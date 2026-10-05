@@ -1,0 +1,10 @@
+# Non-secret integration settings. Credential material is NOT stored in this file.
+schema_version = 1
+
+[kosync]
+enabled = false
+server_url = ""
+account_name = ""
+credential_ref = ""
+auto_sync = false
+document_match = "content"

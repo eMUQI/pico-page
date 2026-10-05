@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/style.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@400&family=JetBrains+Mono:wght@400&display=swap">
+<style>
+body{margin:0;background:#e6e4df;color:#111;font-family:"Noto Sans SC",sans-serif}
+a{color:#111;text-decoration:underline}
+a:hover{color:#555}
+</style>
+</helmet>
+
+<div style="padding:56px 64px 24px;display:flex;flex-direction:column;gap:10px;max-width:1100px">
+  <div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#555">阅读体验 v1 · 2026-10-05 · 工具面板 1b + 排版 2a · 684 × 1216 设备像素</div>
+  <div style="font-size:30px;font-weight:700">S02 / S03 / S05 / S06 / S07 状态全集</div>
+  <div style="font-size:15px;line-height:1.7;color:#333;text-wrap:pretty">每张画板下方注明触发条件和建议更新区域。右侧 Tweaks 可切换 0.5× / 1× 原像素和近似黑白。示例正文取自鲁迅《呐喊》（公版）；注释、时间和百分比都是占位数据。</div>
+  <div style="display:flex;gap:16px;font-size:15px;flex-wrap:wrap"><a href="#S02">S02 阅读页</a><a href="#S03">S03 工具面板</a><a href="#S04">S04 目录</a><a href="#S05">S05 排版</a><a href="#S06">S06 同步</a><a href="#S07">S07 冲突</a><a href="#S08">S08 刷新</a><a href="Read Pico 书库.dc.html">S01 书库 →</a><a href="Read Pico 连接与设置.dc.html">S09/S10 →</a><a href="Read Pico 休眠与提示.dc.html">S11/S12 →</a></div>
+</div>
+
+<section id="S02" style="padding:24px 64px 40px;display:flex;flex-direction:column;gap:20px">
+  <div style="font-size:22px;font-weight:700;border-top:2px solid #111;padding-top:16px">S02 · 正文阅读</div>
+  <div style="display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start">
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S02-1 · 正常</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S02-1 正常" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;bottom:88px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify">
+          <p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。</p>
+          <p style="margin:0;text-indent:2em">时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响<span style="font-family:'Noto Sans SC',sans-serif;font-size:0.6em;vertical-align:super;border-bottom:2px solid #111">注1</span>，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村，没有一些活气。我的心禁不住悲凉起来了。</p>
+          <p style="margin:0;text-indent:2em">阿！这不是我二十年来时时记得的故乡？</p>
+          <p style="margin:0;text-indent:2em">我所记得的故乡全不如此。我的故乡好得多了。但要我记起他的美丽，说出他的佳处来，却又没有影像，没有言辞了。仿佛也就如此。于是我自己解释说：故乡本也如此，——虽然没有进步，也未必有如我所感的悲凉，这只是我自己心情的改变罢了，因为我这次回乡，本没有什么好心绪。</p>
+        </div>
+        <div style="position:absolute;left:36px;right:36px;bottom:0;height:88px;display:flex;align-items:center;justify-content:space-between;font-size:24px;color:#333">
+          <div>本章 3 / 12</div>
+          <div style="display:flex;align-items:center;gap:10px"><div style="width:34px;height:18px;border:2px solid #333;padding:2px;box-sizing:border-box;display:flex"><div style="width:70%;background:#333"></div></div><div>72%</div></div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">页码处点按切换“全书 38%”。K1 上一页，K2 立即全刷，K3 下一页。翻页时整屏更新。电量只在数值变化时随翻页刷新。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S02-2 · 首屏准备</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S02-2 首屏准备" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:420px;left:72px;right:72px;display:flex;flex-direction:column;gap:20px">
+          <div style="font-family:'LXGW WenKai',serif;font-size:48px">故乡</div>
+          <div style="font-size:26px;color:#333">呐喊 · 鲁迅</div>
+          <div style="border-top:2px solid #111;padding-top:24px;display:flex;flex-direction:column;gap:10px">
+            <div style="font-size:30px;font-weight:500">正在准备这一章</div>
+            <div style="font-size:24px;color:#333">将回到上次保存的位置</div>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">从书库打开、且首屏超过提示阈值时才显示（阈值待实测）。静态文字，没有旋转图标。首屏就绪后整屏替换为正文。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S02-3 · 跨章等待</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S02-3 跨章等待" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;bottom:88px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify">
+          <p style="margin:0;text-indent:2em">我想：希望本是无所谓有，无所谓无的。这正如地上的路；其实地上本没有路，走的人多了，也便成了路。</p>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:88px;border-top:2px solid #111;display:flex;align-items:center;justify-content:space-between;padding:0 36px;font-size:24px;background:#fff">
+          <div style="font-weight:500">正在准备这一章</div>
+          <div style="color:#333">72%</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">上一页保持可读，只有页脚区换成阶段说明。下一章就绪后整屏翻到新页。等待期间再次翻页不排队。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S02-4 · 图片降级 + 页数未知</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S02-4 图片降级" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;bottom:88px;overflow:hidden;display:flex;flex-direction:column;gap:28px">
+          <div style="font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify;text-indent:2em">这来的便是闰土。虽然我一见便知道是闰土，但又不是我这记忆上的闰土了。</div>
+          <div style="border:2px solid #111;height:360px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:0 32px;text-align:center">
+            <div style="font-size:28px;font-weight:500">图片暂无法显示，正文仍可阅读</div>
+            <div style="font-size:22px;color:#333">原因：图片尺寸超出设备能力</div>
+            <div style="font-size:22px;color:#333">插图 · 闰土</div>
+          </div>
+          <div style="font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify;text-indent:2em">他身材增加了一倍；先前的紫色的圆脸，已经变作灰黄，而且加上了很深的皱纹。</div>
+        </div>
+        <div style="position:absolute;left:36px;right:36px;bottom:0;height:88px;display:flex;align-items:center;justify-content:space-between;font-size:24px;color:#333">
+          <div>本章第 5 屏</div>
+          <div>72%</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">占位框保留原图位置，写明原因和图注（有图注时）。本章分页还没算完时，页脚显示“本章第 N 屏”，不给出总页数。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S02-5 · 脚注跳转后</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S02-5 脚注返回" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;border-bottom:3px solid #111;display:flex;align-items:center;padding:0 28px;gap:12px;font-size:28px;font-weight:500"><span style="font-size:36px">‹</span>返回原位置<span style="font-size:22px;font-weight:400;color:#333">故乡 · 第 3 页</span></div>
+        <div style="position:absolute;top:144px;left:36px;right:36px;bottom:88px;overflow:hidden;display:flex;flex-direction:column;gap:20px">
+          <div style="font-size:26px;color:#333">注释</div>
+          <div style="font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify;border-left:none">〔1〕示例注释：此处为占位文本，用于演示脚注跳转与返回，不是原书注释。</div>
+          <div style="font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify;color:#333">〔2〕下一条注释同样为占位文本。</div>
+        </div>
+        <div style="position:absolute;left:36px;right:36px;bottom:0;height:88px;display:flex;align-items:center;justify-content:space-between;font-size:24px;color:#333"><div>注释 1 / 2</div><div>72%</div></div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">点脚注或内部链接后，顶部固定显示“返回原位置”，只能点这条返回（K2 在阅读页固定为立即全刷）。在注释页继续翻页时，返回条一直保留，直到用户返回或打开工具面板。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S02-6 · 读完</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S02-6 读完" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;height:300px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify">
+          <p style="margin:0;text-indent:2em">真的，一直到现在，我实在再没有吃到那夜似的好豆，——也不再看到那夜似的好戏了。</p>
+        </div>
+        <div style="position:absolute;top:480px;left:36px;right:36px;border-top:2px solid #111;padding-top:40px;display:flex;flex-direction:column;gap:16px">
+          <div style="font-size:34px;font-weight:700">已读完《呐喊》</div>
+          <div style="font-size:24px;color:#333">此处已保存，联网后可同步</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:24px">
+            <div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px">返回书库</div>
+            <div style="height:96px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:28px">查看目录</div>
+          </div>
+        </div>
+        <div style="position:absolute;left:36px;right:36px;bottom:0;height:88px;display:flex;align-items:center;justify-content:space-between;font-size:24px;color:#333"><div>全书 100%</div><div>72%</div></div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">最后一页之后再翻一页进入这一屏。K1 回到最后一页正文，K3 不起作用。不自动推荐其他书。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S02-7 · 加载失败</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S02-7 加载失败" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;height:640px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify">
+          <p style="margin:0;text-indent:2em">我想：希望本是无所谓有，无所谓无的。这正如地上的路；其实地上本没有路，走的人多了，也便成了路。</p>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;padding:36px;display:flex;flex-direction:column;gap:14px">
+          <div style="font-size:30px;font-weight:700">下一章无法打开</div>
+          <div style="font-size:24px;color:#333;line-height:1.5">内容文件损坏或缺失。上一页仍可阅读，阅读位置没有改变。</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
+            <div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px">留在此页</div>
+            <div style="height:96px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:28px">打开目录</div>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">只更新底部提示区。“打开目录”方便跳过坏章节。不说“数据已丢失”，也不跳回第一页。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S02-8 · 存储卡移除 / 未保存</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S02-8 存储卡移除" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;bottom:300px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify">
+          <p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。</p>
+          <p style="margin:0;text-indent:2em">时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村，没有一些活气。</p>
+        </div>
+        <div style="position:absolute;left:36px;right:36px;bottom:112px;border:3px solid #111;padding:24px;display:flex;flex-direction:column;gap:8px;background:#fff">
+          <div style="font-size:28px;font-weight:700">存储卡已移除，无法加载后续内容</div>
+          <div style="font-size:22px;color:#333">插回后会重新核对这本书。</div>
+        </div>
+        <div style="position:absolute;left:36px;right:36px;bottom:0;height:88px;display:flex;align-items:center;justify-content:space-between;font-size:24px">
+          <div style="display:flex;gap:12px;align-items:center"><span style="color:#333">本章 3 / 12</span><span style="background:#111;color:#fff;padding:2px 10px;font-size:22px">此处尚未保存</span></div>
+          <div style="color:#333">72%</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">当前页保留。提示可点按关闭，关闭后页脚的“此处尚未保存”继续留着，直到保存成功。翻页到未加载的内容时再次显示提示。</div>
+    </div>
+
+  </div>
+</section>
+
+<section id="S03" style="padding:24px 64px 40px;display:flex;flex-direction:column;gap:20px">
+  <div style="font-size:22px;font-weight:700;border-top:2px solid #111;padding-top:16px">S03 · 阅读工具面板（1b）</div>
+  <div style="display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start">
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S03-1 · 展开（同步有待办）</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S03-1 展开" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;height:760px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify">
+          <p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。</p>
+          <p style="margin:0;text-indent:2em">时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村，没有一些活气。我的心禁不住悲凉起来了。</p>
+          <p style="margin:0;text-indent:2em">阿！这不是我二十年来时时记得的故乡？</p>
+        </div>
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;background:#fff;border-bottom:3px solid #111;display:flex;align-items:center">
+          <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px;white-space:nowrap"><span style="font-size:36px">‹</span>书库</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><div style="font-size:30px;font-weight:700">故乡</div><div style="font-size:22px;color:#333">呐喊 · 本章 3 / 12</div></div>
+          <div style="height:104px;display:flex;align-items:center;padding:0 24px;flex-shrink:0;white-space:nowrap"><div style="border:2px solid #111;padding:8px 14px;font-size:22px">⇅ 待上传</div></div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111">
+          <div style="display:grid;grid-template-columns:repeat(5,1fr)">
+            <div style="height:136px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border-right:2px solid #111"><div style="font-size:38px;line-height:1">≡</div><div style="font-size:26px">目录</div></div>
+            <div style="height:136px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border-right:2px solid #111"><div style="font-size:34px;line-height:1;font-family:'LXGW WenKai',serif">Aa</div><div style="font-size:26px">排版</div></div>
+            <div style="height:136px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border-right:2px solid #111"><div style="font-size:38px;line-height:1">⇅</div><div style="font-size:26px">同步</div></div>
+            <div style="height:136px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border-right:2px solid #111"><div style="font-size:38px;line-height:1">◐</div><div style="font-size:26px">刷新</div><div style="font-size:20px;color:#333">均衡</div></div>
+            <div style="height:136px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px"><div style="font-size:38px;line-height:1">□</div><div style="font-size:26px">全刷</div></div>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">轻点正文中部打开（阅读页的 K2 是立即全刷，不打开面板）。只重绘顶栏和底栏两个区域，正文不重新分页。点露出的正文区或按 K2 关闭；这次抬手不会穿透成翻页。底部只保留一行五个入口；字号只在“排版”里调整。“全刷”直接执行一次整屏刷新，不打开子面板。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S03-2 · 发现不同位置</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S03-2 位置不同" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;height:760px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify">
+          <p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。</p>
+          <p style="margin:0;text-indent:2em">时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村，没有一些活气。我的心禁不住悲凉起来了。</p>
+        </div>
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;background:#fff;border-bottom:3px solid #111;display:flex;align-items:center">
+          <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px;white-space:nowrap"><span style="font-size:36px">‹</span>书库</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><div style="font-size:30px;font-weight:700">故乡</div><div style="font-size:22px;color:#333">呐喊 · 本章 3 / 12</div></div>
+          <div style="height:104px;display:flex;align-items:center;padding:0 24px;flex-shrink:0;white-space:nowrap"><div style="background:#111;color:#fff;padding:10px 16px;font-size:22px">位置不同 ›</div></div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111">
+          <div style="display:grid;grid-template-columns:repeat(5,1fr)">
+            <div style="height:136px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border-right:2px solid #111"><div style="font-size:38px;line-height:1">≡</div><div style="font-size:26px">目录</div></div>
+            <div style="height:136px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border-right:2px solid #111"><div style="font-size:34px;line-height:1;font-family:'LXGW WenKai',serif">Aa</div><div style="font-size:26px">排版</div></div>
+            <div style="height:136px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border-right:2px solid #111"><div style="font-size:38px;line-height:1">⇅</div><div style="font-size:26px">同步</div><div style="font-size:20px;background:#111;color:#fff;padding:0 8px">待选择</div></div>
+            <div style="height:136px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border-right:2px solid #111"><div style="font-size:38px;line-height:1">◐</div><div style="font-size:26px">刷新</div><div style="font-size:20px;color:#333">均衡</div></div>
+            <div style="height:136px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px"><div style="font-size:38px;line-height:1">□</div><div style="font-size:26px">全刷</div></div>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">自动检查发现不同位置时，不打断阅读，只在顶栏状态里显示（反相）。点顶栏状态或“同步”进入 S07。阅读页的页脚不加标记。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S03-3 · 禁用动作（存储卡移除）</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S03-3 禁用" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;height:760px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify">
+          <p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。</p>
+          <p style="margin:0;text-indent:2em">时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村，没有一些活气。我的心禁不住悲凉起来了。</p>
+        </div>
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;background:#fff;border-bottom:3px solid #111;display:flex;align-items:center">
+          <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px;white-space:nowrap"><span style="font-size:36px">‹</span>书库</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><div style="font-size:30px;font-weight:700">故乡</div><div style="font-size:22px;color:#333">呐喊 · 本章 3 / 12</div></div>
+          <div style="height:104px;display:flex;align-items:center;padding:0 24px;flex-shrink:0;white-space:nowrap"><div style="background:#111;color:#fff;padding:10px 16px;font-size:22px">尚未保存</div></div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111">
+          <div style="padding:20px 36px;border-bottom:2px solid #111;font-size:24px;font-weight:500">存储卡已移除，目录和排版暂不可用</div>
+          <div style="display:grid;grid-template-columns:repeat(5,1fr)">
+            <div style="height:136px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border-right:2px solid #111;color:#555"><div style="font-size:38px;line-height:1">≡</div><div style="font-size:26px;text-decoration:line-through">目录</div><div style="font-size:20px">需存储卡</div></div>
+            <div style="height:136px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border-right:2px solid #111;color:#555"><div style="font-size:34px;line-height:1;font-family:'LXGW WenKai',serif">Aa</div><div style="font-size:26px;text-decoration:line-through">排版</div><div style="font-size:20px">需存储卡</div></div>
+            <div style="height:136px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border-right:2px solid #111"><div style="font-size:38px;line-height:1">⇅</div><div style="font-size:26px">同步</div></div>
+            <div style="height:136px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border-right:2px solid #111"><div style="font-size:38px;line-height:1">◐</div><div style="font-size:26px">刷新</div><div style="font-size:20px;color:#333">均衡</div></div>
+            <div style="height:136px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px"><div style="font-size:38px;line-height:1">□</div><div style="font-size:26px">全刷</div></div>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">禁用项同时用三种方式区分：灰字、删除线，以及写在下方的原因。禁用项仍可点按，点按后提示原因、不执行动作。原因来自 available_actions，需要开发侧补充这个字段。</div>
+    </div>
+
+  </div>
+</section>
+
+<section id="S04" style="padding:24px 64px 40px;display:flex;flex-direction:column;gap:20px">
+  <div style="font-size:22px;font-weight:700;border-top:2px solid #111;padding-top:16px">S04 · 目录（1b 标签页）</div>
+  <div style="font-size:14px;color:#333;max-width:1100px;line-height:1.6">目录按屏分页，不做惯性滚动。K1/K3 翻屏，K2 收起。层级展开和收起用行右侧单独的 88px 热区，点标题本身是跳转。打开目录时自动定位到当前章所在的那一屏。</div>
+  <div style="display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start">
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S04-1 · 当前章所在屏</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S04-1 目录" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;background:#fff;border-bottom:3px solid #111;display:flex;align-items:center">
+          <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px;white-space:nowrap"><span style="font-size:36px">‹</span>书库</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><div style="font-size:30px;font-weight:700">故乡</div><div style="font-size:22px;color:#333">呐喊 · 本章 3 / 12</div></div>
+          <div style="height:104px;display:flex;align-items:center;padding:0 24px;flex-shrink:0;white-space:nowrap"><div style="border:2px solid #111;padding:8px 14px;font-size:22px">⇅ 待上传</div></div>
+        </div>
+        <div style="position:absolute;top:104px;left:0;right:0;bottom:0;background:#fff;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr) 112px;border-bottom:2px solid #111">
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;background:#111;color:#fff">目录</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111;border-left:2px solid #111">排版</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">同步</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">刷新</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:24px">收起</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;padding:0 24px">
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px;border-bottom:2px solid #cfcfcf;font-size:28px">自序</div>
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px;border-bottom:2px solid #cfcfcf;font-size:28px">狂人日记</div>
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px;border-bottom:2px solid #cfcfcf;font-size:28px">孔乙己</div>
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px;border-bottom:2px solid #cfcfcf;font-size:28px">药</div>
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px;border-bottom:2px solid #cfcfcf;font-size:28px">明天</div>
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px;border-bottom:2px solid #cfcfcf;font-size:28px">一件小事</div>
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px;border-bottom:2px solid #cfcfcf;font-size:28px">头发的故事</div>
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px;border-bottom:2px solid #cfcfcf;font-size:28px">风波</div>
+            <div style="height:86px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;border:3px solid #111;font-size:28px;font-weight:700"><span>故乡</span><span style="font-size:20px;font-weight:400;background:#111;color:#fff;padding:2px 10px">当前位置</span></div>
+            <div style="height:86px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #cfcfcf;font-size:28px"><span style="padding:0 12px">阿Q正传</span><span style="width:88px;height:86px;display:flex;align-items:center;justify-content:center;border-left:2px solid #cfcfcf;font-size:24px">▸ 9</span></div>
+          </div>
+          <div style="height:120px;border-top:2px solid #111;display:flex;align-items:center;justify-content:space-between;padding:0 24px">
+            <div style="width:180px;height:88px;border:2px dashed #555;color:#555;display:flex;align-items:center;justify-content:center;font-size:24px">‹ 上一屏</div>
+            <div style="font-size:26px">1 / 2</div>
+            <div style="width:180px;height:88px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:24px">下一屏 ›</div>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">当前章用粗框加“当前位置”标签标出，不只靠加粗。有子级的行在右侧显示“▸ 子项数”。不显示本机页码，因为页码随排版变化。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S04-2 · 展开子级 + 长章名</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S04-2 层级" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;background:#fff;border-bottom:3px solid #111;display:flex;align-items:center">
+          <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px;white-space:nowrap"><span style="font-size:36px">‹</span>书库</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><div style="font-size:30px;font-weight:700">故乡</div><div style="font-size:22px;color:#333">呐喊 · 本章 3 / 12</div></div>
+          <div style="height:104px;display:flex;align-items:center;padding:0 24px;flex-shrink:0;white-space:nowrap"><div style="border:2px solid #111;padding:8px 14px;font-size:22px">⇅ 待上传</div></div>
+        </div>
+        <div style="position:absolute;top:104px;left:0;right:0;bottom:0;background:#fff;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr) 112px;border-bottom:2px solid #111">
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;background:#111;color:#fff">目录</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111;border-left:2px solid #111">排版</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">同步</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">刷新</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:24px">收起</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;padding:0 24px">
+            <div style="height:86px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #111;font-size:28px;font-weight:500"><span style="padding:0 12px">阿Q正传</span><span style="width:88px;height:86px;display:flex;align-items:center;justify-content:center;border-left:2px solid #cfcfcf;font-size:24px">▾</span></div>
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px 0 60px;border-bottom:2px solid #cfcfcf;font-size:26px">第一章　序</div>
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px 0 60px;border-bottom:2px solid #cfcfcf;font-size:26px">第二章　优胜记略</div>
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px 0 60px;border-bottom:2px solid #cfcfcf;font-size:26px">第三章　续优胜记略</div>
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px 0 60px;border-bottom:2px solid #cfcfcf;font-size:26px">第四章　恋爱的悲剧</div>
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px 0 60px;border-bottom:2px solid #cfcfcf;font-size:26px">第五章　生计问题</div>
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px 0 60px;border-bottom:2px solid #cfcfcf;font-size:26px">第六章　从中兴到末路</div>
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px 0 60px;border-bottom:2px solid #cfcfcf;font-size:26px">第七章　革命</div>
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px 0 60px;border-bottom:2px solid #cfcfcf;font-size:26px">第八章　不准革命</div>
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px 0 60px;border-bottom:2px solid #cfcfcf;font-size:26px">第九章　大团圆</div>
+          </div>
+          <div style="height:120px;border-top:2px solid #111;display:flex;align-items:center;justify-content:space-between;padding:0 24px">
+            <div style="width:180px;height:88px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:24px">‹ 上一屏</div>
+            <div style="font-size:26px">2 / 3</div>
+            <div style="width:180px;height:88px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:24px">下一屏 ›</div>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">子级缩进约 48px，字号小一档。展开后总屏数会变（2 → 3），列表停在被展开项所在的屏。章名过长时最多折两行，行高随之增加，不做截断。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S04-3 · 目录缺失 / 无标题回退</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S04-3 目录缺失" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;background:#fff;border-bottom:3px solid #111;display:flex;align-items:center">
+          <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px;white-space:nowrap"><span style="font-size:36px">‹</span>书库</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><div style="font-size:30px;font-weight:700">第 3 部分</div><div style="font-size:22px;color:#333">示例无目录书 · 本章第 2 屏</div></div>
+          <div style="height:104px;display:flex;align-items:center;padding:0 24px;flex-shrink:0;white-space:nowrap"><div style="border:2px solid #111;padding:8px 14px;font-size:22px">⇅ 已上传</div></div>
+        </div>
+        <div style="position:absolute;top:104px;left:0;right:0;bottom:0;background:#fff;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr) 112px;border-bottom:2px solid #111">
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;background:#111;color:#fff">目录</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111;border-left:2px solid #111">排版</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">同步</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">刷新</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:24px">收起</div>
+          </div>
+          <div style="padding:36px;display:flex;flex-direction:column;gap:10px;border-bottom:2px solid #111">
+            <div style="font-size:30px;font-weight:700">这本书未提供目录</div>
+            <div style="font-size:24px;color:#333;line-height:1.5">下面按书中内容的顺序列出，名称由设备生成，不是原书的章节标题。</div>
+          </div>
+          <div style="display:flex;flex-direction:column;padding:0 24px">
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px;border-bottom:2px solid #cfcfcf;font-size:28px">第 1 部分<span style="font-size:22px;color:#333;margin-left:12px">无标题</span></div>
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px;border-bottom:2px solid #cfcfcf;font-size:28px">第 2 部分<span style="font-size:22px;color:#333;margin-left:12px">无标题</span></div>
+            <div style="height:86px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;border:3px solid #111;font-size:28px;font-weight:700"><span>第 3 部分<span style="font-size:22px;font-weight:400;color:#333;margin-left:12px">无标题</span></span><span style="font-size:20px;font-weight:400;background:#111;color:#fff;padding:2px 10px">当前位置</span></div>
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px;border-bottom:2px solid #cfcfcf;font-size:28px">第 4 部分<span style="font-size:22px;color:#333;margin-left:12px">无标题</span></div>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">不写笼统的“加载失败”。回退名称来自阅读顺序，并明确标注“无标题”，不编造章名。顶栏标题也用同一个回退名称。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S04-4 · 加载中</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S04-4 加载中" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;background:#fff;border-bottom:3px solid #111;display:flex;align-items:center">
+          <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px;white-space:nowrap"><span style="font-size:36px">‹</span>书库</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><div style="font-size:30px;font-weight:700">故乡</div><div style="font-size:22px;color:#333">呐喊 · 本章 3 / 12</div></div>
+          <div style="height:104px;display:flex;align-items:center;padding:0 24px;flex-shrink:0;white-space:nowrap"><div style="border:2px solid #111;padding:8px 14px;font-size:22px">⇅ 待上传</div></div>
+        </div>
+        <div style="position:absolute;top:104px;left:0;right:0;bottom:0;background:#fff;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr) 112px;border-bottom:2px solid #111">
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;background:#111;color:#fff">目录</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111;border-left:2px solid #111">排版</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">同步</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">刷新</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:24px">收起</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;justify-content:center;padding:0 72px;gap:12px">
+            <div style="font-size:30px;font-weight:500">正在读取目录</div>
+            <div style="font-size:24px;color:#333">可以收起面板继续阅读</div>
+          </div>
+          <div style="height:120px;border-top:2px solid #111;display:flex;align-items:center;justify-content:space-between;padding:0 24px;color:#555">
+            <div style="width:180px;height:88px;border:2px dashed #555;display:flex;align-items:center;justify-content:center;font-size:24px">‹ 上一屏</div>
+            <div style="font-size:26px">— / —</div>
+            <div style="width:180px;height:88px;border:2px dashed #555;display:flex;align-items:center;justify-content:center;font-size:24px">下一屏 ›</div>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">目录超过提示阈值还没读好时才显示这一屏。静态文字，没有骨架屏。读好后整块替换为 S04-1。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S04-5 · 跳转失败</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S04-5 跳转失败" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;background:#fff;border-bottom:3px solid #111;display:flex;align-items:center">
+          <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px;white-space:nowrap"><span style="font-size:36px">‹</span>书库</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><div style="font-size:30px;font-weight:700">故乡</div><div style="font-size:22px;color:#333">呐喊 · 本章 3 / 12</div></div>
+          <div style="height:104px;display:flex;align-items:center;padding:0 24px;flex-shrink:0;white-space:nowrap"><div style="border:2px solid #111;padding:8px 14px;font-size:22px">⇅ 待上传</div></div>
+        </div>
+        <div style="position:absolute;top:104px;left:0;right:0;bottom:0;background:#fff;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr) 112px;border-bottom:2px solid #111">
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;background:#111;color:#fff">目录</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111;border-left:2px solid #111">排版</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">同步</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">刷新</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:24px">收起</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;padding:0 24px">
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px;border-bottom:2px solid #cfcfcf;font-size:28px">明天</div>
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px;border-bottom:2px solid #cfcfcf;font-size:28px">一件小事</div>
+            <div style="height:86px;display:flex;align-items:center;padding:0 12px;border-bottom:2px solid #cfcfcf;font-size:28px">头发的故事</div>
+            <div style="height:86px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;border:3px dashed #111;font-size:28px"><span>风波</span><span style="font-size:20px">无法打开</span></div>
+            <div style="height:86px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;border-bottom:2px solid #cfcfcf;font-size:28px;font-weight:700"><span>故乡</span><span style="font-size:20px;font-weight:400;background:#111;color:#fff;padding:2px 10px">当前位置</span></div>
+          </div>
+          <div style="border-top:3px solid #111;padding:32px 36px;display:flex;flex-direction:column;gap:14px">
+            <div style="font-size:28px;font-weight:700">无法跳转到“风波”，已留在当前位置</div>
+            <div style="font-size:22px;color:#333">这一章的内容文件损坏或缺失。</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px">
+              <div style="height:96px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:26px">重试</div>
+              <div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:26px">回到正文</div>
+            </div>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">失败的行改为虚线框并标“无法打开”，目录不关闭。阅读位置和跳转历史都不变。提示只占底部，不叠第二层弹窗。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S04-6 · 跳转后（可返回）</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S04-6 跳转后" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;border-bottom:3px solid #111;display:flex;align-items:center;padding:0 28px;gap:12px;font-size:28px;font-weight:500"><span style="font-size:36px">‹</span>返回跳转前位置<span style="font-size:22px;font-weight:400;color:#333">故乡 · 约 38%</span></div>
+        <div style="position:absolute;top:144px;left:36px;right:36px;bottom:88px;overflow:hidden;display:flex;flex-direction:column;gap:32px">
+          <div style="font-family:'LXGW WenKai',serif;font-size:48px;text-align:center">风波</div>
+          <div style="font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify;text-indent:2em">临河的土场上，太阳渐渐的收了他通黄的光线了。场边靠河的乌桕树叶，干巴巴的才喘过气来，几个花脚蚊子在下面哼着飞舞。</div>
+        </div>
+        <div style="position:absolute;left:36px;right:36px;bottom:0;height:88px;display:flex;align-items:center;justify-content:space-between;font-size:24px;color:#333"><div>本章 1 / 9</div><div>72%</div></div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">从目录跳转后，第一屏顶部显示“返回跳转前位置”。翻页后这条收起，但仍可以在目录标签的第一行找到，最多保留最近 3 条。新位置要在显示完成后才保存。</div>
+    </div>
+
+  </div>
+</section>
+
+<section id="S05" style="padding:24px 64px 40px;display:flex;flex-direction:column;gap:20px">
+  <div style="font-size:22px;font-weight:700;border-top:2px solid #111;padding-top:16px">S05 · 排版（2a 结构，放进 1b 标签页）</div>
+  <div style="font-size:14px;color:#333;max-width:1100px;line-height:1.6">进入排版标签时顶栏收起，让出预览区。步进只重排当前屏作为预览，不改变阅读位置。“应用”后全书重新分页；“取消”、K2 或收起都恢复原排版。第一张画板可以点按试用。</div>
+  <div style="display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start">
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S05-1 · 当前值 / 预览（可试用）</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S05-1 预览" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:0;right:0;height:600px;overflow:hidden;padding-left:{{ pmgPx }};padding-right:{{ pmgPx }};font-family:{{ pfontFamily }};font-size:{{ pfsPx }};line-height:{{ plh }};text-align:justify">
+          <p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。</p>
+          <p style="margin:0;text-indent:2em">时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村，没有一些活气。我的心禁不住悲凉起来了。</p>
+          <p style="margin:0;text-indent:2em">阿！这不是我二十年来时时记得的故乡？</p>
+        </div>
+        <div style="position:absolute;top:12px;left:16px;font-size:20px;background:#fff;border:2px solid #111;padding:4px 10px">{{ previewTag }}</div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr) 112px;border-bottom:2px solid #111">
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">目录</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;background:#111;color:#fff">排版</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111;border-left:2px solid #111">同步</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">刷新</div>
+            <div onClick="{{ cancel }}" style="cursor:pointer;height:96px;display:flex;align-items:center;justify-content:center;font-size:24px">收起</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:20px 24px 12px">
+            <div onClick="{{ selFont }}" style="cursor:pointer;height:96px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:3px solid {{ cFontBd }}"><div style="font-size:22px;color:#333">字体</div><div style="font-size:24px;font-weight:700;white-space:nowrap">{{ pfontShort }}</div></div>
+            <div onClick="{{ selFs }}" style="cursor:pointer;height:96px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:3px solid {{ cFsBd }}"><div style="font-size:22px;color:#333">字号</div><div style="font-size:24px;font-weight:700">{{ pfsLabel }}</div></div>
+            <div onClick="{{ selLh }}" style="cursor:pointer;height:96px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:3px solid {{ cLhBd }}"><div style="font-size:22px;color:#333">行距</div><div style="font-size:24px;font-weight:700">{{ plhLabel }}</div></div>
+            <div onClick="{{ selMg }}" style="cursor:pointer;height:96px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:3px solid {{ cMgBd }}"><div style="font-size:22px;color:#333">页边距</div><div style="font-size:24px;font-weight:700">{{ pmgLabel }}</div></div>
+          </div>
+          <div style="height:120px;display:flex;align-items:center;justify-content:space-between;padding:0 36px;border-bottom:2px solid #cfcfcf">
+            <div onClick="{{ selDec }}" style="cursor:pointer;width:120px;height:88px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:40px">{{ decGlyph }}</div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:4px"><div style="font-size:22px;color:#333">{{ selName }}</div><div style="font-size:34px;font-weight:700">{{ selValue }}</div></div>
+            <div onClick="{{ selInc }}" style="cursor:pointer;width:120px;height:88px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:40px">{{ incGlyph }}</div>
+          </div>
+          <div style="height:72px;display:flex;align-items:center;justify-content:space-between;padding:0 36px">
+            <div style="font-size:22px">作用域：<b>此书</b><span style="color:#333"> · 段距、缩进 ▸</span></div>
+            <div onClick="{{ reset }}" style="cursor:pointer;font-size:22px;text-decoration:underline;height:72px;display:flex;align-items:center">恢复默认</div>
+          </div>
+          <div style="padding:0 36px 32px;display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div style="height:96px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:26px">设为阅读默认</div>
+            <sc-if value="{{ pending }}" hint-placeholder-val="{{ false }}">
+              <div onClick="{{ apply }}" style="cursor:pointer;height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:500">应用</div>
+            </sc-if>
+            <sc-if value="{{ notPending }}" hint-placeholder-val="{{ true }}">
+              <div style="height:96px;border:2px dashed #555;color:#555;display:flex;align-items:center;justify-content:center;font-size:26px">已应用</div>
+            </sc-if>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">每次步进只局部刷新预览区和步进器，连续点击合并成一次刷新。“已应用”用虚线表示不可点按。“恢复默认”只把数值改回阅读默认，仍要点“应用”才生效。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S05-2 · 重排中</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S05-2 重排中" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;height:600px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:42px;line-height:1.5;text-align:justify">
+          <p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。</p>
+          <p style="margin:0;text-indent:2em">时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村。</p>
+        </div>
+        <div style="position:absolute;top:12px;left:16px;font-size:20px;background:#111;color:#fff;padding:6px 12px">正在重新排版</div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr) 112px;border-bottom:2px solid #111;color:#555">
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">目录</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;background:#111;color:#fff">排版</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111;border-left:2px solid #111">同步</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">刷新</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:24px">收起</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:20px 24px 12px;color:#555">
+            <div style="height:96px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:3px solid transparent"><div style="font-size:22px">字体</div><div style="font-size:24px">霞鹜文楷</div></div>
+            <div style="height:96px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:3px dashed #555"><div style="font-size:22px">字号</div><div style="font-size:24px">42 px</div></div>
+            <div style="height:96px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:3px solid transparent"><div style="font-size:22px">行距</div><div style="font-size:24px">1.50</div></div>
+            <div style="height:96px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:3px solid transparent"><div style="font-size:22px">页边距</div><div style="font-size:24px">36 px</div></div>
+          </div>
+          <div style="height:120px;display:flex;flex-direction:column;justify-content:center;gap:6px;padding:0 36px;border-bottom:2px solid #cfcfcf">
+            <div style="font-size:28px;font-weight:500">正在按新设置排版全书</div>
+            <div style="font-size:22px;color:#333">完成后停在原文附近；期间可以继续阅读当前屏。</div>
+          </div>
+          <div style="height:72px;display:flex;align-items:center;padding:0 36px;font-size:22px;color:#555">作用域：此书 · 设置暂不可修改</div>
+          <div style="padding:0 36px 32px;display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div style="height:96px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:26px">取消，恢复原排版</div>
+            <div style="height:96px;border:2px dashed #555;color:#555;display:flex;align-items:center;justify-content:center;font-size:26px">重排中</div>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">“应用”后立即变成“重排中”，同时禁用所有参数（虚线、灰字），不会再提交新的排版任务。可以取消。完成后自动收起面板，整屏显示正文。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S05-3 · 字体不可用</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S05-3 字体不可用" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;height:600px;overflow:hidden;font-family:'Noto Sans SC',sans-serif;font-size:38px;line-height:1.5;text-align:justify">
+          <p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。</p>
+          <p style="margin:0;text-indent:2em">时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村。</p>
+        </div>
+        <div style="position:absolute;top:12px;left:16px;font-size:20px;background:#fff;border:2px solid #111;padding:4px 10px">预览 · 尚未应用</div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr) 112px;border-bottom:2px solid #111">
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">目录</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;background:#111;color:#fff">排版</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111;border-left:2px solid #111">同步</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">刷新</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:24px">收起</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:20px 24px 12px">
+            <div style="height:96px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:3px solid #111"><div style="font-size:22px;color:#333">字体</div><div style="font-size:24px;font-weight:700">思源宋体</div></div>
+            <div style="height:96px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:3px solid transparent"><div style="font-size:22px;color:#333">字号</div><div style="font-size:24px;font-weight:700">38 px</div></div>
+            <div style="height:96px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:3px solid transparent"><div style="font-size:22px;color:#333">行距</div><div style="font-size:24px;font-weight:700">1.50</div></div>
+            <div style="height:96px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:3px solid transparent"><div style="font-size:22px;color:#333">页边距</div><div style="font-size:24px;font-weight:700">36 px</div></div>
+          </div>
+          <div style="height:120px;display:flex;align-items:center;justify-content:space-between;padding:0 36px;border-bottom:2px solid #cfcfcf">
+            <div style="width:120px;height:88px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:40px">‹</div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:4px"><div style="font-size:30px;font-weight:700;text-decoration:line-through">思源宋体</div><div style="font-size:22px;background:#111;color:#fff;padding:0 10px">字体不可用</div></div>
+            <div style="width:120px;height:88px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:40px">›</div>
+          </div>
+          <div style="height:72px;display:flex;align-items:center;padding:0 36px;font-size:22px">字体不可用，已使用替代字体（思源黑体）</div>
+          <div style="padding:0 36px 32px;display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div style="height:96px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:26px">设为阅读默认</div>
+            <div style="height:96px;border:2px dashed #555;color:#555;display:flex;align-items:center;justify-content:center;font-size:26px">无法应用</div>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">字体文件缺失或损坏时，预览改用内置替代字体，“应用”不可点。如果正文原本用的字体丢失（比如换了 TF 卡），在阅读页给出同样的提示，正文用替代字体显示，不出现空白或乱码。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S05-4 · 进阶：段距与缩进</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S05-4 进阶" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;height:600px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify">
+          <p style="margin:0 0 0.6em;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。</p>
+          <p style="margin:0 0 0.6em;text-indent:2em">时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村。</p>
+        </div>
+        <div style="position:absolute;top:12px;left:16px;font-size:20px;background:#fff;border:2px solid #111;padding:4px 10px">预览 · 尚未应用</div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr) 112px;border-bottom:2px solid #111">
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">目录</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;background:#111;color:#fff">排版</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111;border-left:2px solid #111">同步</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">刷新</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:24px">收起</div>
+          </div>
+          <div style="display:grid;grid-template-columns:140px 1fr 1fr;gap:12px;padding:20px 24px 12px">
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;gap:6px;font-size:24px;white-space:nowrap;border:3px solid transparent"><span style="font-size:32px">‹</span>基本</div>
+            <div style="height:96px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:3px solid #111"><div style="font-size:22px;color:#333">段距</div><div style="font-size:24px;font-weight:700">0.6 行</div></div>
+            <div style="height:96px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:3px solid transparent"><div style="font-size:22px;color:#333">首行缩进</div><div style="font-size:24px;font-weight:700">2 字</div></div>
+          </div>
+          <div style="height:120px;display:flex;align-items:center;justify-content:space-between;padding:0 36px;border-bottom:2px solid #cfcfcf">
+            <div style="width:120px;height:88px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:40px">−</div>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:4px"><div style="font-size:22px;color:#333">段距</div><div style="font-size:34px;font-weight:700">0.6 行</div></div>
+            <div style="width:120px;height:88px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:40px">+</div>
+          </div>
+          <div style="height:72px;display:flex;align-items:center;justify-content:space-between;padding:0 36px"><div style="font-size:22px">作用域：<b>此书</b></div><div style="font-size:22px;text-decoration:underline">恢复默认</div></div>
+          <div style="padding:0 36px 32px;display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div style="height:96px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:26px">设为阅读默认</div>
+            <div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:500">应用</div>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">从“段距、缩进 ▸”进入，参数行换成进阶项，用“‹ 基本”返回，仍在同一层面板里。段距可选 0–1 行（步长 0.2），首行缩进可选 0 / 1 / 2 字。</div>
+    </div>
+
+  </div>
+</section>
+
+<section id="S06" style="padding:24px 64px 40px;display:flex;flex-direction:column;gap:20px">
+  <div style="font-size:22px;font-weight:700;border-top:2px solid #111;padding-top:16px">S06 · 同步状态与操作（1b 标签页）</div>
+  <div style="font-size:14px;color:#333;max-width:1100px;line-height:1.6">三格分别回答：本机是否保存，服务器是否收到，其他设备有没有不同位置。三格对应 save_state、sync_state，以及 remote_candidate + mapping_quality。</div>
+  <div style="display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start">
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S06-1 · 未配置</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S06-1 未配置" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:104px;left:36px;right:36px;height:500px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify"><p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。时候既然是深冬；渐近故乡时，天气又阴晦了。</p></div>
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;background:#fff;border-bottom:3px solid #111;display:flex;align-items:center">
+          <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px;white-space:nowrap"><span style="font-size:36px">‹</span>书库</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><div style="font-size:30px;font-weight:700">故乡</div><div style="font-size:22px;color:#333">呐喊 · 本章 3 / 12</div></div>
+          <div style="height:104px;display:flex;align-items:center;padding:0 24px;flex-shrink:0;white-space:nowrap"><div style="border:2px solid #111;padding:8px 14px;font-size:22px">⇅ 未配置</div></div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr) 112px;border-bottom:2px solid #111">
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">目录</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px">排版</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;background:#111;color:#fff">同步</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">刷新</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:24px">收起</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);border-bottom:2px solid #111">
+            <div style="padding:28px 20px 28px 36px;display:flex;flex-direction:column;gap:8px;border-right:2px solid #cfcfcf"><div style="font-size:22px;color:#333">本机</div><div style="font-size:30px;font-weight:700">已保存</div><div style="font-size:22px;color:#333">10:51</div></div>
+            <div style="padding:28px 20px;display:flex;flex-direction:column;gap:8px;border-right:2px solid #cfcfcf"><div style="font-size:22px;color:#333">服务器</div><div style="font-size:30px;font-weight:700">未配置</div><div style="font-size:22px;color:#333">—</div></div>
+            <div style="padding:28px 36px 28px 20px;display:flex;flex-direction:column;gap:8px"><div style="font-size:22px;color:#333">其他设备</div><div style="font-size:30px;font-weight:700">—</div><div style="font-size:22px;color:#333">无法检查</div></div>
+          </div>
+          <div style="padding:24px 36px 0;font-size:24px;line-height:1.5">尚未设置 KOReader 同步。服务地址和账户需要在手机或电脑上填写，设备负责发起和确认。</div>
+          <div style="padding:24px 36px 40px"><div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px">设置同步</div></div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">“设置同步”进入 S10 的 KOReader 分组；阅读位置会保留，返回时回到原处。未配置时，顶栏状态用描边（不反相），表示这不是需要处理的问题。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S06-2 · 离线待同步</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S06-2 离线待同步" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:104px;left:36px;right:36px;height:500px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify"><p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。时候既然是深冬；渐近故乡时，天气又阴晦了。</p></div>
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;background:#fff;border-bottom:3px solid #111;display:flex;align-items:center">
+          <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px;white-space:nowrap"><span style="font-size:36px">‹</span>书库</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><div style="font-size:30px;font-weight:700">故乡</div><div style="font-size:22px;color:#333">呐喊 · 本章 3 / 12</div></div>
+          <div style="height:104px;display:flex;align-items:center;padding:0 24px;flex-shrink:0;white-space:nowrap"><div style="border:2px solid #111;padding:8px 14px;font-size:22px">⇅ 待上传</div></div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr) 112px;border-bottom:2px solid #111">
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">目录</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px">排版</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;background:#111;color:#fff">同步</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">刷新</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:24px">收起</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);border-bottom:2px solid #111">
+            <div style="padding:28px 20px 28px 36px;display:flex;flex-direction:column;gap:8px;border-right:2px solid #cfcfcf"><div style="font-size:22px;color:#333">本机</div><div style="font-size:30px;font-weight:700">已保存</div><div style="font-size:22px;color:#333">10:51</div></div>
+            <div style="padding:28px 20px;display:flex;flex-direction:column;gap:8px;border-right:2px solid #cfcfcf"><div style="font-size:22px;color:#333">服务器</div><div style="font-size:30px;font-weight:700">未上传</div><div style="font-size:22px;color:#333">暂时无法连接</div></div>
+            <div style="padding:28px 36px 28px 20px;display:flex;flex-direction:column;gap:8px"><div style="font-size:22px;color:#333">其他设备</div><div style="font-size:30px;font-weight:700">未检查</div><div style="font-size:22px;color:#333">需联网</div></div>
+          </div>
+          <div style="padding:24px 36px 0;font-size:24px;line-height:1.5">此处已保存，联网后可同步。暂时无法连接，不影响继续阅读。</div>
+          <div style="padding:24px 36px 0;display:flex;flex-direction:column;gap:16px">
+            <div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px">检查并同步</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+              <div style="height:96px;border:2px dashed #555;color:#555;display:flex;flex-direction:column;align-items:center;justify-content:center"><div style="font-size:26px">从其他设备接续</div><div style="font-size:20px">需联网</div></div>
+              <div style="height:96px;border:2px dashed #555;color:#555;display:flex;flex-direction:column;align-items:center;justify-content:center"><div style="font-size:26px">将此处上传</div><div style="font-size:20px">需联网</div></div>
+            </div>
+          </div>
+          <div style="padding:20px 36px 32px;font-size:22px;color:#333">最近一次上传确认：今天 09:30</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">“检查并同步”会尝试联网，所以离线时仍可点；另外两个动作要求已联网。自动同步失败时只更新顶栏状态，不弹窗。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S06-3 · 进行中</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S06-3 进行中" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:104px;left:36px;right:36px;height:500px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify"><p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。时候既然是深冬；渐近故乡时，天气又阴晦了。</p></div>
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;background:#fff;border-bottom:3px solid #111;display:flex;align-items:center">
+          <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px;white-space:nowrap"><span style="font-size:36px">‹</span>书库</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><div style="font-size:30px;font-weight:700">故乡</div><div style="font-size:22px;color:#333">呐喊 · 本章 3 / 12</div></div>
+          <div style="height:104px;display:flex;align-items:center;padding:0 24px;flex-shrink:0;white-space:nowrap"><div style="border:2px solid #111;padding:8px 14px;font-size:22px">⇅ 同步中</div></div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr) 112px;border-bottom:2px solid #111">
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">目录</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px">排版</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;background:#111;color:#fff">同步</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">刷新</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:24px">收起</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);border-bottom:2px solid #111">
+            <div style="padding:28px 20px 28px 36px;display:flex;flex-direction:column;gap:8px;border-right:2px solid #cfcfcf"><div style="font-size:22px;color:#333">本机</div><div style="font-size:30px;font-weight:700">已保存</div><div style="font-size:22px;color:#333">10:51</div></div>
+            <div style="padding:28px 20px;display:flex;flex-direction:column;gap:8px;border-right:2px solid #cfcfcf;border:3px solid #111"><div style="font-size:22px;color:#333">服务器</div><div style="font-size:30px;font-weight:700">连接中</div><div style="font-size:22px;color:#333">第 1 步 / 共 2 步</div></div>
+            <div style="padding:28px 36px 28px 20px;display:flex;flex-direction:column;gap:8px"><div style="font-size:22px;color:#333">其他设备</div><div style="font-size:30px;font-weight:700">检查中</div><div style="font-size:22px;color:#333">读取远端位置</div></div>
+          </div>
+          <div style="padding:24px 36px 0;font-size:24px;line-height:1.5">先读取远端位置，再决定是否上传。期间可以收起面板继续阅读。</div>
+          <div style="padding:24px 36px 0;display:flex;flex-direction:column;gap:16px">
+            <div style="height:96px;border:2px dashed #555;color:#555;display:flex;align-items:center;justify-content:center;font-size:28px">同步中</div>
+            <div style="height:96px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:26px">取消同步</div>
+          </div>
+          <div style="padding:20px 36px 32px;font-size:22px;color:#333">最近一次上传确认：今天 09:30</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">进度按阶段更新：连接 → 读取远端 → 上传，每个阶段只刷新状态格。没有旋转图标。按超时上限停止后进入失败状态。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S06-4 · 已上传</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S06-4 已上传" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:104px;left:36px;right:36px;height:500px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify"><p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。时候既然是深冬；渐近故乡时，天气又阴晦了。</p></div>
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;background:#fff;border-bottom:3px solid #111;display:flex;align-items:center">
+          <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px;white-space:nowrap"><span style="font-size:36px">‹</span>书库</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><div style="font-size:30px;font-weight:700">故乡</div><div style="font-size:22px;color:#333">呐喊 · 本章 3 / 12</div></div>
+          <div style="height:104px;display:flex;align-items:center;padding:0 24px;flex-shrink:0;white-space:nowrap"><div style="border:2px solid #111;padding:8px 14px;font-size:22px">⇅ 已上传</div></div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr) 112px;border-bottom:2px solid #111">
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">目录</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px">排版</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;background:#111;color:#fff">同步</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">刷新</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:24px">收起</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);border-bottom:2px solid #111">
+            <div style="padding:28px 20px 28px 36px;display:flex;flex-direction:column;gap:8px;border-right:2px solid #cfcfcf"><div style="font-size:22px;color:#333">本机</div><div style="font-size:30px;font-weight:700">已保存</div><div style="font-size:22px;color:#333">10:58</div></div>
+            <div style="padding:28px 20px;display:flex;flex-direction:column;gap:8px;border-right:2px solid #cfcfcf"><div style="font-size:22px;color:#333">服务器</div><div style="font-size:30px;font-weight:700">已上传此处</div><div style="font-size:22px;color:#333">服务器确认 10:58</div></div>
+            <div style="padding:28px 36px 28px 20px;display:flex;flex-direction:column;gap:8px"><div style="font-size:22px;color:#333">其他设备</div><div style="font-size:30px;font-weight:700">无不同位置</div><div style="font-size:22px;color:#333">检查于 10:58</div></div>
+          </div>
+          <div style="padding:24px 36px 0;font-size:24px;line-height:1.5">已上传此处。另一台设备需要自己同步后才会看到这个位置。</div>
+          <div style="padding:24px 36px 0;display:flex;flex-direction:column;gap:16px">
+            <div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px">检查并同步</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+              <div style="height:96px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:26px">从其他设备接续</div>
+              <div style="height:96px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:26px">将此处上传</div>
+            </div>
+          </div>
+          <div style="padding:20px 36px 32px;font-size:22px;color:#333">服务 sync.example.org · 账户 reader</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">只有收到服务器确认后才显示“已上传此处”。不写“另一台设备已同步”。“将此处上传”遇到远端有不同位置时转入 S07，不会直接覆盖。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S06-5 · 鉴权失败</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S06-5 鉴权失败" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:104px;left:36px;right:36px;height:500px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify"><p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。时候既然是深冬；渐近故乡时，天气又阴晦了。</p></div>
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;background:#fff;border-bottom:3px solid #111;display:flex;align-items:center">
+          <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px;white-space:nowrap"><span style="font-size:36px">‹</span>书库</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><div style="font-size:30px;font-weight:700">故乡</div><div style="font-size:22px;color:#333">呐喊 · 本章 3 / 12</div></div>
+          <div style="height:104px;display:flex;align-items:center;padding:0 24px;flex-shrink:0;white-space:nowrap"><div style="background:#111;color:#fff;padding:10px 16px;font-size:22px">登录失效 ›</div></div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr) 112px;border-bottom:2px solid #111">
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">目录</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px">排版</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;background:#111;color:#fff">同步</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">刷新</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:24px">收起</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);border-bottom:2px solid #111">
+            <div style="padding:28px 20px 28px 36px;display:flex;flex-direction:column;gap:8px;border-right:2px solid #cfcfcf"><div style="font-size:22px;color:#333">本机</div><div style="font-size:30px;font-weight:700">已保存</div><div style="font-size:22px;color:#333">10:51</div></div>
+            <div style="padding:28px 20px;display:flex;flex-direction:column;gap:8px;border-right:2px solid #cfcfcf"><div style="font-size:22px;color:#333">服务器</div><div style="font-size:30px;font-weight:700">登录失效</div><div style="font-size:22px;color:#333">未上传</div></div>
+            <div style="padding:28px 36px 28px 20px;display:flex;flex-direction:column;gap:8px"><div style="font-size:22px;color:#333">其他设备</div><div style="font-size:30px;font-weight:700">未检查</div><div style="font-size:22px;color:#333">—</div></div>
+          </div>
+          <div style="padding:24px 36px 0;display:flex;flex-direction:column;gap:8px"><div style="font-size:28px;font-weight:700">同步登录已失效，请重新配置</div><div style="font-size:22px;color:#333">网络正常。待上传的位置会保留，配置后再上传。</div></div>
+          <div style="padding:28px 36px 0;display:flex;flex-direction:column;gap:16px">
+            <div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px">重新配置</div>
+          </div>
+          <div style="padding:20px 36px 32px;font-size:22px;color:#333">服务 sync.example.org · 账户 reader</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">只给一个最相关的操作。文案要和“无网络”分开。顶栏状态反相，表示需要用户处理。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S06-6 · 定位无法映射</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S06-6 定位失败" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:104px;left:36px;right:36px;height:500px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify"><p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。时候既然是深冬；渐近故乡时，天气又阴晦了。</p></div>
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;background:#fff;border-bottom:3px solid #111;display:flex;align-items:center">
+          <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px;white-space:nowrap"><span style="font-size:36px">‹</span>书库</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><div style="font-size:30px;font-weight:700">故乡</div><div style="font-size:22px;color:#333">呐喊 · 本章 3 / 12</div></div>
+          <div style="height:104px;display:flex;align-items:center;padding:0 24px;flex-shrink:0;white-space:nowrap"><div style="border:2px solid #111;padding:8px 14px;font-size:22px">⇅ 未能对应</div></div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr) 112px;border-bottom:2px solid #111">
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">目录</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px">排版</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;background:#111;color:#fff">同步</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">刷新</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:24px">收起</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);border-bottom:2px solid #111">
+            <div style="padding:28px 20px 28px 36px;display:flex;flex-direction:column;gap:8px;border-right:2px solid #cfcfcf"><div style="font-size:22px;color:#333">本机</div><div style="font-size:30px;font-weight:700">已保存</div><div style="font-size:22px;color:#333">10:51</div></div>
+            <div style="padding:28px 20px;display:flex;flex-direction:column;gap:8px;border-right:2px solid #cfcfcf"><div style="font-size:22px;color:#333">服务器</div><div style="font-size:30px;font-weight:700">未上传</div><div style="font-size:22px;color:#333">等待你的选择</div></div>
+            <div style="padding:28px 36px 28px 20px;display:flex;flex-direction:column;gap:8px"><div style="font-size:22px;color:#333">其他设备</div><div style="font-size:30px;font-weight:700">位置未知</div><div style="font-size:22px;color:#333">只有约 34%</div></div>
+          </div>
+          <div style="padding:24px 36px 0;display:flex;flex-direction:column;gap:8px"><div style="font-size:28px;font-weight:700;line-height:1.4">无法准确对应此位置，已保留当前阅读位置</div><div style="font-size:22px;color:#333">另一设备的位置在本机无法解析，只能定位到附近。</div></div>
+          <div style="padding:28px 36px 0;display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:26px">保留此处</div>
+            <div style="height:96px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:26px">转到附近（约 34%）</div>
+          </div>
+          <div style="padding:20px 36px 32px;font-size:22px;color:#333">附近定位为实验功能，跳转后可退回。</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">mapping_quality = unsupported / approximate 时显示这一屏。不显示成功，也不退回第一页。“转到附近”会先保存一条跳转前的历史，跳转后提供“返回跳转前位置”。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S06-7 · 原书不匹配</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S06-7 原书不匹配" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:104px;left:36px;right:36px;height:500px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify"><p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。时候既然是深冬；渐近故乡时，天气又阴晦了。</p></div>
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;background:#fff;border-bottom:3px solid #111;display:flex;align-items:center">
+          <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px;white-space:nowrap"><span style="font-size:36px">‹</span>书库</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><div style="font-size:30px;font-weight:700">故乡</div><div style="font-size:22px;color:#333">呐喊 · 本章 3 / 12</div></div>
+          <div style="height:104px;display:flex;align-items:center;padding:0 24px;flex-shrink:0;white-space:nowrap"><div style="border:2px solid #111;padding:8px 14px;font-size:22px">⇅ 暂未同步</div></div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr) 112px;border-bottom:2px solid #111">
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">目录</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px">排版</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;background:#111;color:#fff">同步</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">刷新</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:24px">收起</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);border-bottom:2px solid #111">
+            <div style="padding:28px 20px 28px 36px;display:flex;flex-direction:column;gap:8px;border-right:2px solid #cfcfcf"><div style="font-size:22px;color:#333">本机</div><div style="font-size:30px;font-weight:700">已保存</div><div style="font-size:22px;color:#333">10:51</div></div>
+            <div style="padding:28px 20px;display:flex;flex-direction:column;gap:8px;border-right:2px solid #cfcfcf"><div style="font-size:22px;color:#333">服务器</div><div style="font-size:30px;font-weight:700">暂未同步</div><div style="font-size:22px;color:#333">未上传</div></div>
+            <div style="padding:28px 36px 28px 20px;display:flex;flex-direction:column;gap:8px"><div style="font-size:22px;color:#333">其他设备</div><div style="font-size:30px;font-weight:700">—</div><div style="font-size:22px;color:#333">无法比较</div></div>
+          </div>
+          <div style="padding:24px 36px 0;display:flex;flex-direction:column;gap:8px"><div style="font-size:28px;font-weight:700">无法确认是同一本书，暂未同步</div><div style="font-size:22px;color:#333;line-height:1.5">本机文件与服务器记录的标识不一致。不会按同名文件覆盖。</div></div>
+          <div style="padding:28px 36px 0"><div style="height:96px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:26px">查看书籍详情</div></div>
+          <div style="padding:20px 36px 32px;font-size:22px;color:#333">匹配方式可在设置中查看。</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">按文件名匹配是需要用户主动开启的兼容选项，这一屏不提供快捷开启。</div>
+    </div>
+
+  </div>
+</section>
+
+<section id="S07" style="padding:24px 64px 96px;display:flex;flex-direction:column;gap:20px">
+  <div style="font-size:22px;font-weight:700;border-top:2px solid #111;padding-top:16px">S07 · 同步冲突确认</div>
+  <div style="font-size:14px;color:#333;max-width:1100px;line-height:1.6">手动“检查并同步”或“将此处上传”发现不同位置时，直接出现这一屏。自动检查发现时只标记顶栏状态（S03-2），由用户点开。K1/K3 在这一屏不翻背后的正文；K2 等于“继续此处”。</div>
+  <div style="display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start">
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S07-1 · 远端位置可解析</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S07-1 可解析" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;height:400px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify"><p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中。</p></div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;padding:36px 36px 32px;display:flex;flex-direction:column;gap:24px">
+          <div style="display:flex;flex-direction:column;gap:8px"><div style="font-size:34px;font-weight:700">发现不同的阅读位置</div><div style="font-size:24px;color:#333">两台设备的阅读位置不同，请选择继续位置</div></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div style="border:3px solid #111;padding:20px;display:flex;flex-direction:column;gap:8px"><div style="font-size:22px;color:#333">此设备</div><div style="font-size:30px;font-weight:700">故乡 · 约 38%</div><div style="font-size:22px;color:#333">本机已保存</div></div>
+            <div style="border:2px solid #111;padding:20px;display:flex;flex-direction:column;gap:8px"><div style="font-size:22px;color:#333">另一设备</div><div style="font-size:30px;font-weight:700">风波 · 约 34%</div><div style="font-size:22px;color:#333;line-height:1.4">来自 KOReader<br>最近收到：10:42</div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div style="height:96px;border:3px solid #111;display:flex;align-items:center;justify-content:center;font-size:28px">继续此处</div>
+            <div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px">转到另一设备的位置</div>
+          </div>
+          <div style="font-size:22px;color:#333;line-height:1.5">“继续此处”只关闭提示，服务器上的位置保持不变。</div>
+          <div style="border-top:2px solid #111;min-height:96px;display:flex;align-items:center;justify-content:space-between;padding-top:8px"><div style="display:flex;flex-direction:column;gap:4px"><div style="font-size:26px">上传此处，替换远端位置</div><div style="font-size:22px;color:#333">需再次确认，会覆盖服务器记录</div></div><div style="font-size:30px">›</div></div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">mapping_quality = exact 时，章名来自本机目录解析。两个按钮的权重相同，用户回读也是正常情况，所以不按百分比大小暗示哪个更新。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S07-2 · 仅近似 + 时间未知</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S07-2 仅近似" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;height:400px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify"><p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中。</p></div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;padding:36px 36px 32px;display:flex;flex-direction:column;gap:24px">
+          <div style="display:flex;flex-direction:column;gap:8px"><div style="font-size:34px;font-weight:700">发现不同的阅读位置</div><div style="font-size:24px;color:#333">另一设备的位置信息有限，只能定位到附近</div></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div style="border:3px solid #111;padding:20px;display:flex;flex-direction:column;gap:8px"><div style="font-size:22px;color:#333">此设备</div><div style="font-size:30px;font-weight:700">故乡 · 约 38%</div><div style="font-size:22px;color:#333">本机已保存</div></div>
+            <div style="border:2px solid #111;padding:20px;display:flex;flex-direction:column;gap:8px"><div style="font-size:22px;color:#333">另一设备</div><div style="font-size:30px;font-weight:700">约 34%</div><div style="font-size:22px;color:#333;line-height:1.4">章节无法确认<br>阅读时间未知<br>本机收到：10:42</div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div style="height:96px;border:3px solid #111;display:flex;align-items:center;justify-content:center;font-size:28px">继续此处</div>
+            <div style="height:96px;background:#111;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center"><div style="font-size:26px">转到附近位置</div><div style="font-size:20px">只能定位到附近</div></div>
+          </div>
+          <div style="font-size:22px;color:#333;line-height:1.5">转到附近后可以退回此处。“继续此处”不改动服务器。</div>
+          <div style="border-top:2px solid #111;min-height:96px;display:flex;align-items:center;justify-content:space-between;padding-top:8px"><div style="display:flex;flex-direction:column;gap:4px"><div style="font-size:26px">上传此处，替换远端位置</div><div style="font-size:22px;color:#333">需再次确认，会覆盖服务器记录</div></div><div style="font-size:30px">›</div></div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">没有解析出章名时不显示章名。阅读时间没有可靠来源时写“阅读时间未知”，并和“本机收到”的时间分两行显示。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S07-3 · 操作中</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S07-3 操作中" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;height:400px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify"><p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中。</p></div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;padding:36px 36px 32px;display:flex;flex-direction:column;gap:24px">
+          <div style="display:flex;flex-direction:column;gap:8px"><div style="font-size:34px;font-weight:700">正在转到另一设备的位置</div><div style="font-size:24px;color:#333">风波 · 约 34% · 正在准备这一章</div></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;color:#555">
+            <div style="border:2px dashed #555;padding:20px;display:flex;flex-direction:column;gap:8px"><div style="font-size:22px">此设备</div><div style="font-size:30px">故乡 · 约 38%</div><div style="font-size:22px">已记入跳转历史</div></div>
+            <div style="border:3px solid #111;color:#111;padding:20px;display:flex;flex-direction:column;gap:8px"><div style="font-size:22px;color:#333">另一设备</div><div style="font-size:30px;font-weight:700">风波 · 约 34%</div><div style="font-size:22px;color:#333">目标位置</div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+            <div style="height:96px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:28px">取消</div>
+            <div style="height:96px;border:2px dashed #555;color:#555;display:flex;align-items:center;justify-content:center;font-size:28px">跳转中</div>
+          </div>
+          <div style="font-size:22px;color:#333;line-height:1.5">完成后整屏显示新位置，并保存为本机位置。取消则留在此处。</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">按下后立即用一次局部刷新显示忙碌状态，避免重复提交。失败时退回 S07-1，并在标题下给出原因。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S07-4 · 上传替换二次确认</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S07-4 上传确认" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;height:400px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify"><p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中。</p></div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;padding:36px 36px 40px;display:flex;flex-direction:column;gap:24px">
+          <div style="font-size:34px;font-weight:700">上传此处，替换远端位置？</div>
+          <div style="display:flex;flex-direction:column;gap:12px;font-size:26px;line-height:1.5">
+            <div>服务器上的“约 34%”将改为此处“故乡 · 约 38%”。</div>
+            <div style="color:#333;font-size:24px">另一台设备下次同步时才会看到这个位置。这个操作不会删除另一设备上的阅读记录。</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
+            <div style="height:96px;border:3px solid #111;display:flex;align-items:center;justify-content:center;font-size:28px">取消</div>
+            <div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px">上传并替换</div>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">K2 等于“取消”。上传成功后回到 S06-4，显示“已上传此处”；失败时回到 S07-1，并给出原因。</div>
+    </div>
+
+  </div>
+</section>
+
+
+<section id="S08" style="padding:24px 64px 96px;display:flex;flex-direction:column;gap:20px">
+  <div style="font-size:22px;font-weight:700;border-top:2px solid #111;padding-top:16px">S08 · 刷新设置（1b 标签页）</div>
+  <div style="font-size:14px;color:#333;max-width:1100px;line-height:1.6">三种预设对应 refresh_preset。“立即全刷”是独立动作，S03 底部也有入口。页面上不出现 DU、GC16 之类的工程名词，也不承诺毫秒数或“无残影”。</div>
+  <div style="display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start">
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S08-1 · 当前：均衡</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S08-1 刷新" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:104px;left:36px;right:36px;height:400px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify"><p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。时候既然是深冬；渐近故乡时，天气又阴晦了。</p></div>
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;background:#fff;border-bottom:3px solid #111;display:flex;align-items:center">
+          <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px;white-space:nowrap"><span style="font-size:36px">‹</span>书库</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><div style="font-size:30px;font-weight:700">故乡</div><div style="font-size:22px;color:#333">呐喊 · 本章 3 / 12</div></div>
+          <div style="height:104px;display:flex;align-items:center;padding:0 24px;flex-shrink:0;white-space:nowrap"><div style="border:2px solid #111;padding:8px 14px;font-size:22px">⇅ 待上传</div></div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr) 112px;border-bottom:2px solid #111">
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">目录</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">排版</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px">同步</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;background:#111;color:#fff">刷新</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:24px;border-left:2px solid #111">收起</div>
+          </div>
+          <div style="padding:20px 24px 0;display:flex;flex-direction:column;gap:12px">
+            <div style="min-height:112px;border:3px solid transparent;display:flex;align-items:center;gap:20px;padding:0 16px"><div style="width:32px;height:32px;border:3px solid #111;border-radius:50%;flex-shrink:0"></div><div style="display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:500">清晰</div><div style="font-size:22px;color:#333">优先文字与图像表现</div></div></div>
+            <div style="min-height:112px;border:3px solid #111;display:flex;align-items:center;gap:20px;padding:0 16px"><div style="width:32px;height:32px;border:3px solid #111;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;box-sizing:border-box"><div style="width:16px;height:16px;background:#111;border-radius:50%"></div></div><div style="flex:1;display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:700">均衡</div><div style="font-size:22px;color:#333">在显示效果和操作响应之间折中</div></div><div style="font-size:20px;background:#111;color:#fff;padding:2px 10px;white-space:nowrap">当前</div></div>
+            <div style="min-height:112px;border:3px solid transparent;display:flex;align-items:center;gap:20px;padding:0 16px"><div style="width:32px;height:32px;border:3px solid #111;border-radius:50%;flex-shrink:0"></div><div style="display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:500">快速</div><div style="font-size:22px;color:#333">优先操作响应，可能减少灰阶或更易留痕</div></div></div>
+          </div>
+          <div style="padding:20px 36px 0"><div style="height:96px;border:2px solid #111;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px"><div style="font-size:28px">立即全刷</div><div style="font-size:20px;color:#333">整屏刷新一次，用于清理残影</div></div></div>
+          <div style="height:88px;display:flex;align-items:center;justify-content:space-between;padding:0 36px 8px;font-size:24px"><span style="color:#333">自动全刷间隔</span><span>每 8 页 ▸</span></div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">选中项同时有实心圆点、粗框和“当前”标签三重标识。清晰或均衡点按后直接生效，只刷新面板区域，不播放演示动画。自动全刷间隔是进阶项，默认值待真机调校。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S08-2 · 切换到快速前说明</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S08-2 快速确认" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:104px;left:36px;right:36px;height:300px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify"><p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。</p></div>
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;background:#fff;border-bottom:3px solid #111;display:flex;align-items:center">
+          <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px;white-space:nowrap"><span style="font-size:36px">‹</span>书库</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><div style="font-size:30px;font-weight:700">故乡</div><div style="font-size:22px;color:#333">呐喊 · 本章 3 / 12</div></div>
+          <div style="height:104px;display:flex;align-items:center;padding:0 24px;flex-shrink:0;white-space:nowrap"><div style="border:2px solid #111;padding:8px 14px;font-size:22px">⇅ 待上传</div></div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr) 112px;border-bottom:2px solid #111">
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">目录</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">排版</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px">同步</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;background:#111;color:#fff">刷新</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:24px;border-left:2px solid #111">收起</div>
+          </div>
+          <div style="padding:20px 24px 0;display:flex;flex-direction:column;gap:12px">
+            <div style="min-height:112px;border:3px solid transparent;display:flex;align-items:center;gap:20px;padding:0 16px"><div style="width:32px;height:32px;border:3px solid #111;border-radius:50%;flex-shrink:0"></div><div style="display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:500">清晰</div><div style="font-size:22px;color:#333">优先文字与图像表现</div></div></div>
+            <div style="min-height:112px;border:3px solid transparent;display:flex;align-items:center;gap:20px;padding:0 16px"><div style="width:32px;height:32px;border:3px solid #111;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;box-sizing:border-box"><div style="width:16px;height:16px;background:#111;border-radius:50%"></div></div><div style="flex:1;display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:700">均衡</div><div style="font-size:22px;color:#333">在显示效果和操作响应之间折中</div></div><div style="font-size:20px;background:#111;color:#fff;padding:2px 10px;white-space:nowrap">当前</div></div>
+            <div style="border:3px dashed #111;display:flex;flex-direction:column;gap:16px;padding:24px 16px 20px">
+              <div style="display:flex;align-items:center;gap:20px"><div style="width:32px;height:32px;border:3px dashed #111;border-radius:50%;flex-shrink:0;box-sizing:border-box"></div><div style="font-size:28px;font-weight:700">改用快速？</div></div>
+              <div style="font-size:24px;line-height:1.55;padding-left:52px">翻页和面板响应会更快，但画面可能灰阶更少，也更容易留下残影。觉得画面变脏时，可以用“全刷”清理。</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;padding-left:52px">
+                <div style="height:88px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:26px">保持均衡</div>
+                <div style="height:88px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:26px">改用快速</div>
+              </div>
+            </div>
+          </div>
+          <div style="height:40px"></div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">只有切到快速时才展开说明，确认后才生效，均衡在确认前仍标“当前”。说明用虚线框表示还没确认。快速模式下的真实灰阶表现需要真机验证。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S08-3 · 全刷暂不可用</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S08-3 不可用" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:104px;left:36px;right:36px;height:400px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify"><p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。时候既然是深冬；渐近故乡时，天气又阴晦了。</p></div>
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;background:#fff;border-bottom:3px solid #111;display:flex;align-items:center">
+          <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px;white-space:nowrap"><span style="font-size:36px">‹</span>书库</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px"><div style="font-size:30px;font-weight:700">故乡</div><div style="font-size:22px;color:#333">呐喊 · 本章 3 / 12</div></div>
+          <div style="height:104px;display:flex;align-items:center;padding:0 24px;flex-shrink:0;white-space:nowrap"><div style="border:2px solid #111;padding:8px 14px;font-size:22px">⇅ 待上传</div></div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr) 112px;border-bottom:2px solid #111">
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">目录</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;border-right:2px solid #111">排版</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px">同步</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700;background:#111;color:#fff">刷新</div>
+            <div style="height:96px;display:flex;align-items:center;justify-content:center;font-size:24px;border-left:2px solid #111">收起</div>
+          </div>
+          <div style="padding:20px 24px 0;display:flex;flex-direction:column;gap:12px">
+            <div style="min-height:112px;border:3px solid transparent;display:flex;align-items:center;gap:20px;padding:0 16px"><div style="width:32px;height:32px;border:3px solid #111;border-radius:50%;flex-shrink:0"></div><div style="display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:500">清晰</div><div style="font-size:22px;color:#333">优先文字与图像表现</div></div></div>
+            <div style="min-height:112px;border:3px solid #111;display:flex;align-items:center;gap:20px;padding:0 16px"><div style="width:32px;height:32px;border:3px solid #111;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;box-sizing:border-box"><div style="width:16px;height:16px;background:#111;border-radius:50%"></div></div><div style="flex:1;display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:700">均衡</div><div style="font-size:22px;color:#333">在显示效果和操作响应之间折中</div></div><div style="font-size:20px;background:#111;color:#fff;padding:2px 10px;white-space:nowrap">当前</div></div>
+            <div style="min-height:112px;border:3px solid transparent;display:flex;align-items:center;gap:20px;padding:0 16px"><div style="width:32px;height:32px;border:3px solid #111;border-radius:50%;flex-shrink:0"></div><div style="display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:500">快速</div><div style="font-size:22px;color:#333">优先操作响应，可能减少灰阶或更易留痕</div></div></div>
+          </div>
+          <div style="padding:20px 36px 0"><div style="height:96px;border:2px dashed #555;color:#555;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px"><div style="font-size:28px">立即全刷</div><div style="font-size:20px">屏幕正在刷新，完成后可用</div></div></div>
+          <div style="height:88px;display:flex;align-items:center;justify-content:space-between;padding:0 36px 8px;font-size:24px"><span style="color:#333">自动全刷间隔</span><span>每 8 页 ▸</span></div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">刷新事务进行中时，“全刷”禁用并写明原因，不排队，避免一次操作闪好几次。S03 底部的“全刷”入口同步禁用。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S08-4 · 刷新失败</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S08-4 刷新失败" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;height:640px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify">
+          <p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。</p>
+          <p style="margin:0;text-indent:2em">时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村，没有一些活气。</p>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;padding:36px;display:flex;flex-direction:column;gap:14px">
+          <div style="font-size:30px;font-weight:700">屏幕刷新未完成</div>
+          <div style="font-size:24px;color:#333;line-height:1.5">已保留上一画面，阅读位置没有改变。可以再试一次全刷；反复出现时，可以在设置里导出诊断信息。</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
+            <div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px">再试一次</div>
+            <div style="height:96px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:28px">关闭</div>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">对应 DisplayPort 返回 Failed。未显示成功的页面不登记为已读，提示里也不写“已检测到残影”。</div>
+    </div>
+
+  </div>
+</section></x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;viewMode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;正常灰阶&quot;,&quot;近似黑白&quot;],&quot;default&quot;:&quot;正常灰阶&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;scale&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;0.5×&quot;,&quot;1×（原像素）&quot;],&quot;default&quot;:&quot;0.5×&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = { fs: 38, lh: 1.5, mg: 36, font: 0, pfs: 38, plh: 1.5, pmg: 36, pfont: 0, sel: 'fs' };
+  fonts = [['霞鹜文楷', "'LXGW WenKai',serif"], ['思源宋体', "'Noto Serif SC',serif"], ['思源黑体', "'Noto Sans SC',sans-serif"]];
+  clamp(v, a, b) { return Math.min(b, Math.max(a, Math.round(v * 100) / 100)); }
+  step(k, d, a, b) { this.setState(s => ({ [k]: this.clamp(s[k] + d, a, b) })); }
+  selStep(dir) {
+    const k = this.state.sel;
+    if (k === 'font') return this.setState(x => ({ pfont: (x.pfont + dir + 3) % 3 }));
+    if (k === 'fs') return this.step('pfs', 2 * dir, 28, 56);
+    if (k === 'lh') return this.step('plh', 0.05 * dir, 1.35, 1.65);
+    this.step('pmg', 4 * dir, 24, 52);
+  }
+  renderVals() {
+    const s = this.state, sel = s.sel;
+    const chip = k => sel === k ? ['#111', '#fff'] : ['#fff', '#111'];
+    const names = { font: '字体', fs: '字号', lh: '行距', mg: '页边距' };
+    const vals = { font: this.fonts[s.pfont][0], fs: s.pfs + ' px', lh: s.plh.toFixed(2), mg: s.pmg + ' px' };
+    const pending = s.pfs !== s.fs || s.plh !== s.lh || s.pmg !== s.mg || s.pfont !== s.font;
+    return {
+      zoom: this.props.scale === '1×（原像素）' ? 1 : 0.5,
+      frameFilter: this.props.viewMode === '近似黑白' ? 'grayscale(1) contrast(8)' : 'none',
+      pfsPx: s.pfs + 'px', plh: s.plh, pmgPx: s.pmg + 'px', pfontFamily: this.fonts[s.pfont][1],
+      pfontShort: vals.font, pfsLabel: vals.fs, plhLabel: vals.lh, pmgLabel: vals.mg,
+      cFontBd: sel === 'font' ? '#111' : 'transparent', cFsBd: sel === 'fs' ? '#111' : 'transparent',
+      cLhBd: sel === 'lh' ? '#111' : 'transparent', cMgBd: sel === 'mg' ? '#111' : 'transparent',
+      selFont: () => this.setState({ sel: 'font' }), selFs: () => this.setState({ sel: 'fs' }),
+      selLh: () => this.setState({ sel: 'lh' }), selMg: () => this.setState({ sel: 'mg' }),
+      selName: names[sel], selValue: vals[sel],
+      decGlyph: sel === 'font' ? '‹' : '−', incGlyph: sel === 'font' ? '›' : '+',
+      selDec: () => this.selStep(-1), selInc: () => this.selStep(1),
+      pending, notPending: !pending,
+      previewTag: pending ? '预览 · 尚未应用' : '当前排版',
+      apply: () => this.setState(x => ({ fs: x.pfs, lh: x.plh, mg: x.pmg, font: x.pfont })),
+      cancel: () => this.setState(x => ({ pfs: x.fs, plh: x.lh, pmg: x.mg, pfont: x.font })),
+      reset: () => this.setState({ pfs: 38, plh: 1.5, pmg: 36, pfont: 0 })
+    };
+  }
+}
+</script>
+</body>
+</html>

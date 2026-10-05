@@ -1,0 +1,22 @@
+# Pico Page configuration proposal v1. Reader support is not implemented yet.
+# Paths under library.roots are relative to the mounted card root, not the host OS.
+schema_version = 1
+
+[library]
+roots = ["/Books", "/Articles"]
+view = "list"
+
+[reader]
+# This file is not supplied. Preserve this preference and fall back when missing.
+# The font path is relative to the PicoPage directory on the card.
+font = "fonts/reader.ttf"
+font_size_px = 38
+line_height = 1.5
+margin_x_px = 36
+
+[display]
+# Proposed values: clear / balanced / fast. Hardware behavior needs validation.
+refresh_preset = "balanced"
+
+# No input-remapping configuration in the first version.
+# Reading K2 = ForceRefresh; panels keep their own close/cancel semantics.

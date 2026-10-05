@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/style.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400&display=swap">
+<style>
+body{margin:0;background:#e6e4df;color:#111;font-family:"Noto Sans SC",sans-serif}
+a{color:#111;text-decoration:underline}
+a:hover{color:#555}
+</style>
+</helmet>
+
+<div style="padding:56px 64px 24px;display:flex;flex-direction:column;gap:10px;max-width:1100px">
+  <div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#555">书库 v1 · 2026-10-05 · 684 × 1216 设备像素 · 延续 <a href="Read Pico 阅读体验.dc.html">阅读体验 v1</a> 的组件</div>
+  <div style="font-size:30px;font-weight:700">S01 · 书库与单本详情</div>
+  <div style="font-size:15px;line-height:1.7;color:#333;text-wrap:pretty">冷启动进入书库。最近阅读的一本放在最上面，是列表里稍大一点的一行，不做推荐大卡片。列表按屏分页，K1/K3 翻屏。书名为主，封面可有可无。书目和进度都是示例数据。</div>
+</div>
+
+<section id="S01" style="padding:24px 64px 96px;display:flex;flex-direction:column;gap:20px">
+  <div style="display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start">
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S01-1 · 正常</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S01-1 书库" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f;display:flex;flex-direction:column">
+        <div style="height:104px;flex-shrink:0;border-bottom:3px solid #111;display:flex;align-items:center;justify-content:space-between;padding-left:36px">
+          <div style="font-size:34px;font-weight:700">书库</div>
+          <div style="display:flex;height:104px">
+            <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 24px;font-size:26px;border-left:2px solid #111;white-space:nowrap"><span style="font-size:30px">⇣</span>导入</div>
+            <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 24px;font-size:26px;border-left:2px solid #111;white-space:nowrap"><span style="font-size:30px">⚙</span>设置</div>
+          </div>
+        </div>
+        <div style="padding:24px 36px 0;font-size:22px;color:#333">继续阅读</div>
+        <div style="margin:12px 24px 0;border:3px solid #111;padding:20px;display:flex;gap:24px;align-items:center">
+          <div style="width:96px;height:128px;flex-shrink:0;border:2px solid #111;background:repeating-linear-gradient(45deg,#fff 0 8px,#e2e2e2 8px 10px);display:flex;align-items:flex-end;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:14px;padding-bottom:6px;box-sizing:border-box">封面</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:32px;font-weight:700">呐喊</div>
+            <div style="font-size:22px;color:#333">鲁迅</div>
+            <div style="font-size:24px">故乡 · 约 38%</div>
+          </div>
+          <div style="font-size:26px;white-space:nowrap">继续 ›</div>
+        </div>
+        <div style="padding:28px 36px 8px;display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #111">
+          <div style="font-size:22px;color:#333">本机书籍 · 9 本</div>
+          <div style="display:flex;align-items:center;gap:20px"><div style="font-size:22px;height:64px;display:flex;align-items:center">最近阅读 ▾</div><div style="display:flex;border:2px solid #111"><div style="height:60px;padding:0 16px;display:flex;align-items:center;font-size:22px;background:#111;color:#fff">列表</div><div style="height:60px;padding:0 16px;display:flex;align-items:center;font-size:22px">卡片</div></div></div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;padding:0 24px">
+          <div style="min-height:116px;display:flex;align-items:center;gap:20px;padding:0 12px;border-bottom:2px solid #cfcfcf">
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:500;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">唐诗三百首：附历代名家评注与作者小传合编本（示例长书名）</div><div style="font-size:22px;color:#333">蘅塘退士 编</div></div>
+            <div style="font-size:22px;white-space:nowrap">12%</div>
+          </div>
+          <div style="min-height:116px;display:flex;align-items:center;gap:20px;padding:0 12px;border-bottom:2px solid #cfcfcf">
+            <div style="width:60px;height:80px;flex-shrink:0;border:2px solid #111;background:repeating-linear-gradient(45deg,#fff 0 6px,#e2e2e2 6px 8px)"></div>
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:500">彷徨</div><div style="font-size:22px;color:#333">鲁迅</div></div>
+            <div style="font-size:22px;white-space:nowrap">未读</div>
+          </div>
+          <div style="min-height:116px;display:flex;align-items:center;gap:20px;padding:0 12px;border-bottom:2px solid #cfcfcf">
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:500">呼兰河传</div><div style="font-size:22px;color:#333">萧红</div></div>
+            <div style="font-size:22px;white-space:nowrap">64%</div>
+          </div>
+          <div style="min-height:116px;display:flex;align-items:center;gap:20px;padding:0 12px;border-bottom:2px solid #cfcfcf">
+            <div style="width:60px;height:80px;flex-shrink:0;border:2px solid #111;background:repeating-linear-gradient(45deg,#fff 0 6px,#e2e2e2 6px 8px)"></div>
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:500">朝花夕拾</div><div style="font-size:22px;color:#333">鲁迅</div></div>
+            <div style="font-size:22px;white-space:nowrap;border:2px solid #111;padding:0 8px">已读完</div>
+          </div>
+          <div style="min-height:116px;display:flex;align-items:center;gap:20px;padding:0 12px;border-bottom:2px solid #cfcfcf">
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:500">骆驼祥子</div><div style="font-size:22px;color:#333">老舍</div></div>
+            <div style="font-size:22px;white-space:nowrap">未读</div>
+          </div>
+        </div>
+        <div style="height:120px;flex-shrink:0;border-top:2px solid #111;display:flex;align-items:center;justify-content:space-between;padding:0 24px">
+          <div style="width:180px;height:88px;border:2px dashed #555;color:#555;display:flex;align-items:center;justify-content:center;font-size:24px">‹ 上一屏</div>
+          <div style="font-size:26px">1 / 2</div>
+          <div style="width:180px;height:88px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:24px">下一屏 ›</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">点“继续阅读”整行直接打开原书。点列表行打开书，长按不承载功能；行右侧的状态区（88px）进入单本详情。长书名最多两行，详情里显示完整标题。没有封面时不留空白占位，书名左对齐。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S01-1b · 卡片模式</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S01-1b 卡片模式" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f;display:flex;flex-direction:column">
+        <div style="height:104px;flex-shrink:0;border-bottom:3px solid #111;display:flex;align-items:center;justify-content:space-between;padding-left:36px">
+          <div style="font-size:34px;font-weight:700">书库</div>
+          <div style="display:flex;height:104px">
+            <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 24px;font-size:26px;border-left:2px solid #111;white-space:nowrap"><span style="font-size:30px">⇣</span>导入</div>
+            <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 24px;font-size:26px;border-left:2px solid #111;white-space:nowrap"><span style="font-size:30px">⚙</span>设置</div>
+          </div>
+        </div>
+        <div style="padding:24px 36px 0;font-size:22px;color:#333">继续阅读</div>
+        <div style="margin:12px 24px 0;border:3px solid #111;padding:16px 20px;display:flex;gap:24px;align-items:center">
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px"><div style="font-size:30px;font-weight:700">呐喊 <span style="font-size:22px;font-weight:400;color:#333">鲁迅</span></div><div style="font-size:24px">故乡 · 约 38%</div></div>
+          <div style="font-size:26px;white-space:nowrap">继续 ›</div>
+        </div>
+        <div style="padding:20px 36px 8px;display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #111">
+          <div style="font-size:22px;color:#333">本机书籍 · 9 本</div>
+          <div style="display:flex;align-items:center;gap:20px"><div style="font-size:22px;height:64px;display:flex;align-items:center">最近阅读 ▾</div><div style="display:flex;border:2px solid #111"><div style="height:60px;padding:0 16px;display:flex;align-items:center;font-size:22px">列表</div><div style="height:60px;padding:0 16px;display:flex;align-items:center;font-size:22px;background:#111;color:#fff">卡片</div></div></div>
+        </div>
+        <div style="flex:1;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);gap:20px 16px;padding:24px 24px">
+          <div style="display:flex;flex-direction:column;gap:8px;min-height:0">
+            <div style="flex:1;border:2px solid #111;display:flex;align-items:center;justify-content:center;padding:16px;font-family:'LXGW WenKai',serif;font-size:28px;line-height:1.35;text-align:center">唐诗三百首</div>
+            <div style="font-size:22px;font-weight:500;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.35">唐诗三百首：附历代名家评注与作者小传合编本（示例长书名）</div>
+            <div style="font-size:20px;color:#333">12%</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;min-height:0">
+            <div style="flex:1;border:2px solid #111;background:repeating-linear-gradient(45deg,#fff 0 8px,#e2e2e2 8px 10px);display:flex;align-items:flex-end;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:14px;padding-bottom:8px">封面</div>
+            <div style="font-size:22px;font-weight:500;line-height:1.35">彷徨</div>
+            <div style="font-size:20px;color:#333">未读</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;min-height:0">
+            <div style="flex:1;border:2px solid #111;display:flex;align-items:center;justify-content:center;padding:16px;font-family:'LXGW WenKai',serif;font-size:30px;line-height:1.35;text-align:center">呼兰河传</div>
+            <div style="font-size:22px;font-weight:500;line-height:1.35">呼兰河传</div>
+            <div style="font-size:20px;color:#333">64%</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;min-height:0">
+            <div style="flex:1;border:2px solid #111;background:repeating-linear-gradient(45deg,#fff 0 8px,#e2e2e2 8px 10px);display:flex;align-items:flex-end;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:14px;padding-bottom:8px">封面</div>
+            <div style="font-size:22px;font-weight:500;line-height:1.35">朝花夕拾</div>
+            <div style="font-size:20px"><span style="border:2px solid #111;padding:0 6px">已读完</span></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;min-height:0">
+            <div style="flex:1;border:2px solid #111;display:flex;align-items:center;justify-content:center;padding:16px;font-family:'LXGW WenKai',serif;font-size:30px;line-height:1.35;text-align:center">骆驼祥子</div>
+            <div style="font-size:22px;font-weight:500;line-height:1.35">骆驼祥子</div>
+            <div style="font-size:20px;color:#333">未读</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;min-height:0">
+            <div style="flex:1;border:2px dashed #111;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:16px;text-align:center;color:#555"><div style="font-family:'LXGW WenKai',serif;font-size:30px">红楼梦</div><div style="font-size:18px;color:#111">文件缺失</div></div>
+            <div style="font-size:22px;font-weight:500;line-height:1.35;color:#555">红楼梦</div>
+            <div style="font-size:20px">无法打开 · 详情 ›</div>
+          </div>
+        </div>
+        <div style="height:120px;flex-shrink:0;border-top:2px solid #111;display:flex;align-items:center;justify-content:space-between;padding:0 24px">
+          <div style="width:180px;height:88px;border:2px dashed #555;color:#555;display:flex;align-items:center;justify-content:center;font-size:24px">‹ 上一屏</div>
+          <div style="font-size:26px">1 / 2</div>
+          <div style="width:180px;height:88px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:24px">下一屏 ›</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">每屏 3 × 2 张卡片，整张卡片都是热区（约 200 × 330px）。没有封面时，用书名排出一张文字封面，不显示空白方块。卡片下方仍写出完整书名（最多两行）和进度，封面不代替书名。点卡片打开书，点下方的状态行进入详情。“列表 / 卡片”是全局偏好，存入设置，切换只重绘列表区。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S01-2 · 空书库</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S01-2 空书库" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f;display:flex;flex-direction:column">
+        <div style="height:104px;flex-shrink:0;border-bottom:3px solid #111;display:flex;align-items:center;justify-content:space-between;padding-left:36px">
+          <div style="font-size:34px;font-weight:700">书库</div>
+          <div style="display:flex;height:104px">
+            <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 24px;font-size:26px;border-left:2px solid #111;white-space:nowrap"><span style="font-size:30px">⇣</span>导入</div>
+            <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 24px;font-size:26px;border-left:2px solid #111;white-space:nowrap"><span style="font-size:30px">⚙</span>设置</div>
+          </div>
+        </div>
+        <div style="padding:120px 48px 0;display:flex;flex-direction:column;gap:16px">
+          <div style="font-size:34px;font-weight:700">书库里还没有书</div>
+          <div style="font-size:24px;color:#333">存储卡已就绪 · 0 本</div>
+        </div>
+        <div style="padding:48px 48px 0;display:flex;flex-direction:column;gap:28px">
+          <div style="display:grid;grid-template-columns:56px 1fr;gap:8px"><div style="font-size:30px;font-weight:700">1</div><div style="display:flex;flex-direction:column;gap:6px"><div style="font-size:28px;font-weight:500">复制到存储卡</div><div style="font-size:22px;color:#333;line-height:1.5">在电脑上用预处理工具处理 EPUB，把结果复制到存储卡的 books 文件夹，再插回设备。</div></div></div>
+          <div style="display:grid;grid-template-columns:56px 1fr;gap:8px"><div style="font-size:30px;font-weight:700">2</div><div style="display:flex;flex-direction:column;gap:6px"><div style="font-size:28px;font-weight:500">通过局域网传输</div><div style="font-size:22px;color:#333;line-height:1.5">在设备上开启传输，再用手机或电脑发送已处理的内容。</div></div></div>
+          <div style="font-size:22px;color:#333;line-height:1.5;border-top:2px solid #cfcfcf;padding-top:20px">设备不能直接打开未经处理的 EPUB 文件。</div>
+        </div>
+        <div style="margin-top:auto;padding:0 36px 40px;display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div style="height:96px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:26px">重新扫描</div>
+          <div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:26px">开启传输</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">只在存储卡可读且确实没有书时显示。“开启传输”进入 S09。说明里写明设备不在本机转换原始 EPUB。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S01-3 · 扫描中</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S01-3 扫描中" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f;display:flex;flex-direction:column">
+        <div style="height:104px;flex-shrink:0;border-bottom:3px solid #111;display:flex;align-items:center;justify-content:space-between;padding-left:36px">
+          <div style="font-size:34px;font-weight:700">书库</div>
+          <div style="display:flex;height:104px">
+            <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 24px;font-size:26px;border-left:2px solid #111;white-space:nowrap"><span style="font-size:30px">⇣</span>导入</div>
+            <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 24px;font-size:26px;border-left:2px solid #111;white-space:nowrap"><span style="font-size:30px">⚙</span>设置</div>
+          </div>
+        </div>
+        <div style="padding:20px 36px;border-bottom:2px solid #111;display:flex;justify-content:space-between;align-items:center"><div style="font-size:24px;font-weight:500">正在扫描存储卡</div><div style="font-size:22px;color:#333">已找到 6 本</div></div>
+        <div style="padding:24px 36px 0;font-size:22px;color:#333">继续阅读</div>
+        <div style="margin:12px 24px 0;border:3px solid #111;padding:20px;display:flex;gap:24px;align-items:center">
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px"><div style="font-size:32px;font-weight:700">呐喊</div><div style="font-size:22px;color:#333">鲁迅</div><div style="font-size:24px">故乡 · 约 38%</div></div>
+          <div style="font-size:26px;white-space:nowrap">继续 ›</div>
+        </div>
+        <div style="padding:28px 36px 8px;border-bottom:2px solid #111;font-size:22px;color:#333">本机书籍 · 扫描完成前列表可能不完整</div>
+        <div style="display:flex;flex-direction:column;padding:0 24px">
+          <div style="min-height:116px;display:flex;align-items:center;padding:0 12px;border-bottom:2px solid #cfcfcf"><div style="flex:1;display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:500">彷徨</div><div style="font-size:22px;color:#333">鲁迅</div></div><div style="font-size:22px">未读</div></div>
+          <div style="min-height:116px;display:flex;align-items:center;padding:0 12px;border-bottom:2px solid #cfcfcf"><div style="flex:1;display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:500">呼兰河传</div><div style="font-size:22px;color:#333">萧红</div></div><div style="font-size:22px">64%</div></div>
+          <div style="min-height:116px;display:flex;align-items:center;padding:0 12px;border-bottom:2px solid #cfcfcf"><div style="flex:1;display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:500">朝花夕拾</div><div style="font-size:22px;color:#333">鲁迅</div></div><div style="font-size:22px;border:2px solid #111;padding:0 8px">已读完</div></div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">先显示上次的书库索引和“继续阅读”，扫描在后台进行，计数按明显的变化刷新（例如每找到 5 本，或每隔几秒），不逐本闪动。扫描期间可以直接打开书。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S01-4 · 存储卡不可用</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S01-4 TF 不可用" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f;display:flex;flex-direction:column">
+        <div style="height:104px;flex-shrink:0;border-bottom:3px solid #111;display:flex;align-items:center;justify-content:space-between;padding-left:36px">
+          <div style="font-size:34px;font-weight:700">书库</div>
+          <div style="display:flex;height:104px">
+            <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 24px;font-size:26px;border-left:2px solid #111;white-space:nowrap;color:#555"><span style="font-size:30px">⇣</span>导入</div>
+            <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 24px;font-size:26px;border-left:2px solid #111;white-space:nowrap"><span style="font-size:30px">⚙</span>设置</div>
+          </div>
+        </div>
+        <div style="padding:120px 48px 0;display:flex;flex-direction:column;gap:16px">
+          <div style="font-size:34px;font-weight:700">存储卡不可用</div>
+          <div style="font-size:24px;line-height:1.55">未检测到存储卡，无法显示书库。这不代表书已被删除。</div>
+          <div style="font-size:22px;color:#333;line-height:1.5">请确认存储卡已插好。插回后会按内容重新核对书籍，不会仅凭文件路径沿用旧进度。</div>
+        </div>
+        <div style="margin:48px 36px 0;border:2px dashed #555;color:#555;padding:20px;display:flex;flex-direction:column;gap:6px">
+          <div style="font-size:22px">上次阅读</div>
+          <div style="font-size:28px">呐喊 · 故乡 · 约 38%</div>
+          <div style="font-size:22px">位置已保存在本机，插回存储卡后可继续</div>
+        </div>
+        <div style="margin-top:auto;padding:0 36px 40px"><div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px">重新检测</div></div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">和“空书库”是两种完全不同的说法。“导入”变灰：复制方式需要存储卡，传输也要写入存储卡。上次阅读的位置来自内部存储里的记录，所以仍能显示，只是不能打开。读不出容量时显示“未知”，不写 0。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S01-5 · 部分书籍不可用</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S01-5 部分不可用" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f;display:flex;flex-direction:column">
+        <div style="height:104px;flex-shrink:0;border-bottom:3px solid #111;display:flex;align-items:center;justify-content:space-between;padding-left:36px">
+          <div style="font-size:34px;font-weight:700">书库</div>
+          <div style="display:flex;height:104px">
+            <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 24px;font-size:26px;border-left:2px solid #111;white-space:nowrap"><span style="font-size:30px">⇣</span>导入</div>
+            <div style="height:104px;display:flex;align-items:center;gap:8px;padding:0 24px;font-size:26px;border-left:2px solid #111;white-space:nowrap"><span style="font-size:30px">⚙</span>设置</div>
+          </div>
+        </div>
+        <div style="padding:28px 36px 8px;display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #111">
+          <div style="font-size:22px;color:#333">本机书籍 · 9 本</div>
+          <div style="display:flex;align-items:center;gap:20px"><div style="font-size:22px;height:64px;display:flex;align-items:center">最近阅读 ▾</div><div style="display:flex;border:2px solid #111"><div style="height:60px;padding:0 16px;display:flex;align-items:center;font-size:22px;background:#111;color:#fff">列表</div><div style="height:60px;padding:0 16px;display:flex;align-items:center;font-size:22px">卡片</div></div></div>
+        </div>
+        <div style="height:88px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:0 36px;border-bottom:2px solid #111;font-size:24px"><span>2 本无法打开</span><span style="text-decoration:underline">清理缺失书目 ›</span></div>
+        <div style="flex:1;display:flex;flex-direction:column;padding:12px 24px 0;gap:12px;overflow:hidden">
+          <div style="min-height:116px;display:flex;align-items:center;padding:0 12px;border-bottom:2px solid #cfcfcf"><div style="flex:1;display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:500">呐喊</div><div style="font-size:22px;color:#333">鲁迅</div></div><div style="font-size:22px">38%</div></div>
+          <div style="min-height:116px;display:flex;align-items:center;gap:16px;padding:0 12px;border:2px dashed #111"><div style="flex:1;display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:500;color:#555">红楼梦</div><div style="font-size:22px">文件缺失，可能已被移动或删除</div></div><div style="font-size:22px;white-space:nowrap">详情 ›</div></div>
+          <div style="min-height:116px;display:flex;align-items:center;gap:16px;padding:0 12px;border:2px dashed #111"><div style="flex:1;display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:500;color:#555">中国小说史略</div><div style="font-size:22px">需要重新处理：阅读包版本过旧</div></div><div style="font-size:22px;white-space:nowrap">详情 ›</div></div>
+          <div style="min-height:116px;display:flex;align-items:center;padding:0 12px;border-bottom:2px solid #cfcfcf"><div style="flex:1;display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:500">彷徨</div><div style="font-size:22px;color:#333">鲁迅</div></div><div style="font-size:22px">未读</div></div>
+        </div>
+        <div style="height:120px;flex-shrink:0;border-top:2px solid #111;display:flex;align-items:center;justify-content:space-between;padding:0 24px">
+          <div style="width:180px;height:88px;border:2px dashed #555;color:#555;display:flex;align-items:center;justify-content:center;font-size:24px">‹ 上一屏</div>
+          <div style="font-size:26px">1 / 2</div>
+          <div style="width:180px;height:88px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:24px">下一屏 ›</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">不可用的书仍按原来的顺序显示，用虚线框加一句原因标出，点按进入详情处理，不会直接打开。原因分为文件缺失、需要重新处理、内容损坏三类，取决于开发侧能提供的错误种类。列表头下方加一行“清理缺失书目”，只处理文件缺失的那类（参考 KOReader 历史记录里的“清理已删除文件”）。S10 里另设“自动移除缺失书目”，默认关闭。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S01-5b · 清理缺失书目确认</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S01-5b 清理确认" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;border-bottom:3px solid #111;display:flex;align-items:center;padding-left:36px;font-size:34px;font-weight:700;color:#555">书库</div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;padding:36px 36px 40px;display:flex;flex-direction:column;gap:20px">
+          <div style="font-size:32px;font-weight:700">从书库移除 1 本已缺失的书？</div>
+          <div style="border:2px solid #111;padding:16px 20px;display:flex;flex-direction:column;gap:4px"><div style="font-size:26px;font-weight:500">红楼梦</div><div style="font-size:22px;color:#333">原位置 books/红楼梦/ · 上次读到约 21%</div></div>
+          <div style="display:flex;flex-direction:column;gap:10px;font-size:24px;line-height:1.55">
+            <div>只移除书库里的条目，阅读位置记录保留，放回同一本书后可以接着读。</div>
+            <div style="color:#333">“需要重新处理”的 1 本不在此列。服务器上的同步记录不受影响。</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px">
+            <div style="height:96px;border:3px solid #111;display:flex;align-items:center;justify-content:center;font-size:28px">取消</div>
+            <div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px">移除条目</div>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">逐本列出将被移除的书（超过 4 本时分屏）。移除前先重新检查一遍存储卡，放回原处的书不会被误清。K2 等于“取消”。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S01-5c · 详情：文件缺失</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S01-5c 缺失详情" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f;display:flex;flex-direction:column">
+        <div style="height:104px;flex-shrink:0;border-bottom:3px solid #111;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px"><span style="font-size:36px">‹</span>书库</div>
+        <div style="padding:32px 36px 24px;display:flex;flex-direction:column;gap:12px;border-bottom:2px solid #111">
+          <div style="font-size:32px;font-weight:700">红楼梦</div>
+          <div style="font-size:22px;color:#333">曹雪芹</div>
+          <div style="margin-top:8px;border:2px dashed #111;padding:16px 20px;display:flex;flex-direction:column;gap:6px"><div style="font-size:26px;font-weight:700">文件缺失</div><div style="font-size:22px;line-height:1.5">存储卡上找不到这本书，可能已被移动、改名或删除。</div></div>
+        </div>
+        <div style="padding:0 36px;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:150px 1fr;padding:18px 0;border-bottom:2px solid #cfcfcf;font-size:24px"><div style="color:#333">上次位置</div><div>第三回附近 · 约 21%</div></div>
+          <div style="display:grid;grid-template-columns:150px 1fr;padding:18px 0;border-bottom:2px solid #cfcfcf;font-size:24px"><div style="color:#333">原位置</div><div style="font-family:'JetBrains Mono',monospace;font-size:22px">books/红楼梦/</div></div>
+          <div style="display:grid;grid-template-columns:150px 1fr;padding:18px 0;border-bottom:2px solid #cfcfcf;font-size:24px"><div style="color:#333">同步</div><div>已上传此处</div></div>
+        </div>
+        <div style="padding:24px 36px 0;font-size:22px;color:#333;line-height:1.5">放回存储卡后重新扫描，设备会按内容认出这本书，即使换了文件夹也能接着读。</div>
+        <div style="padding:24px 36px 0"><div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px">重新扫描</div></div>
+        <div style="margin-top:auto;border-top:3px solid #111;padding:16px 36px 24px;display:flex;flex-direction:column">
+          <div style="font-size:22px;color:#333;padding:8px 0">本机管理 · 不会改动服务器上的同步记录</div>
+          <div style="min-height:96px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #cfcfcf"><div style="display:flex;flex-direction:column;gap:2px"><div style="font-size:26px">从书库移除条目</div><div style="font-size:20px;color:#333">保留阅读位置记录</div></div><div style="font-size:28px">›</div></div>
+          <div style="min-height:96px;display:flex;align-items:center;justify-content:space-between"><div style="display:flex;flex-direction:column;gap:2px"><div style="font-size:26px">移除条目并清除进度</div><div style="font-size:20px;color:#333">放回后从头开始</div></div><div style="font-size:28px">›</div></div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">缺失的书没有“继续阅读”和“查看目录”，主要操作是“重新扫描”。本机管理只剩两项：移除条目，或移除条目并清除进度，两者都需要二次确认。“需要重新处理”的书详情页另做，主要操作改为说明如何用电脑重新处理。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S01-6 · 单本详情</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S01-6 详情" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f;display:flex;flex-direction:column">
+        <div style="height:104px;flex-shrink:0;border-bottom:3px solid #111;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px"><span style="font-size:36px">‹</span>书库</div>
+        <div style="padding:32px 36px 24px;display:flex;gap:24px;border-bottom:2px solid #111">
+          <div style="width:120px;height:160px;flex-shrink:0;border:2px solid #111;background:repeating-linear-gradient(45deg,#fff 0 8px,#e2e2e2 8px 10px);display:flex;align-items:flex-end;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:14px;padding-bottom:6px;box-sizing:border-box">封面</div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px"><div style="font-size:32px;font-weight:700;line-height:1.35">唐诗三百首：附历代名家评注与作者小传合编本（示例长书名）</div><div style="font-size:22px;color:#333">蘅塘退士 编</div></div>
+        </div>
+        <div style="padding:0 36px;display:flex;flex-direction:column">
+          <div style="display:grid;grid-template-columns:150px 1fr;padding:18px 0;border-bottom:2px solid #cfcfcf;font-size:24px"><div style="color:#333">进度</div><div>卷一 · 约 12%</div></div>
+          <div style="display:grid;grid-template-columns:150px 1fr;padding:18px 0;border-bottom:2px solid #cfcfcf;font-size:24px"><div style="color:#333">同步</div><div>此处已保存，联网后可同步</div></div>
+          <div style="display:grid;grid-template-columns:150px 1fr;padding:18px 0;border-bottom:2px solid #cfcfcf;font-size:24px"><div style="color:#333">占用</div><div>书 4.2 MB · 缓存 1.1 MB</div></div>
+        </div>
+        <div style="padding:24px 36px 0;display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px">继续阅读</div>
+          <div style="height:96px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:26px">查看目录</div>
+        </div>
+        <div style="margin-top:auto;border-top:3px solid #111;padding:16px 36px 24px;display:flex;flex-direction:column">
+          <div style="font-size:22px;color:#333;padding:8px 0">本机管理 · 都不会改动服务器上的同步记录</div>
+          <div style="min-height:96px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #cfcfcf"><div style="display:flex;flex-direction:column;gap:2px"><div style="font-size:26px">清理缓存</div><div style="font-size:20px;color:#333">可重建，不影响书和进度</div></div><div style="font-size:28px">›</div></div>
+          <div style="min-height:96px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #cfcfcf"><div style="display:flex;flex-direction:column;gap:2px"><div style="font-size:26px">清除本机进度</div><div style="font-size:20px;color:#333">书保留，从头开始</div></div><div style="font-size:28px">›</div></div>
+          <div style="min-height:96px;display:flex;align-items:center;justify-content:space-between"><div style="display:flex;flex-direction:column;gap:2px"><div style="font-size:26px;font-weight:700">从本机删除书籍</div><div style="font-size:20px;color:#333">删除存储卡上的这本书</div></div><div style="font-size:28px">›</div></div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">从书库行右侧的状态区进入。三种本机操作放在页面底部，用粗分隔线和普通操作分开，每项写明影响范围。后两项需要二次确认，清理缓存不需要。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S01-7 · 删除确认</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S01-7 删除确认" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:0;left:0;right:0;height:104px;border-bottom:3px solid #111;display:flex;align-items:center;gap:8px;padding:0 28px;font-size:28px;color:#555"><span style="font-size:36px">‹</span>书库</div>
+        <div style="position:absolute;top:136px;left:36px;right:36px;font-size:32px;font-weight:700;line-height:1.35;color:#555">唐诗三百首：附历代名家评注与作者小传合编本（示例长书名）</div>
+        <div style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-top:3px solid #111;padding:36px 36px 40px;display:flex;flex-direction:column;gap:20px">
+          <div style="font-size:32px;font-weight:700">从本机删除这本书？</div>
+          <div style="display:flex;flex-direction:column;gap:12px;font-size:24px;line-height:1.55">
+            <div>会删除存储卡上的书和缓存，共 5.3 MB。</div>
+            <div style="color:#333">本机阅读位置保留，重新导入同一本书后可以接着读。服务器上的同步记录不受影响。</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px">
+            <div style="height:96px;border:3px solid #111;display:flex;align-items:center;justify-content:center;font-size:28px">取消</div>
+            <div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px">删除</div>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">K2 等于“取消”，K1/K3 不起作用。确认按钮写“删除”，不写“确定”。删除失败时留在本屏并给出原因；删除成功后回到书库，并短暂显示“已从本机删除”。</div>
+    </div>
+
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;viewMode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;正常灰阶&quot;,&quot;近似黑白&quot;],&quot;default&quot;:&quot;正常灰阶&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;scale&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;0.5×&quot;,&quot;1×（原像素）&quot;],&quot;default&quot;:&quot;0.5×&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      zoom: this.props.scale === '1×（原像素）' ? 1 : 0.5,
+      frameFilter: this.props.viewMode === '近似黑白' ? 'grayscale(1) contrast(8)' : 'none'
+    };
+  }
+}
+</script>
+</body>
+</html>

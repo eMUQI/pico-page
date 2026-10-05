@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/style.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400&display=swap">
+<style>
+body{margin:0;background:#f4f3ef;color:#111;font-family:"Noto Sans SC",sans-serif}
+a{color:#111;text-decoration:underline}
+a:hover{color:#555}
+</style>
+</helmet>
+
+<div style="max-width:1080px;margin:0 auto;padding:56px 32px 120px;display:flex;flex-direction:column;gap:56px">
+
+  <div style="display:flex;flex-direction:column;gap:12px">
+    <div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#555">设计规范 v1 · 2026-10-05 · 所有数值以 684 × 1216 设备像素为单位，均需真机复核</div>
+    <div style="font-size:34px;font-weight:700">Read Pico 阅读固件 · 令牌、组件、输入与开发标注</div>
+    <div style="font-size:16px;line-height:1.75;color:#333;text-wrap:pretty">本页汇总各画板中已经使用的取值，供固件 UI 实现对齐。画板见 <a href="Read Pico 阅读体验.dc.html">阅读体验</a>、<a href="Read Pico 书库.dc.html">书库</a>、<a href="Read Pico 连接与设置.dc.html">连接与设置</a>、<a href="Read Pico 休眠与提示.dc.html">休眠与提示</a>。标为“建议新增”的动作和字段，在架构文档 v0.1 里还没有对应项。</div>
+    <div style="display:flex;gap:16px;font-size:15px;flex-wrap:wrap"><a href="#tokens">1 设计令牌</a><a href="#type">2 字体</a><a href="#components">3 组件</a><a href="#input">4 输入与热区</a><a href="#refresh">5 刷新与更新区域</a><a href="#actions">6 动作标注</a><a href="#fields">7 状态字段需求</a><a href="#gaps">8 已知偏差</a></div>
+  </div>
+
+  <section id="tokens" style="display:flex;flex-direction:column;gap:24px">
+    <div style="font-size:24px;font-weight:700;border-top:3px solid #111;padding-top:16px">1 · 设计令牌</div>
+
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="font-size:18px;font-weight:700">灰阶</div>
+      <div style="font-size:15px;color:#333;line-height:1.7">只用五级。16 灰阶索引按 0 = 黑、15 = 白计算。近似黑白（快速模式可能出现）时，索引 ≥ 8 的颜色会变白，所以浅灰不能单独承载信息。</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:16px">
+        <div style="display:flex;flex-direction:column;gap:8px"><div style="height:72px;background:#111"></div><div style="font-size:14px;line-height:1.6"><b>墨 ink</b> · #111 · 索引 1<br>正文、标题、边框、反相底</div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><div style="height:72px;background:#333"></div><div style="font-size:14px;line-height:1.6"><b>次要 secondary</b> · #333 · 索引 3<br>说明文字、标签</div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><div style="height:72px;background:#555"></div><div style="font-size:14px;line-height:1.6"><b>禁用 disabled</b> · #555 · 索引 5<br>禁用文字与虚线，须配虚线或删除线</div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><div style="height:72px;background:#cfcfcf"></div><div style="font-size:14px;line-height:1.6"><b>细分隔 rule-light</b> · #cfcfcf · 索引 12<br>列表行分隔，仅作辅助</div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><div style="height:72px;background:#fff;outline:1px solid #999"></div><div style="font-size:14px;line-height:1.6"><b>纸 paper</b> · #fff · 索引 15<br>背景</div></div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:32px">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="font-size:18px;font-weight:700">间距</div>
+        <div style="font-size:15px;line-height:1.9">4 / 8 步进。常用：8 · 12 · 16 · 20 · 24 · 28 · 36。<br>正文左右边距默认 36（可调 24–52，步长 4）。<br>面板内边距 36；列表外边距 24 + 行内 12。<br>按钮之间 16。</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="font-size:18px;font-weight:700">线与框</div>
+        <div style="display:flex;flex-direction:column;gap:10px;font-size:15px">
+          <div style="display:flex;align-items:center;gap:12px"><div style="width:80px;height:0;border-top:2px solid #111"></div>2px 实线 · 常规边框、分隔</div>
+          <div style="display:flex;align-items:center;gap:12px"><div style="width:80px;height:0;border-top:3px solid #111"></div>3px 实线 · 面板边缘、选中、强调</div>
+          <div style="display:flex;align-items:center;gap:12px"><div style="width:80px;height:0;border-top:2px dashed #111"></div>2–3px 虚线 · 禁用、未生效、待确认、缺失</div>
+          <div style="display:flex;align-items:center;gap:12px"><div style="width:80px;height:0;border-top:6px solid #111"></div>6px 实线 · 按下（单帧）</div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="font-size:18px;font-weight:700">尺寸</div>
+        <div style="font-size:15px;line-height:1.9">顶栏 104 · 标签栏 96 · 主按钮 96 · 列表行 ≥ 88（书库 116） · 步进器 120 × 88 · 开关 2 × 64 × 60（热区为整行） · 翻屏按钮 180 × 88。<br>圆角：不用。只有单选圆点是圆形。</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="type" style="display:flex;flex-direction:column;gap:20px">
+    <div style="font-size:24px;font-weight:700;border-top:3px solid #111;padding-top:16px">2 · 字体</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:24px;font-size:15px;line-height:1.75">
+      <div style="border:2px solid #111;padding:20px;display:flex;flex-direction:column;gap:8px;background:#fff">
+        <div style="font-family:'LXGW WenKai',serif;font-size:34px">霞鹜文楷 · 正文</div>
+        <div>LXGW WenKai · SIL Open Font License 1.1 · 来源：github.com/lxgw/LxgwWenKai</div>
+        <div style="color:#333">只用 Regular。正文默认 38，可选 28–56（步长 2）；行距 1.35–1.65（默认 1.50）。</div>
+      </div>
+      <div style="border:2px solid #111;padding:20px;display:flex;flex-direction:column;gap:8px;background:#fff">
+        <div style="font-size:34px;font-weight:500">思源黑体 · 界面</div>
+        <div>Source Han Sans / Noto Sans SC · SIL Open Font License 1.1 · 来源：Adobe / Google Fonts</div>
+        <div style="color:#333">用 Regular、Medium、Bold 三档。可作为用户可选的正文字体之一。</div>
+      </div>
+    </div>
+    <div style="font-size:15px;line-height:1.75;color:#333">回退规则：正文字体缺失或损坏时，改用思源黑体，并提示“字体不可用，已使用替代字体”。存储卡上的字体全部不可用时，用固件内置 UI 字体，它必须覆盖所有错误提示用到的字形。字体文件不随设计交付，由开发侧打包并核对授权。</div>
+    <div style="display:grid;grid-template-columns:120px 1fr 1fr;border-top:2px solid #111;font-size:15px">
+      <div style="padding:10px 0;font-weight:700;border-bottom:2px solid #111">字号</div><div style="padding:10px 0;font-weight:700;border-bottom:2px solid #111">用途</div><div style="padding:10px 0;font-weight:700;border-bottom:2px solid #111">字重</div>
+      <div style="padding:10px 0;border-bottom:1px solid #ccc">48</div><div style="padding:10px 0;border-bottom:1px solid #ccc">章首标题、首屏书名</div><div style="padding:10px 0;border-bottom:1px solid #ccc">文楷 Regular</div>
+      <div style="padding:10px 0;border-bottom:1px solid #ccc">38</div><div style="padding:10px 0;border-bottom:1px solid #ccc">正文（默认）</div><div style="padding:10px 0;border-bottom:1px solid #ccc">文楷 Regular</div>
+      <div style="padding:10px 0;border-bottom:1px solid #ccc">32–34</div><div style="padding:10px 0;border-bottom:1px solid #ccc">页面标题、提示标题、步进器数值</div><div style="padding:10px 0;border-bottom:1px solid #ccc">Bold</div>
+      <div style="padding:10px 0;border-bottom:1px solid #ccc">28–30</div><div style="padding:10px 0;border-bottom:1px solid #ccc">顶栏书名、列表书名、状态值、主按钮</div><div style="padding:10px 0;border-bottom:1px solid #ccc">Medium / Bold</div>
+      <div style="padding:10px 0;border-bottom:1px solid #ccc">26</div><div style="padding:10px 0;border-bottom:1px solid #ccc">常规 UI 标签、次按钮、标签栏</div><div style="padding:10px 0;border-bottom:1px solid #ccc">Regular</div>
+      <div style="padding:10px 0;border-bottom:1px solid #ccc">24</div><div style="padding:10px 0;border-bottom:1px solid #ccc">说明文字、页脚</div><div style="padding:10px 0;border-bottom:1px solid #ccc">Regular</div>
+      <div style="padding:10px 0;border-bottom:1px solid #ccc">22</div><div style="padding:10px 0;border-bottom:1px solid #ccc">辅助信息、作者、时间</div><div style="padding:10px 0;border-bottom:1px solid #ccc">Regular，#333 以上</div>
+      <div style="padding:10px 0;border-bottom:1px solid #ccc">20</div><div style="padding:10px 0;border-bottom:1px solid #ccc">小标签、禁用原因（见第 8 节偏差）</div><div style="padding:10px 0;border-bottom:1px solid #ccc">Regular，只用 #111</div>
+    </div>
+  </section>
+
+  <section id="components" style="display:flex;flex-direction:column;gap:20px">
+    <div style="font-size:24px;font-weight:700;border-top:3px solid #111;padding-top:16px">3 · 组件</div>
+    <div style="font-size:15px;line-height:1.75;color:#333">组件都画在画板里，这里列出名称、位置和状态规则。控件状态的样张见 <a href="Read Pico 休眠与提示.dc.html#S12">S12-6</a>。</div>
+    <div style="display:grid;grid-template-columns:180px 1fr 1fr;border-top:2px solid #111;font-size:15px;line-height:1.6">
+      <div style="padding:10px 12px 10px 0;font-weight:700;border-bottom:2px solid #111">组件</div><div style="padding:10px 12px 10px 0;font-weight:700;border-bottom:2px solid #111">结构</div><div style="padding:10px 0;font-weight:700;border-bottom:2px solid #111">状态区分</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">顶栏</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">‹ 返回 · 标题两行 · 右侧同步状态</div><div style="padding:10px 0;border-bottom:1px solid #ccc">同步状态：描边 = 只是告知；反相 = 需要用户处理（位置不同、登录失效）</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">工具入口行</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">5 格：目录 · 排版 · 同步 · 刷新 · 全刷</div><div style="padding:10px 0;border-bottom:1px solid #ccc">待办：格内反相小标签；禁用：灰字 + 删除线 + 原因</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">标签栏</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">4 个标签 + 收起</div><div style="padding:10px 0;border-bottom:1px solid #ccc">当前标签反相</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">参数选择</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">4 格，名称 + 当前值，四周留边距</div><div style="padding:10px 0;border-bottom:1px solid #ccc">选中：3px 黑框（区别于标签栏的反相）；忙碌：虚线</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">步进器</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">− · 名称 / 数值 · +；字体用 ‹ ›</div><div style="padding:10px 0;border-bottom:1px solid #ccc">到达上下限时，那一侧按钮改虚线</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">按钮</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">主：反相；次：2px 框；每处最多一个主按钮</div><div style="padding:10px 0;border-bottom:1px solid #ccc">按下 6px 框；禁用和忙碌用虚线加文字；错误用“!”方块</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">列表行</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">主文字 + 辅助文字 + 右侧状态</div><div style="padding:10px 0;border-bottom:1px solid #ccc">当前：3px 框 + “当前位置”标签；不可用：虚线框 + 原因</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">翻屏条</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">‹ 上一屏 · N / M · 下一屏 ›</div><div style="padding:10px 0;border-bottom:1px solid #ccc">首屏和末屏对应的按钮用虚线；总数未知时显示 — / —</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">状态三格</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">本机 · 服务器 · 其他设备</div><div style="padding:10px 0;border-bottom:1px solid #ccc">进行中的那一格用 3px 框</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">单选行</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">圆点 + 名称 + 一句说明</div><div style="padding:10px 0;border-bottom:1px solid #ccc">选中：实心圆点 + 3px 框 + “当前”；待确认：虚线框</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">开关</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">“开 / 关”两段</div><div style="padding:10px 0;border-bottom:1px solid #ccc">当前值反相；未保存：虚线外框；不可用：灰色虚线 + 原因</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">提示</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">底部条或底部面板，不居中弹窗</div><div style="padding:10px 0;border-bottom:1px solid #ccc">分四级 + 确认框，见 S12</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">返回条</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">顶部 104：‹ 返回原位置 / 跳转前位置</div><div style="padding:10px 0;border-bottom:1px solid #ccc">脚注跳转时常驻；目录跳转时只在第一屏显示</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">图标</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">目前用文字符号占位：≡ Aa ⇅ ◐ □ ⇣ ⚙ ‹ › ▸ ▾ !</div><div style="padding:10px 0;border-bottom:1px solid #ccc">待绘制成 SVG：40px 视觉尺寸，3px 线宽，统一外框</div>
+    </div>
+  </section>
+
+  <section id="input" style="display:flex;flex-direction:column;gap:20px">
+    <div style="font-size:24px;font-weight:700;border-top:3px solid #111;padding-top:16px">4 · 输入与热区</div>
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px;align-items:start">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="font-size:18px;font-weight:700">阅读页触摸分区（初始值）</div>
+        <div style="display:grid;grid-template-columns:30fr 40fr 30fr;height:240px;border:2px solid #111;font-size:14px;text-align:center;max-width:180px">
+          <div style="border-right:2px dashed #111;display:flex;align-items:center;justify-content:center">上一页</div>
+          <div style="border-right:2px dashed #111;display:flex;align-items:center;justify-content:center">工具</div>
+          <div style="display:flex;align-items:center;justify-content:center">下一页</div>
+        </div>
+        <div style="font-size:15px;line-height:1.75;color:#333">左 30% / 中 40% / 右 30%，页脚 88px 是独立热区（点按切换本章/全书）。左右轻扫作为辅助翻页。宽度和手势阈值待握持测试，可在设置里调整。</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="font-size:18px;font-weight:700">命中规则</div>
+        <div style="font-size:15px;line-height:1.85">1. 显式命中区（脚注、链接、图片、按钮）优先于背景翻页区。<br>2. 一次输入只执行一个动作：滑动不触发脚注，抬手关闭面板不穿透成翻页。<br>3. 打开面板或模态框后，第一次抬手只用于关闭，不传给下层。<br>3a. 阅读页 K2 = 立即全刷。刷新事务进行中时忽略，不排队；有返回条时也不执行返回。<br>4. 唤醒输入只唤醒，被吞掉，不传给任何页面。<br>5. 正文长按首版不绑定功能；重要动作都有可见入口。<br>6. 重排中、跳转中、同步中的按钮禁用，不会排队提交。</div>
+      </div>
+    </div>
+    <div style="font-size:18px;font-weight:700">电容键 K1 / K2 / K3</div>
+    <div style="display:grid;grid-template-columns:200px repeat(3,minmax(0,1fr));border-top:2px solid #111;font-size:15px;line-height:1.6">
+      <div style="padding:10px 12px 10px 0;font-weight:700;border-bottom:2px solid #111">场景</div><div style="padding:10px 12px 10px 0;font-weight:700;border-bottom:2px solid #111">K1</div><div style="padding:10px 12px 10px 0;font-weight:700;border-bottom:2px solid #111">K2</div><div style="padding:10px 0;font-weight:700;border-bottom:2px solid #111">K3</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">正文阅读 S02</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">上一页</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc"><b>立即全刷</b>（ForceRefresh）；工具面板只靠轻点中区打开</div><div style="padding:10px 0;border-bottom:1px solid #ccc">下一页</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">工具面板 S03</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">不作用</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">关闭面板</div><div style="padding:10px 0;border-bottom:1px solid #ccc">不作用</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">排版 S05</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">不作用</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">收起并恢复原排版（等于取消）</div><div style="padding:10px 0;border-bottom:1px solid #ccc">不作用</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">目录 S04 / 书库 S01</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">上一屏</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">收起 / 返回上层</div><div style="padding:10px 0;border-bottom:1px solid #ccc">下一屏</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">冲突 S07、确认框 S12</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">不作用于背后</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">安全选项：继续此处 / 取消</div><div style="padding:10px 0;border-bottom:1px solid #ccc">不作用于背后</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">传输 S09</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">文件列表上一屏</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">结束传输（先确认）</div><div style="padding:10px 0;border-bottom:1px solid #ccc">文件列表下一屏</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">休眠 S11</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">以板级确认的唤醒来源为准；唤醒后吞掉这次输入</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">同左</div><div style="padding:10px 0;border-bottom:1px solid #ccc">同左</div>
+    </div>
+    <div style="font-size:15px;line-height:1.75;color:#333">首版不用长按区分功能，也不支持组合键。同时触摸多个键时忽略这次输入。误触过滤（最短接触时间、两次之间的最小间隔）由真机测试确定。</div>
+  </section>
+
+  <section id="refresh" style="display:flex;flex-direction:column;gap:20px">
+    <div style="font-size:24px;font-weight:700;border-top:3px solid #111;padding-top:16px">5 · 刷新与更新区域</div>
+    <div style="font-size:15px;line-height:1.75;color:#333">下表只给出建议的更新范围和质量要求，具体波形和模式组合由显示层决定。每次交互只刷新一次最终状态，没有中间帧。</div>
+    <div style="display:grid;grid-template-columns:220px 1fr 160px;border-top:2px solid #111;font-size:15px;line-height:1.6">
+      <div style="padding:10px 12px 10px 0;font-weight:700;border-bottom:2px solid #111">场景</div><div style="padding:10px 12px 10px 0;font-weight:700;border-bottom:2px solid #111">建议更新区域</div><div style="padding:10px 0;font-weight:700;border-bottom:2px solid #111">质量要求</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">翻页</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">整屏（正文 + 页脚）</div><div style="padding:10px 0;border-bottom:1px solid #ccc">文字</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">打开 / 关闭工具面板</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">顶栏 + 底部面板；关闭时恢复被遮挡的区域</div><div style="padding:10px 0;border-bottom:1px solid #ccc">UI，需遮挡恢复</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">切换标签</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">面板区；进出排版时顶栏一起变</div><div style="padding:10px 0;border-bottom:1px solid #ccc">UI</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">排版步进 / 预览</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">预览区 + 参数格 + 步进器，连续点击合并</div><div style="padding:10px 0;border-bottom:1px solid #ccc">文字</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">应用排版完成</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">整屏</div><div style="padding:10px 0;border-bottom:1px solid #ccc">文字，建议清理</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">同步阶段变化</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">状态三格 + 顶栏状态</div><div style="padding:10px 0;border-bottom:1px solid #ccc">UI</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">跨章等待提示</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">页脚</div><div style="padding:10px 0;border-bottom:1px solid #ccc">UI</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">二维码（配网、传输）</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">整屏</div><div style="padding:10px 0;border-bottom:1px solid #ccc">黑白清晰，快速模式下也要能扫</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">书库翻屏、视图切换</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">列表区 + 翻屏条</div><div style="padding:10px 0;border-bottom:1px solid #ccc">卡片模式含封面：图像</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">休眠画面</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">整屏，只画一次</div><div style="padding:10px 0;border-bottom:1px solid #ccc">封面：图像</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">唤醒恢复</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">整屏，先重建屏幕基线</div><div style="padding:10px 0;border-bottom:1px solid #ccc">文字，需清理</div>
+    </div>
+  </section>
+
+  <section id="actions" style="display:flex;flex-direction:column;gap:20px">
+    <div style="font-size:24px;font-weight:700;border-top:3px solid #111;padding-top:16px">6 · 动作标注</div>
+    <div style="font-size:15px;line-height:1.75;color:#333">UI 只发送语义动作，并显示状态快照返回的结果。“★”表示架构文档里还没有、建议新增的动作。</div>
+    <div style="display:grid;grid-template-columns:200px 150px minmax(0,1fr) minmax(0,1fr);border-top:2px solid #111;font-size:14px;line-height:1.6">
+      <div style="padding:10px 12px 10px 0;font-weight:700;border-bottom:2px solid #111">动作</div><div style="padding:10px 12px 10px 0;font-weight:700;border-bottom:2px solid #111">位置</div><div style="padding:10px 12px 10px 0;font-weight:700;border-bottom:2px solid #111">可用条件 / 处理中</div><div style="padding:10px 0;font-weight:700;border-bottom:2px solid #111">成功 / 失败去向</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">OpenBook</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">S01 行、继续阅读</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">书状态 ok；超过阈值显示 S02-2</div><div style="padding:10px 0;border-bottom:1px solid #ccc">S02-1 / S12-4 不可恢复</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">TurnPage</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">S02 左右区、K1/K3、轻扫</div><div style="padding:10px 0 10px 0;border-bottom:1px solid #ccc;padding-right:12px">跨章未就绪时页脚显示 S02-3，不排队</div><div style="padding:10px 0;border-bottom:1px solid #ccc">新页 / S02-7 留在原页</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">★ OpenPanel / ClosePanel</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">S02 中区（K2 只用于关闭）</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">始终可用；关闭不推进阅读位置</div><div style="padding:10px 0;border-bottom:1px solid #ccc">S03 / 回到同一锚点</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">OpenToc</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">S03 目录</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">需要存储卡；读取超过阈值显示 S04-4</div><div style="padding:10px 0;border-bottom:1px solid #ccc">S04-1 / S04-3 目录缺失</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">JumpToAnchor</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">S04 行、脚注、链接</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">跳转前先压入历史</div><div style="padding:10px 0;border-bottom:1px solid #ccc">S04-6 或 S02-5 / S04-5</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">★ ReturnToPreviousAnchor</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">返回条、目录首行</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">历史非空，最多 3 条</div><div style="padding:10px 0;border-bottom:1px solid #ccc">原位置</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">★ PreviewTypography</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">S05 步进器、参数格</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">不在重排中；只排当前屏，不写设置</div><div style="padding:10px 0;border-bottom:1px solid #ccc">预览区更新 / S05-3 字体不可用</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">ApplyTypography</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">S05 应用</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">有未应用修改；处理中显示 S05-2，可取消</div><div style="padding:10px 0;border-bottom:1px solid #ccc">收起面板，停在原文附近 / 恢复原排版并提示</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">★ SetReadingDefault</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">S05 设为阅读默认</div><div style="padding:10px 0 10px 0;border-bottom:1px solid #ccc;padding-right:12px">只更新全局默认，不改其他书已有的设置</div><div style="padding:10px 0;border-bottom:1px solid #ccc">底部提示 / 保存失败</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">RequestSync</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">S06 检查并同步</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">已配置；离线时尝试联网；处理中显示 S06-3</div><div style="padding:10px 0;border-bottom:1px solid #ccc">S06-4 / S07 / S06-5、6、7</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">AcceptRemotePosition</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">S06 从其他设备接续、S07</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">有远端候选；approximate 时标“附近”</div><div style="padding:10px 0;border-bottom:1px solid #ccc">S07-3 → 新位置 / 退回 S07-1</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">KeepLocalPosition</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">S07 继续此处、K2</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">始终可用；不改动远端</div><div style="padding:10px 0;border-bottom:1px solid #ccc">关闭冲突提示</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">★ PushLocalReplaceRemote</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">S07 上传此处，S06 将此处上传</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">已联网；必须经过 S07-4 确认</div><div style="padding:10px 0;border-bottom:1px solid #ccc">S06-4 已上传 / S07-1 附原因</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">★ CancelSync</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">S06-3</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">同步进行中</div><div style="padding:10px 0;border-bottom:1px solid #ccc">S06-2 待同步</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">SetRefreshPreset</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">S08 单选</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">切到快速前需要经过 S08-2</div><div style="padding:10px 0;border-bottom:1px solid #ccc">选中项更新 / 错误说明</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">ForceRefresh</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">阅读页 K2、S03 全刷、S08</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">没有刷新事务在进行（S08-3）</div><div style="padding:10px 0;border-bottom:1px solid #ccc">整屏 / S08-4</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">RequestSleep</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">超时、电源键</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">没有关键写入；传输中不自动休眠</div><div style="padding:10px 0;border-bottom:1px solid #ccc">S11-0 / S11-5 低电量</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">★ SetLibraryView</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">S01 列表 / 卡片</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">始终可用，存为全局偏好</div><div style="padding:10px 0;border-bottom:1px solid #ccc">列表区重绘</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">★ RescanStorage</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">S01-2、4、5c，S09-1</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">存储卡可读；处理中显示 S01-3</div><div style="padding:10px 0;border-bottom:1px solid #ccc">S01-1 / S01-4</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">★ RemoveMissingEntries</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">S01-5 清理、5c</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">经过 S01-5b 确认；执行前先重新检查</div><div style="padding:10px 0;border-bottom:1px solid #ccc">S01-1，进度记录保留</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">★ DeleteBookLocal / ClearLocalProgress / ClearCache</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">S01-6</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">前两项需要确认（S01-7、S12-5）</div><div style="padding:10px 0;border-bottom:1px solid #ccc">书库并提示 / 留在原页附原因</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">★ StartProvisioning / StartTransfer / EndTransfer</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">S09</div><div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc">结束时有写入则先确认（S09-6），收尾后再关闭服务</div><div style="padding:10px 0;border-bottom:1px solid #ccc">S09-4 / S09-3；结束后回书库</div>
+    </div>
+  </section>
+
+  <section id="fields" style="display:flex;flex-direction:column;gap:20px">
+    <div style="font-size:24px;font-weight:700;border-top:3px solid #111;padding-top:16px">7 · 状态字段需求</div>
+    <div style="font-size:15px;line-height:1.75;color:#333">在 ReadingViewState 和 SyncRecord 已有字段的基础上，画板还用到下面这些信息，需要开发侧确认能否提供。</div>
+    <div style="display:grid;grid-template-columns:280px minmax(0,1fr);border-top:2px solid #111;font-size:14px;line-height:1.6">
+      <div style="padding:10px 12px 10px 0;font-weight:700;border-bottom:2px solid #111">字段</div><div style="padding:10px 0;font-weight:700;border-bottom:2px solid #111">用途</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">available_actions[].disabled_reason</div><div style="padding:10px 0;border-bottom:1px solid #ccc">禁用项下面显示的原因：需联网、需存储卡、屏幕正忙等</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">sync_progress { stage, stage_count }</div><div style="padding:10px 0;border-bottom:1px solid #ccc">S06-3 的阶段显示：连接 → 读取远端 → 上传</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">remote_candidate { chapter_label?, percentage, received_at, read_time_reliable }</div><div style="padding:10px 0;border-bottom:1px solid #ccc">S07 的远端卡片：章名可为空，“最近收到”和“阅读时间未知”分开显示</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">last_ack { at, account_scope }</div><div style="padding:10px 0;border-bottom:1px solid #ccc">“最近一次上传确认”以及当前服务和账户</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">jump_history[≤3] { label, anchor }</div><div style="padding:10px 0;border-bottom:1px solid #ccc">返回条和目录首行</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">typography { applied, pending, preview_status, reflow_status }</div><div style="padding:10px 0;border-bottom:1px solid #ccc">区分“已应用”“预览中”“重排中”“字体不可用”</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">library_item.status</div><div style="padding:10px 0;border-bottom:1px solid #ccc">ok / missing / needs_reprocess / corrupt，对应 S01-5 的三类原因</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">library_item.cover { available, decode_ok }</div><div style="padding:10px 0;border-bottom:1px solid #ccc">卡片模式和休眠封面；不可用时回退到文字封面</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">storage { state, books_bytes?, cache_bytes?, free_bytes? }</div><div style="padding:10px 0;border-bottom:1px solid #ccc">存储卡不可用和空书库分开显示；读不到时显示“未知”</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">transfer.items[] { name, stage, progress?, error_kind }</div><div style="padding:10px 0;border-bottom:1px solid #ccc">S09-5 的逐文件三阶段和失败原因</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">wifi { state, ssid, band, fail_reason }</div><div style="padding:10px 0;border-bottom:1px solid #ccc">只支持 2.4 GHz；fail_reason 区分密码错误、找不到网络、超时、无地址</div>
+      <div style="padding:10px 12px 10px 0;border-bottom:1px solid #ccc;font-family:'JetBrains Mono',monospace">wake_sources[]</div><div style="padding:10px 0;border-bottom:1px solid #ccc">休眠画面的唤醒文案，以板级确认结果为准</div>
+    </div>
+  </section>
+
+  <section id="gaps" style="display:flex;flex-direction:column;gap:16px">
+    <div style="font-size:24px;font-weight:700;border-top:3px solid #111;padding-top:16px">8 · 已知偏差与待验证</div>
+    <div style="font-size:15px;line-height:1.9">
+      1. 20px 小标签和禁用原因低于交接说明中辅助信息 22px 的下限。建议真机检查后统一提到 22px，代价是部分格子需要变宽。<br>
+      2. 目录行高 86px，略低于 88px 的热区起点。若真机误触多，每屏少放一行。<br>
+      3. 浅灰分隔线（#cfcfcf）在近似黑白下会消失。列表行靠留白和行高仍然能分开，但快速模式下要实际看一遍。<br>
+      4. 唤醒文案、K1/K2/K3 的实际排列，待板级确认。<br>
+      5. 提示阈值、自动全刷间隔、翻页区宽度、扫描计数的刷新频率都是占位值，由实测确定。<br>
+      6. 图标仍是文字符号，需要统一绘制成 SVG 源文件。
+    </div>
+  </section>
+
+</div>
+</x-dc>
+</body>
+</html>

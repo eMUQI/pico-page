@@ -1,0 +1,23 @@
+# Build products and local experiments
+build/
+.pio/
+__pycache__/
+*.pyc
+.DS_Store
+.vscode/
+.idea/
+# ESP-IDF generated/local files: pin intentional defaults and dependency locks separately
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/managed_components/
+# Personal media, credentials, flash backups, device traces
+local/
+private/
+.local/
+artifacts/
+.env
+.env.*
+!.env.example
+*.flash-backup.bin
+# Test fixtures should be synthetic/licensed; do not globally ignore all EPUB or BIN.
+# Do not ignore dependencies.lock or third-party source/license records by default.

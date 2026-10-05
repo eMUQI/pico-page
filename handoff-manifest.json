@@ -1,0 +1,322 @@
+{
+  "schema_version": 1,
+  "project": "Pico Page",
+  "artifact": "codex-development-handoff",
+  "artifact_version": "0.2",
+  "date": "2026-10-05",
+  "status": "documentation_handoff_not_firmware",
+  "source_archive": {
+    "name": "Pico阅读固件界面设计.zip",
+    "bytes": 4497372,
+    "sha256": "f24e4f2f7d2f4eddac1629f5a6f62a308d113b0e2c3584540a99e53d341e4eab"
+  },
+  "original_design_files": [
+    {
+      "path": "docs/design/original/README.md",
+      "bytes": 3371,
+      "sha256": "0413c3697a3efd07e60c8ef3d4a542cadd4f69e1e1f6fab55ad9d0b27de56617"
+    },
+    {
+      "path": "docs/design/original/actions.md",
+      "bytes": 3393,
+      "sha256": "23dd87d2a0057608c4ded77a38ab83482fcc9cc94246a4d5c9c76ed0ae68d120"
+    },
+    {
+      "path": "docs/design/original/copy.md",
+      "bytes": 15352,
+      "sha256": "2824452141d98afc54b0a02625647b3dc50b859fd0324127697b6a6d60429374"
+    },
+    {
+      "path": "docs/design/original/fields.md",
+      "bytes": 2203,
+      "sha256": "289f77f2a22ceeebefa07124f0614f1e5d912ff448ef218b38bb1fd51e06f3a0"
+    },
+    {
+      "path": "docs/design/original/input.md",
+      "bytes": 2417,
+      "sha256": "7726d5524e1b72d9a908ab66b1e3ce1f9c607ff2e7b78c4f33951e3b540a4642"
+    },
+    {
+      "path": "docs/design/original/png/S02-1.png",
+      "bytes": 257951,
+      "sha256": "e69c4060f96b110212f894d0415a33478e31543c0ac89bf7067c380d1a6ad1e6"
+    },
+    {
+      "path": "docs/design/original/png/S02-2.png",
+      "bytes": 45837,
+      "sha256": "82558c84f2af7dddfc6232b1c791b4b526af65a42319ab8f735b609af475d7fd"
+    },
+    {
+      "path": "docs/design/original/png/S02-3.png",
+      "bytes": 72645,
+      "sha256": "8f012f9f57e52cd2d21823867d37976176d400ce35d850eb60538ae3faf5e1cd"
+    },
+    {
+      "path": "docs/design/original/png/S02-4.png",
+      "bytes": 112195,
+      "sha256": "c3e9654f0d4c26de27a2154f1543e8a1065d165cb6afcb17a06f9dc49973559e"
+    },
+    {
+      "path": "docs/design/original/png/S02-5.png",
+      "bytes": 84200,
+      "sha256": "011e353359a95db38b20f6ef10feb7d7287e1e9fff142238680ce75a7b82259c"
+    },
+    {
+      "path": "docs/design/original/png/S02-6.png",
+      "bytes": 85668,
+      "sha256": "4052000aa4c54da276dde1182863fcc3a95bca9b40b581094d307e25601d86ae"
+    },
+    {
+      "path": "docs/design/original/png/S02-7.png",
+      "bytes": 89794,
+      "sha256": "5470130d63429718008617ea0c5417f09559a555edd195088dc217e4ed51e589"
+    },
+    {
+      "path": "docs/design/original/png/S02-8.png",
+      "bytes": 134657,
+      "sha256": "c7582921db062cc7dd6cb95621d12647230574427d06b2c03d7a1f2dff1cd846"
+    },
+    {
+      "path": "docs/design/original/png/S03-1.png",
+      "bytes": 150487,
+      "sha256": "87f763d5393d85c8d651a0717beb72bf6cb7f206e50c3dea9182f161c2d85574"
+    },
+    {
+      "path": "docs/design/original/png/S03-2.png",
+      "bytes": 135846,
+      "sha256": "d8ef050c7b0d7b6a71a661114a716c5734c9ca87d713b596ca3fdb93918b402e"
+    },
+    {
+      "path": "docs/design/original/png/S03-3.png",
+      "bytes": 145135,
+      "sha256": "d6d6e6183794b1670130d52224bf5bdf8b0329aef66df1cb03fe9b5884eecd3e"
+    },
+    {
+      "path": "docs/design/original/png/S04-1.png",
+      "bytes": 72596,
+      "sha256": "f4e27fb376ba086e53a0d6b9917bedafe1ce193008df008bfef40a3a4e2f1364"
+    },
+    {
+      "path": "docs/design/original/png/S04-2.png",
+      "bytes": 89946,
+      "sha256": "5a2e3834a36b85612819af035961af3acedfef7e0e3c5c3ecac6a7d22342bb3e"
+    },
+    {
+      "path": "docs/design/original/png/S04-3.png",
+      "bytes": 87639,
+      "sha256": "f85e42f3eca32cab21d5654ae72f17c5760ed0f20b6aeaa73ff89c71aeb5378f"
+    },
+    {
+      "path": "docs/design/original/png/S04-4.png",
+      "bytes": 59329,
+      "sha256": "f4789875bcb4aadc189f54bd0d22c5b00f877aec49f6e38e0683c878567d079b"
+    },
+    {
+      "path": "docs/design/original/png/S04-5.png",
+      "bytes": 82239,
+      "sha256": "77029b9fadaf0a283c69eaeb4e929bdee118af412786dc42bfadd95387de8bfe"
+    },
+    {
+      "path": "docs/design/original/png/S04-6.png",
+      "bytes": 95503,
+      "sha256": "21b8856593e14dcd6cb5e5b1a08ac440a5db96f45933fd3dbd69e97e0f91c8e8"
+    },
+    {
+      "path": "docs/design/original/png/S05-1.png",
+      "bytes": 176342,
+      "sha256": "966ee365e43ac1ea50a9e167f9e48d4ff6267ece8264b788e2127b3c283aa450"
+    },
+    {
+      "path": "docs/design/original/png/S05-2.png",
+      "bytes": 165090,
+      "sha256": "42a9cf1502b38ee1a45e581be92fc3551f9ebe34c2b5e0d18b3ccccedc100274"
+    },
+    {
+      "path": "docs/design/original/png/S05-3.png",
+      "bytes": 134935,
+      "sha256": "675ebe08d8cc04a86e1ba83389f933b753530e8d7d11715f15a39e8c9dbda31f"
+    },
+    {
+      "path": "docs/design/original/png/S05-4.png",
+      "bytes": 139196,
+      "sha256": "1aaf70de9da7bccf185a547cd63422cba7717428dc8efcd3a68b5844f9b51ded"
+    },
+    {
+      "path": "docs/design/original/png/S06-1.png",
+      "bytes": 120551,
+      "sha256": "88e89c4975d310dccd9a255b694c3260cef1f36fbff7d925e91268db92a20617"
+    },
+    {
+      "path": "docs/design/original/png/S06-2.png",
+      "bytes": 136948,
+      "sha256": "5152841882348382fb01735239562f917ffe129e1099e46ef33ae9a0160a4d57"
+    },
+    {
+      "path": "docs/design/original/png/S06-3.png",
+      "bytes": 130297,
+      "sha256": "56073cfd3abb2a4b2bcf46b7e51845a9d6de0d38604daeba807017afbfd8be7b"
+    },
+    {
+      "path": "docs/design/original/png/S06-4.png",
+      "bytes": 133104,
+      "sha256": "7f6ebad00e78f7f12a52d00f7ee9a353cd5c54afa51cba22b4096cf76e984d85"
+    },
+    {
+      "path": "docs/design/original/png/S06-5.png",
+      "bytes": 127051,
+      "sha256": "377f8c4db1a7e7ba999c525458a11fe60c9368f2bba9e11e70698498e254dde3"
+    },
+    {
+      "path": "docs/design/original/png/S06-6.png",
+      "bytes": 139372,
+      "sha256": "5d53492f5a9cd9e10d15e8152ed565dd2b11d96990c960be243e2338fc20bc63"
+    },
+    {
+      "path": "docs/design/original/png/S06-7.png",
+      "bytes": 127335,
+      "sha256": "0b30cb1788aa87a918156671575b36dea32505e3bb1b0fc3d8196b2a613dc829"
+    },
+    {
+      "path": "docs/design/original/png/S07-1.png",
+      "bytes": 146839,
+      "sha256": "0203843cb66d5fe3587bb1fb7e00578a08351de0c24c2d7e1dff55311874911b"
+    },
+    {
+      "path": "docs/design/original/png/S07-2.png",
+      "bytes": 151503,
+      "sha256": "e4b3f5bf1d2405f2ae9c965a879eed0ab1079adbe67c3d3b3d728ce0f8af7f02"
+    },
+    {
+      "path": "docs/design/original/png/S07-3.png",
+      "bytes": 129321,
+      "sha256": "a8398f4139e8416df859c5e44c2bc0d2ccfb94e0ec2ab74998d604cce8276566"
+    },
+    {
+      "path": "docs/design/original/png/S07-4.png",
+      "bytes": 122392,
+      "sha256": "ec68c402d19da13974056e46ac31235cd727c5efc00168199a3ad3426fa3a24f"
+    },
+    {
+      "path": "docs/design/original/png/S08-1.png",
+      "bytes": 128373,
+      "sha256": "744e3b64254438c652dce7ba6ffe6ec8a757bde1f6a324bdc55d805474700b85"
+    },
+    {
+      "path": "docs/design/original/png/S08-2.png",
+      "bytes": 119559,
+      "sha256": "e7b715935970a34022e53d2bd4b3c9d3e782a8298234cb4b36cf0d6f495e48bb"
+    },
+    {
+      "path": "docs/design/original/png/S08-3.png",
+      "bytes": 128792,
+      "sha256": "5599dda22565770c05e3d55613bbaf0a77a0f1d1e066330e2a2caf8581958f27"
+    },
+    {
+      "path": "docs/design/original/png/S08-4.png",
+      "bytes": 141258,
+      "sha256": "69afcb55e2dc82391419a2897221ee49c5509686a38d81a543bac4a1517729e4"
+    },
+    {
+      "path": "docs/design/original/reference/Read Pico 书库.dc.html",
+      "bytes": 42039,
+      "sha256": "6573c5e65ae70a7fdead64221a989b8c1d0d4cd48218a0b80c5224d360342ead"
+    },
+    {
+      "path": "docs/design/original/reference/Read Pico 休眠与提示.dc.html",
+      "bytes": 24932,
+      "sha256": "ccb5e3e4539429fc2ffe7b5ea149f17113657c3212a5cb128ae97e0950f23c00"
+    },
+    {
+      "path": "docs/design/original/reference/Read Pico 设计规范.dc.html",
+      "bytes": 40519,
+      "sha256": "b7123c7c92d83322ee2fbca06c4e4adfa4bc1d142ed6207e717679bc4183c416"
+    },
+    {
+      "path": "docs/design/original/reference/Read Pico 连接与设置.dc.html",
+      "bytes": 36465,
+      "sha256": "a496b1ffb7e190a5817c2cda2c922d9bf7de86681803c758f6d7c54f5fdc7a8e"
+    },
+    {
+      "path": "docs/design/original/reference/Read Pico 阅读体验.dc.html",
+      "bytes": 138767,
+      "sha256": "0eb89e014d6e92e43aa70a8fc1b0725bb02c0f2fa111900a66d137d6a80f5fdc"
+    },
+    {
+      "path": "docs/design/original/reference/support.js",
+      "bytes": 69150,
+      "sha256": "8fe7df74405f3c55f49b7249c74ea1397e65d07dea2b1bd3b4a489bec2e28cbe"
+    },
+    {
+      "path": "docs/design/original/screens.md",
+      "bytes": 12141,
+      "sha256": "af1a1f4e754000b44a893e9852ef4fbd62d8c0123385100f836f35ad088a0c03"
+    },
+    {
+      "path": "docs/design/original/tokens.json",
+      "bytes": 2437,
+      "sha256": "84496762274feb16c8f167df75a1835b0f090c90a6e1b2fd1c7351e2d4ae9957"
+    }
+  ],
+  "historical_files": [
+    {
+      "path": "docs/archive/architecture-v0.1.md",
+      "source_filename": "read-pico-firmware-architecture-v0.1.md",
+      "bytes": 30484,
+      "sha256": "8191b3996b933dc34bf229609784eb4ccaa1a3599bd7e152af3ddf905933397f"
+    },
+    {
+      "path": "docs/archive/ui-brief-v0.1.md",
+      "source_filename": "read-pico-ui-design-brief-v0.1.md",
+      "bytes": 22888,
+      "sha256": "782ac9b6397df541339ed04a89dd6001922188669b49371b6dc763f962126e00"
+    },
+    {
+      "path": "docs/archive/ui-review-v1.md",
+      "source_filename": "review.md",
+      "bytes": 21209,
+      "sha256": "48850141c63752e80a62bbc7382e7d6896d54a62592c2e1b45cd43e34550403c"
+    }
+  ],
+  "facts": {
+    "original_design_file_count": 49,
+    "original_png_count": 36,
+    "html_count": 5,
+    "declared_state_count": 69,
+    "states_without_png_count": 33
+  },
+  "required_files": [
+    "AGENTS.md",
+    "README.md",
+    "CODEX_START.md",
+    "docs/decisions.md",
+    "docs/architecture.md",
+    "docs/storage.md",
+    "docs/ui-implementation.md",
+    "docs/milestones.md",
+    "docs/acceptance.md",
+    "docs/references.md",
+    "docs/development-status.md",
+    "docs/environment.md",
+    "docs/dependency-review.md",
+    "docs/design/README.md",
+    "docs/design/inventory.json",
+    "docs/archive/README.md",
+    "firmware/README.md",
+    "host/README.md",
+    "tests/README.md",
+    "examples/README.md",
+    "examples/sdcard/PicoPage/settings.toml",
+    "examples/sdcard/PicoPage/integrations.toml",
+    "examples/sidecar/settings.toml",
+    "tools/check_handoff.py",
+    ".gitignore"
+  ],
+  "not_included": [
+    "font files",
+    "private books or credentials",
+    "third-party production source",
+    "compiled firmware",
+    "real KOReader interoperability evidence",
+    "hardware test evidence"
+  ]
+}

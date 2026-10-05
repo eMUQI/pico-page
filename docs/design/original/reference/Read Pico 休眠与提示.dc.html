@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/style.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400&display=swap">
+<style>
+body{margin:0;background:#e6e4df;color:#111;font-family:"Noto Sans SC",sans-serif}
+a{color:#111;text-decoration:underline}
+a:hover{color:#555}
+</style>
+</helmet>
+
+<div style="padding:56px 64px 24px;display:flex;flex-direction:column;gap:10px;max-width:1100px">
+  <div style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#555">休眠与提示 v1 · 2026-10-05 · 684 × 1216 设备像素</div>
+  <div style="font-size:30px;font-weight:700">S11 休眠与唤醒 · S12 通用提示组件</div>
+  <div style="font-size:15px;line-height:1.7;color:#333;text-wrap:pretty">休眠画面默认显示书籍封面，没有封面时显示默认封面。“保留正文”和“简洁屏保”作为可选项放在“电源与休眠”里。唤醒说明以真机测试通过的唤醒来源为准。下面暂按“中间按键（K2）”来写，确认后再替换文案。</div>
+  <div style="display:flex;gap:16px;font-size:15px;flex-wrap:wrap"><a href="#S11">S11 休眠</a><a href="#S12">S12 通用提示</a><a href="Read Pico 阅读体验.dc.html">阅读体验</a><a href="Read Pico 书库.dc.html">书库</a><a href="Read Pico 连接与设置.dc.html">连接与设置</a></div>
+</div>
+
+<section id="S11" style="padding:24px 64px 40px;display:flex;flex-direction:column;gap:20px">
+  <div style="font-size:22px;font-weight:700;border-top:2px solid #111;padding-top:16px">S11 · 休眠与唤醒</div>
+  <div style="display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start">
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S11-0 · 书籍封面（默认）</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S11-0 封面休眠" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:0;left:0;right:0;bottom:176px;background:repeating-linear-gradient(45deg,#fff 0 12px,#e2e2e2 12px 14px);display:flex;align-items:center;justify-content:center"><div style="background:#fff;border:2px solid #111;padding:8px 14px;font-family:'JetBrains Mono',monospace;font-size:20px;text-align:center;line-height:1.5">书籍封面<br>按屏幕比例裁切 · 16 灰阶抖动</div></div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:176px;background:#111;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 36px">
+          <div style="display:flex;flex-direction:column;gap:6px"><div style="font-size:30px;font-weight:700">已休眠</div><div style="font-size:22px">轻触中间按键唤醒</div></div>
+          <div style="font-size:22px;text-align:right;line-height:1.45">呐喊 · 约 38%<br>已上传此处</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">默认的休眠画面，显示当前书的封面。封面裁切到 684 × 1040，空出底部状态条，不压在图上。休眠前用清晰刷新整屏画一次，之后不再更新。封面解码失败或超出资源预算时，改用默认封面。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S11-0b · 默认封面（无封面 · 待上传）</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S11-0b 默认封面" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:56px;left:56px;right:56px;bottom:232px;border:3px solid #111;display:flex;flex-direction:column;justify-content:center;padding:0 56px;gap:28px">
+          <div style="font-family:'LXGW WenKai',serif;font-size:76px;line-height:1.25">骆驼祥子</div>
+          <div style="width:96px;height:4px;background:#111"></div>
+          <div style="font-size:28px">老舍</div>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:176px;background:#111;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 36px">
+          <div style="display:flex;flex-direction:column;gap:6px"><div style="font-size:30px;font-weight:700">已休眠</div><div style="font-size:22px">轻触中间按键唤醒</div></div>
+          <div style="font-size:22px;text-align:right;line-height:1.45">此处已保存<br>尚未上传</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">书没有封面时，用书名和作者排出一张默认封面，版式和书库卡片的文字封面一致。只用黑白两色和正文字体，不需要额外的图片资源。书名过长时缩小字号，最多四行。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S11-1 · 可选：保留正文（已上传）</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S11-1 休眠" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;bottom:152px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify">
+          <p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。</p>
+          <p style="margin:0;text-indent:2em">时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村，没有一些活气。我的心禁不住悲凉起来了。</p>
+          <p style="margin:0;text-indent:2em">阿！这不是我二十年来时时记得的故乡？</p>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:128px;background:#111;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 36px">
+          <div style="display:flex;flex-direction:column;gap:4px"><div style="font-size:30px;font-weight:700">已休眠</div><div style="font-size:22px">轻触中间按键唤醒</div></div>
+          <div style="font-size:22px;text-align:right;line-height:1.4">已上传此处<br>72%</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">保留正文时，底部用一条反相条明确写出“已休眠”，避免被误以为触摸失灵。这一屏在休眠前只刷新一次，之后不再更新。唤醒动作只负责唤醒，不翻页，也不触发任何按钮。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S11-2 · 可选：保留正文（待上传）</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S11-2 休眠待上传" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;bottom:152px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify">
+          <p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。</p>
+          <p style="margin:0;text-indent:2em">时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村，没有一些活气。我的心禁不住悲凉起来了。</p>
+          <p style="margin:0;text-indent:2em">阿！这不是我二十年来时时记得的故乡？</p>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:128px;background:#111;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 36px">
+          <div style="display:flex;flex-direction:column;gap:4px"><div style="font-size:30px;font-weight:700">已休眠</div><div style="font-size:22px">轻触中间按键唤醒</div></div>
+          <div style="font-size:22px;text-align:right;line-height:1.4">此处已保存<br>尚未上传</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">休眠前上传有时限，失败就照实写“尚未上传”，然后正常休眠。休眠期间不为更新这个状态联网或刷屏，唤醒后由同步逻辑接着处理。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S11-3 · 可选：简洁屏保（不显示正文）</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S11-3 屏保" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:440px;left:72px;right:72px;display:flex;flex-direction:column;gap:16px">
+          <div style="font-size:40px;font-weight:700">已休眠</div>
+          <div style="font-size:26px">轻触中间按键唤醒</div>
+          <div style="border-top:2px solid #111;margin-top:24px;padding-top:24px;display:flex;flex-direction:column;gap:8px">
+            <div style="font-family:'LXGW WenKai',serif;font-size:32px">呐喊</div>
+            <div style="font-size:22px;color:#333">故乡 · 约 38% · 此处已保存</div>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">在“电源与休眠”里选择。只显示书名和位置，不显示正文内容，没有封面轮播。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S11-4 · 恢复中</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S11-4 恢复中" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;bottom:152px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify">
+          <p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。</p>
+          <p style="margin:0;text-indent:2em">时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村，没有一些活气。我的心禁不住悲凉起来了。</p>
+          <p style="margin:0;text-indent:2em">阿！这不是我二十年来时时记得的故乡？</p>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:128px;border-top:3px solid #111;background:#fff;display:flex;align-items:center;padding:0 36px">
+          <div style="display:flex;flex-direction:column;gap:4px"><div style="font-size:28px;font-weight:700">正在恢复</div><div style="font-size:22px;color:#333">回到本机保存的位置，暂时无法翻页</div></div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">深睡唤醒后按重建会话处理：先清理屏幕基线，再按本地保存的位置重新排出当前页，完成后整屏刷新为正常阅读页。网络检查放在之后异步进行，不会卡在这一屏。底部条被反相条盖过，需要一起纳入清理区域。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S11-5 · 低电量</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div data-screen-label="S11-5 低电量" style="width:684px;height:1216px;position:relative;overflow:hidden;background:#fff;outline:2px solid #9a978f">
+        <div style="position:absolute;top:64px;left:36px;right:36px;bottom:200px;overflow:hidden;font-family:'LXGW WenKai',serif;font-size:38px;line-height:1.5;text-align:justify">
+          <p style="margin:0;text-indent:2em">我冒了严寒，回到相隔二千余里，别了二十余年的故乡去。</p>
+          <p style="margin:0;text-indent:2em">时候既然是深冬；渐近故乡时，天气又阴晦了，冷风吹进船舱中，呜呜的响，从篷隙向外一望，苍黄的天底下，远近横着几个萧索的荒村，没有一些活气。</p>
+        </div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:176px;background:#111;color:#fff;display:flex;flex-direction:column;justify-content:center;gap:6px;padding:0 36px">
+          <div style="font-size:30px;font-weight:700">电量低，已休眠</div>
+          <div style="font-size:22px;line-height:1.5">剩余 4%。阅读位置已保存在本机，尚未上传。请充电后再唤醒。</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">电量低于阈值时，优先保存位置并休眠，不尝试联网上传，也不自动开启任何耗电操作。阈值由开发侧根据 PMU 实测确定。</div>
+    </div>
+
+  </div>
+</section>
+
+<section id="S12" style="padding:24px 64px 96px;display:flex;flex-direction:column;gap:20px">
+  <div style="font-size:22px;font-weight:700;border-top:2px solid #111;padding-top:16px">S12 · 通用提示组件</div>
+  <div style="font-size:14px;color:#333;max-width:1100px;line-height:1.6">提示分四级：普通提示、警告、可重试错误、不可恢复错误，另有确认框。每一级只配一个最相关的下一步。模态框打开时，K1/K3 不作用于背后的正文；K2 执行安全关闭或取消。以下组件按 684px 宽、实际高度绘制。</div>
+  <div style="display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start">
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S12-1 · 普通提示（不打断）</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div style="width:684px;background:#fff;outline:2px solid #9a978f">
+        <div style="height:96px;border-top:3px solid #111;display:flex;align-items:center;justify-content:space-between;padding:0 36px;font-size:26px"><span>已从本机删除</span><span style="font-size:22px;color:#333">轻触关闭</span></div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">贴在底部，不遮正文中部。不定时自动消失，因为消失本身也要刷新一次；它会在下一次操作（翻页或点按）时一并清除。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S12-2 · 警告（低打扰）</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div style="width:684px;background:#fff;outline:2px solid #9a978f">
+        <div style="min-height:112px;border-top:3px solid #111;display:flex;align-items:center;gap:20px;padding:16px 36px;box-sizing:border-box">
+          <div style="width:44px;height:44px;flex-shrink:0;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:700">!</div>
+          <div style="flex:1;font-size:24px;line-height:1.45">暂时无法连接，不影响继续阅读</div>
+          <div style="font-size:24px;text-decoration:underline;white-space:nowrap">详情</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">用于自动操作失败，例如自动同步。用反相方块里的“!”加文字区分，不只靠颜色。阅读页上更常见的形式是只改变顶栏状态，不弹出这一条。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S12-3 · 可重试错误</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div style="width:684px;background:#fff;outline:2px solid #9a978f">
+        <div style="border-top:3px solid #111;padding:36px;display:flex;flex-direction:column;gap:14px">
+          <div style="font-size:30px;font-weight:700">此处尚未保存，请检查存储</div>
+          <div style="font-size:24px;color:#333;line-height:1.5">写入存储卡失败。当前页仍可阅读，翻页后会再尝试保存。</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
+            <div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px">重试</div>
+            <div style="height:96px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:28px">关闭</div>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">标题直接写结果，说明里写原因和现在的状态。主按钮放在左侧，用反相。不写“数据已丢失”之类无法确认的结论。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S12-4 · 不可恢复错误</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div style="width:684px;background:#fff;outline:2px solid #9a978f">
+        <div style="border-top:3px solid #111;padding:36px;display:flex;flex-direction:column;gap:14px">
+          <div style="font-size:30px;font-weight:700">这本书无法打开</div>
+          <div style="font-size:24px;color:#333;line-height:1.5">阅读包已损坏，需要在电脑上重新处理后再导入。本机阅读位置已保留。</div>
+          <div style="margin-top:12px;height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px">返回书库</div>
+          <div style="font-size:22px;text-decoration:underline">导出诊断信息</div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">不提供“重试”，只给一个去处。诊断导出是次要的文字链接，不和主按钮并列。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S12-5 · 确认（破坏性）</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div style="width:684px;background:#fff;outline:2px solid #9a978f">
+        <div style="border-top:3px solid #111;padding:36px;display:flex;flex-direction:column;gap:18px">
+          <div style="font-size:30px;font-weight:700">清除本机进度？</div>
+          <div style="font-size:24px;line-height:1.5">《呐喊》会从头开始。书和缓存保留。<span style="color:#333">服务器上的位置不变，下次同步时会提示两处位置不同。</span></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px">
+            <div style="height:96px;border:3px solid #111;display:flex;align-items:center;justify-content:center;font-size:28px">取消</div>
+            <div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px">清除进度</div>
+          </div>
+        </div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">标题是一个问句，说明里写清作用范围：清除什么、保留什么、会不会影响服务器。确认按钮用具体动词。K2 等于“取消”。</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#444">S12-6 · 控件状态</div>
+      <div style="zoom:{{ zoom }};filter:{{ frameFilter }}"><div style="width:684px;background:#fff;outline:2px solid #9a978f;padding:36px;box-sizing:border-box;display:grid;grid-template-columns:1fr 1fr;gap:20px 16px">
+        <div style="display:flex;flex-direction:column;gap:8px"><div style="font-size:20px;color:#333">主按钮 · 常态</div><div style="height:96px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px">应用</div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><div style="font-size:20px;color:#333">次按钮 · 常态</div><div style="height:96px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:28px">取消</div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><div style="font-size:20px;color:#333">按下（一帧最终态）</div><div style="height:96px;border:6px solid #111;box-sizing:border-box;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:700">取消</div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><div style="font-size:20px;color:#333">选中</div><div style="height:96px;border:3px solid #111;display:flex;align-items:center;justify-content:center;gap:12px;font-size:28px;font-weight:700"><span style="width:16px;height:16px;background:#111;border-radius:50%"></span>均衡</div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><div style="font-size:20px;color:#333">禁用（附原因）</div><div style="height:96px;border:2px dashed #555;color:#555;display:flex;flex-direction:column;align-items:center;justify-content:center"><div style="font-size:26px">将此处上传</div><div style="font-size:20px">需联网</div></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><div style="font-size:20px;color:#333">忙碌</div><div style="height:96px;border:2px dashed #555;color:#555;display:flex;align-items:center;justify-content:center;font-size:26px">同步中</div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><div style="font-size:20px;color:#333">错误</div><div style="height:96px;border:3px solid #111;display:flex;align-items:center;justify-content:center;gap:12px;font-size:26px"><span style="width:32px;height:32px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700">!</span>上传失败</div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><div style="font-size:20px;color:#333">开关</div><div style="height:96px;display:flex;align-items:center"><div style="display:flex;border:2px solid #111"><div style="height:60px;width:72px;display:flex;align-items:center;justify-content:center;font-size:22px;background:#111;color:#fff">开</div><div style="height:60px;width:72px;display:flex;align-items:center;justify-content:center;font-size:22px">关</div></div></div></div>
+      </div></div>
+      <div style="font-size:12px;color:#333;line-height:1.5;max-width:342px">每种状态至少有两个非灰度的区分特征：虚线、加粗、反相、文字或符号。按下态只画一帧：粗边框配加粗文字，随后直接切换到结果状态，没有中间动画。在近似黑白模式下，禁用和忙碌仍能靠虚线和文字辨认。</div>
+    </div>
+
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;viewMode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;正常灰阶&quot;,&quot;近似黑白&quot;],&quot;default&quot;:&quot;正常灰阶&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;scale&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;0.5×&quot;,&quot;1×（原像素）&quot;],&quot;default&quot;:&quot;0.5×&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      zoom: this.props.scale === '1×（原像素）' ? 1 : 0.5,
+      frameFilter: this.props.viewMode === '近似黑白' ? 'grayscale(1) contrast(8)' : 'none'
+    };
+  }
+}
+</script>
+</body>
+</html>

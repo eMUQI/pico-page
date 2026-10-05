@@ -1,0 +1,261 @@
+{
+  "type": "original_design_inventory",
+  "original_files": 49,
+  "declared_states_count": 69,
+  "png_count": 36,
+  "html_count": 5,
+  "pngs": [
+    {
+      "state": "S02-1",
+      "path": "docs/design/original/png/S02-1.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S02-2",
+      "path": "docs/design/original/png/S02-2.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S02-3",
+      "path": "docs/design/original/png/S02-3.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S02-4",
+      "path": "docs/design/original/png/S02-4.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S02-5",
+      "path": "docs/design/original/png/S02-5.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S02-6",
+      "path": "docs/design/original/png/S02-6.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S02-7",
+      "path": "docs/design/original/png/S02-7.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S02-8",
+      "path": "docs/design/original/png/S02-8.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S03-1",
+      "path": "docs/design/original/png/S03-1.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S03-2",
+      "path": "docs/design/original/png/S03-2.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S03-3",
+      "path": "docs/design/original/png/S03-3.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S04-1",
+      "path": "docs/design/original/png/S04-1.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S04-2",
+      "path": "docs/design/original/png/S04-2.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S04-3",
+      "path": "docs/design/original/png/S04-3.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S04-4",
+      "path": "docs/design/original/png/S04-4.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S04-5",
+      "path": "docs/design/original/png/S04-5.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S04-6",
+      "path": "docs/design/original/png/S04-6.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S05-1",
+      "path": "docs/design/original/png/S05-1.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S05-2",
+      "path": "docs/design/original/png/S05-2.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S05-3",
+      "path": "docs/design/original/png/S05-3.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S05-4",
+      "path": "docs/design/original/png/S05-4.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S06-1",
+      "path": "docs/design/original/png/S06-1.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S06-2",
+      "path": "docs/design/original/png/S06-2.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S06-3",
+      "path": "docs/design/original/png/S06-3.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S06-4",
+      "path": "docs/design/original/png/S06-4.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S06-5",
+      "path": "docs/design/original/png/S06-5.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S06-6",
+      "path": "docs/design/original/png/S06-6.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S06-7",
+      "path": "docs/design/original/png/S06-7.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S07-1",
+      "path": "docs/design/original/png/S07-1.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S07-2",
+      "path": "docs/design/original/png/S07-2.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S07-3",
+      "path": "docs/design/original/png/S07-3.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S07-4",
+      "path": "docs/design/original/png/S07-4.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S08-1",
+      "path": "docs/design/original/png/S08-1.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S08-2",
+      "path": "docs/design/original/png/S08-2.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S08-3",
+      "path": "docs/design/original/png/S08-3.png",
+      "width": 684,
+      "height": 1216
+    },
+    {
+      "state": "S08-4",
+      "path": "docs/design/original/png/S08-4.png",
+      "width": 684,
+      "height": 1216
+    }
+  ],
+  "states_without_png": [
+    "S01-1",
+    "S01-1b",
+    "S01-2",
+    "S01-3",
+    "S01-4",
+    "S01-5",
+    "S01-5b",
+    "S01-5c",
+    "S01-6",
+    "S01-7",
+    "S09-1",
+    "S09-2",
+    "S09-3",
+    "S09-4",
+    "S09-5",
+    "S09-6",
+    "S10-1",
+    "S10-2",
+    "S10-3",
+    "S10-4",
+    "S11-0",
+    "S11-0b",
+    "S11-1",
+    "S11-2",
+    "S11-3",
+    "S11-4",
+    "S11-5",
+    "S12-1",
+    "S12-2",
+    "S12-3",
+    "S12-4",
+    "S12-5",
+    "S12-6"
+  ],
+  "note": "Original user-provided files preserved byte-for-byte; no missing screenshots generated. Missing PNG does not mean no HTML/text reference."
+}
