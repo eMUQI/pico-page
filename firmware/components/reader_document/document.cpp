@@ -988,9 +988,11 @@ bool EpubDocument::chapter_index_for(const std::string& resource, std::size_t& i
     for (std::size_t i = 0; i < impl_->spine.size(); ++i) if (impl_->spine[i].resource == resource) { index = i; return true; }
     return false;
 }
-bool EpubDocument::read_image(const std::string& resource, std::vector<std::uint8_t>& bytes, std::string& error) {
+bool EpubDocument::read_image(const std::string& resource, std::vector<std::uint8_t>& bytes, std::string& error,
+                              const std::function<bool()>& stop) {
     const StageTimer timer{"image_read_inflate"};
     bytes.clear(); error.clear();
+    if (stop && stop()) return fail(error, "Image load cancelled");
     std::string canonical;
     if (!impl_->file || resource.empty() || !path_parts(resource, canonical) || canonical != resource) return fail(error, "Invalid internal image path");
     const int index = mz_zip_reader_locate_file(&impl_->zip, resource.c_str(), nullptr, MZ_ZIP_FLAG_CASE_SENSITIVE);
@@ -998,8 +1000,17 @@ bool EpubDocument::read_image(const std::string& resource, std::vector<std::uint
     if (index < 0 || !mz_zip_reader_file_stat(&impl_->zip, index, &stat)) return fail(error, "Missing EPUB image");
     if (!stat.m_uncomp_size || stat.m_uncomp_size > 2 * 1024 * 1024) return fail(error, "EPUB image exceeds 2 MiB limit");
     bytes.resize(static_cast<std::size_t>(stat.m_uncomp_size));
-    if (!mz_zip_reader_extract_to_mem(&impl_->zip, index, bytes.data(), bytes.size(), 0)) {
-        bytes.clear(); return fail(error, "Invalid compressed EPUB image");
+    struct Output { std::vector<std::uint8_t>& bytes; const std::function<bool()>& stop; bool cancelled = false; } output{bytes, stop};
+    const bool extracted = mz_zip_reader_extract_to_callback(&impl_->zip, index,
+        [](void* opaque, mz_uint64 offset, const void* data, std::size_t count) -> std::size_t {
+            auto& output = *static_cast<Output*>(opaque);
+            if (output.stop && output.stop()) { output.cancelled = true; return 0; }
+            if (offset > output.bytes.size() || count > output.bytes.size() - offset) return 0;
+            std::memcpy(output.bytes.data() + offset, data, count);
+            return count;
+        }, &output, 0);
+    if (!extracted || output.cancelled || (stop && stop())) {
+        bytes.clear(); return fail(error, output.cancelled || (stop && stop()) ? "Image load cancelled" : "Invalid compressed EPUB image");
     }
     const bool png = bytes.size() >= 8 && std::memcmp(bytes.data(), "\x89PNG\r\n\x1a\n", 8) == 0;
     const bool jpeg = bytes.size() >= 3 && bytes[0] == 0xff && bytes[1] == 0xd8 && bytes[2] == 0xff;

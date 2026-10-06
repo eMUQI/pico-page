@@ -35,6 +35,8 @@ struct Raster {
     std::unique_ptr<std::uint8_t, decltype(&std::free)> pixels{nullptr, &std::free};
     std::uint64_t samples = 0;
     bool done = false;
+    const std::function<bool()>* stop = nullptr;
+    bool cancelled() const { return stop && *stop && (*stop)(); }
     // Destination edge of every source column and row; sample() runs once per source pixel.
     std::vector<std::uint16_t> columns, rows;
     bool create(unsigned source_w, unsigned source_h, int box_w, int box_h) {
@@ -99,6 +101,7 @@ bool png(const std::vector<std::uint8_t>& input, int width, int height, Raster& 
     if (input[28] > 1) return fail(error, "Invalid PNG interlace method");
     bool ended = false;
     for (std::size_t at = 8; at < input.size();) {
+        if (raster.cancelled()) return fail(error, kImageCancelled);
         if (input.size() - at < 12) return fail(error, "Truncated PNG chunk");
         const auto length = be32(input.data() + at);
         if (length > input.size() - at - 12) return fail(error, "Truncated PNG data");
@@ -120,9 +123,19 @@ bool png(const std::vector<std::uint8_t>& input, int width, int height, Raster& 
         static_cast<Raster*>(pngle_get_user_data(png))->sample(x, y, w, h, rgba, rgba[3]);
     });
     pngle_set_done_callback(decoder.get(), [](pngle_t* png) { static_cast<Raster*>(pngle_get_user_data(png))->done = true; });
-    const int consumed = pngle_feed(decoder.get(), input.data(), input.size());
-    if (consumed < 0) return fail(error, std::string("PNG decode failed: ") + pngle_error(decoder.get()));
-    if (static_cast<std::size_t>(consumed) != input.size() || !raster.done || raster.samples != std::uint64_t(source_w) * source_h)
+    std::size_t at = 0, window = 32;
+    while (at < input.size()) {
+        if (raster.cancelled()) return fail(error, kImageCancelled);
+        const auto count = std::min(window, input.size() - at);
+        const int consumed = pngle_feed(decoder.get(), input.data() + at, count);
+        if (consumed < 0) return fail(error, std::string("PNG decode failed: ") + pngle_error(decoder.get()));
+        if (!consumed) {
+            // Headers and palette chunks require contiguous bytes; retain the unconsumed prefix.
+            if (count == input.size() - at) return fail(error, "Truncated PNG stream");
+            window += 32;
+        } else { at += static_cast<std::size_t>(consumed); window = 32; }
+    }
+    if (!raster.done || raster.samples != std::uint64_t(source_w) * source_h)
         return fail(error, "PNG pixel stream is incomplete");
     return true;
 }
@@ -139,11 +152,13 @@ bool jpeg(const std::vector<std::uint8_t>& input, int width, int height, Raster&
     JDEC decoder{};
     auto result = jd_prepare(&decoder, [](JDEC* decoder, std::uint8_t* destination, std::size_t count) -> std::size_t {
         auto& io = *static_cast<JpegInput*>(decoder->device);
+        if (io.raster.cancelled()) return 0;
         count = std::min(count, io.bytes.size() - io.offset);
         if (destination) std::memcpy(destination, io.bytes.data() + io.offset, count);
         io.offset += count;
         return count;
     }, workspace.get(), 8192, &io);
+    if (raster.cancelled()) return fail(error, kImageCancelled);
     if (result != JDR_OK) return fail(error, "JPEG header is invalid or unsupported (baseline JPEG required)");
     if (!dimensions(decoder.width, decoder.height)) return fail(error, "JPEG exceeds 4096-pixel side or 8-megapixel limit");
     if (!raster.create(decoder.width, decoder.height, width, height)) return fail(error, "Image canvas allocation failed");
@@ -152,12 +167,14 @@ bool jpeg(const std::vector<std::uint8_t>& input, int width, int height, Raster&
     raster.source(decoder.width >> scale, decoder.height >> scale);
     result = jd_decomp(&decoder, [](JDEC* decoder, void* bitmap, JRECT* rect) -> int {
         auto& raster = static_cast<JpegInput*>(decoder->device)->raster;
+        if (raster.cancelled()) return 0;
         const auto* rgb = static_cast<const std::uint8_t*>(bitmap);
         for (unsigned row = rect->top; row <= rect->bottom; ++row)
             for (unsigned col = rect->left; col <= rect->right; ++col, rgb += 3)
                 raster.sample(col, row, 1, 1, rgb);
         return 1;
     }, static_cast<std::uint8_t>(scale));
+    if (raster.cancelled()) return fail(error, kImageCancelled);
     if (result != JDR_OK || raster.samples != std::uint64_t(raster.source_width) * raster.source_height)
         return fail(error, "JPEG pixel stream is invalid or incomplete");
     return true;
@@ -167,16 +184,18 @@ bool jpeg(const std::vector<std::uint8_t>& input, int width, int height, Raster&
 std::uint64_t image_decode_count() { return decode_count.load(std::memory_order_relaxed); }
 
 bool render_image(Canvas& canvas, const std::vector<std::uint8_t>& encoded,
-                  int x, int y, int width, int height, std::string& error, bool crop) {
+                  int x, int y, int width, int height, std::string& error, bool crop, const std::function<bool()>& stop) {
     const StageTimer timer{"image_decode_draw"};
     decode_count.fetch_add(1, std::memory_order_relaxed);
     error.clear();
+    if (stop && stop()) return fail(error, kImageCancelled);
     if (x < 0 || y < 0 || width <= 0 || height <= 0 || width > canvas.width() || height > canvas.height() ||
         x > canvas.width() - width || y > canvas.height() - height || std::uint64_t(width) * height > 684U * 1216U)
         return fail(error, "Invalid image drawing area");
     if (encoded.empty() || encoded.size() > kEncodedLimit) return fail(error, "Encoded image exceeds 2 MiB limit");
     Raster raster;
     raster.crop = crop;
+    raster.stop = &stop;
     bool success;
     if (encoded.size() >= 8 && std::memcmp(encoded.data(), "\x89PNG\r\n\x1a\n", 8) == 0)
         success = png(encoded, width, height, raster, error);
@@ -184,6 +203,7 @@ bool render_image(Canvas& canvas, const std::vector<std::uint8_t>& encoded,
         success = jpeg(encoded, width, height, raster, error);
     else return fail(error, "Image format is not PNG or JPEG");
     if (!success) return false;
+    if (raster.cancelled()) return fail(error, kImageCancelled);
     x += (width - static_cast<int>(raster.width)) / 2;
     y += (height - static_cast<int>(raster.height)) / 2;
     for (unsigned row = 0; row < raster.height; ++row) for (unsigned col = 0; col < raster.width; ++col) {

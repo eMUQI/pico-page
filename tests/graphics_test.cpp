@@ -65,6 +65,14 @@ int main(int argc, char** argv) {
     assert(canvas.pixel(9, 20) == 7 && canvas.pixel(18, 43) == 7);
     bad = jpeg; bad.resize(bad.size() / 2);
     const auto jpeg_unchanged = canvas.pixels();
+    unsigned cancellation_checks = 0;
+    assert(!render_image(canvas, jpeg, 0, 0, 32, 24, image_error, false,
+                         [&] { return ++cancellation_checks >= 3; }));
+    assert(image_error == kImageCancelled && canvas.pixels() == jpeg_unchanged);
+    cancellation_checks = 0;
+    assert(!render_image(canvas, rgba, 0, 0, 4, 4, image_error, false,
+                         [&] { return ++cancellation_checks >= 3; }));
+    assert(image_error == kImageCancelled && canvas.pixels() == jpeg_unchanged);
     assert(!render_image(canvas, bad, 0, 0, 32, 24, image_error) && canvas.pixels() == jpeg_unchanged);
     canvas.pixel(0, 0, 1);
     canvas.pixel(1, 0, 3);

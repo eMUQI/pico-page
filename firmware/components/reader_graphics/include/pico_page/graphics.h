@@ -135,12 +135,16 @@ bool render_page(Canvas& canvas, Font& font, const Page& page, std::uint8_t gray
 /** Number of image decode attempts in this process, including failures. */
 std::uint64_t image_decode_count();
 
+inline constexpr char kImageCancelled[] = "Image decode cancelled";
+
 /** Decode PNG/baseline JPEG centered in the box. Crop fills the box; otherwise fit the whole image.
  * Failure leaves the canvas unchanged. Temporary pixels are bounded by the box dimensions;
- * the scaling tables hold one 16-bit entry per source column and row.
+ * the scaling tables hold one 16-bit entry per source column and row. Cancellation is checked
+ * between PNG input chunks and JPEG blocks and returns kImageCancelled without changing pixels.
  */
 bool render_image(Canvas& canvas, const std::vector<std::uint8_t>& encoded,
-                  int x, int y, int width, int height, std::string& error, bool crop = false);
+                  int x, int y, int width, int height, std::string& error, bool crop = false,
+                  const std::function<bool()>& stop = {});
 
 /**
  * Draws text as a QR code centred in a size x size box at (x, y), black on white with a

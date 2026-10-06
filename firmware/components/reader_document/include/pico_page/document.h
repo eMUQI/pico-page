@@ -163,7 +163,8 @@ public:
                            const std::function<bool(const Chapter&)>& match);
     bool chapter_index_for(const std::string& resource, std::size_t& index) const;
     /** Read an internal PNG/JPEG resource, at most 2 MiB; output is cleared on failure. */
-    bool read_image(const std::string& resource, std::vector<std::uint8_t>& bytes, std::string& error);
+    bool read_image(const std::string& resource, std::vector<std::uint8_t>& bytes, std::string& error,
+                    const std::function<bool()>& stop = {});
     /** Read a declared cover or single-image cover page without hashing the book or changing a reading session.
      * PNG/JPEG output is bounded to 2 MiB and cleared on failure.
      */
