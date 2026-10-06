@@ -22,7 +22,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--book", action="append", type=Path, default=[],
                         help="Also verify this unchanged EPUB with the actual reference engine")
+    parser.add_argument("--sample-step", type=int, default=1, help="Compare every Nth scalar plus each part end; default checks all scalars")
     args = parser.parse_args()
+    if not 1 <= args.sample_step <= 1000000:
+        parser.error("--sample-step must be between 1 and 1000000")
     archive = LOCAL / "downloads/crengine.tar.gz"
     fetch(archive, f"https://codeload.github.com/koreader/crengine/tar.gz/{REVISION}",
           "0551a3daef8d08203f35aefaf00af8227aa1925effaef6d74839b8bb77012583")
@@ -76,7 +79,7 @@ target_link_libraries(koreader_mapping_probe PRIVATE reader_sync reference_creng
     for book in [fixture, *args.book]:
         print(f"Reference comparison: {book}", flush=True)
         run(str(probe / "build/koreader_mapping_probe"), str(book.resolve()),
-            str(LOCAL / "card/PicoPage/fonts/LXGWWenKai-Regular.ttf"))
+            str(LOCAL / "card/PicoPage/fonts/LXGWWenKai-Regular.ttf"), str(args.sample_step))
 
 
 if __name__ == "__main__":

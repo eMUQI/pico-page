@@ -154,9 +154,9 @@ bool load_content(const FileStore& store, EpubDocument& doc, std::size_t index, 
         if (detail == ChapterLoad::Layout) for (auto& run : chapter.runs) { run.source.resource.clear(); run.source.node.clear(); }
         return true;
     }
-    if (!doc.load_chapter(index, chapter, error, detail, part, stop)) return false;
-    if (detail == ChapterLoad::Reading && !(stop && stop())) save(store, doc, index, chapter);
-    return true;
+    return doc.load_chapter(index, chapter, error, detail, part, stop, [&](const Chapter& completed) {
+        if (!(stop && stop())) save(store, doc, index, completed);
+    });
 }
 bool find_content(const FileStore& store, EpubDocument& doc, std::size_t index, Chapter& chapter,
                   std::string& error, ChapterLoad detail, const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop) {
@@ -170,8 +170,8 @@ bool find_content(const FileStore& store, EpubDocument& doc, std::size_t index, 
             release(chapter);
         }
     }
-    if (!doc.find_chapter_part(index, chapter, error, detail, match, stop)) return false;
-    if (detail == ChapterLoad::Reading && !(stop && stop())) save(store, doc, index, chapter);
-    return true;
+    return doc.find_chapter_part(index, chapter, error, detail, match, stop, [&](const Chapter& completed) {
+        if (!(stop && stop())) save(store, doc, index, completed);
+    });
 }
 } // namespace pico_page

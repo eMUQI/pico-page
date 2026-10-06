@@ -371,6 +371,15 @@ struct ChapterParser {
         return chapter.text.size() >= kMaxText || chapter.runs.size() >= kPartRecordsHard ||
                part_nodes >= kPartRecordsHard || retained_metadata_bytes >= kPartMetadataHard;
     }
+    const std::function<void(const Chapter&)>* visit = nullptr;
+    void visit_part(bool last) {
+        if (!visit || !*visit) return;
+        chapter.part = part; chapter.last_part = last;
+        const bool separator = !chapter.text.empty() && chapter.text.back() == U'\n';
+        if (separator) chapter.text.pop_back();
+        (*visit)(chapter);
+        if (separator) chapter.text.push_back(U'\n');
+    }
     bool selected() const {
         return match ? (*match)(chapter) : wanted != kLastChapterPart && part == wanted;
     }
@@ -418,6 +427,7 @@ struct ChapterParser {
                 std::any_of(frames.begin(), frames.end(), [&](const Frame& frame) { return frame.path == parent; }))
                 carried.push_back(node);
         }
+        visit_part(false);
         if (!captured && selected()) {
             capture(false);
             // Position mapping reads the stylesheets and structure of the whole document.
@@ -660,7 +670,8 @@ struct EpubDocument::Impl {
         return std::fread(buffer, 1, size, self->file);
     }
     bool load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
-              std::uint32_t wanted, const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop = {});
+              std::uint32_t wanted, const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop,
+              const std::function<void(const Chapter&)>& visit);
     bool parse(const std::string& path, Xml& xml, std::string& error, std::uint32_t max_bytes = kMaxXmlBytes, const std::function<bool()>& stop = {}) {
         const StageTimer timer{"xml_read_inflate_parse"};
         const int index = mz_zip_reader_locate_file(&zip, path.c_str(), nullptr, MZ_ZIP_FLAG_CASE_SENSITIVE);
@@ -925,21 +936,23 @@ void release(Chapter& chapter) {
 }
 
 bool EpubDocument::load_chapter(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail, std::uint32_t part,
-                                const std::function<bool()>& stop) {
-    return impl_->load(index, chapter, error, detail, part, nullptr, stop);
+                                const std::function<bool()>& stop, const std::function<void(const Chapter&)>& visit) {
+    return impl_->load(index, chapter, error, detail, part, nullptr, stop, visit);
 }
 bool EpubDocument::find_chapter_part(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
-                                     const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop) {
-    return impl_->load(index, chapter, error, detail, 0, &match, stop);
+                                     const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop, const std::function<void(const Chapter&)>& visit) {
+    return impl_->load(index, chapter, error, detail, 0, &match, stop, visit);
 }
 bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
-                              std::uint32_t wanted, const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop) {
+                              std::uint32_t wanted, const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop,
+                              const std::function<void(const Chapter&)>& visit) {
     pico_page::release(chapter); error.clear();
     if (stop && stop()) return fail(error, kChapterCancelled);
     if (!file || index >= spine.size()) return fail(error, "Invalid EPUB chapter index");
     ChapterParser parser(chapter, spine[index].resource);
     parser.wanted = wanted;
     parser.match = match;
+    if (detail == ChapterLoad::Reading) parser.visit = &visit;
     if (detail != ChapterLoad::Mapping) {
         parser.keep_mapping = false;
         parser.keep_anchors = detail == ChapterLoad::Reading;
@@ -958,6 +971,7 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
             pico_page::release(chapter);
             return fail(error, "Chapter contains no supported body content");
         }
+        parser.visit_part(true);
         if (!parser.captured && (wanted == kLastChapterPart || parser.selected())) parser.capture(true);
     }
     if (!parser.captured) { pico_page::release(chapter); return fail(error, "Chapter part is not available: " + spine[index].resource); }

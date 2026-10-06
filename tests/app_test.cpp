@@ -895,6 +895,18 @@ int main(int argc, char** argv) {
         const auto cache = card / "PicoPage/cache/content/content-reading-v1" / doc.metadata().book_id / "0/2";
         assert(fs::exists(cache));
         const auto data = read(cache);
+        for (std::uint32_t part = 0; part < 2; ++part) {
+            assert(fs::exists(cache.parent_path() / std::to_string(part)));
+            Chapter parsed, prior;
+            assert(doc.load_chapter(0, parsed, error, ChapterLoad::Reading, part));
+            assert(load_content(store, doc, 0, prior, error, ChapterLoad::Reading, part));
+            assert(parsed.text == prior.text && parsed.part == prior.part && parsed.last_part == prior.last_part);
+            for (std::uint32_t offset = 0; offset < parsed.text.size(); ++offset) {
+                Anchor a, b;
+                assert(parsed.anchor_at(offset, a) == prior.anchor_at(offset, b));
+                assert(a == b);
+            }
+        }
         assert(load_content(store, doc, 0, cached, error, ChapterLoad::Reading, 2));
         assert(cached.text == original.text && cached.runs.size() == original.runs.size());
         for (std::uint32_t n = 0; n < cached.text.size(); ++n) {

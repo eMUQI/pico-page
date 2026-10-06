@@ -147,6 +147,8 @@ public:
     /**
      * Parses the spine resource as a stream and keeps one part of it; output is released on
      * failure. Earlier parts are parsed and discarded, so a later part takes longer to reach.
+     * For Reading loads, visit receives each completed normalized part before it is discarded
+     * or returned. Its reference is valid only during the callback; it must not reenter this document.
      * Below Mapping the text is reserved once, at most twice kChapterPartScalars, instead of
      * growing geometrically; a Reading part is then trimmed to its length. A Layout load fails
      * with kChapterMemoryError when that reservation does not fit.
@@ -157,13 +159,15 @@ public:
      */
     bool load_chapter(std::size_t index, Chapter& chapter, std::string& error,
                       ChapterLoad detail = ChapterLoad::Mapping, std::uint32_t part = 0,
-                      const std::function<bool()>& stop = {});
+                      const std::function<bool()>& stop = {},
+                      const std::function<void(const Chapter&)>& visit = {});
     /**
      * Like load_chapter, for the first part that match accepts. match sees each complete part
      * at the given detail, before the stylesheet fields of a Mapping load are final.
      */
     bool find_chapter_part(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
-                           const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop = {});
+                           const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop = {},
+                           const std::function<void(const Chapter&)>& visit = {});
     bool chapter_index_for(const std::string& resource, std::size_t& index) const;
     /** Read an internal PNG/JPEG resource, at most 2 MiB; output is cleared on failure. */
     bool read_image(const std::string& resource, std::vector<std::uint8_t>& bytes, std::string& error,
