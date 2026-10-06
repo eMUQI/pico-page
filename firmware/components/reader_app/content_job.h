@@ -23,8 +23,13 @@ std::string image_cache_key(const std::string& book_id, const std::string& resou
 /** A single job owns its parser and font. Only done() permits access to its result. */
 class ContentJob {
 public:
-    enum class Kind { Pagination, FontIdentity, Image, Open, Chapter, RasterPage, SaveProgress };
+    enum class Kind { Pagination, FontIdentity, Image, Open, Chapter, RasterPage, SaveProgress, LibraryCovers };
     enum class Target { Start, End, Before, Anchor, Fragment };
+    struct CoverSource {
+        std::string path, cache_name, cache_header;
+        off_t size = 0;
+        time_t modified = 0;
+    };
     struct Request {
         std::string path, font;
         Kind kind = Kind::Pagination;
@@ -36,6 +41,7 @@ public:
         DocumentMetadata identity;
         graphics::LayoutSpec layout;
         graphics::Page page;
+        std::vector<CoverSource> covers;
         std::optional<ReadingRecord> record;
         bool save_last_book = false;
         std::uint64_t generation = 0;
@@ -48,6 +54,7 @@ public:
         bool part_done = false, last_part = false;
         std::string error, font_identity;
         std::unique_ptr<graphics::Canvas> image;
+        std::vector<std::vector<std::uint8_t>> covers;
         std::unique_ptr<EpubDocument> document;
         Chapter chapter;
         std::vector<std::pair<std::uint32_t, std::uint32_t>> history;
@@ -76,6 +83,7 @@ private:
     void open_book();
     void load_chapter();
     void raster_page();
+    void library_covers();
     std::atomic<bool> cancelled_{false}, done_{false};
     bool started_ = false;
 #ifndef ESP_PLATFORM

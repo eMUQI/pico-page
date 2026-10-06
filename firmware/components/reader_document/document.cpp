@@ -880,23 +880,25 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
     return true;
 }
 
-bool EpubDocument::read_cover(const std::string& path, std::vector<std::uint8_t>& bytes, std::string& error) {
+bool EpubDocument::read_cover(const std::string& path, std::vector<std::uint8_t>& bytes, std::string& error, const std::function<bool()>& stop) {
     bytes.clear(); error.clear();
     EpubDocument book;
-    if (!book.open_impl(path, error, true)) return false;
-    if (!book.impl_->cover.empty() && book.read_image(book.impl_->cover, bytes, error)) return true;
+    if (!book.open_impl(path, error, true, nullptr, stop)) return false;
+    if (!book.impl_->cover.empty() && book.read_image(book.impl_->cover, bytes, error, stop)) return true;
+    if (stop && stop()) return fail(error, kChapterCancelled);
     Chapter unused;
     const auto resource = book.impl_->cover_page.empty() ? book.impl_->spine.front().resource : book.impl_->cover_page;
-    if (!book.impl_->cover_page.empty() && book.read_image(resource, bytes, error)) return true;
+    if (!book.impl_->cover_page.empty() && book.read_image(resource, bytes, error, stop)) return true;
+    if (stop && stop()) return fail(error, kChapterCancelled);
     error.clear();
     // A cover page is a single image; a page long enough to span parts is not one.
     ChapterParser parser(unused, resource);
-    if (!book.impl_->parse(resource, parser.xml, error, 262144)) return false;
+    if (!book.impl_->parse(resource, parser.xml, error, 262144, stop)) return false;
     parser.finish_block();
     const auto& chapter = parser.chapter;
     if (parser.part != 0 || chapter.images.size() != 1 || chapter.blocks.size() != 1 || chapter.blocks.front().kind != BlockKind::Image)
         return fail(error, "EPUB has no supported cover");
-    return book.read_image(chapter.images.front().resource, bytes, error);
+    return book.read_image(chapter.images.front().resource, bytes, error, stop);
 }
 
 bool chapter_memory_available(std::size_t bytes) { return memory_room(bytes); }

@@ -44,7 +44,7 @@ ContentJob::~ContentJob() { cancel(); wait(); }
 bool ContentJob::start() {
     if (started_) return false;
 #ifdef ESP_PLATFORM
-    if ((request.kind == Kind::Pagination || request.kind == Kind::FontIdentity || request.kind == Kind::RasterPage) &&
+    if ((request.kind == Kind::Pagination || request.kind == Kind::FontIdentity || request.kind == Kind::RasterPage || request.kind == Kind::LibraryCovers) &&
         heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < 64U * 1024) return false;
     started_ = xTaskCreate([](void* opaque) {
         auto* job = static_cast<ContentJob*>(opaque);
@@ -84,6 +84,7 @@ void ContentJob::run() {
         if (result.font_identity.empty() && !stop()) result.error = "Font identity read failed";
         return;
     }
+    if (request.kind == Kind::LibraryCovers) { library_covers(); return; }
     if (request.kind == Kind::RasterPage) { raster_page(); return; }
     if (request.kind == Kind::Chapter) { load_chapter(); return; }
     if (request.kind == Kind::Open) { open_book(); return; }
@@ -259,4 +260,30 @@ void ContentJob::raster_page() {
         result.image.reset();
     }
 }
+void ContentJob::library_covers() {
+    const StageTimer timer{"library_covers"};
+    const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
+    FileStore store(request.root);
+    for (const auto& source : request.covers) {
+        if (stop()) return;
+        result.covers.emplace_back();
+#ifdef ESP_PLATFORM
+        if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 3U * 1024 * 1024) continue;
+#endif
+        graphics::Canvas thumbnail(164, 184);
+        std::vector<std::uint8_t> encoded;
+        std::string error;
+        const bool loaded = EpubDocument::read_cover(request.root + "/" + source.path, encoded, error, stop) &&
+            graphics::render_image(thumbnail, encoded, 0, 0, 164, 184, error, false, stop);
+        if (stop()) return;
+        struct stat info{};
+        if (stat((request.root + "/" + source.path).c_str(), &info) != 0 ||
+            info.st_size != source.size || info.st_mtime != source.modified) continue;
+        if (loaded) result.covers.back() = thumbnail.pixels();
+        if (loaded || error.find("allocation") == std::string::npos)
+            store.save_cache(source.cache_name, source.cache_header +
+                std::string(result.covers.back().begin(), result.covers.back().end()));
+    }
+}
+
 } // namespace pico_page

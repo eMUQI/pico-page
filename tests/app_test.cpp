@@ -190,6 +190,36 @@ int main(int argc, char** argv) {
         assert(grid_pixel(270, 490) == 0 && grid_pixel(270, 610) == 5);
         assert(read(cached).size() > thumbnail_bytes);
     }
+    {
+        const auto root = card / "CoverWorker";
+        fs::create_directories(root / "Books");
+        fs::create_directories(root / "PicoPage");
+        for (const auto name : {"a.epub", "b.epub"}) fs::copy_file(fixtures / "image-cover.epub", root / "Books" / name);
+        for (const bool cancel : {false, true}) {
+            fs::remove_all(root / "PicoPage/cache/covers");
+            ReaderApp app(root.string(), "cover-worker", true, true); Driver driver{app};
+            assert(app.initialize()); driver.present();
+            driver.tap(240, 482); driver.present();
+            driver.tap(610, 384); driver.present();
+            assert(app.background_due() && !app.pending_frame());
+            app.poll_background(); driver.refresh();
+            if (cancel) { driver.tap(600, 50); driver.present(); assert(app.view() == View::Settings); }
+            const auto before = app.canvas().pixels();
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+            unsigned frames = 0;
+            while (app.background_due()) {
+                app.poll_background();
+                if (app.pending_frame()) { ++frames; driver.present(); }
+                assert(std::chrono::steady_clock::now() < deadline);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            if (cancel) assert(frames == 0 && app.canvas().pixels() == before);
+            else {
+                assert(frames == 1 && app.view() == View::Library);
+                assert(app.canvas().pixel(60, 490) == 0 && app.canvas().pixel(270, 610) == 5);
+            }
+        }
+    }
     fs::create_directories(card / "PicoPage/fonts");
     fs::copy_file(argv[2], card / "PicoPage/fonts/LXGWWenKai-Regular.ttf");
     {

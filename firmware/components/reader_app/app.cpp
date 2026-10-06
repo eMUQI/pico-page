@@ -316,6 +316,42 @@ struct ReaderApp::Impl final : DisplayBackend {
         std::vector<std::uint8_t> pixels;
     };
     std::vector<CoverThumbnail> covers;
+    std::unique_ptr<ContentJob> cover_job;
+    std::optional<ContentJob::Request> pending_covers;
+    std::vector<ContentJob::CoverSource> missing_covers;
+    std::uint64_t cover_generation = 0;
+    void cancel_covers() {
+        ++cover_generation; pending_covers.reset(); missing_covers.clear();
+        if (cover_job) cover_job->cancel();
+    }
+    void stop_covers() { cancel_covers(); cover_job.reset(); }
+    void poll_covers() {
+        if (view != View::Library) cancel_covers();
+        if (cover_job) {
+            if (!cover_job->done()) return;
+            auto job = std::move(cover_job);
+            if (view == View::Library && job->request.generation == cover_generation &&
+                job->result.covers.size() == job->request.covers.size()) {
+                if (display.busy()) { cover_job = std::move(job); return; }
+                for (std::size_t i = 0; i < job->request.covers.size(); ++i) {
+                    const auto& source = job->request.covers[i];
+                    if (covers.size() == 12) covers.erase(covers.begin());
+                    covers.push_back({source.path, source.size, source.modified, std::move(job->result.covers[i])});
+                }
+                draw_library(); overlay();
+            }
+        }
+        if (!pending_covers || display.busy() || save_job || foreground_job || pending_content || counting_job || raster_job) return;
+        cover_job = std::make_unique<ContentJob>(std::move(*pending_covers)); pending_covers.reset();
+        if (!cover_job->start()) {
+            cover_job.reset(); message = "封面暂未生成，可继续阅读";
+            for (const auto& source : missing_covers) {
+                if (covers.size() == 12) covers.erase(covers.begin());
+                covers.push_back({source.path, source.size, source.modified, {}});
+            }
+            draw_library(); overlay();
+        }
+    }
     std::vector<Hit> hits, links;
     std::optional<Anchor> link_return, confirmed_link_return;
     // Recent page spans are isolated by spine item, part and return-bar geometry.
@@ -382,6 +418,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool content_loading = false, image_prepared = false;
     std::string prepared_image_error;
     void abandon_content() {
+        cancel_covers();
         ++foreground_generation;
         if (foreground_job) foreground_job->cancel();
         pending_content.reset();
@@ -471,7 +508,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!foreground_job) return;
         if (!foreground_job->started()) {
             if (!content_loading) { foreground_job.reset(); return; }
-            if (display.busy() || counting_job || raster_job || save_job) return;
+            if (display.busy() || counting_job || raster_job || save_job || cover_job) return;
             if (!foreground_job->start()) {
                 foreground_job.reset(); content_loading = false;
                 error("内容任务无法启动，请返回后重试。");
@@ -568,7 +605,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     void poll_save() {
         if (!save_job) return;
         if (!save_job->started()) {
-            if (counting_job || raster_job || (foreground_job && foreground_job->started() && !foreground_job->done())) return;
+            if (counting_job || raster_job || cover_job || (foreground_job && foreground_job->started() && !foreground_job->done())) return;
             if (save_job->start()) return;
             save_job->result.progress.status = StoreStatus::IoError;
         } else if (!save_job->done()) return;
@@ -587,7 +624,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void drain_save() {
         if (!save_job) return;
-        stop_raster(); stop_counting_job();
+        stop_covers(); stop_raster(); stop_counting_job();
         if (foreground_job && foreground_job->started()) foreground_job->wait();
         poll_save();
         if (save_job) { save_job->wait(); poll_save(); }
@@ -595,6 +632,11 @@ struct ReaderApp::Impl final : DisplayBackend {
     void schedule_save() {
         if (!async_content) { if (!persist()) error(message); return; }
         if (save_job) return;
+        if (cover_job) {
+            pending_covers = cover_job->request;
+            pending_covers->generation = ++cover_generation;
+            cover_job->cancel();
+        }
         saving_request = session.request_save();
         if (!saving_request && (!session.visible_record() || last_recorded == book_path)) return;
         ContentJob::Request request;
@@ -1123,7 +1165,10 @@ struct ReaderApp::Impl final : DisplayBackend {
             const auto cached = cover_entry(entry.path, info, 164, 184, false);
             std::vector<std::uint8_t> pixels;
             if (!cached_cover(cached, pixels)) {
-                if (!decode) return Cover::Undecoded;
+                if (!decode || async_content) {
+                    if (async_content) missing_covers.push_back({entry.path, cached.name, cached.header, info.st_size, info.st_mtime});
+                    return Cover::Undecoded;
+                }
                 pixels = decode_cover(entry.path, cached, 164, 184, false);
             }
             // Two visible screens occupy at most 181,056 bytes of packed thumbnail pixels.
@@ -1137,9 +1182,10 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     /**
      * Draws the library. Covers that still need decoding first appear as titles with a status
-     * line; a deferred pass then decodes them, unless decode requests them immediately.
+     * line. Native asynchronous mode prepares a visible batch and merges its display update.
      */
     void draw_library(bool decode = false) {
+        if (async_content) cancel_covers();
         decode = decode || display.busy();
         bool undecoded = false;
         view = View::Library;
@@ -1207,7 +1253,12 @@ struct ReaderApp::Impl final : DisplayBackend {
             note(undecoded ? "正在生成封面…" : message, 1050);
         }
         pager(Prev, Next, library_page, (entries.size() + size - 1) / size);
-        if (undecoded)
+        if (undecoded && async_content) {
+            ContentJob::Request request;
+            request.kind = ContentJob::Kind::LibraryCovers; request.root = root;
+            request.generation = cover_generation; request.covers = missing_covers;
+            pending_covers = std::move(request);
+        } else if (undecoded)
             deferred = [this] {
                 if (view != View::Library) return;
                 draw_library(true);
@@ -2532,7 +2583,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             links.clear(); clear_page_history(); link_return.reset(); confirmed_link_return.reset();
             last_recorded.clear();
         }
-        abandon_content(); foreground_job.reset(); stop_raster();
+        abandon_content(); foreground_job.reset(); stop_covers(); stop_raster();
         stop_counting_job();
         identities.clear();
         font_identity.clear(); effective_font.clear();
@@ -3327,7 +3378,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             message.clear(); draw_storage();
             break;
         case ClearCache:
-            abandon_content(); foreground_job.reset(); stop_raster(); stop_counting_job();
+            abandon_content(); foreground_job.reset(); stop_covers(); stop_raster(); stop_counting_job();
             covers.clear();
             message = store.clear_cache() == StoreStatus::Ok ? "缓存已清理，原书与阅读记录保留" : "缓存未完全清理，请检查 TF 卡";
             draw_storage();
@@ -3652,7 +3703,7 @@ void ReaderApp::Impl::save_refresh(const ReaderSettings &values) {
 
 ReaderApp::ReaderApp(std::string root, std::string writer, bool controlled_storage, bool async_content)
     : impl_(std::make_unique<Impl>(std::move(root), std::move(writer))) { impl_->controlled_storage = controlled_storage; impl_->async_content = async_content; }
-void ReaderApp::invalidate_identity_cache() { impl_->drain_save(); impl_->abandon_content(); impl_->foreground_job.reset(); impl_->stop_raster(); impl_->stop_counting_job(); impl_->identities.clear(); impl_->font_identity.clear(); impl_->effective_font.clear(); }
+void ReaderApp::invalidate_identity_cache() { impl_->drain_save(); impl_->abandon_content(); impl_->foreground_job.reset(); impl_->stop_covers(); impl_->stop_raster(); impl_->stop_counting_job(); impl_->identities.clear(); impl_->font_identity.clear(); impl_->effective_font.clear(); }
 ReaderApp::~ReaderApp() { impl_->drain_save(); }
 bool ReaderApp::initialize() {
     return impl_->initialize();
@@ -3769,6 +3820,7 @@ bool ReaderApp::prepare_portal() {
         !impl_->card_available || !impl_->persist()) return false;
     impl_->cancel_sync();
     impl_->clear_body_cache();
+    impl_->stop_covers();
     impl_->stop_raster();
     impl_->release_counting();
     impl_->portal = {};
@@ -3870,13 +3922,14 @@ CacheUsage ReaderApp::cache_usage() const {
 }
 bool ReaderApp::content_busy() const { return !!impl_->foreground_job || impl_->pending_content.has_value(); }
 bool ReaderApp::background_due() const {
-    return !!impl_->raster_job || impl_->prefetch_due() || impl_->counting_due();
+    return !!impl_->cover_job || impl_->pending_covers.has_value() || !!impl_->raster_job || impl_->prefetch_due() || impl_->counting_due();
 }
 const char *ReaderApp::background_state() const {
     if (impl_->content_loading) {
         const auto kind = impl_->pending_content ? impl_->pending_content->kind : impl_->foreground_job->request.kind;
         return kind == ContentJob::Kind::Open ? "opening" : kind == ContentJob::Kind::Chapter ? "chapter" : "image";
     }
+    if (impl_->cover_job || impl_->pending_covers) return "covers";
     if (impl_->raster_job || impl_->prefetch_due()) return "prefetch";
     if (!impl_->has_book() || impl_->pages_complete) return "idle";
     if (impl_->pages_failed) return "failed";
@@ -3886,6 +3939,7 @@ void ReaderApp::poll_background(bool cancel) {
     if (cancel && impl_->counting_job) impl_->counting_job->cancel();
     impl_->poll_raster();
     impl_->poll_counting_job();
+    impl_->poll_covers();
     impl_->poll_save();
     if (impl_->save_error_pending && !impl_->display.busy() && !impl_->content_loading) {
         impl_->save_error_pending = false; impl_->error(impl_->message);
