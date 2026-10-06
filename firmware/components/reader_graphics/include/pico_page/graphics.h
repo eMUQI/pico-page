@@ -8,6 +8,7 @@
 #include <vector>
 #include <deque>
 #include <list>
+#include <functional>
 
 namespace pico_page::graphics {
 
@@ -117,17 +118,21 @@ struct Page {
 /**
  * Layout only the page at a Unicode scalar offset. [start,end) includes consumed
  * paragraph separators. A nonempty error leaves end equal to start.
+ * collect=false uses identical line breaking without retaining drawing commands. stop is
+ * checked between lines and every 64 measured scalars; cancellation returns "Layout cancelled".
  */
 Page layout_page(Font& font, std::u32string_view text, std::size_t start,
-                 const LayoutSpec& spec = {});
+                 const LayoutSpec& spec = {}, bool collect = true,
+                 const std::function<bool()>& stop = {});
 bool render_page(Canvas& canvas, Font& font, const Page& page, std::uint8_t gray = 1);
+
+/** Number of image decode attempts in this process, including failures. */
+std::uint64_t image_decode_count();
 
 /** Decode PNG/baseline JPEG centered in the box. Crop fills the box; otherwise fit the whole image.
  * Failure leaves the canvas unchanged. Temporary pixels are bounded by the box dimensions;
  * the scaling tables hold one 16-bit entry per source column and row.
  */
-/** Number of image decode attempts in this process, including failures. */
-std::uint64_t image_decode_count();
 bool render_image(Canvas& canvas, const std::vector<std::uint8_t>& encoded,
                   int x, int y, int width, int height, std::string& error, bool crop = false);
 

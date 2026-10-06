@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -24,6 +25,7 @@
 
 namespace pico_page {
 namespace {
+std::atomic<std::uint64_t> identity_scans{0};
 constexpr std::uint64_t kMaxBook = 256ULL * 1024 * 1024;
 // XHTML is parsed as a stream and kept one part at a time, so these two bound parsing time
 // rather than memory.
@@ -703,7 +705,20 @@ bool EpubDocument::open(const std::string& path, std::string& error) {
     return open_impl(path, error, false);
 }
 
-bool EpubDocument::open_impl(const std::string& path, std::string& error, bool cover_only) {
+std::uint64_t identity_hash_count() { return identity_scans.load(std::memory_order_relaxed); }
+
+bool EpubDocument::open_verified(const std::string& path, const DocumentMetadata& identity, std::string& error) {
+    const auto hex = [](const std::string& s, std::size_t size) {
+        return s.size() == size && std::all_of(s.begin(), s.end(), [](char c) {
+            return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+        });
+    };
+    if (!hex(identity.book_id, 64) || !hex(identity.partial_md5, 32)) return fail(error, "Invalid verified EPUB identity");
+    const auto copy = identity;
+    return open_impl(path, error, false, &copy);
+}
+
+bool EpubDocument::open_impl(const std::string& path, std::string& error, bool cover_only, const DocumentMetadata* identity) {
     const StageTimer timer{"epub_open"};
     close(); error.clear();
     std::unique_ptr<Impl> next(new Impl);
@@ -747,7 +762,11 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
     if (names.count("META-INF/encryption.xml")) return fail(error, "Encrypted or obfuscated EPUB is unsupported");
     char mime[21]{};
     if (!mz_zip_reader_extract_file_to_mem(&next->zip, "mimetype", mime, 20, 0) || std::string(mime) != "application/epub+zip") return fail(error, "Invalid EPUB mimetype");
-    if (!cover_only) {
+    if (identity) {
+        next->metadata.book_id = identity->book_id;
+        next->metadata.partial_md5 = identity->partial_md5;
+    } else if (!cover_only) {
+        identity_scans.fetch_add(1, std::memory_order_relaxed);
         const StageTimer timer{"identity_read_hash"};
         Hash sha(false), md5(true); std::array<unsigned char, 8192> buffer{};
         if (std::fseek(next->file, 0, SEEK_SET) != 0) return fail(error, "Cannot hash EPUB");

@@ -94,6 +94,9 @@ struct Chapter {
     bool fragment_offset(const std::string& id, std::uint32_t& offset) const;
 };
 
+/** Number of complete EPUB identity scans in this process. */
+std::uint64_t identity_hash_count();
+
 /** Lowercase hexadecimal MD5 of bytes; empty when the digest backend fails. */
 std::string md5_hex(std::string_view bytes);
 
@@ -126,6 +129,11 @@ public:
     EpubDocument(const EpubDocument&) = delete;
     EpubDocument& operator=(const EpubDocument&) = delete;
     bool open(const std::string& path, std::string& error);
+    /** Reuses a previously verified digest only under exclusive, unchanged storage ownership.
+     * The caller must invalidate that trust after import, removal, sleep or external access.
+     * ZIP structure and metadata are still read. File attributes alone do not establish trust.
+     */
+    bool open_verified(const std::string& path, const DocumentMetadata& identity, std::string& error);
     void close();
     const DocumentMetadata& metadata() const;
     const std::vector<SpineItem>& spine() const;
@@ -158,7 +166,8 @@ public:
      */
     static bool read_cover(const std::string& path, std::vector<std::uint8_t>& bytes, std::string& error);
 private:
-    bool open_impl(const std::string& path, std::string& error, bool cover_only);
+    bool open_impl(const std::string& path, std::string& error, bool cover_only,
+                   const DocumentMetadata* identity = nullptr);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

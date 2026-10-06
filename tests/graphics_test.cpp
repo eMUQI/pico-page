@@ -120,6 +120,11 @@ int main(int argc, char** argv) {
                 assert(text[line.end - 1] != U'“');
             }
             std::size_t next = cursor;
+            const auto counted = layout_page(font, text, page.start, spec, false);
+            assert(counted.error == page.error && counted.start == page.start && counted.end == page.end);
+            assert(counted.glyphs.empty() && counted.lines.empty());
+            const auto cancelled = layout_page(font, text, page.start, spec, false, [] { return true; });
+            assert(cancelled.error == "Layout cancelled" && cancelled.end == cancelled.start);
             for (const auto& glyph : page.glyphs) {
                 while (next < page.end && (text[next] == U'\n' || text[next] == U'\r')) ++next;
                 assert(glyph.index == next && glyph.scalar == text[next]);

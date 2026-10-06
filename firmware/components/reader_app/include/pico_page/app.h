@@ -67,10 +67,13 @@ struct AppInput {
 /** Owns document, UI, display transactions and reading session on one task. */
 class ReaderApp {
   public:
-    explicit ReaderApp(std::string card_root, std::string writer_id = "pico-page-host");
+    explicit ReaderApp(std::string card_root, std::string writer_id = "pico-page-host",
+                       bool controlled_storage = false);
     ~ReaderApp();
     ReaderApp(const ReaderApp &) = delete;
     ReaderApp &operator=(const ReaderApp &) = delete;
+    /** Drops all verified identities before storage can change outside this application. */
+    void invalidate_identity_cache();
     bool initialize();
     bool open_book(const std::string &relative_path);
     /** Updates the latest battery reading for the next render; nullopt means unknown. */

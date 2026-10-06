@@ -284,7 +284,7 @@ bool break_after(char32_t previous, char32_t next) {
 }
 }  // namespace
 
-Page layout_page(Font& font, std::u32string_view text, std::size_t start, const LayoutSpec& spec) {
+Page layout_page(Font& font, std::u32string_view text, std::size_t start, const LayoutSpec& spec, bool collect, const std::function<bool()>& stop) {
     Page page;
     page.start = page.end = start;
     page.font_px = spec.font_px;
@@ -302,6 +302,7 @@ Page layout_page(Font& font, std::u32string_view text, std::size_t start, const 
     std::size_t cursor = start;
     int top = spec.top;
     while (cursor < text.size() && top + spec.line_height <= spec.top + spec.height) {
+        if (stop && stop()) { page.error = "Layout cancelled"; page.lines.clear(); page.glyphs.clear(); return page; }
         const auto line_start = cursor;
         const bool paragraph_start = cursor == 0 || text[cursor - 1] == U'\n' || text[cursor - 1] == U'\r';
         const bool source_indented = text[cursor] == U'\u3000' || text[cursor] == U'\t';
@@ -311,6 +312,7 @@ Page layout_page(Font& font, std::u32string_view text, std::size_t start, const 
         std::size_t last_break = cursor;
         bool newline = false;
         while (end < text.size()) {
+            if ((end - cursor) % 64 == 0 && stop && stop()) { page.error = "Layout cancelled"; break; }
             if (text[end] == U'\n' || text[end] == U'\r') {
                 ++end;
                 if (text[end - 1] == U'\r' && end < text.size() && text[end] == U'\n') ++end;
@@ -334,12 +336,12 @@ Page layout_page(Font& font, std::u32string_view text, std::size_t start, const 
         }
         const int baseline = top + (spec.line_height - metrics.ascender - metrics.descender) / 2 + metrics.ascender;
         int x = spec.left + indent;
-        for (std::size_t i = cursor; i < end; ++i) {
+        for (std::size_t i = cursor; collect && i < end; ++i) {
             if (text[i] == U'\n' || text[i] == U'\r') continue;
             page.glyphs.push_back({text[i], i, x, baseline});
             x += font.advance(text[i]);
         }
-        page.lines.push_back({line_start, end, top, baseline, top + spec.line_height});
+        if (collect) page.lines.push_back({line_start, end, top, baseline, top + spec.line_height});
         cursor = end;
         top += spec.line_height + (newline ? spec.paragraph_gap : 0);
     }

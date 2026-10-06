@@ -158,6 +158,26 @@ bool epub_name(std::string name) {
 struct ReaderApp::Impl final : DisplayBackend {
     std::string root, writer, book_path, folder, message, last_book;
     FileStore store;
+    bool controlled_storage = false;
+    struct VerifiedFile { off_t size; time_t modified; ino_t inode; DocumentMetadata identity; };
+    std::map<std::string, VerifiedFile> identities;
+    bool open_document(const std::string& path, std::string& error) {
+        struct stat before{}, after{};
+        const auto full = root + "/" + path;
+        const bool stat_ok = stat(full.c_str(), &before) == 0;
+        const auto found = identities.find(path);
+        const bool reuse = controlled_storage && stat_ok && found != identities.end() &&
+            found->second.size == before.st_size && found->second.modified == before.st_mtime &&
+            found->second.inode == before.st_ino;
+        const bool opened = reuse ? document.open_verified(full, found->second.identity, error) : document.open(full, error);
+        if (!opened) { identities.erase(path); return false; }
+        if (controlled_storage && stat_ok && stat(full.c_str(), &after) == 0 &&
+            before.st_size == after.st_size && before.st_mtime == after.st_mtime && before.st_ino == after.st_ino) {
+            if (identities.size() >= 8 && found == identities.end()) identities.erase(identities.begin());
+            identities[path] = {after.st_size, after.st_mtime, after.st_ino, document.metadata()};
+        }
+        return true;
+    }
     graphics::Canvas canvas;
     graphics::Font ui, body;
     Display display{*this};
@@ -960,7 +980,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         save_pages();
         std::string detail;
-        if (!document.open(root + "/" + path, detail)) {
+        if (!open_document(path, detail)) {
             book_path.clear();
             session.open("", "", writer);
             error("无法打开 EPUB：" + detail);
@@ -1142,7 +1162,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     graphics::Page plan_page(std::size_t start, const graphics::LayoutSpec& spec) {
         return plan_page(chapter, start, spec);
     }
-    graphics::Page plan_page(const Chapter &source, std::size_t start, const graphics::LayoutSpec& spec) {
+    graphics::Page plan_page(const Chapter &source, std::size_t start, const graphics::LayoutSpec& spec,
+                             bool collect = true, const std::function<bool()>& stop = {}) {
         const StageTimer timer{"page_layout"};
         // Media ranges occupy one page; text layout must not consume their placeholders.
         start = readable_offset(source, start);
@@ -1157,7 +1178,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         for (const auto& image : source.images)
             if (image.begin > start && image.begin < image.end && image.end <= source.text.size())
                 end = std::min<std::size_t>(end, image.begin);
-        return graphics::layout_page(body, std::u32string_view(source.text).substr(0, end), start, spec);
+        return graphics::layout_page(body, std::u32string_view(source.text).substr(0, end), start, spec, collect, stop);
     }
     /**
      * Restarts page counting for the applied typography and adopts a matching cache entry.
@@ -1343,7 +1364,8 @@ struct ReaderApp::Impl final : DisplayBackend {
                 release_counting();
                 return;
             }
-            const auto planned = plan_page(source, start, spec);
+            const auto planned = plan_page(source, start, spec, false, stop);
+            if (planned.error == "Layout cancelled") return;
             if (!planned.error.empty() || planned.end <= planned.start) {
                 pages_failed = true;
                 release_counting();
@@ -1506,7 +1528,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         std::size_t start = 0;
         previous = 0;
         while (start < limit) {
-            const auto planned = plan_page(start, spec);
+            const auto planned = plan_page(chapter, start, spec, false);
             if (planned.start >= limit)
                 break;
             if (planned.end <= start || !planned.error.empty())
@@ -2159,6 +2181,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             links.clear(); clear_page_history(); link_return.reset(); confirmed_link_return.reset();
             last_recorded.clear();
         }
+        identities.clear();
         const auto result = store.manage_book(management_snapshot, delete_original, detail_metadata.book_id, content_revision);
         if (result != StoreStatus::Ok) {
             error(result == StoreStatus::ExternalChange ? "文件已被外部修改，操作未执行。请重新打开书籍详情。" :
@@ -3238,8 +3261,9 @@ void ReaderApp::Impl::save_refresh(const ReaderSettings &values) {
     overlay();
 }
 
-ReaderApp::ReaderApp(std::string root, std::string writer)
-    : impl_(std::make_unique<Impl>(std::move(root), std::move(writer))) {}
+ReaderApp::ReaderApp(std::string root, std::string writer, bool controlled_storage)
+    : impl_(std::make_unique<Impl>(std::move(root), std::move(writer))) { impl_->controlled_storage = controlled_storage; }
+void ReaderApp::invalidate_identity_cache() { impl_->identities.clear(); }
 ReaderApp::~ReaderApp() = default;
 bool ReaderApp::initialize() {
     return impl_->initialize();
@@ -3317,6 +3341,7 @@ UsbTransferAction ReaderApp::take_usb_transfer_action() {
     return std::exchange(impl_->usb_action, UsbTransferAction::None);
 }
 bool ReaderApp::prepare_usb_transfer() {
+    invalidate_identity_cache();
     if (impl_->usb_prepared || impl_->display.busy() || impl_->active_network ||
         !impl_->card_available || !impl_->persist()) return false;
     impl_->cancel_sync();
@@ -3383,6 +3408,7 @@ void ReaderApp::show_portal(const PortalStatus &status) {
     impl_->overlay(codes_appear);
 }
 bool ReaderApp::prepare_sleep() {
+    invalidate_identity_cache();
     if (impl_->usb_prepared || impl_->view == View::Portal) return false;
     if (impl_->display.busy() || impl_->active_network || !impl_->persist())
         return false;
@@ -3409,6 +3435,7 @@ void ReaderApp::wake() {
     }
 }
 void ReaderApp::card_removed() {
+    invalidate_identity_cache();
     impl_->clear_body_cache();
     impl_->clear_prefetch();
     impl_->release_counting();

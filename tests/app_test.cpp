@@ -878,6 +878,17 @@ int main(int argc, char** argv) {
         assert(error == kChapterCancelled && cached.text.empty());
     }
     {
+        ReaderApp app(card.string(), "exclusive-storage-test", true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/cover.epub"); driver.present();
+        const auto scans = identity_hash_count();
+        const auto saved = *app.saved_record();
+        opened(app, "Books/cover.epub"); driver.present();
+        assert(identity_hash_count() == scans && *app.saved_record() == saved);
+        app.invalidate_identity_cache();
+        opened(app, "Books/cover.epub"); driver.present();
+        assert(identity_hash_count() == scans + 1 && *app.saved_record() == saved);
+    }
+    {
         // Phone setup: both entry points only request a session, the page keeps K2 and ignores
         // every control but its own, and a closed session returns to the settings list.
         ReaderApp app(card.string()); Driver driver{app};
