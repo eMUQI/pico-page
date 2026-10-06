@@ -1,4 +1,4 @@
-# Pico Page configuration proposal v1. Reader support is not implemented yet.
+# Pico Page configuration v1. Shared by the device and host reader.
 # Paths under library.roots are relative to the mounted card root, not the host OS.
 schema_version = 1
 
@@ -7,16 +7,20 @@ roots = ["/Books", "/Articles"]
 view = "list"
 
 [reader]
-# This file is not supplied. Preserve this preference and fall back when missing.
+# Obtain the complete body font with tools/setup_fonts.py.
 # The font path is relative to the PicoPage directory on the card.
-font = "fonts/reader.ttf"
+font = "fonts/LXGWWenKai-Regular.ttf"
 font_size_px = 38
 line_height = 1.5
 margin_x_px = 36
 
 [display]
-# Proposed values: clear / balanced / fast. Hardware behavior needs validation.
+# Refresh presets: clear / balanced / fast. Physical behavior still requires device validation.
 refresh_preset = "balanced"
+
+[power]
+# Minutes without input before the device sleeps; 0 disables idle sleep. Range 0..240.
+auto_sleep_minutes = 10
 
 # No input-remapping configuration in the first version.
 # Reading K2 = ForceRefresh; panels keep their own close/cancel semantics.

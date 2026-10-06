@@ -1,0 +1,62 @@
+#pragma once
+
+#include "pico_page/document.h"
+#include "pico_page/record.h"
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace pico_page::sync {
+
+struct Config {
+    std::string endpoint;
+    std::string username;
+    std::string userkey;
+    std::string device_id;
+    int dom_version = 20260812;
+};
+
+/** Read only PicoPage/sync.toml. Diagnostics never contain credentials or source lines. */
+bool load_config(const std::string& card_root, Config& config, std::string& error);
+std::string account_scope(const Config& config);
+
+struct HttpRequest {
+    std::string method;
+    std::string url;
+    std::vector<std::pair<std::string, std::string>> headers;
+    std::string body;
+    std::string scope;
+    std::optional<ReadingRecord> uploaded_record;
+};
+
+bool get_request(const Config& config, const std::string& partial_md5,
+                 HttpRequest& request, std::string& error);
+/** Capture the saved record at send time; an ACK applies only to this record. */
+bool put_request(const Config& config, const std::string& partial_md5,
+                 const std::string& xpointer, double percentage, const ReadingRecord& saved_record,
+                 HttpRequest& request, std::string& error);
+
+enum class RemoteStatus { Found, NoRecord, Unauthorized, Error };
+struct RemoteResult {
+    RemoteStatus status = RemoteStatus::Error;
+    std::string progress;
+    double percentage = 0;
+    std::string device;
+    std::string device_id;
+    std::string error;
+};
+RemoteResult parse_remote(int http_status, const std::string& body);
+/** A 202 response is accepted for processing, but is not a confirmed write. */
+bool upload_confirmed(int http_status, std::string& error);
+
+/**
+ * Exact mapping for the verified plain XHTML profile and configured CREngine
+ * DOM version. Unsupported content returns false; percentage is never a locator.
+ */
+bool to_xpointer(const EpubDocument& document, const Chapter& chapter, const Anchor& anchor,
+                 int dom_version, std::string& xpointer, std::string& error);
+bool from_xpointer(EpubDocument& document, const std::string& xpointer, int dom_version,
+                   Anchor& anchor, std::string& error);
+
+}  // namespace pico_page::sync

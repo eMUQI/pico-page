@@ -1,0 +1,5 @@
+# Local build profile. This is not a verified layout for an existing device.
+# Name,Type,SubType,Offset,Size,Flags
+nvs,data,nvs,,24K,
+phy_init,data,phy,,4K,
+factory,app,factory,,3M,

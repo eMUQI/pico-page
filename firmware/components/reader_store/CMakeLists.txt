@@ -1,0 +1,13 @@
+set(store_sources store.cpp config.cpp third_party/tomlc17/tomlc17.c third_party/cjson/cJSON.c)
+if(ESP_PLATFORM)
+    idf_component_register(SRCS ${store_sources} INCLUDE_DIRS include
+        PRIV_INCLUDE_DIRS third_party/tomlc17 third_party/cjson REQUIRES reader_core PRIV_REQUIRES esp_rom)
+    target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_17 PRIVATE c_std_17)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE CJSON_NESTING_LIMIT=16)
+else()
+    add_library(reader_store ${store_sources})
+    target_include_directories(reader_store PUBLIC include PRIVATE third_party/tomlc17 third_party/cjson)
+    target_link_libraries(reader_store PUBLIC reader_core)
+    target_compile_features(reader_store PUBLIC cxx_std_17 PRIVATE c_std_17)
+    target_compile_definitions(reader_store PRIVATE CJSON_NESTING_LIMIT=16)
+endif()

@@ -1,0 +1,44 @@
+[
+  {
+    "path": "pngle/pngle.c",
+    "commit": "b1c68193f1d3f8642b3e0e095d457a828038e6fb",
+    "upstream_sha256": "cfd047df6464ac299ecd47aeb13fecfb55f1d841da56dc57085248ef43655049",
+    "local_sha256": "0ac2bf2de0139a6980e34af20b8a26f69c01e846dcbf52421728be0a1f1d3455",
+    "modified": true
+  },
+  {
+    "path": "pngle/pngle.h",
+    "commit": "b1c68193f1d3f8642b3e0e095d457a828038e6fb",
+    "upstream_sha256": "d8aa264f80cdd884c02ca1e28b696e8bbfbc16074c9c5265fcec4463f563bb17",
+    "local_sha256": "d8aa264f80cdd884c02ca1e28b696e8bbfbc16074c9c5265fcec4463f563bb17",
+    "modified": false
+  },
+  {
+    "path": "pngle/LICENSE",
+    "commit": "b1c68193f1d3f8642b3e0e095d457a828038e6fb",
+    "upstream_sha256": "f965b67dece0b41367e5b66ba8b6787a93381e61d81121dbb5d87f6b2f330b39",
+    "local_sha256": "f965b67dece0b41367e5b66ba8b6787a93381e61d81121dbb5d87f6b2f330b39",
+    "modified": false
+  },
+  {
+    "path": "tjpgd/tjpgd.c",
+    "commit": "28cde682a4468a581c278761922724f57d976418",
+    "upstream_sha256": "789f62d6c5e7ddc1e09599a67c3686d840a2b27e44c4a33317d59d93b279ce1a",
+    "local_sha256": "789f62d6c5e7ddc1e09599a67c3686d840a2b27e44c4a33317d59d93b279ce1a",
+    "modified": false
+  },
+  {
+    "path": "tjpgd/tjpgd.h",
+    "commit": "28cde682a4468a581c278761922724f57d976418",
+    "upstream_sha256": "3b242db7108427fd64792bb9fa139a59404787385bb94fb1e569695ba84a8b81",
+    "local_sha256": "3b242db7108427fd64792bb9fa139a59404787385bb94fb1e569695ba84a8b81",
+    "modified": false
+  },
+  {
+    "path": "tjpgd/Apache-2.0.txt",
+    "commit": "28cde682a4468a581c278761922724f57d976418",
+    "upstream_sha256": "c2ede378097fb1fcdcd128c47880c918663f475eba53e1e2dc59d95b537c8809",
+    "local_sha256": "c2ede378097fb1fcdcd128c47880c918663f475eba53e1e2dc59d95b537c8809",
+    "modified": false
+  }
+]

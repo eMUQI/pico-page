@@ -1,6 +1,7 @@
 # 配置示例
 
-这些 TOML 是当前格式提案，可用 Python tomllib 检查语法，不表示固件已经支持这些字段。
+全局和本书 `settings.toml` 已由共享 `reader_store` 读取、校验并合成；界面和正文渲染尚未接入。
+`integrations.toml` 仍为后续网络配置提案，当前没有服务连接实现。格式冻结仍需后续验收。
 `sdcard/PicoPage` 表示复制到 TF 卡根目录下的产品配置。
 `sidecar/settings.toml` 表示某本 `<完整文件名>.picopage/` 内的局部覆盖。
 目录名称已经统一到 Pico Page；不自动覆盖用户现有卡或迁移旧 ReadPico 数据。

@@ -21,3 +21,7 @@ artifacts/
 *.flash-backup.bin
 # Test fixtures should be synthetic/licensed; do not globally ignore all EPUB or BIN.
 # Do not ignore dependencies.lock or third-party source/license records by default.
+
+# Per-device network and synchronization credentials
+**/network.toml
+**/sync.toml

@@ -1,0 +1,11 @@
+menu "Pico Page diagnostics"
+config PICO_PAGE_DIAGNOSTIC_CONSOLE
+    bool "Enable local USB diagnostic commands"
+    depends on ESP_CONSOLE_USB_SERIAL_JTAG
+    default n
+    help
+        Enables bounded status, directory listing, input injection, verified
+        resource import and current framebuffer export over the local USB Serial JTAG console. Commands
+        run on the application task and use the normal reader APIs. This is
+        an unauthenticated development interface; disable it for normal builds.
+endmenu

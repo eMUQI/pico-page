@@ -3,6 +3,7 @@
 from __future__ import annotations
 import hashlib
 import json
+import os
 import re
 import struct
 import sys
@@ -15,6 +16,15 @@ if sys.version_info < (3, 11):
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def project_files():
+    """Exclude downloaded dependencies, private data and generated build products."""
+    excluded = {'build', 'third_party', 'managed_components', 'local', 'private', 'artifacts', '__pycache__'}
+    for directory, dirs, files in os.walk(ROOT):
+        dirs[:] = [name for name in dirs if not name.startswith('.') and name not in excluded]
+        for name in files:
+            yield Path(directory) / name
 
 
 def local_path(relative: str) -> Path:
@@ -84,7 +94,9 @@ def main() -> int:
     check(integration.get('credential_ref') == '', 'Example must not contain a configured credential reference')
 
     # Current specs may evolve. Only original/archived documents have immutable hashes.
-    for p in ROOT.rglob('*.md'):
+    for p in project_files():
+        if p.suffix != '.md':
+            continue
         rel = p.relative_to(ROOT).as_posix()
         if rel.startswith('docs/design/original/'):
             continue
@@ -102,10 +114,11 @@ def main() -> int:
     check('正文页 K2 = ForceRefresh' in agents, 'Missing reading K2 full-refresh rule')
     check('NVS 不保存隐藏的权威阅读配置/进度' in agents, 'Missing file-first storage rule')
     check(len(agents.encode('utf-8')) < 16000, 'Root AGENTS is too long for this handoff')
-    # Check this initial delivery only, not the licensing of future project assets.
     font_ext = {'.ttf', '.otf', '.ttc', '.otc', '.woff', '.woff2', '.dfont'}
-    check(not any(p.is_file() and p.suffix.lower() in font_ext for p in ROOT.rglob('*')),
-          'A font file is present in the handoff package')
+    licensed_fallback = ROOT / 'firmware/components/reader_graphics/fonts/PicoPageFallback.otf'
+    check(all(p == licensed_fallback for p in project_files() if p.suffix.lower() in font_ext),
+          'Unexpected font file outside the reviewed embedded UI subset')
+    check((licensed_fallback.parent / 'Noto-OFL.txt').is_file(), 'Missing embedded font license')
 
     if errors:
         print(f'FAIL: {len(errors)} failures across {checks} checks.', file=sys.stderr)

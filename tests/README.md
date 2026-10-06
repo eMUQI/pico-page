@@ -1,8 +1,12 @@
-# Test workspace (planned)
+# 验证入口
 
-G1a 创建 unit/integration/fixtures；后续添加 golden/hardware。
-测试 ID 与门槛见 `../docs/acceptance.md`。当前没有固件测试结果。
-用自行生成的 EPUB 验证中文、内联标签、空白、脚注、长章节、同名不同内容、缺损资源。
-私有真实书籍放到未跟踪的 `local/`，只提交可再分发的最小复现。
-实际 KOReader 输出作为位置兼容对照；不要由待测转换函数自己生成唯一预期结果。
-本交接包不提供字体；项目自行取得字体时另行核对许可。不得提交凭据、全片备份或未经处理的个人阅读记录。
+按 `docs/environment.md` 准备固定字体/依赖，构建根目录 CMake 后运行 CTest。
+当前九个入口：core、store、store_sync、reader_flow、epub_probe、graphics、document、app、sync。
+
+主要覆盖：呈现/保存事务、旧代次拒绝、持久化失败重试、配置外部编辑、真实 EPUB 源位置、
+分页无半行、K2 全刷不改进度、应用层缺字库/读档/显示失败、排版取消/应用、网络取消与旧回包、
+账户变化后禁止采用旧候选，以及协议字段与受限 XPointer 映射。
+
+测试 EPUB 均由脚本生成；不提交个人书籍。`app_test` 使用 setup_fonts 下载的完整文楷字体。
+`tools/check_koreader_mapping.py` 是独立的真实 CREngine 兼容性对照，不是模拟期望值。
+墨水屏、TF 掉电、网络真实账户与双向接续仍需按 `docs/acceptance.md` 验收。

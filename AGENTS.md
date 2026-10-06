@@ -56,11 +56,12 @@ K2 手动全刷必须绕过“像素没变就不刷”的优化；不改变锚�
 
 ## 验证与交接
 
-当前可运行：`python3 tools/check_handoff.py`（Python 3.11+；仅检查交接包）。
-固件和 host 构建命令目前尚未建立；不要假报 `idf.py build` 或硬件测试通过。
-G0 建立后把实际命令写入 `docs/environment.md`。
+交接检查：`python3 tools/check_handoff.py`（Python 3.11+；仅检查交接包）。
+host：根目录 CMake 构建后运行 CTest；固件：`sh tools/build_firmware.sh`。
+具体环境、命令和实际结果见 `docs/environment.md`；编译通过不等于硬件测试通过。
 每批完成后更新 `docs/development-status.md`：变更、实际命令与结果、未测项、下一步。
-开始 G0 和 G1a，不只产出另一份计划；遇到硬件/网络阻塞不要用成功占位顶替。
+当前已进入可运行初版集成，继续按实际开发状态推进；不要退回只产出计划。
+遇到硬件/网络阻塞不得用成功占位顶替；桌面运行与引擎对照不等于真机双向接续。
 
 ## Code Comment Policy
 

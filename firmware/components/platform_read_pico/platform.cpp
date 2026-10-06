@@ -1,0 +1,480 @@
+/*
+ * SPDX-FileCopyrightText: 2026 mindreset
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Adapted from Read Pico board bring-up, display, sleep and touch-key mapping
+ * at 28cde682a4468a581c278761922724f57d976418. Pico Page changes enforce factory
+ * VCOM before panel power-on and expose a single-task application interface.
+ */
+
+#include "pico_page/platform.h"
+
+#include <algorithm>
+#include <cstring>
+
+#include "cst836u.h"
+#include "driver/gpio.h"
+#include "e0470_epaper_waveform.h"
+#include "epd_highlevel.h"
+#include "epdiy.h"
+#include "esp_log.h"
+#include "esp_pm.h"
+#include "esp_sleep.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "read_pico_board.h"
+#include "read_pico_epd_timing.h"
+#include "read_pico_pmu.h"
+#include "read_pico_sd.h"
+#include "sc7a20h.h"
+
+namespace pico_page::platform {
+namespace {
+constexpr char tag[] = "pico_platform";
+constexpr int key_area_top = 1300;
+constexpr int key_pitch = 160;
+constexpr std::int64_t rails_idle_us = 8'000'000;
+TaskHandle_t owner = nullptr;
+bool attempted = false;
+bool ready = false;
+bool display_ready = false;
+bool baseline_valid = false;
+bool mounted = false;
+bool suppress_touch = true;
+bool suppress_power = false;
+int panel_vcom = 0;
+std::int64_t rails_deadline = 0;
+std::int64_t last_pmu_poll = 0;
+std::int64_t last_card_poll = 0;
+std::int64_t power_ignore_until = 0;
+std::uint64_t sequence = 0;
+EpdiyHighlevelState display{};
+cst836u_handle_t touch = nullptr;
+sc7a20h_handle_t accelerometer = nullptr;
+Event active{};
+Event pending{};
+Battery battery_state{};
+std::string mount_error;
+esp_pm_lock_handle_t performance_lock = nullptr;
+bool performance_high = false;
+PageWaveform page_waveform = PageWaveform::Gray16;
+PresentTiming timing{};
+
+bool failure(std::string& error, const char* operation, esp_err_t result) {
+    error = std::string(operation) + ": " + esp_err_to_name(result);
+    ESP_LOGE(tag, "%s", error.c_str());
+    return false;
+}
+
+bool on_owner(std::string& error) {
+    if (owner == nullptr || owner != xTaskGetCurrentTaskHandle()) {
+        error = "Read Pico hardware must be used by its application task";
+        return false;
+    }
+    return true;
+}
+
+void copy_portrait(const std::uint8_t* packed) {
+    constexpr int source_stride = width / 2;
+    constexpr int native_stride = height / 2;
+    // Both frames exceed the 64 KiB data cache. A band of columns reads each source
+    // line once and keeps its destination rows cached while y advances.
+    constexpr int band = 64;
+    for (int first = 0; first < width; first += band) {
+        const int last = std::min(first + band, width);
+        for (int y = 0; y < height; y += 2) {
+            const auto* low_row = packed + y * source_stride;
+            const auto* high_row = low_row + source_stride;
+            for (int x = first; x < last; ++x) {
+                const int shift = (x & 1) * 4;
+                const auto low = (low_row[x / 2] >> shift) & 15;
+                const auto high = (high_row[x / 2] >> shift) & 15;
+                display.front_fb[(width - 1 - x) * native_stride + y / 2] =
+                    static_cast<std::uint8_t>(low | (high << 4));
+            }
+        }
+    }
+}
+
+void observe_card() {
+    read_pico_sd_info_t info{};
+    const auto result = read_pico_sd_get_info(&info);
+    mounted = result == ESP_OK && info.mounted;
+    mount_error = mounted ? "" : !info.present ? "TF card not inserted" :
+        std::string("TF card unavailable: ") + esp_err_to_name(result);
+}
+
+bool await_mount(std::string& error) {
+    const auto deadline = esp_timer_get_time() + 5'000'000;
+    read_pico_sd_info_t info{};
+    while (read_pico_sd_get_info(&info) == ESP_ERR_NOT_FINISHED &&
+           esp_timer_get_time() < deadline) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    observe_card();
+    error = mount_error;
+    return mounted;
+}
+
+bool pmu_events(bool& short_press, bool& wake_press, std::string& error) {
+    short_press = false;
+    wake_press = false;
+    for (int i = 0; i <= PMU_EVENT_FIFO_DEPTH; ++i) {
+        const auto result = read_pico_pmu_poll();
+        const auto* snapshot = read_pico_pmu_get();
+        if (result != ESP_OK || !snapshot->identity_ok || !snapshot->status_ok) {
+            battery_state.valid = false;
+            return failure(error, "PMU status", result != ESP_OK ? result : ESP_ERR_INVALID_RESPONSE);
+        }
+        battery_state.valid = (snapshot->flags & PMU_STATUS_BATTERY_VALID) && snapshot->soc_permille <= 1000;
+        battery_state.percent = snapshot->soc_permille / 10;
+        battery_state.millivolts = snapshot->battery_mv;
+        battery_state.charging = snapshot->charge_state == PMU_CHARGE_CHARGING;
+        if (!snapshot->pending_events) return true;
+        if (!snapshot->event_ok || snapshot->event.event_id == 0) {
+            return failure(error, "PMU event", ESP_ERR_INVALID_RESPONSE);
+        }
+        if (i == PMU_EVENT_FIFO_DEPTH) {
+            return failure(error, "PMU event queue did not drain", ESP_ERR_TIMEOUT);
+        }
+        const auto type = snapshot->event.type;
+        const auto ack = read_pico_pmu_event_ack(snapshot->event.event_id);
+        if (ack != ESP_OK) return failure(error, "PMU event acknowledgement", ack);
+        short_press = short_press || type == PMU_EVT_KEY_SHORT;
+        wake_press = wake_press || type == PMU_EVT_KEY_DOWN || type == PMU_EVT_KEY_SHORT;
+    }
+    return true;
+}
+
+EventKind hit_test(int x, int y) {
+    if (y >= key_area_top && x >= 0 && x < 3 * key_pitch) {
+        constexpr EventKind keys[] = {EventKind::K1, EventKind::K2, EventKind::K3};
+        return keys[x / key_pitch];
+    }
+    return x >= 0 && x < width && y >= 0 && y < height ? EventKind::Touch : EventKind::None;
+}
+
+void cancel_touch(Event& event) {
+    if (active.kind != EventKind::None) {
+        event = active;
+        event.phase = EventPhase::Cancel;
+        active = {};
+    }
+    suppress_touch = true;
+}
+
+void system_event(EventKind kind, Event& event) {
+    const Event next{kind, EventPhase::Begin, ++sequence};
+    if (active.kind != EventKind::None) {
+        cancel_touch(event);
+        pending = next;
+    } else {
+        suppress_touch = true;
+        event = next;
+    }
+}
+
+bool panel_status(sy7636a_status_t& status, std::string& error) {
+    if (!read_pico_rails_on()) return failure(error, "Panel power", ESP_ERR_INVALID_STATE);
+    const auto result = sy7636a_read(read_pico_sy7636a(), &status);
+    if (result != ESP_OK) return failure(error, "Panel power status", result);
+    if (!status.pg || status.fault != SY7636A_FAULT_NONE || !status.on || status.vcom_mv != panel_vcom) {
+        return failure(error, "Panel power-good/fault", ESP_ERR_INVALID_STATE);
+    }
+    return true;
+}
+} // namespace
+
+void set_performance(bool high) {
+    if (!performance_lock || high == performance_high) return;
+    const auto result = high ? esp_pm_lock_acquire(performance_lock) : esp_pm_lock_release(performance_lock);
+    if (result == ESP_OK) performance_high = high;
+}
+
+bool initialize(std::string& error) {
+    error.clear();
+    if (attempted) {
+        if (!on_owner(error)) return false;
+        if (!ready) error = "Read Pico initialization failed; restart after correcting the reported hardware error";
+        return ready;
+    }
+    attempted = true;
+    owner = xTaskGetCurrentTaskHandle();
+
+    // 80 MHz keeps the PLL and the 80 MHz APB clock, so peripheral timing is unchanged.
+    // Without a lock the CPU would also render at the idle frequency; scaling is
+    // therefore enabled only together with the lock.
+    esp_pm_config_t power{240, 80, false};
+    if (esp_pm_configure(&power) == ESP_OK) {
+        if (esp_pm_lock_create(ESP_PM_CPU_FREQ_MAX, 0, "pico_active", &performance_lock) == ESP_OK) {
+            set_performance(true);
+        } else {
+            power.min_freq_mhz = power.max_freq_mhz;
+            esp_pm_configure(&power);
+        }
+    }
+
+    // Board initialization keeps SY_EN and VCOM_EN low. Its default VCOM is
+    // only a driver RAM value until the first panel power-on.
+    epd_init(&epd_board_read_pico, &E0470_DISPLAY, EPD_LUT_1K);
+    epd_set_rotation(EPD_ROT_INVERTED_PORTRAIT);
+    if (epd_width() != height || epd_height() != width) {
+        error = "Unexpected Read Pico panel geometry";
+        return false;
+    }
+    read_pico_pmu_config_t pmu = READ_PICO_PMU_CONFIG_DEFAULT();
+    auto result = read_pico_pmu_init(read_pico_i2c_bus(), &pmu);
+    if (result != ESP_OK) return failure(error, "PMU initialization; panel remains off", result);
+    int factory_vcom = 0;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        result = read_pico_pmu_vcom_get(&factory_vcom);
+        if (result == ESP_OK) break;
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    if (result != ESP_OK) return failure(error, "Factory VCOM unavailable; panel remains off", result);
+    result = sy7636a_set_vcom(read_pico_sy7636a(), factory_vcom);
+    if (result != ESP_OK) return failure(error, "Apply factory panel VCOM", result);
+    panel_vcom = factory_vcom;
+
+    read_pico_epd_set_pclk(18);
+    read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FULL);
+    e0470_waveform_init();
+    display = epd_hl_init(&E0470_WAVEFORM);
+    display_ready = true;
+    esp_log_level_set("epdiy", ESP_LOG_WARN);
+
+    sc7a20h_config_t sensor = SC7A20H_DEVICE_CONFIG_DEFAULT();
+    result = sc7a20h_init(read_pico_i2c_bus(), &sensor, &accelerometer);
+    if (result == ESP_OK) result = sc7a20h_power_down(accelerometer);
+    if (result != ESP_OK) ESP_LOGW(tag, "Accelerometer standby: %s", esp_err_to_name(result));
+
+    cst836u_config_t input = CST836U_CONFIG_DEFAULT();
+    input.int_gpio = static_cast<gpio_num_t>(READ_PICO_TP_INT_GPIO);
+    input.reset_fn = read_pico_touch_reset;
+    result = cst836u_init(read_pico_i2c_bus(), &input, &touch);
+    if (result != ESP_OK) return failure(error, "Touch/key initialization", result);
+    bool unused_short = false;
+    bool unused_wake = false;
+    if (!pmu_events(unused_short, unused_wake, error)) return false;
+
+    result = read_pico_sd_start_probe();
+    if (result == ESP_OK || result == ESP_ERR_NOT_FINISHED) {
+        std::string card_message;
+        await_mount(card_message);
+    } else {
+        observe_card();
+    }
+    ready = true;
+    ESP_LOGI(tag, "Read Pico initialized; factory VCOM loaded; card %s", mounted ? "mounted" : "unavailable");
+    return true;
+}
+
+bool panel_ready() { return display_ready; }
+void set_page_waveform(PageWaveform waveform) { page_waveform = waveform; }
+PresentTiming present_timing() { return timing; }
+const char* card_root() { return mounted ? "/sdcard" : nullptr; }
+const std::string& card_error() { return mount_error; }
+Battery battery() { return battery_state; }
+
+bool refresh_card(std::string& error) {
+    error.clear();
+    if (!on_owner(error) || !ready) return false;
+    mounted = false;
+    const auto result = read_pico_sd_remount();
+    if (result != ESP_OK && result != ESP_ERR_NOT_FINISHED) {
+        observe_card();
+        error = mount_error;
+        return false;
+    }
+    return await_mount(error);
+}
+
+bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
+             std::string& error) {
+    error.clear();
+    if (!on_owner(error)) return false;
+    if (!display_ready || packed == nullptr || size != framebuffer_bytes) {
+        return failure(error, "Panel frame", ESP_ERR_INVALID_ARG);
+    }
+    set_performance(true);
+    const auto started = esp_timer_get_time();
+    copy_portrait(packed);
+    const auto copied = esp_timer_get_time();
+    read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FULL);
+    epd_lcd_set_prefill_lines(32);
+    epd_poweron();
+    sy7636a_status_t status{};
+    const bool powered = panel_status(status, error);
+    const auto drawing = esp_timer_get_time();
+    timing = {copied - started, drawing - copied, 0};
+    if (!powered) {
+        baseline_valid = false;
+        epd_poweroff();
+        rails_deadline = 0;
+        return false;
+    }
+    const bool clear = full_clean || !baseline_valid;
+    baseline_valid = false;
+    epd_set_leading_skip(!clear);
+    EpdDrawError draw_result;
+    if (clear) {
+        // Physical black/white pulses establish a new baseline independently
+        // of the previous frame, including when all target pixels are equal.
+        epd_clear();
+        draw_result = epd_hl_update_screen_from_white(&display, MODE_GC16, status.temperature_c);
+    } else if (page_waveform == PageWaveform::Gray8) {
+        epd_hl_waveform(&display, &E0470_GRAY8_WAVEFORM);
+        draw_result = epd_hl_update_screen_full(&display, MODE_GL16, status.temperature_c);
+        epd_hl_waveform(&display, &E0470_WAVEFORM);
+    } else {
+        draw_result = epd_hl_update_screen_full(&display, MODE_GL16, status.temperature_c);
+    }
+    timing.draw_us = esp_timer_get_time() - drawing;
+    const bool power_good = panel_status(status, error);
+    if (draw_result != EPD_DRAW_SUCCESS || !power_good) {
+        if (draw_result != EPD_DRAW_SUCCESS) {
+            error = "Panel waveform failed: " + std::to_string(static_cast<unsigned>(draw_result));
+        }
+        if (draw_result & EPD_DRAW_EMPTY_LINE_QUEUE) read_pico_epd_set_pclk(12);
+        epd_poweroff();
+        rails_deadline = 0;
+        return false;
+    }
+    baseline_valid = true;
+    rails_deadline = esp_timer_get_time() + rails_idle_us;
+    return true;
+}
+
+bool poll(Event& event, std::string& error) {
+    event = {};
+    error.clear();
+    if (!on_owner(error) || !ready) return false;
+    if (pending.kind != EventKind::None) {
+        event = pending;
+        pending = {};
+        return true;
+    }
+    const auto now = esp_timer_get_time();
+    if (rails_deadline && now >= rails_deadline) {
+        epd_poweroff();
+        rails_deadline = 0;
+    }
+    if (now - last_card_poll >= 500'000) {
+        last_card_poll = now;
+        const bool was_mounted = mounted;
+        observe_card();
+        if (was_mounted && !mounted) {
+            system_event(EventKind::SdRemoved, event);
+            return true;
+        }
+    }
+    if (now - last_pmu_poll >= 200'000) {
+        last_pmu_poll = now;
+        bool short_press = false;
+        bool wake_press = false;
+        if (!pmu_events(short_press, wake_press, error)) {
+            cancel_touch(event);
+            return false;
+        }
+        if (suppress_power) {
+            if (!(read_pico_pmu_get()->key_state & 1) && now >= power_ignore_until) suppress_power = false;
+        } else if (short_press) {
+            system_event(EventKind::Power, event);
+            return true;
+        }
+    }
+    cst836u_touch_t sample{};
+    const auto result = cst836u_read(touch, &sample);
+    if (result != ESP_OK) {
+        cancel_touch(event);
+        return failure(error, "Touch/key read", result);
+    }
+    if (suppress_touch) {
+        if (!sample.touched) suppress_touch = false;
+        return true;
+    }
+    if (sample.count > 1) {
+        cancel_touch(event);
+        return true;
+    }
+    if (sample.touched) {
+        if (active.kind == EventKind::None) {
+            const auto kind = hit_test(sample.x, sample.y);
+            if (kind == EventKind::None) {
+                suppress_touch = true;
+                return true;
+            }
+            active = {kind, EventPhase::Begin, ++sequence, sample.x, sample.y};
+            event = active;
+        } else if (hit_test(sample.x, sample.y) != active.kind) {
+            cancel_touch(event);
+        } else {
+            active.x = sample.x;
+            active.y = sample.y;
+        }
+    } else if (active.kind != EventKind::None) {
+        event = active;
+        event.phase = EventPhase::End;
+        active = {};
+    }
+    return true;
+}
+
+bool sleep(std::string& error) {
+    error.clear();
+    if (!on_owner(error) || !ready) return false;
+    active = {};
+    suppress_touch = true;
+    epd_poweroff();
+    rails_deadline = 0;
+    auto result = cst836u_set_mode(touch, CST836U_MODE_DEEPSLEEP);
+    if (result != ESP_OK) return failure(error, "Touch standby", result);
+
+    const auto irq = static_cast<gpio_num_t>(READ_PICO_IOE_INT_GPIO);
+    gpio_config_t config{};
+    config.pin_bit_mask = 1ULL << READ_PICO_IOE_INT_GPIO;
+    config.mode = GPIO_MODE_INPUT;
+    config.pull_up_en = GPIO_PULLUP_ENABLE;
+    result = gpio_config(&config);
+    bool slept = false;
+    const auto idle_deadline = esp_timer_get_time() + 2'000'000;
+    while (result == ESP_OK && esp_timer_get_time() < idle_deadline) {
+        bool short_press = false;
+        bool wake_press = false;
+        if (!pmu_events(short_press, wake_press, error)) break;
+        read_pico_clear_ioe_int();
+        if (!(read_pico_pmu_get()->key_state & 1) && gpio_get_level(irq)) {
+            result = gpio_wakeup_enable(irq, GPIO_INTR_LOW_LEVEL);
+            if (result == ESP_OK) result = esp_sleep_enable_gpio_wakeup();
+            if (result != ESP_OK) break;
+            while (result == ESP_OK) {
+                result = esp_light_sleep_start();
+                if (result != ESP_OK) break;
+                read_pico_clear_ioe_int();
+                if (!pmu_events(short_press, wake_press, error)) break;
+                if (wake_press) {
+                    slept = true;
+                    break;
+                }
+                if (!gpio_get_level(irq)) {
+                    error = "Wake interrupt remains asserted without a power-key event";
+                    break;
+                }
+            }
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    gpio_wakeup_disable(irq);
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
+    const auto touch_result = cst836u_wake(touch);
+    suppress_power = true;
+    power_ignore_until = esp_timer_get_time() + 300'000;
+    if (touch_result != ESP_OK) return failure(error, "Touch resume", touch_result);
+    if (result != ESP_OK) return failure(error, "Light sleep", result);
+    if (!slept && error.empty()) error = "Power key or wake interrupt did not become idle";
+    return slept;
+}
+
+} // namespace pico_page::platform
