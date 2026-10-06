@@ -13,7 +13,7 @@ inline constexpr int width = 684;
 inline constexpr int height = 1216;
 inline constexpr std::size_t framebuffer_bytes = width * height / 2;
 
-enum class EventKind { None, K1, K2, K3, Touch, Power, SdRemoved };
+enum class EventKind { None, K1, K2, K3, Touch, Power, SdRemoved, InputReset };
 enum class EventPhase { Begin, End, Cancel };
 
 struct Event {
@@ -69,6 +69,7 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
 /**
  * Polls one event; EventKind::None means no new event. Touch coordinates use
  * portrait pixels; K1/K2/K3 retain their controller coordinates below the panel.
+ * InputReset cancels all prior contacts after queue overflow; input resumes after release.
  * A held input never repeats. Read failures cancel an active touch sequence.
  * A sampler task records touch and key events every 5 ms, including while the
  * application task is blocked; they are returned here in order with their sample time.

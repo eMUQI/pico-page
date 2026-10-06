@@ -186,12 +186,22 @@ void sample_touch(void*) {
     bool failing = false;
     bool interrupt_seen = false;
     int fast = settle_samples;
+    std::uint32_t overflows = 0;
     const auto emit = [&](EventPhase phase, std::int64_t now) {
         Event event = active;
         event.phase = phase;
         event.time_us = now;
-        // A full queue means the application stopped draining; later contacts are dropped.
-        xQueueSend(touch_events, &event, 0);
+        if (xQueueSend(touch_events, &event, 0) == pdTRUE) return;
+        // Discard the incomplete backlog before publishing the recovery boundary. This task
+        // is the only producer; the consumer can only free space after the reset.
+        xQueueReset(touch_events);
+        const Event reset{EventKind::InputReset, EventPhase::Cancel, event.sequence, 0, 0, now};
+        const auto sent = xQueueSend(touch_events, &reset, 0);
+        configASSERT(sent == pdTRUE);
+        active = {};
+        suppressed = true;
+        ESP_LOGW(tag, "Input queue overflow: count=%lu; contacts cancelled",
+                 static_cast<unsigned long>(++overflows));
     };
     const auto cancel = [&](std::int64_t now) {
         if (active.kind != EventKind::None) emit(EventPhase::Cancel, now);

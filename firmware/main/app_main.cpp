@@ -20,7 +20,7 @@
 namespace {
 constexpr auto tag = "pico_page";
 constexpr std::int64_t idle_slow_us = 3'000'000;
-// A progress commit blocks input sampling for its duration, so it waits until the page has
+// A progress commit blocks action dispatch for its duration, so it waits until the page has
 // been left alone this long. Leaving the book, sleeping and USB transfer commit immediately.
 constexpr std::int64_t idle_save_us = 2'000'000;
 // Whole-book page counting shares the application task with input handling and starts only
@@ -428,7 +428,11 @@ extern "C" void app_main() {
             last_activity = esp_timer_get_time();
             pico_page::platform::set_performance(true);
         }
-        if (event.kind == EventKind::SdRemoved) {
+        if (event.kind == EventKind::InputReset) {
+            released_tap.accept(event, presentation_sequence);
+            physical_source = physical_sequence = 0;
+            physical_suppressed = false;
+        } else if (event.kind == EventKind::SdRemoved) {
             app->card_removed();
             present(*app);
         } else if (event.kind == EventKind::Power) {

@@ -1,3 +1,4 @@
+#include "pico_page/stage_timer.h"
 #include "pico_page/graphics.h"
 #include "pngle.h"
 #include "tjpgd.h"
@@ -163,6 +164,7 @@ bool jpeg(const std::vector<std::uint8_t>& input, int width, int height, Raster&
 
 bool render_image(Canvas& canvas, const std::vector<std::uint8_t>& encoded,
                   int x, int y, int width, int height, std::string& error, bool crop) {
+    const StageTimer timer{"image_decode_draw"};
     error.clear();
     if (x < 0 || y < 0 || width <= 0 || height <= 0 || width > canvas.width() || height > canvas.height() ||
         x > canvas.width() - width || y > canvas.height() - height || std::uint64_t(width) * height > 684U * 1216U)

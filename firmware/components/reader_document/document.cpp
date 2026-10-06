@@ -1,3 +1,4 @@
+#include "pico_page/stage_timer.h"
 #include "pico_page/document.h"
 #include "expat.h"
 #include "miniz.h"
@@ -659,6 +660,7 @@ struct EpubDocument::Impl {
     bool load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
               std::uint32_t wanted, const std::function<bool(const Chapter&)>* match);
     bool parse(const std::string& path, Xml& xml, std::string& error, std::uint32_t max_bytes = kMaxXmlBytes) {
+        const StageTimer timer{"xml_read_inflate_parse"};
         const int index = mz_zip_reader_locate_file(&zip, path.c_str(), nullptr, MZ_ZIP_FLAG_CASE_SENSITIVE);
         mz_zip_archive_file_stat stat{};
         if (index < 0 || !mz_zip_reader_file_stat(&zip, index, &stat)) return fail(error, "Missing EPUB resource: " + path);
@@ -683,6 +685,7 @@ bool EpubDocument::open(const std::string& path, std::string& error) {
 }
 
 bool EpubDocument::open_impl(const std::string& path, std::string& error, bool cover_only) {
+    const StageTimer timer{"epub_open"};
     close(); error.clear();
     std::unique_ptr<Impl> next(new Impl);
     next->file = std::fopen(path.c_str(), "rb");
@@ -726,6 +729,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
     char mime[21]{};
     if (!mz_zip_reader_extract_file_to_mem(&next->zip, "mimetype", mime, 20, 0) || std::string(mime) != "application/epub+zip") return fail(error, "Invalid EPUB mimetype");
     if (!cover_only) {
+        const StageTimer timer{"identity_read_hash"};
         Hash sha(false), md5(true); std::array<unsigned char, 8192> buffer{};
         if (std::fseek(next->file, 0, SEEK_SET) != 0) return fail(error, "Cannot hash EPUB");
         for (;;) {
@@ -925,6 +929,7 @@ bool EpubDocument::chapter_index_for(const std::string& resource, std::size_t& i
     return false;
 }
 bool EpubDocument::read_image(const std::string& resource, std::vector<std::uint8_t>& bytes, std::string& error) {
+    const StageTimer timer{"image_read_inflate"};
     bytes.clear(); error.clear();
     std::string canonical;
     if (!impl_->file || resource.empty() || !path_parts(resource, canonical) || canonical != resource) return fail(error, "Invalid internal image path");

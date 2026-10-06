@@ -47,6 +47,15 @@ int main() {
         CHECK(!taps.accept({EventKind::K3, EventPhase::Begin, 6}, 2));
         CHECK(taps.accept({EventKind::K3, EventPhase::End, 6}, 2));
     }
+    {
+        using namespace pico_page::platform;
+        ReleasedTap taps;
+        CHECK(!taps.accept({EventKind::K3, EventPhase::Begin, 1}, 1));
+        CHECK(!taps.accept({EventKind::InputReset, EventPhase::Cancel, 9}, 1));
+        CHECK(!taps.accept({EventKind::K3, EventPhase::End, 1}, 1));
+        CHECK(!taps.accept({EventKind::K2, EventPhase::Begin, 10}, 1));
+        CHECK(taps.accept({EventKind::K2, EventPhase::End, 10}, 1));
+    }
     // IN03/IN04: a context change cannot reuse the input that opened it.
     InputRouter input;
     CHECK(input.route(Context::Reading, {1, Phase::Begin, Input::TouchCenter}) == Action::OpenTools);

@@ -1,3 +1,4 @@
+#include "pico_page/stage_timer.h"
 #include "pico_page/app.h"
 #include "pico_page/document.h"
 #include "pico_page/provision.h"
@@ -252,6 +253,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         auto request = session.request_save();
         if (!request)
             return !session.needs_save();
+        const StageTimer timer{"progress_commit"};
         const auto result = store.save_progress(book_path, request->record);
         const bool okay =
             result.status == StoreStatus::Ok && result.record && *result.record == request->record;
@@ -966,6 +968,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         return true;
     }
     bool load_chapter(std::size_t index, std::uint32_t part = 0) {
+        const StageTimer timer{"chapter_reading"};
         return load_with(index, [&](Chapter &loaded, std::string &detail) {
             return document.load_chapter(index, loaded, detail, ChapterLoad::Reading, part);
         });
@@ -1043,6 +1046,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         return plan_page(chapter, start, spec);
     }
     graphics::Page plan_page(const Chapter &source, std::size_t start, const graphics::LayoutSpec& spec) {
+        const StageTimer timer{"page_layout"};
         // Media ranges occupy one page; text layout must not consume their placeholders.
         start = readable_offset(source, start);
         if (const auto* image = image_at(source, start)) {
@@ -1129,6 +1133,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     /** Writes counted chapters to PicoPage/cache so that a later open resumes instead of recounting. */
     void save_pages() {
         if (!pages_dirty || pages_name.empty()) return;
+        const StageTimer timer{"pages_cache_commit"};
         std::string bytes = pages_header;
         const auto word = [&](std::uint32_t value) {
             bytes.append(reinterpret_cast<const char *>(&value), sizeof(value));
@@ -1187,6 +1192,7 @@ struct ReaderApp::Impl final : DisplayBackend {
      * arriving meanwhile to one part load or one slice of layout.
      */
     void count_pages() {
+        const StageTimer timer{"count_slice"};
         const auto &spine = document.spine();
         if (counting_index == not_counting) {
             auto next = static_cast<std::size_t>(std::find(counted.begin(), counted.end(), false) - counted.begin());
@@ -1208,6 +1214,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 return;
             }
             std::string detail;
+            const StageTimer load_timer{"chapter_counting"};
             if (document.load_chapter(counting_index, counting_chapter, detail, ChapterLoad::Layout, counting_part))
                 counting_loaded = true;
             else if (memory_error(detail))
@@ -1247,6 +1254,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         } while (std::chrono::steady_clock::now() < deadline);
     }
     bool draw_page_content(const graphics::Page& planned, const graphics::LayoutSpec& spec) {
+        const StageTimer timer{"page_draw"};
         if (const auto* image = image_at(planned.start)) {
             std::vector<std::uint8_t> encoded;
             std::string detail;
@@ -1262,6 +1270,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         return graphics::render_page(canvas, body, planned);
     }
     bool render_body(std::size_t start) {
+        const StageTimer timer{"body_prepare"};
         const auto spec = layout(settings, link_return ? 144 : 64);
         auto candidate = plan_page(start, spec);
         if (!candidate.error.empty() || candidate.end <= candidate.start) {

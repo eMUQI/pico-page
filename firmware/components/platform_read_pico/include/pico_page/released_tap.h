@@ -9,6 +9,10 @@ namespace pico_page::platform {
 class ReleasedTap {
 public:
     std::optional<Event> accept(const Event& event, std::uint64_t frame) {
+        if (event.kind == EventKind::InputReset) {
+            held_.reset();
+            return std::nullopt;
+        }
         if (event.phase == EventPhase::Begin) {
             if (!held_) { held_ = event; frame_ = frame; }
             return std::nullopt;
