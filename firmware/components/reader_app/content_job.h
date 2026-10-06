@@ -5,6 +5,8 @@
 #include <sys/types.h>
 #include <atomic>
 #include <memory>
+#include <optional>
+#include <utility>
 #ifndef ESP_PLATFORM
 #include <thread>
 #endif
@@ -21,10 +23,15 @@ std::string image_cache_key(const std::string& book_id, const std::string& resou
 /** A single job owns its parser and font. Only done() permits access to its result. */
 class ContentJob {
 public:
-    enum class Kind { Pagination, FontIdentity, Image, Open };
+    enum class Kind { Pagination, FontIdentity, Image, Open, Chapter };
+    enum class Target { Start, End, Before, Anchor, Fragment };
     struct Request {
         std::string path, font;
         Kind kind = Kind::Pagination;
+        Target target = Target::Start;
+        Anchor anchor;
+        std::string fragment;
+        std::optional<std::size_t> known_start;
         std::string root, image_resource, cache_name, relative_path, content_revision;
         DocumentMetadata identity;
         graphics::LayoutSpec layout;
@@ -40,6 +47,7 @@ public:
         std::unique_ptr<graphics::Canvas> image;
         std::unique_ptr<EpubDocument> document;
         Chapter chapter;
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> history;
         std::size_t chapter_index = 0;
         ConfigResult configuration;
         ProgressResult progress;
@@ -62,6 +70,7 @@ private:
     void run();
     void render_image();
     void open_book();
+    void load_chapter();
     std::atomic<bool> cancelled_{false}, done_{false};
     bool started_ = false;
 #ifndef ESP_PLATFORM

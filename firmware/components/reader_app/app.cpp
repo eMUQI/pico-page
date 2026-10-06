@@ -404,6 +404,35 @@ struct ReaderApp::Impl final : DisplayBackend {
         overlay();
         return true;
     }
+    bool begin_chapter(std::size_t index, std::uint32_t part, ContentJob::Target target,
+                       std::size_t position = 0, const Anchor& anchor = {}, const std::string& fragment = "") {
+        abandon_content();
+        ++counting_generation;
+        release_counting();
+        ContentJob::Request request;
+        request.kind = ContentJob::Kind::Chapter; request.target = target;
+        request.root = root; request.path = root + "/" + book_path; request.identity = document.metadata();
+        request.font = body_font_path(); request.layout = layout(settings, link_return ? 144 : 64);
+        request.chapter = index; request.part = part; request.offset = position;
+        request.anchor = anchor; request.fragment = fragment; request.generation = foreground_generation;
+        if (target == ContentJob::Target::End && !link_return && index < counted_live.size() && counted_live[index]) {
+            const auto& parts = chapter_pages[index];
+            const auto selected = part == kLastChapterPart && !parts.empty() ? parts.size() - 1 : part;
+            if (selected < parts.size() && !parts[selected].empty()) request.known_start = parts[selected].back();
+        }
+        pending_content = std::move(request); content_loading = true; view = View::Loading;
+        clear_body_cache(); clear_prefetch(); covers.clear(); release(chapter); page = {};
+        canvas.fill_rect(0, footer_top, 684, 88, 15);
+        text("正在准备章节…", 36, 1156, 24, 400, 3);
+        button(Dismiss, "取消", 488, 1140, 160, 64, false, 24);
+        overlay();
+        return true;
+    }
+    bool begin_seek(const Anchor& anchor) {
+        std::size_t index;
+        if (!document.chapter_index_for(anchor.resource, index)) { error("目标位置不在正文中"); return false; }
+        return begin_chapter(index, 0, ContentJob::Target::Anchor, 0, anchor);
+    }
     void poll_content() {
         if (foreground_job && (!content_loading || foreground_job->request.generation != foreground_generation)) {
             if (foreground_job->started() && !foreground_job->done()) return;
@@ -437,6 +466,15 @@ struct ReaderApp::Impl final : DisplayBackend {
                     job->result.file_inode, document.metadata()};
             }
             finish_open(request.relative_path, &job->result);
+            return;
+        }
+        if (request.kind == ContentJob::Kind::Chapter) {
+            content_loading = false;
+            if (!job->result.error.empty()) { error(chapter_error(job->result.error)); return; }
+            chapter = std::move(job->result.chapter); chapter_index = request.chapter;
+            offset = job->result.offset;
+            for (const auto& span : job->result.history) record_boundary(computed_pages, span.first, span.second);
+            show_page(offset);
             return;
         }
         if (request.chapter != chapter_index || request.part != chapter.part) return;
@@ -1200,6 +1238,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         return true;
     }
     bool recover_body() {
+        const auto record = session.visible_record() ? session.visible_record() : session.saved_record();
+        std::uint32_t position;
+        if (async_content && record && !chapter.offset_for(record->anchor, position)) return begin_seek(record->anchor);
         return restore_confirmed_position() && show_page(offset);
     }
     std::uint32_t restored_offset = 0;
@@ -1600,7 +1641,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     void draw_image_error(const graphics::LayoutSpec& spec) {
         outline(spec.left, spec.top + 12, spec.width, spec.height - 24, 2);
         center("图片无法显示", spec.left + 8, spec.top + spec.height / 2 - 36, spec.width - 16, 28);
-        center("图片缺失、损坏或资源不足", spec.left + 8, spec.top + spec.height / 2 + 16, spec.width - 16, 22, 3);
+        center("图片缺失、损坏或内存不足", spec.left + 8, spec.top + spec.height / 2 + 16, spec.width - 16, 22, 3);
     }
     bool draw_page_content(const graphics::Page& planned, const graphics::LayoutSpec& spec) {
         const StageTimer timer{"page_draw"};
@@ -1785,6 +1826,7 @@ struct ReaderApp::Impl final : DisplayBackend {
      */
     void turn_back_to(std::size_t limit) {
         if (const auto cached = previous_page(limit)) { show_page(*cached); return; }
+        if (async_content) { begin_chapter(chapter_index, chapter.part, ContentJob::Target::Before, limit); return; }
         constexpr std::size_t announced_scalars = 10000;
         if (limit > announced_scalars)
             defer("正在排版…", [this, limit] { show_page_before(limit); });
@@ -1808,6 +1850,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 show_page(next_offset);
             else if (!chapter.last_part) {
                 const auto next = chapter.part + 1;
+                if (async_content) { begin_chapter(chapter_index, next, ContentJob::Target::Start); return; }
                 change_part(chapter_index, [this, next] {
                     if (load_chapter(chapter_index, next)) show_page(0);
                 });
@@ -1815,6 +1858,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 auto next = chapter_index + 1;
                 while (next < document.spine().size() && !document.spine()[next].linear)
                     ++next;
+                if (async_content && next < document.spine().size()) { begin_chapter(next, 0, ContentJob::Target::Start); return; }
                 if (next < document.spine().size() && load_chapter(next))
                     show_page(0);
             } else {
@@ -1826,6 +1870,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (offset == readable_offset(0)) {
                 if (chapter.part > 0) {
                     const auto previous = chapter.part - 1;
+                    if (async_content) { begin_chapter(chapter_index, previous, ContentJob::Target::End); return; }
                     change_part(chapter_index, [this, previous] {
                         if (load_chapter(chapter_index, previous)) show_page_before(chapter.text.size());
                     });
@@ -1838,6 +1883,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                     --previous_chapter;
                 if (!document.spine()[previous_chapter].linear)
                     return;
+                if (async_content) { begin_chapter(previous_chapter, kLastChapterPart, ContentJob::Target::End); return; }
                 if (document.spine()[previous_chapter].bytes > announced_bytes) {
                     defer("正在排版…", [this, previous_chapter] {
                         if (load_chapter(previous_chapter, kLastChapterPart)) show_page_before(chapter.text.size());
@@ -2858,7 +2904,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         cancel_sync();
         link_return = confirmed_link_return;
         message = detail;
-        const bool retained = !foreground_job && card_available && has_book() && session.visible_record() &&
+        std::uint32_t visible_offset;
+        const bool available = session.visible_record() && chapter.offset_for(session.visible_record()->anchor, visible_offset);
+        const bool retained = (!async_content || available) && !foreground_job && card_available && has_book() && session.visible_record() &&
                               restore_confirmed_position() && panel_background(752);
         view = View::Error;
         hits.clear();
@@ -2999,6 +3047,12 @@ struct ReaderApp::Impl final : DisplayBackend {
             const auto origin = session.visible_record();
             if (!origin)
                 return;
+            if (async_content) {
+                if (!link_return) link_return = origin->anchor;
+                clear_page_history();
+                begin_chapter(index, 0, ContentJob::Target::Fragment, 0, {}, link.fragment);
+                return;
+            }
             std::uint32_t target = 0;
             if (!seek_fragment(index, link.fragment, target, "链接锚点不存在"))
                 return;
@@ -3018,6 +3072,11 @@ struct ReaderApp::Impl final : DisplayBackend {
                 error("目录目标不在正文中");
                 return;
             }
+            if (async_content) {
+                clear_page_history();
+                begin_chapter(target, 0, ContentJob::Target::Fragment, 0, {}, item.fragment);
+                return;
+            }
             std::uint32_t position = 0;
             if (!seek_fragment(target, item.fragment, position, "目录锚点不存在"))
                 return;
@@ -3035,7 +3094,8 @@ struct ReaderApp::Impl final : DisplayBackend {
                 scan_library();
                 draw_library();
                 overlay();
-            } else
+            } else if (async_content) open(entry.path);
+            else
                 defer("正在打开书籍…", [this, path = entry.path] { open(path); });
             return;
         }
@@ -3044,6 +3104,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (!link_return)
                 return;
             const auto target = *link_return;
+            if (async_content) { link_return.reset(); clear_page_history(); begin_seek(target); return; }
             std::uint32_t target_offset;
             if (!seek(target, target_offset, "原位置无法恢复"))
                 return;
@@ -3079,8 +3140,10 @@ struct ReaderApp::Impl final : DisplayBackend {
                     recover_body();
                 else
                     open(book_path);
-            } else if (!last_book.empty())
-                defer("正在打开书籍…", [this] { open(last_book); });
+            } else if (!last_book.empty()) {
+                if (async_content) open(last_book);
+                else defer("正在打开书籍…", [this] { open(last_book); });
+            }
             return;
         case Contents: {
             load_fonts();
@@ -3140,6 +3203,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             manage_book();
             return;
         case DetailOpen:
+            if (async_content) { open(detail_path); return; }
             defer("正在打开书籍…", [this] { open(detail_path); });
             return;
         case RefreshAccept:
@@ -3255,6 +3319,12 @@ struct ReaderApp::Impl final : DisplayBackend {
                 return;
             }
             const auto target = *remote_anchor;
+            if (async_content) {
+                const auto origin = session.visible_record();
+                cancel_sync();
+                if (origin) link_return = origin->anchor;
+                clear_page_history(); begin_seek(target); return;
+            }
             std::uint32_t start;
             if (!seek(target, start, "远端位置无法恢复"))
                 return;
@@ -3389,6 +3459,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (!input.touch && input.event.input == Input::K2) force_refresh();
             else if (!input.queued && input.touch && input.x >= 488 && input.y >= 1140) {
                 abandon_content();
+                link_return = confirmed_link_return;
                 draw_library(); overlay();
             }
             return;
@@ -3726,7 +3797,7 @@ bool ReaderApp::background_due() const {
 const char *ReaderApp::background_state() const {
     if (impl_->content_loading) {
         const auto kind = impl_->pending_content ? impl_->pending_content->kind : impl_->foreground_job->request.kind;
-        return kind == ContentJob::Kind::Open ? "opening" : "image";
+        return kind == ContentJob::Kind::Open ? "opening" : kind == ContentJob::Kind::Chapter ? "chapter" : "image";
     }
     if (impl_->prefetch_due()) return "prefetch";
     if (!impl_->has_book() || impl_->pages_complete) return "idle";

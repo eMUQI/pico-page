@@ -13,7 +13,7 @@ using namespace pico_page::graphics;
 int main(int argc, char** argv) {
     Font font;
     assert(font.open_fallback());
-    const auto fallback_text = decode_utf8("未检测到存储卡，请插入后重新启动。初始化失败，重试。");
+    const auto fallback_text = decode_utf8("未检测到存储卡，请插入后重新启动。初始化失败，重试。正在准备书籍章节图片…取消。内容任务无法启动。内存不足。");
     for (const auto c : fallback_text) assert(font.contains(c));
     {
         // Prewarming an independent font face must preserve the rasterized pixels.

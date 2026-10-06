@@ -70,6 +70,8 @@ def generate(directory: Path) -> None:
     entries["EPUB/nav.xhtml"] = entries["EPUB/nav.xhtml"].replace(
         '<li><a href="chapter2.xhtml">', '<li><a href="chapter1.xhtml#late">后段</a></li><li><a href="chapter2.xhtml">')
     write_fixture(directory / "multi-part.epub", entries)
+    entries["EPUB/chapter1.xhtml"] = entries["EPUB/chapter1.xhtml"].replace("<p>第0段", '<p><a href="#late">后段</a>第0段', 1)
+    write_fixture(directory / "multi-part-link.epub", entries)
 
 
 if __name__ == "__main__":

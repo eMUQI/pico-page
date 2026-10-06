@@ -1019,6 +1019,63 @@ int main(int argc, char** argv) {
         assert(app.view() == View::Error && app.saved_record() == before_failure);
     }
     {
+        fs::create_directories(card / "Worker");
+        fs::copy_file(fixtures / "multi-part.epub", card / "Worker/reference.epub");
+        fs::copy_file(fixtures / "multi-part.epub", card / "Worker/async.epub");
+        EpubDocument source; Chapter part; std::string detail;
+        assert(source.open((card / "Worker/reference.epub").string(), detail));
+        assert(source.load_chapter(0, part, detail, ChapterLoad::Reading, 1));
+        Anchor first;
+        std::uint32_t start = 0;
+        while (start < part.text.size() && !part.anchor_at(start, first)) ++start;
+        assert(start < part.text.size());
+        const ReadingRecord seeded{source.metadata().book_id, "epub-native-v1", "fixture", 1, first};
+        FileStore store(card.string());
+        assert(store.save_progress("Worker/reference.epub", seeded).status == StoreStatus::Ok);
+        assert(store.save_progress("Worker/async.epub", seeded).status == StoreStatus::Ok);
+        ReaderApp reference(card.string()), async(card.string(), "async-chapter", true, true);
+        Driver ref_driver{reference}, driver{async};
+        assert(reference.initialize()); ref_driver.present(); opened(reference, "Worker/reference.epub"); ref_driver.present();
+        assert(async.initialize()); driver.present(); opened(async, "Worker/async.epub"); driver.present();
+        const auto same_body = [&] {
+            assert(reference.saved_record()->anchor == async.saved_record()->anchor);
+            assert(std::equal(reference.canvas().pixels().begin(), reference.canvas().pixels().begin() + 342 * 1128,
+                              async.canvas().pixels().begin()));
+        };
+        same_body();
+        ref_driver.key(Input::K1); ref_driver.present();
+        const auto previous = async.saved_record();
+        driver.key(Input::K1); driver.present();
+        assert(async.view() == View::Loading && async.saved_record() == previous);
+        driver.refresh(); driver.complete_content(); same_body();
+        ref_driver.key(Input::K3); ref_driver.present();
+        driver.key(Input::K3); driver.present(); driver.complete_content(); same_body();
+        assert(async.saved_record()->anchor == first);
+        for (auto* d : {&ref_driver, &driver}) {
+            d->tap(342, 500); d->present(); d->tap(68, 1140); d->present();
+            d->tap(300, 424); d->present(); d->complete_content();
+        }
+        assert(async.saved_record()->anchor.resource.find("chapter2") != std::string::npos);
+        same_body();
+        ref_driver.key(Input::K1); ref_driver.present();
+        driver.key(Input::K1); driver.present(); driver.complete_content(); same_body();
+        ref_driver.key(Input::K1); ref_driver.present();
+        driver.key(Input::K1); driver.present(); driver.complete_content(); same_body();
+        fs::copy_file(fixtures / "multi-part-link.epub", card / "Worker/link-reference.epub");
+        fs::copy_file(fixtures / "multi-part-link.epub", card / "Worker/link-async.epub");
+        opened(reference, "Worker/link-reference.epub"); ref_driver.present();
+        opened(async, "Worker/link-async.epub"); driver.present();
+        const auto origin = async.saved_record()->anchor;
+        const auto config = store.load_settings("Worker/link-async.epub").settings;
+        const auto link_x = config.margin_x_px + config.indent_chars * config.font_size_px + config.font_size_px / 2;
+        ref_driver.tap(link_x, 80); ref_driver.present();
+        driver.tap(link_x, 80); driver.present(); driver.complete_content(); same_body();
+        assert(async.saved_record()->anchor.node.find("/p[4501]/") != std::string::npos);
+        ref_driver.tap(150, 50); ref_driver.present();
+        driver.tap(150, 50); driver.present(); driver.complete_content(); same_body();
+        assert(async.saved_record()->anchor == origin);
+    }
+    {
         // Phone setup: both entry points only request a session, the page keeps K2 and ignores
         // every control but its own, and a closed session returns to the settings list.
         ReaderApp app(card.string()); Driver driver{app};

@@ -73,6 +73,7 @@ void ContentJob::run() {
         if (result.font_identity.empty() && !stop()) result.error = "Font identity read failed";
         return;
     }
+    if (request.kind == Kind::Chapter) { load_chapter(); return; }
     if (request.kind == Kind::Open) { open_book(); return; }
     if (request.kind == Kind::Image) { render_image(); return; }
     EpubDocument document;
@@ -183,5 +184,49 @@ void ContentJob::open_book() {
         result.error = "Book changed while opening"; return;
     }
     result.file_size = after.st_size; result.file_modified = after.st_mtime; result.file_inode = after.st_ino;
+}
+void ContentJob::load_chapter() {
+    const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
+    EpubDocument document;
+    FileStore store(request.root);
+    result.chapter_index = request.chapter;
+    if (!document.open_verified(request.path, request.identity, result.error, stop) || stop()) return;
+    std::uint32_t position = 0;
+    if (request.target == Target::Anchor || request.target == Target::Fragment) {
+        const auto match = [&](const Chapter& part) {
+            return request.target == Target::Anchor ? part.offset_for(request.anchor, position) :
+                part.fragment_offset(request.fragment, position);
+        };
+        if (request.target == Target::Fragment && request.fragment.empty()) {
+            if (!load_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading, 0, stop)) return;
+        } else if (!find_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading, match, stop)) return;
+        result.offset = position;
+        if (request.target == Target::Fragment && result.offset >= result.chapter.text.size() && !result.chapter.last_part) {
+            const auto next = result.chapter.part + 1;
+            if (!load_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading, next, stop)) return;
+            result.offset = 0;
+        }
+        return;
+    }
+    if (!load_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading, request.part, stop)) return;
+    if (request.target == Target::Start) return;
+    if (request.known_start && *request.known_start < result.chapter.text.size()) { result.offset = *request.known_start; return; }
+    graphics::Font font;
+    if (!(request.font.empty() ? font.open_fallback() : font.open(request.font))) { result.error = font.error(); return; }
+    const auto limit = request.target == Target::End ? result.chapter.text.size() : request.offset;
+    std::size_t start = 0;
+    result.offset = 0;
+    while (start < limit && !stop()) {
+        const auto page = plan_content(font, result.chapter, start, request.layout, false, stop);
+        if (!page.error.empty() || page.end <= start) {
+            result.error = page.error.empty() ? "Pagination made no progress" : page.error;
+            return;
+        }
+        if (page.start >= limit) break;
+        result.offset = page.start;
+        start = readable_offset(result.chapter, page.end);
+        if (result.history.size() == 64) result.history.erase(result.history.begin());
+        result.history.emplace_back(static_cast<std::uint32_t>(page.start), static_cast<std::uint32_t>(start));
+    }
 }
 } // namespace pico_page
