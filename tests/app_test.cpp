@@ -1,3 +1,4 @@
+#include "../firmware/components/reader_app/content_cache.h"
 #include "pico_page/app.h"
 #include "pico_page/document.h"
 #include "pico_page/store.h"
@@ -840,6 +841,28 @@ int main(int argc, char** argv) {
             driver.key(Input::K1); driver.present();
             assert(app.view() == View::Reading && app.book_pages()->page + 1 >= late_page);
         }
+    }
+    {
+        FileStore store(card.string());
+        EpubDocument doc;
+        std::string error;
+        assert(doc.open((fixtures / "multi-part.epub").string(), error));
+        Chapter original, cached;
+        assert(load_content(store, doc, 0, original, error, ChapterLoad::Reading, 2));
+        const auto cache = card / "PicoPage/cache/content/content-reading-v1" / doc.metadata().book_id / "0/2";
+        assert(fs::exists(cache));
+        const auto data = read(cache);
+        assert(load_content(store, doc, 0, cached, error, ChapterLoad::Reading, 2));
+        assert(cached.text == original.text && cached.runs.size() == original.runs.size());
+        for (std::uint32_t n = 0; n < cached.text.size(); ++n) {
+            Anchor a, b;
+            assert(cached.anchor_at(n, a) == original.anchor_at(n, b) && a == b);
+        }
+        write(cache, data.substr(0, data.size() / 2));
+        assert(load_content(store, doc, 0, cached, error, ChapterLoad::Reading, 2));
+        assert(cached.text == original.text && read(cache) == data);
+        assert(!load_content(store, doc, 0, cached, error, ChapterLoad::Reading, 2, [] { return true; }));
+        assert(error == kChapterCancelled && cached.text.empty());
     }
     {
         // Phone setup: both entry points only request a session, the page keeps K2 and ignores

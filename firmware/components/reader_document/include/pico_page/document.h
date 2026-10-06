@@ -115,6 +115,8 @@ inline constexpr char kChapterMemoryError[] = "Chapter exceeds available memory"
  * is intact now. nullptr restores the platform check, which always passes off the device.
  */
 void set_chapter_memory_probe(bool (*probe)(std::size_t bytes));
+/** Applies the same allocation reserve to cached and parsed chapter loads. */
+bool chapter_memory_available(std::size_t bytes);
 
 /** Bounded, read-only EPUB access. XML text source paths are not KOReader XPointer values. */
 class EpubDocument {

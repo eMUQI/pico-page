@@ -1,3 +1,4 @@
+#include "content_cache.h"
 #include "pico_page/stage_timer.h"
 #include "pico_page/app.h"
 #include "pico_page/document.h"
@@ -971,7 +972,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 return part.offset_for(restored.record->anchor, ignored);
             };
             if (!document.chapter_index_for(restored.record->anchor.resource, chapter_index) ||
-                !document.find_chapter_part(chapter_index, chapter, detail, ChapterLoad::Reading, holds) ||
+                !find_content(store, document, chapter_index, chapter, detail, ChapterLoad::Reading, holds) ||
                 !chapter.offset_for(restored.record->anchor, restored_offset)) {
                 error(memory_error(detail) ? chapter_error(detail) : "保存的位置无法映射，请保留进度文件并检查 EPUB");
                 return false;
@@ -1039,7 +1040,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool load_chapter(std::size_t index, std::uint32_t part = 0) {
         const StageTimer timer{"chapter_reading"};
         return load_with(index, [&](Chapter &loaded, std::string &detail) {
-            return document.load_chapter(index, loaded, detail, ChapterLoad::Reading, part);
+            return load_content(store, document, index, loaded, detail, ChapterLoad::Reading, part);
         });
     }
     /** Loads the part that holds anchor, unless it is the loaded one, and returns the offset in it. */
@@ -1056,7 +1057,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             return part.offset_for(anchor, ignored);
         };
         return load_with(index, [&](Chapter &loaded, std::string &detail) {
-            return document.find_chapter_part(index, loaded, detail, ChapterLoad::Reading, holds);
+            return find_content(store, document, index, loaded, detail, ChapterLoad::Reading, holds);
         }, missing) && chapter.offset_for(anchor, position);
     }
     /**
@@ -1072,7 +1073,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             return part.fragment_offset(fragment, ignored);
         };
         if (!load_with(index, [&](Chapter &loaded, std::string &detail) {
-                return document.find_chapter_part(index, loaded, detail, ChapterLoad::Reading, holds);
+                return find_content(store, document, index, loaded, detail, ChapterLoad::Reading, holds);
             }, missing) || !chapter.fragment_offset(fragment, position))
             return false;
         if (position >= chapter.text.size() && !chapter.last_part) {
@@ -1283,7 +1284,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
             std::string detail;
             const StageTimer load_timer{"chapter_counting"};
-            if (document.load_chapter(counting_index, counting_chapter, detail, ChapterLoad::Layout, counting_part, stop))
+            if (load_content(store, document, counting_index, counting_chapter, detail, ChapterLoad::Layout, counting_part, stop))
                 counting_loaded = true;
             else if (detail == kChapterCancelled)
                 return;
@@ -2431,7 +2432,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             return part.offset_for(record.anchor, ignored);
         };
         if (!document.chapter_index_for(record.anchor.resource, index) ||
-            !document.find_chapter_part(index, source, detail, ChapterLoad::Mapping, holds) ||
+            !find_content(store, document, index, source, detail, ChapterLoad::Mapping, holds) ||
             !sync::to_xpointer(document, source, record.anchor, sync_config.dom_version, xpointer,
                                detail)) {
             sync_status = memory_error(detail) ? "设备内存不足，暂时无法计算同步位置。" : "此位置暂不支持精确同步：" + detail;

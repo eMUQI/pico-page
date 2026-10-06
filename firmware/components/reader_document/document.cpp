@@ -864,6 +864,8 @@ bool EpubDocument::read_cover(const std::string& path, std::vector<std::uint8_t>
     return book.read_image(chapter.images.front().resource, bytes, error);
 }
 
+bool chapter_memory_available(std::size_t bytes) { return memory_room(bytes); }
+
 void set_chapter_memory_probe(bool (*probe)(std::size_t bytes)) {
     memory_room = probe ? probe : platform_memory_room;
 }
