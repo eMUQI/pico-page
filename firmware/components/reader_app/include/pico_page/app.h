@@ -68,7 +68,7 @@ struct AppInput {
 class ReaderApp {
   public:
     explicit ReaderApp(std::string card_root, std::string writer_id = "pico-page-host",
-                       bool controlled_storage = false);
+                       bool controlled_storage = false, bool async_counting = false);
     ~ReaderApp();
     ReaderApp(const ReaderApp &) = delete;
     ReaderApp &operator=(const ReaderApp &) = delete;
@@ -132,15 +132,14 @@ class ReaderApp {
      * "failed" after a chapter could not be read or laid out. The string is static.
      */
     const char *background_state() const;
+    /** Accepts completed results without changing the frame; cancel requests worker cancellation. */
+    void poll_background(bool cancel = false);
     /**
-     * Prepares one next-page layout, warms its glyphs in 15 ms slices, then counts pages
-     * in 15 ms slices or one chapter load. It presents no frame
-     * and changes no reading position; the footer adopts the result at its next redraw.
-     * Call it only while no input is waiting. Counting may hold a second parsed chapter, which
-     * every input and every entry point that loads content releases first. stop is checked
-     * between pages and XML chunks; cancellation retains completed page indices. Storage,
-     * decompression and a single page layout can exceed the target; this is not a hard bound.
-     * Call on the application owner task; stop must not call back into ReaderApp.
+     * Prepares one next-page layout and warms glyphs in 15 ms slices, then starts statistics.
+     * With async_counting, an independent parser and font return page boundaries; otherwise
+     * counting runs here in 15 ms slices or one chapter load. Storage and individual operations
+     * can exceed that target. Call only on the application owner task while no input is waiting;
+     * stop must not call back into ReaderApp. No frame or reading position is changed.
      */
     void background_step(const std::function<bool()>& stop = {});
     void show_error(const std::string &message);

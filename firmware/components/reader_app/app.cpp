@@ -1,4 +1,5 @@
 #include "content_cache.h"
+#include "pagination.h"
 #include "pico_page/stage_timer.h"
 #include "pico_page/app.h"
 #include "pico_page/document.h"
@@ -338,10 +339,35 @@ struct ReaderApp::Impl final : DisplayBackend {
     // Disk counts lack a strong font identity and are not trusted for navigation.
     std::vector<bool> counted_live;
     std::string pages_name, pages_header;
-    // counting_chapter is a second parsed chapter. It exists only while the reading page is
-    // idle: every input releases it first, because the device cannot hold it together with the
-    // chapters that a page turn or another view may load. The partial count survives a release.
+    // The synchronous fallback releases its extra chapter on input. The worker owns a separate
+    // chapter until it observes cancellation; both paths retain accepted pagination offsets.
     Chapter counting_chapter;
+    bool async_counting = false;
+    std::uint64_t counting_generation = 0;
+    std::unique_ptr<PaginationJob> counting_job;
+    void stop_counting_job() {
+        if (counting_job) { counting_job->cancel(); counting_job.reset(); }
+    }
+    void poll_counting_job() {
+        if (!counting_job || !counting_job->done()) return;
+        auto job = std::move(counting_job);
+        const auto& request = job->request;
+        const auto& result = job->result;
+        if (request.generation != counting_generation || request.chapter != counting_index ||
+            request.part != counting_part || request.offset != counting_offset) return;
+        if (!result.error.empty()) {
+            if (memory_error(result.error)) counting_blocked = chapter_index;
+            else pages_failed = true;
+            return;
+        }
+        auto& starts = chapter_pages[counting_index][counting_part];
+        starts.insert(starts.end(), result.starts.begin(), result.starts.end());
+        counting_offset = result.offset;
+        if (result.part_done) {
+            if (result.last_part) finish_counting();
+            else { ++counting_part; counting_offset = 0; chapter_pages[counting_index].emplace_back(); }
+        }
+    }
     std::size_t counting_index = not_counting, counting_offset = 0;
     std::uint32_t counting_part = 0;
     // The visible chapter during which memory was too low to load another one for counting.
@@ -965,6 +991,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             };
     }
     bool open(std::string path) {
+        ++counting_generation;
+        if (counting_job) counting_job->cancel();
         refresh_badge_config();
         clear_body_cache();
         clear_prefetch();
@@ -1139,25 +1167,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (battery_percent) canvas.fill_rect(560, 1169, *battery_percent * 24 / 100, 9, 3);
         text(battery_percent ? std::to_string(*battery_percent) + "%" : "—", 600, 1156, 24, 80, 3);
     }
-    static std::size_t readable_offset(const Chapter &source, std::size_t start) {
-        // Inserted block separators have no source anchor for a saved page start.
-        Anchor anchor;
-        while (start < source.text.size() &&
-               !source.anchor_at(static_cast<std::uint32_t>(start), anchor))
-            ++start;
-        return start;
-    }
     std::size_t readable_offset(std::size_t start) const {
-        return readable_offset(chapter, start);
-    }
-    static const DocumentImage* image_at(const Chapter &source, std::size_t start) {
-        for (const auto& image : source.images)
-            if (image.begin <= start && start < image.end && image.end <= source.text.size())
-                return &image;
-        return nullptr;
+        return pico_page::readable_offset(chapter, start);
     }
     const DocumentImage* image_at(std::size_t start) const {
-        return image_at(chapter, start);
+        return pico_page::image_at(chapter, start);
     }
     graphics::Page plan_page(std::size_t start, const graphics::LayoutSpec& spec) {
         return plan_page(chapter, start, spec);
@@ -1165,26 +1179,15 @@ struct ReaderApp::Impl final : DisplayBackend {
     graphics::Page plan_page(const Chapter &source, std::size_t start, const graphics::LayoutSpec& spec,
                              bool collect = true, const std::function<bool()>& stop = {}) {
         const StageTimer timer{"page_layout"};
-        // Media ranges occupy one page; text layout must not consume their placeholders.
-        start = readable_offset(source, start);
-        if (const auto* image = image_at(source, start)) {
-            graphics::Page result;
-            result.start = image->begin;
-            result.end = image->end;
-            result.font_px = spec.font_px;
-            return result;
-        }
-        auto end = source.text.size();
-        for (const auto& image : source.images)
-            if (image.begin > start && image.begin < image.end && image.end <= source.text.size())
-                end = std::min<std::size_t>(end, image.begin);
-        return graphics::layout_page(body, std::u32string_view(source.text).substr(0, end), start, spec, collect, stop);
+        return plan_content(body, source, start, spec, collect, stop);
     }
+
     /**
      * Restarts page counting for the applied typography and adopts a matching cache entry.
      * The entry is bound to the book file, the body font file and the page geometry.
      */
     void reset_pages() {
+        ++counting_generation;
         clear_body_cache();
         clear_prefetch();
         const auto &spine = document.spine();
@@ -1278,6 +1281,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     /** Frees the chapter loaded for counting; its partial count resumes after a reload. */
     void release_counting() {
+        if (counting_job) counting_job->cancel();
         release(counting_chapter);
         counting_loaded = false;
     }
@@ -1305,9 +1309,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         release_counting();
         pages_dirty = true;
         pages_complete = std::find(counted.begin(), counted.end(), false) == counted.end();
-        if (pages_complete) save_pages();
+        if (pages_complete && !async_counting) save_pages();
     }
-    /** Counts pages on the owner task, retaining completed page boundaries on cancellation. */
+    /** Starts independent counting or advances the synchronous fallback under the same geometry. */
     void count_pages(const std::function<bool()>& stop) {
         const StageTimer timer{"count_slice"};
         if (stop && stop()) return;
@@ -1320,6 +1324,20 @@ struct ReaderApp::Impl final : DisplayBackend {
             counting_part = 0;
             counting_offset = 0;
             chapter_pages[next].assign(1, {});
+        }
+        if (async_counting) {
+            if (counting_job) return;
+            if (!counting_memory(spine[counting_index].bytes)) { counting_blocked = chapter_index; return; }
+            PaginationJob::Request request;
+            request.path = root + "/" + book_path;
+            request.font = builtin_body ? "" : root + "/PicoPage/" +
+                (font_fallback ? "fonts/LXGWWenKai-Regular.ttf" : settings.font);
+            request.identity = document.metadata(); request.layout = layout(settings);
+            request.generation = counting_generation; request.chapter = counting_index;
+            request.part = counting_part; request.offset = counting_offset;
+            counting_job = std::make_unique<PaginationJob>(std::move(request));
+            if (!counting_job->start()) { counting_job.reset(); counting_blocked = chapter_index; }
+            return;
         }
         const bool in_place = counting_index == chapter_index && counting_part == chapter.part &&
                               chapter.resource == spine[counting_index].resource;
@@ -1352,7 +1370,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(15);
         do {
             if (stop && stop()) return;
-            const auto start = readable_offset(source, counting_offset);
+            const auto start = pico_page::readable_offset(source, counting_offset);
             if (start >= source.text.size()) {
                 if (source.last_part) {
                     finish_counting();
@@ -2181,6 +2199,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             links.clear(); clear_page_history(); link_return.reset(); confirmed_link_return.reset();
             last_recorded.clear();
         }
+        stop_counting_job();
         identities.clear();
         const auto result = store.manage_book(management_snapshot, delete_original, detail_metadata.book_id, content_revision);
         if (result != StoreStatus::Ok) {
@@ -3261,9 +3280,9 @@ void ReaderApp::Impl::save_refresh(const ReaderSettings &values) {
     overlay();
 }
 
-ReaderApp::ReaderApp(std::string root, std::string writer, bool controlled_storage)
-    : impl_(std::make_unique<Impl>(std::move(root), std::move(writer))) { impl_->controlled_storage = controlled_storage; }
-void ReaderApp::invalidate_identity_cache() { impl_->identities.clear(); }
+ReaderApp::ReaderApp(std::string root, std::string writer, bool controlled_storage, bool async_counting)
+    : impl_(std::make_unique<Impl>(std::move(root), std::move(writer))) { impl_->controlled_storage = controlled_storage; impl_->async_counting = async_counting; }
+void ReaderApp::invalidate_identity_cache() { impl_->stop_counting_job(); impl_->identities.clear(); }
 ReaderApp::~ReaderApp() = default;
 bool ReaderApp::initialize() {
     return impl_->initialize();
@@ -3469,7 +3488,13 @@ const char *ReaderApp::background_state() const {
     if (impl_->pages_failed) return "failed";
     return impl_->counting_blocked == impl_->chapter_index ? "waiting" : "counting";
 }
+void ReaderApp::poll_background(bool cancel) {
+    if (cancel && impl_->counting_job) impl_->counting_job->cancel();
+    impl_->poll_counting_job();
+}
 void ReaderApp::background_step(const std::function<bool()>& stop) {
+    impl_->poll_counting_job();
+    if (stop && stop()) { if (impl_->counting_job) impl_->counting_job->cancel(); return; }
     if (impl_->prefetch_due()) impl_->prepare_next(stop);
     else if (impl_->counting_due()) impl_->count_pages(stop);
 }

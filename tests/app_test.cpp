@@ -4,6 +4,8 @@
 #include "pico_page/store.h"
 
 #include <algorithm>
+#include <chrono>
+#include <thread>
 #include <cassert>
 #include <cstdlib>
 #include <filesystem>
@@ -887,6 +889,35 @@ int main(int argc, char** argv) {
         app.invalidate_identity_cache();
         opened(app, "Books/cover.epub"); driver.present();
         assert(identity_hash_count() == scans + 1 && *app.saved_record() == saved);
+    }
+    {
+        fs::copy_file(fixtures / "long-chapter.epub", card / "Count/worker.epub");
+        ReaderApp app(card.string(), "worker-test", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Count/worker.epub"); driver.present();
+        const auto record = *app.saved_record();
+        const auto pixels = app.canvas().pixels();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (app.background_due()) {
+            app.background_step();
+            app.poll_background();
+            assert(!app.pending_frame() && app.canvas().pixels() == pixels && *app.saved_record() == record);
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(app.book_pages() && app.book_pages()->total > 40);
+        const auto total = app.book_pages()->total;
+        fs::copy_file(fixtures / "long-chapter.epub", card / "Count/worker-stale.epub");
+        opened(app, "Count/worker-stale.epub"); driver.present();
+        // A result from the previous book cannot publish counts into the new session.
+        for (unsigned n = 0; n < 20; ++n) app.background_step();
+        opened(app, "Books/cover.epub"); driver.present();
+        app.poll_background(true);
+        assert(app.view() == View::Reading);
+        ReaderApp reference(card.string()); Driver ref_driver{reference};
+        assert(reference.initialize()); ref_driver.present(); opened(reference, "Count/worker.epub"); ref_driver.present();
+        while (reference.background_due()) reference.background_step();
+        assert(reference.book_pages() && reference.book_pages()->total == total);
+        app.invalidate_identity_cache();
     }
     {
         // Phone setup: both entry points only request a session, the page keeps K2 and ignores

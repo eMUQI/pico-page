@@ -287,7 +287,7 @@ extern "C" void app_main() {
     std::snprintf(writer, sizeof(writer), "pico-page-%02x%02x%02x%02x%02x%02x", mac[0], mac[1],
                   mac[2], mac[3], mac[4], mac[5]);
     const auto *card = pico_page::platform::card_root();
-    auto app = std::make_unique<pico_page::ReaderApp>(card ? card : "/sdcard", writer, true);
+    auto app = std::make_unique<pico_page::ReaderApp>(card ? card : "/sdcard", writer, true, true);
     if (!app->initialize()) {
         ESP_LOGE(tag, "Reader initialization failed");
         return;
@@ -321,6 +321,8 @@ extern "C" void app_main() {
         last_activity = esp_timer_get_time();
     };
     for (;;) {
+        app->poll_background(physical_source || pico_page::platform::input_waiting_before(
+            std::numeric_limits<std::int64_t>::max()));
         const auto battery = pico_page::platform::battery();
         app->set_battery(battery.valid ? std::optional<int>(battery.percent) : std::nullopt);
         if (app->pending_frame())

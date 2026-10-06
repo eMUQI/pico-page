@@ -319,6 +319,7 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
             return;
         }
         std::string detail;
+        app.invalidate_identity_cache();
         transfer = FileStore(root).begin_import(std::string(input), size, crc, detail);
         if (!transfer) {
             error(id, detail.c_str());
