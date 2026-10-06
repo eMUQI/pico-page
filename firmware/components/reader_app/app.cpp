@@ -248,8 +248,18 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::vector<CoverThumbnail> covers;
     std::vector<Hit> hits, links;
     std::optional<Anchor> link_return, confirmed_link_return;
-    // Page starts already laid out, by spine item and part.
-    std::map<std::pair<std::size_t, std::uint32_t>, std::vector<std::size_t>> page_starts;
+    // Recent page spans are isolated by spine item, part and return-bar geometry.
+    struct PageBoundary {
+        std::size_t chapter, start, end;
+        std::uint32_t part;
+        bool return_bar;
+    };
+    std::vector<PageBoundary> page_history, computed_pages;
+    void clear_page_history() { page_history.clear(); computed_pages.clear(); }
+    void record_boundary(std::vector<PageBoundary>& entries, std::size_t start, std::size_t end) {
+        if (entries.size() == 64) entries.erase(entries.begin());
+        entries.push_back({chapter_index, start, readable_offset(end), chapter.part, link_return.has_value()});
+    }
     std::size_t chapter_index = 0, offset = 0, library_page = 0, toc_page = 0;
     std::vector<std::size_t> toc_starts, toc_visible;
     std::set<std::size_t> toc_collapsed;
@@ -282,6 +292,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     static constexpr std::size_t max_pages_bytes = 1U << 20;
     std::vector<std::vector<std::vector<std::uint32_t>>> chapter_pages;
     std::vector<bool> counted;
+    // Disk counts lack a strong font identity and are not trusted for navigation.
+    std::vector<bool> counted_live;
     std::string pages_name, pages_header;
     // counting_chapter is a second parsed chapter. It exists only while the reading page is
     // idle: every input releases it first, because the device cannot hold it together with the
@@ -935,7 +947,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto configuration = store.load_settings(path);
         settings = configuration.settings;
         load_fonts();
-        page_starts.clear();
+        clear_page_history();
         reset_pages();
         const auto restored =
             store.load_progress(path, document.metadata().book_id, content_revision);
@@ -1128,6 +1140,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto &spine = document.spine();
         chapter_pages.assign(spine.size(), {});
         counted.assign(spine.size(), false);
+        counted_live.assign(spine.size(), false);
         for (std::size_t i = 0; i < spine.size(); ++i) counted[i] = !spine[i].linear;
         counting_index = counting_blocked = not_counting;
         release_counting();
@@ -1237,6 +1250,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void finish_counting() {
         counted[counting_index] = true;
+        counted_live[counting_index] = true;
         counting_index = not_counting;
         release_counting();
         pages_dirty = true;
@@ -1398,11 +1412,6 @@ struct ReaderApp::Impl final : DisplayBackend {
             error("本页没有可保存的来源位置");
             return false;
         }
-        auto &starts = page_starts[{chapter_index, chapter.part}];
-        if (std::find(starts.begin(), starts.end(), page.start) == starts.end()) {
-            starts.push_back(page.start);
-            std::sort(starts.begin(), starts.end());
-        }
         view = View::Reading;
         hits.clear();
         const auto token = session.request_page(
@@ -1414,13 +1423,29 @@ struct ReaderApp::Impl final : DisplayBackend {
             return false;
         return true;
     }
-    /**
-     * Lays out the chapter from its start up to limit and remembers every page start, so later
-     * backward turns need no layout. previous receives the last page start before limit.
-     */
+    /** Records only successfully presented body pages; at most 64 recent spans are retained. */
+    void remember_page() {
+        record_boundary(page_history, page.start, page.end);
+    }
+    std::optional<std::size_t> previous_page(std::size_t limit) const {
+        for (const auto* entries : {&page_history, &computed_pages})
+            for (auto i = entries->rbegin(); i != entries->rend(); ++i)
+                if (i->chapter == chapter_index && i->part == chapter.part &&
+                    i->return_bar == link_return.has_value() && i->end == limit && i->start < limit)
+                    return i->start;
+        if (link_return || chapter_index >= counted_live.size() || !counted_live[chapter_index] ||
+            chapter.part >= chapter_pages[chapter_index].size()) return std::nullopt;
+        const auto& starts = chapter_pages[chapter_index][chapter.part];
+        const auto i = std::lower_bound(starts.begin(), starts.end(), limit);
+        // A jump into the middle of a standard page is not a standard pagination boundary.
+        if (i == starts.begin() || (limit != chapter.text.size() && (i == starts.end() || *i != limit)))
+            return std::nullopt;
+        return *std::prev(i);
+    }
+    /** Finds the preceding page, using matching boundaries before laying out from the part start. */
     bool paginate(std::size_t limit, std::size_t &previous) {
+        if (const auto cached = previous_page(limit)) { previous = *cached; return true; }
         const auto spec = layout(settings, link_return ? 144 : 64);
-        auto &starts = page_starts[{chapter_index, chapter.part}];
         std::size_t start = 0;
         previous = 0;
         while (start < limit) {
@@ -1429,12 +1454,10 @@ struct ReaderApp::Impl final : DisplayBackend {
                 break;
             if (planned.end <= start || !planned.error.empty())
                 return false;
-            starts.push_back(planned.start);
+            record_boundary(computed_pages, planned.start, planned.end);
             previous = planned.start;
             start = planned.end;
         }
-        std::sort(starts.begin(), starts.end());
-        starts.erase(std::unique(starts.begin(), starts.end()), starts.end());
         return true;
     }
     void show_page_before(std::size_t limit) {
@@ -1446,10 +1469,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         show_page(previous);
     }
     /**
-     * Shows the page that ends at limit. Each character's first measurement reads the font from
-     * the card, so a long stretch is announced before it is laid out.
+     * Shows the preceding page. Cache misses over long text ranges are announced before
+     * pagination because the first measurements may read glyph metrics from the card.
      */
     void turn_back_to(std::size_t limit) {
+        if (const auto cached = previous_page(limit)) { show_page(*cached); return; }
         constexpr std::size_t announced_scalars = 10000;
         if (limit > announced_scalars)
             defer("正在排版…", [this, limit] { show_page_before(limit); });
@@ -1513,12 +1537,6 @@ struct ReaderApp::Impl final : DisplayBackend {
                     return;
                 turn_back_to(chapter.text.size());
             } else {
-                const auto &starts = page_starts[{chapter_index, chapter.part}];
-                auto i = std::lower_bound(starts.begin(), starts.end(), offset);
-                if (i != starts.begin()) {
-                    show_page(*std::prev(i));
-                    return;
-                }
                 turn_back_to(offset);
             }
         }
@@ -2085,7 +2103,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             cancel_sync();
             session.open("", "", writer);
             document.close(); book_path.clear(); release(chapter); page = {};
-            links.clear(); page_starts.clear(); link_return.reset(); confirmed_link_return.reset();
+            links.clear(); clear_page_history(); link_return.reset(); confirmed_link_return.reset();
             last_recorded.clear();
         }
         const auto result = store.manage_book(management_snapshot, delete_original, detail_metadata.book_id, content_revision);
@@ -2673,7 +2691,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 return;
             if (!link_return)
                 link_return = origin->anchor;
-            page_starts.clear();
+            clear_page_history();
             show_page(target);
             return;
         }
@@ -2717,7 +2735,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (!seek(target, target_offset, "原位置无法恢复"))
                 return;
             link_return.reset();
-            page_starts.clear();
+            clear_page_history();
             show_page(target_offset);
             return;
         }
@@ -2796,7 +2814,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             break;
         case DetailCache:
             covers.erase(std::remove_if(covers.begin(), covers.end(), [&](const auto& cover) { return cover.path == detail_path; }), covers.end());
-            if (detail_path == book_path) page_starts.clear();
+            if (detail_path == book_path) clear_page_history();
             message = "本书内存缓存已清理，阅读记录保留";
             draw_details();
             break;
@@ -2929,7 +2947,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             const auto origin = session.visible_record();
             cancel_sync();
             if (origin) link_return = origin->anchor;
-            page_starts.clear();
+            clear_page_history();
             show_page(start);
             return;
         }
@@ -3140,7 +3158,7 @@ void ReaderApp::Impl::apply_typography() {
         }
     }
     load_fonts();
-    page_starts.clear();
+    clear_page_history();
     reset_pages();
     session.change_layout();
     show_page(offset);
@@ -3202,6 +3220,7 @@ void ReaderApp::complete_frame(bool success) {
             ++impl_->body_updates;
     }
     if (result && impl_->session.presented(*result)) {
+        if (frame.purpose == FramePurpose::Body) impl_->remember_page();
         impl_->confirmed_link_return = impl_->link_return;
         impl_->save_failed = false;
         if (impl_->last_recorded != impl_->book_path) {
@@ -3253,7 +3272,7 @@ bool ReaderApp::prepare_usb_transfer() {
     impl_->page = {};
     impl_->links.clear();
     impl_->entries.clear();
-    impl_->page_starts.clear();
+    impl_->clear_page_history();
     impl_->covers.clear();
     impl_->card_available = false;
     impl_->usb_prepared = true;

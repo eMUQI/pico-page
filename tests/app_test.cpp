@@ -825,6 +825,13 @@ int main(int argc, char** argv) {
             late = app.saved_record()->anchor;
             late_page = app.book_pages()->page;
             assert(late.node.find("/p[4501]/") != std::string::npos && late_page > total / 2);
+            // A contents jump may start between standard boundaries and changes body height.
+            const auto jumped_pixels = app.canvas().pixels();
+            driver.key(Input::K3); driver.present();
+            driver.key(Input::K1); driver.present();
+            assert(app.saved_record()->anchor == late && app.canvas().pixels() == jumped_pixels);
+            driver.refresh();
+            assert(app.saved_record()->anchor == late);
         }
         {
             ReaderApp app(card.string()); Driver driver{app};
