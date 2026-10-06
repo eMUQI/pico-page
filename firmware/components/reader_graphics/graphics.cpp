@@ -154,6 +154,8 @@ bool Font::open_memory(const unsigned char* bytes, std::size_t length) {
     return size(28);
 }
 
+const char* Font::fallback_identity() { return kFallbackIdentity; }
+
 bool Font::open_fallback() { return open_memory(kFallbackFont, kFallbackFontSize); }
 
 bool Font::size(int pixels) {

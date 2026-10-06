@@ -19,6 +19,7 @@ class PaginationJob {
 public:
     struct Request {
         std::string path, font;
+        bool identity_only = false;
         DocumentMetadata identity;
         graphics::LayoutSpec layout;
         std::uint64_t generation = 0;
@@ -29,7 +30,7 @@ public:
         std::vector<std::uint32_t> starts;
         std::size_t offset = 0;
         bool part_done = false, last_part = false;
-        std::string error;
+        std::string error, font_identity;
     };
     explicit PaginationJob(Request request);
     ~PaginationJob();

@@ -336,9 +336,13 @@ struct ReaderApp::Impl final : DisplayBackend {
     static constexpr std::size_t max_pages_bytes = 1U << 20;
     std::vector<std::vector<std::vector<std::uint32_t>>> chapter_pages;
     std::vector<bool> counted;
-    // Disk counts lack a strong font identity and are not trusted for navigation.
+    // Only indices bound to verified content, font and layout identities serve navigation.
     std::vector<bool> counted_live;
-    std::string pages_name, pages_header;
+    std::string pages_name, pages_header, font_identity;
+    std::string body_font_path() const {
+        return builtin_body ? "" : root + "/PicoPage/" +
+            (font_fallback ? "fonts/LXGWWenKai-Regular.ttf" : settings.font);
+    }
     // The synchronous fallback releases its extra chapter on input. The worker owns a separate
     // chapter until it observes cancellation; both paths retain accepted pagination offsets.
     Chapter counting_chapter;
@@ -353,7 +357,16 @@ struct ReaderApp::Impl final : DisplayBackend {
         auto job = std::move(counting_job);
         const auto& request = job->request;
         const auto& result = job->result;
-        if (request.generation != counting_generation || request.chapter != counting_index ||
+        if (request.generation != counting_generation) return;
+        if (request.identity_only) {
+            if (!result.error.empty()) pages_failed = true;
+            else if (!result.font_identity.empty()) {
+                font_identity = result.font_identity;
+                reset_pages();
+            }
+            return;
+        }
+        if (request.chapter != counting_index ||
             request.part != counting_part || request.offset != counting_offset) return;
         if (!result.error.empty()) {
             if (memory_error(result.error)) counting_blocked = chapter_index;
@@ -721,10 +734,11 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void load_fonts(const ReaderSettings *preview = nullptr) {
         const auto &selected = preview ? *preview : settings;
-        if (effective_font == selected.font && !builtin_body)
+        if (effective_font == selected.font && !builtin_body && controlled_storage)
             return;
         clear_body_cache();
         clear_prefetch();
+        font_identity.clear();
         font_fallback = false;
         builtin_body = false;
         const std::string path = root + "/PicoPage/" + selected.font;
@@ -1201,6 +1215,12 @@ struct ReaderApp::Impl final : DisplayBackend {
         pages_failed = pages_dirty = false;
         pages_complete = std::find(counted.begin(), counted.end(), false) == counted.end();
         pages_name.clear();
+        if (builtin_body) font_identity = graphics::Font::fallback_identity();
+        if (!async_counting && font_identity.empty()) font_identity = sha256_file(body_font_path());
+        if (!font_identity.empty()) load_pages_cache();
+    }
+    void load_pages_cache() {
+        const auto& spine = document.spine();
         struct stat book {}, font {};
         const std::string font_file = builtin_body ? "" : font_fallback ? "fonts/LXGWWenKai-Regular.ttf" : settings.font;
         if (stat((root + "/" + book_path).c_str(), &book) != 0 ||
@@ -1217,11 +1237,16 @@ struct ReaderApp::Impl final : DisplayBackend {
                       spec.left, spec.top, spec.width, spec.height, spec.font_px, spec.line_height,
                       spec.indent_chars, spec.paragraph_gap, spine.size());
         pages_name = name;
-        pages_header = std::string("PPPAGES2\n") + content_revision + "\n" + book_path + "\n" + font_file + "\n" + geometry;
+        pages_header = std::string("PPPAGES3\n") + content_revision + ":pagination-v1\n" + book_path + "\n" + font_file + "\n" + geometry +
+            document.metadata().book_id + "\n" + font_identity + "\n";
         std::string cached;
-        if (store.load_cache(pages_name, pages_header.size() + max_pages_bytes, cached) != StoreStatus::Ok ||
+        if (store.load_cache(pages_name, pages_header.size() + max_pages_bytes + 32, cached) != StoreStatus::Ok ||
             cached.compare(0, pages_header.size(), pages_header) != 0)
             return;
+        if (cached.size() < pages_header.size() + 32) return;
+        const auto checksum = cached.substr(cached.size() - 32);
+        cached.resize(cached.size() - 32);
+        if (md5_hex(cached) != checksum) return;
         // Payload, as 32-bit words in the little-endian order native to the device and the host:
         // per spine item the number of parts, or uncounted_item for an item that was not
         // finished, then per part a count and that many ascending page starts.
@@ -1252,13 +1277,15 @@ struct ReaderApp::Impl final : DisplayBackend {
                 starts.resize(count);
                 for (auto &start : starts)
                     if (!word(start)) return;
-                if (!std::is_sorted(starts.begin(), starts.end())) return;
+                if (!std::is_sorted(starts.begin(), starts.end()) ||
+                    std::adjacent_find(starts.begin(), starts.end()) != starts.end()) return;
             }
             finished[i] = true;
         }
         if (at != cached.size()) return;
         chapter_pages = std::move(loaded);
         counted = std::move(finished);
+        counted_live = counted;
         pages_complete = std::find(counted.begin(), counted.end(), false) == counted.end();
     }
     std::size_t page_index_bytes() const {
@@ -1314,7 +1341,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
         }
         std::string bytes;
-        bytes.reserve(pages_header.size() + payload);
+        bytes.reserve(pages_header.size() + payload + 32);
         bytes = pages_header;
         const auto word = [&](std::uint32_t value) {
             bytes.append(reinterpret_cast<const char *>(&value), sizeof(value));
@@ -1327,8 +1354,8 @@ struct ReaderApp::Impl final : DisplayBackend {
                 for (const auto start : starts) word(start);
             }
         }
-        // A book whose counts exceed the entry limit is recounted on every open.
-        if (bytes.size() - pages_header.size() <= max_pages_bytes && store.save_cache(pages_name, bytes) == StoreStatus::Ok)
+        bytes += md5_hex(bytes);
+        if (store.save_cache(pages_name, bytes) == StoreStatus::Ok)
             pages_dirty = false;
     }
     bool counting_due() const {
@@ -1373,6 +1400,16 @@ struct ReaderApp::Impl final : DisplayBackend {
         const StageTimer timer{"count_slice"};
         if (stop && stop()) return;
         const auto &spine = document.spine();
+        if (async_counting && font_identity.empty()) {
+            if (!counting_job) {
+                PaginationJob::Request request;
+                request.font = body_font_path(); request.identity_only = true;
+                request.generation = counting_generation;
+                counting_job = std::make_unique<PaginationJob>(std::move(request));
+                if (!counting_job->start()) { counting_job.reset(); counting_blocked = chapter_index; }
+            }
+            return;
+        }
         if (counting_index == not_counting) {
             auto next = static_cast<std::size_t>(std::find(counted.begin(), counted.end(), false) - counted.begin());
             if (chapter_index < spine.size() && !counted[chapter_index] && chapter.resource == spine[chapter_index].resource)
@@ -1388,8 +1425,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (!counting_memory(spine[counting_index].bytes)) { counting_blocked = chapter_index; return; }
             PaginationJob::Request request;
             request.path = root + "/" + book_path;
-            request.font = builtin_body ? "" : root + "/PicoPage/" +
-                (font_fallback ? "fonts/LXGWWenKai-Regular.ttf" : settings.font);
+            request.font = body_font_path();
             request.identity = document.metadata(); request.layout = layout(settings);
             request.generation = counting_generation; request.chapter = counting_index;
             request.part = counting_part; request.offset = counting_offset;
@@ -2260,6 +2296,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         stop_counting_job();
         identities.clear();
+        font_identity.clear(); effective_font.clear();
         const auto result = store.manage_book(management_snapshot, delete_original, detail_metadata.book_id, content_revision);
         if (result != StoreStatus::Ok) {
             error(result == StoreStatus::ExternalChange ? "文件已被外部修改，操作未执行。请重新打开书籍详情。" :
@@ -3341,7 +3378,7 @@ void ReaderApp::Impl::save_refresh(const ReaderSettings &values) {
 
 ReaderApp::ReaderApp(std::string root, std::string writer, bool controlled_storage, bool async_counting)
     : impl_(std::make_unique<Impl>(std::move(root), std::move(writer))) { impl_->controlled_storage = controlled_storage; impl_->async_counting = async_counting; }
-void ReaderApp::invalidate_identity_cache() { impl_->stop_counting_job(); impl_->identities.clear(); }
+void ReaderApp::invalidate_identity_cache() { impl_->stop_counting_job(); impl_->identities.clear(); impl_->font_identity.clear(); impl_->effective_font.clear(); }
 ReaderApp::~ReaderApp() = default;
 bool ReaderApp::initialize() {
     return impl_->initialize();

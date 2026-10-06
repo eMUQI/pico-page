@@ -15,10 +15,11 @@ endforeach()
 # The original subset font remains independently inspectable with its OFL notice.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_LIST_DIR}/fonts/PicoPageFallback.otf")
+file(SHA256 "${CMAKE_CURRENT_LIST_DIR}/fonts/PicoPageFallback.otf" fallback_sha256)
 file(READ "${CMAKE_CURRENT_LIST_DIR}/fonts/PicoPageFallback.otf" fallback_hex HEX)
 string(REGEX REPLACE "(..)" "0x\\1," fallback_bytes "${fallback_hex}")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/fallback_font.h"
-    "static const unsigned char kFallbackFont[] = {${fallback_bytes}};\nstatic const unsigned long kFallbackFontSize = sizeof(kFallbackFont);\n")
+    "static const unsigned char kFallbackFont[] = {${fallback_bytes}};\nstatic const unsigned long kFallbackFontSize = sizeof(kFallbackFont);\nstatic const char kFallbackIdentity[] = \"${fallback_sha256}\";\n")
 
 set(image_sources image.cpp qr.cpp third_party/pngle/pngle.c third_party/tjpgd/tjpgd.c
     third_party/qrcodegen/qrcodegen.c)

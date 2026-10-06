@@ -44,7 +44,7 @@ bool PaginationJob::start() {
         ESP_LOGI("pagination", "stack_free=%u", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
         job->done_.store(true, std::memory_order_release);
         vTaskDelete(nullptr);
-    }, "pagination", 12288, this, 1, nullptr) == pdPASS;
+    }, "pagination", 32768, this, 1, nullptr) == pdPASS;
 #else
     thread_ = std::thread([this] { run(); done_.store(true, std::memory_order_release); });
     started_ = true;
@@ -63,6 +63,11 @@ void PaginationJob::run() {
     result.offset = request.offset;
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
     if (stop()) return;
+    if (request.identity_only) {
+        result.font_identity = request.font.empty() ? graphics::Font::fallback_identity() : sha256_file(request.font, stop);
+        if (result.font_identity.empty() && !stop()) result.error = "Font identity read failed";
+        return;
+    }
     EpubDocument document;
     graphics::Font font;
     Chapter source;

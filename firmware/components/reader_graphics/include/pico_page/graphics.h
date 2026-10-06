@@ -50,6 +50,8 @@ public:
     /** The caller retains immutable font bytes until this face is closed. */
     bool open_memory(const unsigned char* bytes, std::size_t length);
     bool open_fallback();
+    /** SHA-256 of the compiled fallback font bytes. */
+    static const char* fallback_identity();
     bool size(int pixels);
     bool valid() const { return face_ != nullptr; }
     const std::string& error() const { return error_; }

@@ -97,6 +97,9 @@ struct Chapter {
 /** Number of complete EPUB identity scans in this process. */
 std::uint64_t identity_hash_count();
 
+/** SHA-256 of a file, read in 8 KiB chunks. Empty on read failure or cancellation. */
+std::string sha256_file(const std::string& path, const std::function<bool()>& stop = {});
+
 /** Lowercase hexadecimal MD5 of bytes; empty when the digest backend fails. */
 std::string md5_hex(std::string_view bytes);
 

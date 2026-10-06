@@ -889,6 +889,22 @@ void set_chapter_memory_probe(bool (*probe)(std::size_t bytes)) {
     memory_room = probe ? probe : platform_memory_room;
 }
 
+std::string sha256_file(const std::string& path, const std::function<bool()>& stop) {
+    std::unique_ptr<FILE, decltype(&std::fclose)> file(std::fopen(path.c_str(), "rb"), &std::fclose);
+    if (!file) return {};
+    Hash sha(false);
+    std::array<unsigned char, 8192> bytes;
+    while (!stop || !stop()) {
+        const auto count = std::fread(bytes.data(), 1, bytes.size(), file.get());
+        if (count && !sha.update(bytes.data(), count)) return {};
+        if (count < bytes.size()) {
+            std::string digest;
+            return !std::ferror(file.get()) && sha.finish(digest) ? digest : std::string();
+        }
+    }
+    return {};
+}
+
 std::string md5_hex(std::string_view bytes) {
     Hash md5(true);
     std::string digest;

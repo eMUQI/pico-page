@@ -925,11 +925,12 @@ int main(int argc, char** argv) {
             const auto original = read(entry.path());
             if (original.find("Count/worker.epub\n") == std::string::npos) continue;
             std::size_t at = 0;
-            for (unsigned n = 0; n < 7; ++n) at = original.find('\n', at) + 1;
+            for (unsigned n = 0; n < 9; ++n) at = original.find('\n', at) + 1;
             std::string oversized = original.substr(0, at);
             const std::uint32_t parts = 50000;
             oversized.append(reinterpret_cast<const char*>(&parts), sizeof(parts));
             oversized.append(parts * sizeof(std::uint32_t), '\0');
+            oversized += md5_hex(oversized);
             write(entry.path(), oversized);
             ReaderApp bounded(card.string()); Driver bounded_driver{bounded};
             assert(bounded.initialize()); bounded_driver.present();
@@ -939,6 +940,19 @@ int main(int argc, char** argv) {
             write(entry.path(), original);
         }
         assert(rejected_oversized_index);
+        const auto font_path = card / "PicoPage/fonts/LXGWWenKai-Regular.ttf";
+        const auto original_font = read(font_path);
+        const auto font_time = fs::last_write_time(font_path);
+        auto replaced_font = original_font;
+        replaced_font.back() ^= 1;
+        write(font_path, replaced_font); fs::last_write_time(font_path, font_time);
+        {
+            ReaderApp replaced(card.string()); Driver replaced_driver{replaced};
+            assert(replaced.initialize()); replaced_driver.present();
+            opened(replaced, "Count/worker.epub"); replaced_driver.present();
+            assert(!replaced.book_pages());
+        }
+        write(font_path, original_font); fs::last_write_time(font_path, font_time);
     }
     {
         // Phone setup: both entry points only request a session, the page keeps K2 and ignores
