@@ -75,13 +75,14 @@ struct CacheUsage {
 class ReaderApp {
   public:
     explicit ReaderApp(std::string card_root, std::string writer_id = "pico-page-host",
-                       bool controlled_storage = false, bool async_counting = false);
+                       bool controlled_storage = false, bool async_content = false);
     ~ReaderApp();
     ReaderApp(const ReaderApp &) = delete;
     ReaderApp &operator=(const ReaderApp &) = delete;
     /** Drops all verified identities before storage can change outside this application. */
     void invalidate_identity_cache();
     bool initialize();
+    /** Accepts an open request; asynchronous images finish through poll_background and body presentation. */
     bool open_book(const std::string &relative_path);
     /** Updates the latest battery reading for the next render; nullopt means unknown. */
     void set_battery(std::optional<int> percent);
@@ -132,19 +133,24 @@ class ReaderApp {
     std::optional<BookPages> book_pages() const;
     /** True while the reading page is shown and next-page preparation or counting has work left. */
     bool background_due() const;
+    /** True until a foreground content job has completed or acknowledged cancellation. */
+    bool content_busy() const;
     /**
-     * Diagnostic state: "prefetch" while the next page is being prepared, "idle" without
+     * Diagnostic state: "image" while an image is prepared, "prefetch" while the next page is being prepared, "idle" without
      * a book or when all work is complete, "counting"
      * while chapters remain, "waiting" while memory is too low to load the next chapter, and
      * "failed" after a chapter could not be read or laid out. The string is static.
      */
     const char *background_state() const;
     CacheUsage cache_usage() const;
-    /** Accepts completed results without changing the frame; cancel requests worker cancellation. */
+    /**
+     * Accepts worker results; image completion may queue a body frame. cancel stops statistics
+     * and defers image completion until pending input has been handled.
+     */
     void poll_background(bool cancel = false);
     /**
      * Prepares one next-page layout and warms glyphs in 15 ms slices, then starts statistics.
-     * With async_counting, an independent parser and font return page boundaries; otherwise
+     * With async_content, an independent parser and font return page boundaries; otherwise
      * counting runs here in 15 ms slices or one chapter load. Storage and individual operations
      * can exceed that target. Call only on the application owner task while no input is waiting;
      * stop must not call back into ReaderApp. No frame or reading position is changed.

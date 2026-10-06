@@ -64,6 +64,9 @@ int main(int argc, char** argv) {
     assert(canvas.pixel(10, 43) >= 14 && canvas.pixel(17, 43) <= 1);
     assert(canvas.pixel(9, 20) == 7 && canvas.pixel(18, 43) == 7);
     bad = jpeg; bad.resize(bad.size() / 2);
+    std::vector<std::uint8_t> uniform(std::begin(kUniformPng), std::end(kUniformPng));
+    assert(render_image(canvas, uniform, 0, 0, 8, 8, image_error));
+    for (int y = 0; y < 8; ++y) for (int x = 0; x < 8; ++x) assert(canvas.pixel(x, y) == 0);
     const auto jpeg_unchanged = canvas.pixels();
     unsigned cancellation_checks = 0;
     assert(!render_image(canvas, jpeg, 0, 0, 32, 24, image_error, false,

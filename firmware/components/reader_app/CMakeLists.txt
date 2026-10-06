@@ -1,11 +1,12 @@
 if(ESP_PLATFORM)
-    idf_component_register(SRCS app.cpp content_cache.cpp pagination.cpp INCLUDE_DIRS include REQUIRES reader_core reader_store reader_document reader_graphics reader_sync
+    idf_component_register(SRCS app.cpp content_cache.cpp content_job.cpp INCLUDE_DIRS include REQUIRES reader_core reader_store reader_document reader_graphics reader_sync
         PRIV_REQUIRES esp_app_format)
     target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_17)
 else()
-    add_library(reader_app app.cpp content_cache.cpp pagination.cpp)
+    find_package(Threads REQUIRED)
+    add_library(reader_app app.cpp content_cache.cpp content_job.cpp)
     target_include_directories(reader_app PUBLIC include)
-    target_link_libraries(reader_app PUBLIC reader_core reader_store reader_document reader_graphics reader_sync)
+    target_link_libraries(reader_app PUBLIC reader_core reader_store reader_document reader_graphics reader_sync Threads::Threads)
     target_compile_features(reader_app PUBLIC cxx_std_17)
     target_compile_options(reader_app PRIVATE -Wall -Wextra -Werror)
 endif()

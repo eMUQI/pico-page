@@ -1,10 +1,13 @@
-#include "pagination.h"
+#include "content_job.h"
+#include "pico_page/store.h"
+#include <cstring>
 #include <algorithm>
 #include <utility>
 #ifdef ESP_PLATFORM
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #endif
 
 namespace pico_page {
@@ -33,25 +36,25 @@ graphics::Page plan_content(graphics::Font& font, const Chapter& source, std::si
             end = std::min<std::size_t>(end, image.begin);
     return graphics::layout_page(font, std::u32string_view(source.text).substr(0, end), start, spec, collect, stop);
 }
-PaginationJob::PaginationJob(Request value) : request(std::move(value)) {}
-PaginationJob::~PaginationJob() { cancel(); wait(); }
-bool PaginationJob::start() {
+ContentJob::ContentJob(Request value) : request(std::move(value)) {}
+ContentJob::~ContentJob() { cancel(); wait(); }
+bool ContentJob::start() {
     if (started_) return false;
 #ifdef ESP_PLATFORM
     started_ = xTaskCreate([](void* opaque) {
-        auto* job = static_cast<PaginationJob*>(opaque);
+        auto* job = static_cast<ContentJob*>(opaque);
         job->run();
-        ESP_LOGI("pagination", "stack_free=%u", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+        ESP_LOGI("content_worker", "stack_free=%u", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
         job->done_.store(true, std::memory_order_release);
         vTaskDelete(nullptr);
-    }, "pagination", 32768, this, 1, nullptr) == pdPASS;
+    }, "content_worker", 32768, this, 1, nullptr) == pdPASS;
 #else
     thread_ = std::thread([this] { run(); done_.store(true, std::memory_order_release); });
     started_ = true;
 #endif
     return started_;
 }
-void PaginationJob::wait() {
+void ContentJob::wait() {
     if (!started_) return;
 #ifdef ESP_PLATFORM
     while (!done()) vTaskDelay(1);
@@ -59,15 +62,16 @@ void PaginationJob::wait() {
     if (thread_.joinable()) thread_.join();
 #endif
 }
-void PaginationJob::run() {
+void ContentJob::run() {
     result.offset = request.offset;
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
     if (stop()) return;
-    if (request.identity_only) {
+    if (request.kind == ContentJob::Kind::FontIdentity) {
         result.font_identity = request.font.empty() ? graphics::Font::fallback_identity() : sha256_file(request.font, stop);
         if (result.font_identity.empty() && !stop()) result.error = "Font identity read failed";
         return;
     }
+    if (request.kind == Kind::Image) { render_image(); return; }
     EpubDocument document;
     graphics::Font font;
     Chapter source;
@@ -98,5 +102,45 @@ void PaginationJob::run() {
         taskYIELD();
 #endif
     }
+}
+std::string image_cache_key(const std::string& book_id, const std::string& resource, const graphics::LayoutSpec& spec) {
+    return "images/gray-v1/" + book_id + "/" + md5_hex(resource + ":" + std::to_string(spec.left) + ":" +
+        std::to_string(spec.top) + ":" + std::to_string(spec.width) + ":" + std::to_string(spec.height));
+}
+void ContentJob::render_image() {
+    const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
+#ifdef ESP_PLATFORM
+    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 3U * 1024 * 1024 ||
+        heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 2U * 1024 * 1024) {
+        result.error = "Image preparation memory unavailable"; return;
+    }
+#endif
+    if (stop()) return;
+    result.image = std::make_unique<graphics::Canvas>();
+    FileStore store(request.root);
+    {
+        std::string cached;
+        const auto size = result.image->pixels().size();
+        if (store.load_cache(request.cache_name, size + 32, cached) == StoreStatus::Ok && cached.size() == size + 32) {
+            const auto checksum = cached.substr(size);
+            cached.resize(size);
+            if (md5_hex(cached) == checksum) {
+                std::memcpy(result.image->data(), cached.data(), size);
+                return;
+            }
+        }
+    }
+    if (stop()) return;
+    EpubDocument document;
+    std::vector<std::uint8_t> bytes;
+    if (!document.open_verified(request.path, request.identity, result.error) || stop()) return;
+    if (!document.read_image(request.image_resource, bytes, result.error, stop)) return;
+    const auto& spec = request.layout;
+    if (!graphics::render_image(*result.image, bytes, spec.left, spec.top, spec.width, spec.height, result.error, false, stop)) return;
+    std::vector<std::uint8_t>().swap(bytes);
+    if (stop()) return;
+    std::string pixels(reinterpret_cast<const char*>(result.image->data()), result.image->pixels().size());
+    pixels += md5_hex(pixels);
+    store.save_cache(request.cache_name, pixels);
 }
 } // namespace pico_page

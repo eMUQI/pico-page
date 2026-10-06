@@ -56,6 +56,15 @@ struct Driver {
         while (app.pending_frame()) app.complete_frame(true);
         if (app.save_due()) app.save_progress();
     }
+    void complete_content() {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (app.content_busy()) {
+            app.poll_background();
+            if (app.pending_frame()) present();
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
     void close() {
         if (app.view() == View::Tools) tap(342, 500);
         else if (app.view() == View::Typography) tap(628, 700);
@@ -911,7 +920,8 @@ int main(int argc, char** argv) {
         opened(app, "Count/worker-stale.epub"); driver.present();
         // A result from the previous book cannot publish counts into the new session.
         for (unsigned n = 0; n < 20; ++n) app.background_step();
-        opened(app, "Books/cover.epub"); driver.present();
+        assert(app.open_book("Books/cover.epub")); driver.present();
+        driver.complete_content();
         app.poll_background(true);
         assert(app.view() == View::Reading);
         ReaderApp reference(card.string()); Driver ref_driver{reference};
@@ -953,6 +963,38 @@ int main(int argc, char** argv) {
             assert(!replaced.book_pages());
         }
         write(font_path, original_font); fs::last_write_time(font_path, font_time);
+    }
+    {
+        fs::remove_all(card / "PicoPage/cache/images");
+        ReaderApp app(card.string(), "image-worker", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        assert(app.open_book("Books/cover.epub") && app.content_busy());
+        assert(app.pending_frame()->purpose == FramePurpose::Overlay);
+        driver.present();
+        const auto saved = app.saved_record();
+        driver.refresh();
+        app.poll_background();
+        driver.tap(580, 1170); driver.present();
+        driver.complete_content();
+        assert(app.view() == View::Library && app.saved_record() == saved);
+        assert(app.open_book("Books/cover.epub")); driver.present(); driver.complete_content();
+        assert(app.view() == View::Reading && !app.content_busy());
+        const auto pixels = app.canvas().pixels();
+        const auto decodes = graphics::image_decode_count();
+        assert(app.open_book("Books/cover.epub")); driver.present(); driver.complete_content();
+        assert(graphics::image_decode_count() == decodes && app.canvas().pixels() == pixels);
+        assert(app.open_book("Books/cover.epub")); driver.present(); app.poll_background();
+        opened(app, "Books/book.epub"); driver.present();
+        const auto switched = app.canvas().pixels();
+        const auto switched_record = app.saved_record();
+        driver.complete_content();
+        assert(app.canvas().pixels() == switched && app.saved_record() == switched_record);
+        assert(app.open_book("Books/cover.epub"));
+        const auto before_failure = app.saved_record();
+        app.complete_frame(false);
+        if (app.pending_frame()) driver.present();
+        driver.complete_content();
+        assert(app.view() == View::Error && app.saved_record() == before_failure);
     }
     {
         // Phone setup: both entry points only request a session, the page keeps K2 and ignores
