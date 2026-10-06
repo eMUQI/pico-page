@@ -128,6 +128,8 @@ class ReaderApp {
     bool save_due() const;
     /** Commits the presented position now; a failure replaces the page with the error view. */
     void save_progress();
+    /** True while an immutable displayed-position snapshot is being committed. */
+    bool save_busy() const;
     /**
      * Page number of the visible page and the page total of the open book under the applied
      * typography; nullopt until every chapter has been counted or outside the reading order.

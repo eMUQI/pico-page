@@ -62,6 +62,12 @@ struct Driver {
         assert(app.pending_frame());
         while (app.pending_frame()) app.complete_frame(true);
         if (app.save_due()) app.save_progress();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (app.save_busy()) {
+            app.poll_background();
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
     }
     void complete_content() {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
@@ -1146,6 +1152,42 @@ int main(int argc, char** argv) {
         const auto saved = *app.saved_record();
         app.show_portal({PortalPhase::Closed, "", "", "", ""}); driver.present();
         assert(app.view() == View::Settings && *app.saved_record() == saved);
+    }
+    {
+        fs::create_directories(card / "SaveWorker");
+        fs::copy_file(fixtures / "multi-part.epub", card / "SaveWorker/book.epub");
+        ReaderApp app(card.string(), "save-worker", true, true);
+        Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "SaveWorker/book.epub");
+        const auto first = app.pending_frame()->anchor;
+        app.complete_frame(true);
+        app.save_progress();
+        assert(app.save_busy() && !app.saved_record());
+        driver.key(Input::K3);
+        assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Body);
+        const auto second = app.pending_frame()->anchor;
+        assert(first != second);
+        app.complete_frame(true);
+        const auto drain = [&] {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+            while (app.save_busy()) {
+                app.poll_background();
+                assert(std::chrono::steady_clock::now() < deadline);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        };
+        drain();
+        assert(app.saved_record()->anchor == first && app.save_due());
+        app.save_progress(); drain();
+        assert(app.saved_record()->anchor == second && !app.save_due());
+        const auto sidecar = card / "SaveWorker/book.epub.picopage";
+        fs::rename(sidecar, sidecar.string() + ".held");
+        write(sidecar, "not a directory");
+        driver.key(Input::K3); app.complete_frame(true);
+        app.save_progress(); drain();
+        assert(app.saved_record()->anchor == second && app.view() == View::Error);
+        assert(app.status().find("进度未保存") != std::string::npos);
+        fs::remove(sidecar); fs::rename(sidecar.string() + ".held", sidecar);
     }
     fs::remove_all(card);
     std::cout << "reader app display, progress protection, typography, cover and stale network checks: passed\n";

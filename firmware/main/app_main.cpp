@@ -521,7 +521,7 @@ extern "C" void app_main() {
                 ESP_LOGI(tag, "Page counting slice: %lld ms state=%s", static_cast<long long>(elapsed_ms),
                          app->background_state());
         }
-        else if (!usb_mode && idle >= idle_slow_us && !app->pending_frame() && !app->content_busy())
+        else if (!usb_mode && idle >= idle_slow_us && !app->pending_frame() && !app->content_busy() && !app->save_busy())
             pico_page::platform::set_performance(false);
         const std::int64_t sleep_after = app->auto_sleep_minutes() * 60'000'000LL;
         if (!usb_mode && sleep_after > 0 && idle >= sleep_after)

@@ -70,6 +70,14 @@ void ContentJob::wait() {
 void ContentJob::run() {
     result.offset = request.offset;
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
+    if (request.kind == Kind::SaveProgress) {
+        const StageTimer timer{"progress_commit"};
+        FileStore store(request.root);
+        if (request.record) result.progress = store.save_progress(request.relative_path, *request.record);
+        if (request.save_last_book && result.progress.status == StoreStatus::Ok)
+            result.last_book_saved = store.save_last_book(request.relative_path, result.error) == StoreStatus::Ok;
+        return;
+    }
     if (stop()) return;
     if (request.kind == ContentJob::Kind::FontIdentity) {
         result.font_identity = request.font.empty() ? graphics::Font::fallback_identity() : sha256_file(request.font, stop);

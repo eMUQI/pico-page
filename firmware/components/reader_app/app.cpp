@@ -231,7 +231,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     bool prefetch_due() const {
         return view == View::Reading && has_book() && card_available && !usb_prepared &&
-               !display.busy() && !deferred && !foreground_job && !pending_content && !prefetch_done;
+               !display.busy() && !deferred && !save_job && !foreground_job && !pending_content && !prefetch_done;
     }
     void prepare_next(const std::function<bool()>& stop) {
         if ((stop && stop()) || raster_job) return;
@@ -471,7 +471,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!foreground_job) return;
         if (!foreground_job->started()) {
             if (!content_loading) { foreground_job.reset(); return; }
-            if (display.busy() || counting_job || raster_job) return;
+            if (display.busy() || counting_job || raster_job || save_job) return;
             if (!foreground_job->start()) {
                 foreground_job.reset(); content_loading = false;
                 error("内容任务无法启动，请返回后重试。");
@@ -562,7 +562,52 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool has_book() const {
         return !book_path.empty();
     }
+    std::unique_ptr<ContentJob> save_job;
+    std::optional<SaveRequest> saving_request;
+    bool save_error_pending = false, recent_save_failed = false;
+    void poll_save() {
+        if (!save_job) return;
+        if (!save_job->started()) {
+            if (counting_job || raster_job || (foreground_job && foreground_job->started() && !foreground_job->done())) return;
+            if (save_job->start()) return;
+            save_job->result.progress.status = StoreStatus::IoError;
+        } else if (!save_job->done()) return;
+        auto job = std::move(save_job);
+        const auto request = std::exchange(saving_request, std::nullopt);
+        const bool okay = job->result.progress.status == StoreStatus::Ok &&
+            job->result.progress.record && *job->result.progress.record == *job->request.record;
+        if (request) session.saved(*request, okay);
+        save_failed = !okay;
+        save_error_pending = !okay;
+        if (!okay) message = "进度未保存，请检查 TF 卡后重试";
+        if (job->result.last_book_saved) last_recorded = job->request.relative_path;
+        else if (okay && job->request.save_last_book) {
+            recent_save_failed = true; message = "最近阅读记录未保存";
+        }
+    }
+    void drain_save() {
+        if (!save_job) return;
+        stop_raster(); stop_counting_job();
+        if (foreground_job && foreground_job->started()) foreground_job->wait();
+        poll_save();
+        if (save_job) { save_job->wait(); poll_save(); }
+    }
+    void schedule_save() {
+        if (!async_content) { if (!persist()) error(message); return; }
+        if (save_job) return;
+        saving_request = session.request_save();
+        if (!saving_request && (!session.visible_record() || last_recorded == book_path)) return;
+        ContentJob::Request request;
+        request.kind = ContentJob::Kind::SaveProgress; request.root = root; request.relative_path = book_path;
+        request.record = saving_request ? saving_request->record : *session.visible_record(); request.save_last_book = last_recorded != book_path;
+        save_job = std::make_unique<ContentJob>(std::move(request));
+        if (counting_job) counting_job->cancel();
+        if (raster_job) raster_job->cancel();
+        poll_save();
+    }
     bool persist() {
+        drain_save();
+        save_error_pending = false;
         auto request = session.request_save();
         if (!request)
             return !session.needs_save();
@@ -1535,7 +1580,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     bool counting_due() const {
         return view == View::Reading && has_book() && card_available && !usb_prepared &&
-               !display.busy() && !deferred && !foreground_job && !pending_content && !raster_job && !pages_complete && !pages_failed &&
+               !display.busy() && !deferred && !save_job && !foreground_job && !pending_content && !raster_job && !pages_complete && !pages_failed &&
                counting_blocked != chapter_index;
     }
     /** Frees the chapter loaded for counting; its partial count resumes after a reload. */
@@ -3607,8 +3652,8 @@ void ReaderApp::Impl::save_refresh(const ReaderSettings &values) {
 
 ReaderApp::ReaderApp(std::string root, std::string writer, bool controlled_storage, bool async_content)
     : impl_(std::make_unique<Impl>(std::move(root), std::move(writer))) { impl_->controlled_storage = controlled_storage; impl_->async_content = async_content; }
-void ReaderApp::invalidate_identity_cache() { impl_->abandon_content(); impl_->foreground_job.reset(); impl_->stop_raster(); impl_->stop_counting_job(); impl_->identities.clear(); impl_->font_identity.clear(); impl_->effective_font.clear(); }
-ReaderApp::~ReaderApp() = default;
+void ReaderApp::invalidate_identity_cache() { impl_->drain_save(); impl_->abandon_content(); impl_->foreground_job.reset(); impl_->stop_raster(); impl_->stop_counting_job(); impl_->identities.clear(); impl_->font_identity.clear(); impl_->effective_font.clear(); }
+ReaderApp::~ReaderApp() { impl_->drain_save(); }
 bool ReaderApp::initialize() {
     return impl_->initialize();
 }
@@ -3646,7 +3691,8 @@ void ReaderApp::complete_frame(bool success) {
         if (frame.purpose == FramePurpose::Body) impl_->remember_page();
         impl_->confirmed_link_return = impl_->link_return;
         impl_->save_failed = false;
-        if (impl_->last_recorded != impl_->book_path) {
+        impl_->recent_save_failed = false;
+        if (!impl_->async_content && impl_->last_recorded != impl_->book_path) {
             std::string error;
             if (impl_->store.save_last_book(impl_->book_path, error) != StoreStatus::Ok)
                 impl_->message = "最近阅读记录未保存";
@@ -3655,7 +3701,7 @@ void ReaderApp::complete_frame(bool success) {
         }
     }
     if (success && impl_->view == View::Tools && std::exchange(impl_->tools_save_pending, false)) {
-        if (!impl_->persist()) impl_->error(impl_->message);
+        impl_->schedule_save();
     }
     if (auto work = std::exchange(impl_->deferred, nullptr); work && success)
         work();
@@ -3723,7 +3769,7 @@ bool ReaderApp::prepare_portal() {
         !impl_->card_available || !impl_->persist()) return false;
     impl_->cancel_sync();
     impl_->clear_body_cache();
-    impl_->clear_prefetch();
+    impl_->stop_raster();
     impl_->release_counting();
     impl_->portal = {};
     impl_->portal_closing = false;
@@ -3795,13 +3841,15 @@ void ReaderApp::card_removed() {
     impl_->error("TF 卡已移除。请重新插卡并重启设备。");
 }
 bool ReaderApp::save_due() const {
-    return !impl_->usb_prepared && !impl_->display.busy() && impl_->session.needs_save() &&
-           !impl_->save_failed;
+    return !impl_->usb_prepared && !impl_->display.busy() && (impl_->session.needs_save() ||
+           (impl_->async_content && !impl_->recent_save_failed && impl_->session.visible_record() && impl_->last_recorded != impl_->book_path)) &&
+           !impl_->save_failed && !impl_->save_job;
 }
 void ReaderApp::save_progress() {
     if (impl_->usb_prepared || impl_->display.busy()) return;
-    if (!impl_->persist()) impl_->error(impl_->message);
+    impl_->schedule_save();
 }
+bool ReaderApp::save_busy() const { return !!impl_->save_job; }
 std::optional<BookPages> ReaderApp::book_pages() const {
     const auto page = impl_->has_book() ? impl_->current_page() : 0;
     return page ? std::optional<BookPages>{{page, impl_->total_pages()}} : std::nullopt;
@@ -3838,6 +3886,10 @@ void ReaderApp::poll_background(bool cancel) {
     if (cancel && impl_->counting_job) impl_->counting_job->cancel();
     impl_->poll_raster();
     impl_->poll_counting_job();
+    impl_->poll_save();
+    if (impl_->save_error_pending && !impl_->display.busy() && !impl_->content_loading) {
+        impl_->save_error_pending = false; impl_->error(impl_->message);
+    }
     if (!cancel || !impl_->content_loading) impl_->poll_content();
 }
 void ReaderApp::background_step(const std::function<bool()>& stop) {

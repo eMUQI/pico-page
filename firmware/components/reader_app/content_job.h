@@ -23,7 +23,7 @@ std::string image_cache_key(const std::string& book_id, const std::string& resou
 /** A single job owns its parser and font. Only done() permits access to its result. */
 class ContentJob {
 public:
-    enum class Kind { Pagination, FontIdentity, Image, Open, Chapter, RasterPage };
+    enum class Kind { Pagination, FontIdentity, Image, Open, Chapter, RasterPage, SaveProgress };
     enum class Target { Start, End, Before, Anchor, Fragment };
     struct Request {
         std::string path, font;
@@ -36,6 +36,8 @@ public:
         DocumentMetadata identity;
         graphics::LayoutSpec layout;
         graphics::Page page;
+        std::optional<ReadingRecord> record;
+        bool save_last_book = false;
         std::uint64_t generation = 0;
         std::size_t chapter = 0, offset = 0;
         std::uint32_t part = 0;
@@ -52,6 +54,7 @@ public:
         std::size_t chapter_index = 0;
         ConfigResult configuration;
         ProgressResult progress;
+        bool last_book_saved = false;
         off_t file_size = 0;
         time_t file_modified = 0;
         ino_t file_inode = 0;
