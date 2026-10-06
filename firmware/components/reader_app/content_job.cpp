@@ -1,5 +1,6 @@
 #include "content_job.h"
 #include "content_cache.h"
+#include "pico_page/stage_timer.h"
 #include <sys/stat.h>
 #include "pico_page/store.h"
 #include <cstring>
@@ -43,6 +44,8 @@ ContentJob::~ContentJob() { cancel(); wait(); }
 bool ContentJob::start() {
     if (started_) return false;
 #ifdef ESP_PLATFORM
+    if ((request.kind == Kind::Pagination || request.kind == Kind::FontIdentity || request.kind == Kind::RasterPage) &&
+        heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < 64U * 1024) return false;
     started_ = xTaskCreate([](void* opaque) {
         auto* job = static_cast<ContentJob*>(opaque);
         job->run();
@@ -73,6 +76,7 @@ void ContentJob::run() {
         if (result.font_identity.empty() && !stop()) result.error = "Font identity read failed";
         return;
     }
+    if (request.kind == Kind::RasterPage) { raster_page(); return; }
     if (request.kind == Kind::Chapter) { load_chapter(); return; }
     if (request.kind == Kind::Open) { open_book(); return; }
     if (request.kind == Kind::Image) { render_image(); return; }
@@ -227,6 +231,24 @@ void ContentJob::load_chapter() {
         start = readable_offset(result.chapter, page.end);
         if (result.history.size() == 64) result.history.erase(result.history.begin());
         result.history.emplace_back(static_cast<std::uint32_t>(page.start), static_cast<std::uint32_t>(start));
+    }
+}
+void ContentJob::raster_page() {
+    const StageTimer timer{"next_page_raster"};
+    const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
+#ifdef ESP_PLATFORM
+    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 3U * 1024 * 1024 ||
+        heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 684U * 1216U / 2) {
+        result.error = "Page bitmap memory unavailable"; return;
+    }
+#endif
+    if (stop()) { result.error = "Page bitmap cancelled"; return; }
+    graphics::Font font;
+    if (!(request.font.empty() ? font.open_fallback() : font.open(request.font))) { result.error = font.error(); return; }
+    result.image = std::make_unique<graphics::Canvas>();
+    if (!graphics::render_page(*result.image, font, request.page, 1, stop)) {
+        result.error = stop() ? "Page bitmap cancelled" : "Page rasterization failed";
+        result.image.reset();
     }
 }
 } // namespace pico_page

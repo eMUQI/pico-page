@@ -351,10 +351,12 @@ Page layout_page(Font& font, std::u32string_view text, std::size_t start, const 
     return page;
 }
 
-bool render_page(Canvas& canvas, Font& font, const Page& page, std::uint8_t gray) {
+bool render_page(Canvas& canvas, Font& font, const Page& page, std::uint8_t gray, const std::function<bool()>& stop) {
     if (!page.error.empty() || !font.size(page.font_px)) return false;
-    for (const auto& glyph : page.glyphs)
+    for (const auto& glyph : page.glyphs) {
+        if (stop && stop()) return false;
         if (!font.draw(canvas, glyph.scalar, glyph.x, glyph.baseline, gray)) return false;
+    }
     return true;
 }
 

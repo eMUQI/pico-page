@@ -23,7 +23,7 @@ std::string image_cache_key(const std::string& book_id, const std::string& resou
 /** A single job owns its parser and font. Only done() permits access to its result. */
 class ContentJob {
 public:
-    enum class Kind { Pagination, FontIdentity, Image, Open, Chapter };
+    enum class Kind { Pagination, FontIdentity, Image, Open, Chapter, RasterPage };
     enum class Target { Start, End, Before, Anchor, Fragment };
     struct Request {
         std::string path, font;
@@ -35,6 +35,7 @@ public:
         std::string root, image_resource, cache_name, relative_path, content_revision;
         DocumentMetadata identity;
         graphics::LayoutSpec layout;
+        graphics::Page page;
         std::uint64_t generation = 0;
         std::size_t chapter = 0, offset = 0;
         std::uint32_t part = 0;
@@ -71,6 +72,7 @@ private:
     void render_image();
     void open_book();
     void load_chapter();
+    void raster_page();
     std::atomic<bool> cancelled_{false}, done_{false};
     bool started_ = false;
 #ifndef ESP_PLATFORM

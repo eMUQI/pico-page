@@ -1043,6 +1043,21 @@ int main(int argc, char** argv) {
                               async.canvas().pixels().begin()));
         };
         same_body();
+        const auto prepare_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (!async.cache_usage().next_bitmap) {
+            async.background_step(); async.poll_background();
+            assert(!async.pending_frame() && std::chrono::steady_clock::now() < prepare_deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(async.cache_usage().next_bitmap == 684U * 1216U / 2);
+        driver.refresh();
+        const auto bitmap_hits = async.cache_usage().bitmap_hits;
+        ref_driver.key(Input::K3); ref_driver.present();
+        driver.key(Input::K3); driver.present();
+        assert(async.cache_usage().bitmap_hits == bitmap_hits + 1);
+        same_body();
+        ref_driver.key(Input::K1); ref_driver.present();
+        driver.key(Input::K1); driver.present(); driver.complete_content(); same_body();
         ref_driver.key(Input::K1); ref_driver.present();
         const auto previous = async.saved_record();
         driver.key(Input::K1); driver.present();

@@ -205,20 +205,36 @@ struct ReaderApp::Impl final : DisplayBackend {
 #endif
     }
     std::optional<graphics::Page> next_page;
+    std::unique_ptr<graphics::Canvas> next_bitmap;
+    std::unique_ptr<ContentJob> raster_job;
+    std::uint64_t prefetch_generation = 0, bitmap_hits = 0;
+    void poll_raster() {
+        if (!raster_job || !raster_job->done()) return;
+        auto job = std::move(raster_job);
+        if (job->request.generation == prefetch_generation && next_page &&
+            job->request.offset == next_page->start && job->request.identity.book_id == document.metadata().book_id) {
+            if (job->result.error.empty() && job->result.image) next_bitmap = std::move(job->result.image);
+            else { raster_disabled = true; prefetch_done = false; }
+        }
+    }
+    void stop_raster() { clear_prefetch(); raster_job.reset(); }
     graphics::LayoutSpec next_spec;
     std::size_t warm_cursor = 0;
-    bool prefetch_done = false;
+    bool prefetch_done = false, raster_disabled = false;
     void clear_prefetch() {
+        ++prefetch_generation;
+        if (raster_job) raster_job->cancel();
+        next_bitmap.reset();
         next_page.reset();
         warm_cursor = 0;
-        prefetch_done = false;
+        prefetch_done = raster_disabled = false;
     }
     bool prefetch_due() const {
         return view == View::Reading && has_book() && card_available && !usb_prepared &&
                !display.busy() && !deferred && !foreground_job && !pending_content && !prefetch_done;
     }
     void prepare_next(const std::function<bool()>& stop) {
-        if (stop && stop()) return;
+        if ((stop && stop()) || raster_job) return;
         const StageTimer timer{"next_page_prepare"};
         if (!next_page) {
             const auto start = readable_offset(page.end);
@@ -231,7 +247,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
 #endif
             next_spec = layout(settings, link_return ? 144 : 64);
-            auto planned = plan_page(start, next_spec);
+            auto planned = plan_page(chapter, start, next_spec, true, stop);
+            if (planned.error == "Layout cancelled") return;
             const auto bytes = planned.glyphs.capacity() * sizeof(graphics::PositionedGlyph) +
                                planned.lines.capacity() * sizeof(graphics::TextLine);
             if (!planned.error.empty() || planned.end <= planned.start || bytes > 256U * 1024) {
@@ -247,6 +264,15 @@ struct ReaderApp::Impl final : DisplayBackend {
             next_page.reset(); prefetch_done = true; return;
         }
 #endif
+        if (async_content && !raster_disabled && !counting_job) {
+            ContentJob::Request request;
+            request.kind = ContentJob::Kind::RasterPage; request.font = body_font_path();
+            request.identity = document.metadata(); request.layout = next_spec; request.page = *next_page;
+            request.offset = next_page->start; request.generation = prefetch_generation;
+            raster_job = std::make_unique<ContentJob>(std::move(request));
+            if (raster_job->start()) { prefetch_done = true; return; }
+            raster_job.reset(); raster_disabled = true;
+        }
         if (!body.size(next_page->font_px)) { next_page.reset(); prefetch_done = true; return; }
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(15);
         while (warm_cursor < next_page->glyphs.size()) {
@@ -445,7 +471,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!foreground_job) return;
         if (!foreground_job->started()) {
             if (!content_loading) { foreground_job.reset(); return; }
-            if (display.busy() || counting_job) return;
+            if (display.busy() || counting_job || raster_job) return;
             if (!foreground_job->start()) {
                 foreground_job.reset(); content_loading = false;
                 error("内容任务无法启动，请返回后重试。");
@@ -500,7 +526,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (!result.error.empty()) pages_failed = true;
             else if (!result.font_identity.empty()) {
                 font_identity = result.font_identity;
-                reset_pages();
+                reset_pages(true);
             }
             return;
         }
@@ -1351,10 +1377,9 @@ struct ReaderApp::Impl final : DisplayBackend {
      * Restarts page counting for the applied typography and adopts a matching cache entry.
      * The entry is bound to the book file, the body font file and the page geometry.
      */
-    void reset_pages() {
+    void reset_pages(bool keep_prepared_frames = false) {
         ++counting_generation;
-        clear_body_cache();
-        clear_prefetch();
+        if (!keep_prepared_frames) { clear_body_cache(); clear_prefetch(); }
         const auto &spine = document.spine();
         chapter_pages.assign(spine.size(), {});
         counted.assign(spine.size(), false);
@@ -1510,7 +1535,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     bool counting_due() const {
         return view == View::Reading && has_book() && card_available && !usb_prepared &&
-               !display.busy() && !deferred && !foreground_job && !pending_content && !pages_complete && !pages_failed &&
+               !display.busy() && !deferred && !foreground_job && !pending_content && !raster_job && !pages_complete && !pages_failed &&
                counting_blocked != chapter_index;
     }
     /** Frees the chapter loaded for counting; its partial count resumes after a reload. */
@@ -1692,8 +1717,10 @@ struct ReaderApp::Impl final : DisplayBackend {
             return true;
         }
         const bool same_spec = same_layout(next_spec, spec);
-        auto candidate = next_page && same_spec && next_page->start == readable_offset(start)
-                             ? std::move(*next_page) : plan_page(start, spec);
+        poll_raster();
+        const bool prefetched = next_page && same_spec && next_page->start == readable_offset(start);
+        auto candidate = prefetched ? std::move(*next_page) : plan_page(start, spec);
+        auto bitmap = prefetched ? std::move(next_bitmap) : nullptr;
         clear_prefetch();
         if (!candidate.error.empty() || candidate.end <= candidate.start) {
             error("本页无法排版：" + candidate.error);
@@ -1708,7 +1735,8 @@ struct ReaderApp::Impl final : DisplayBackend {
                 message = "部分字符缺字，请更换正文阅读字体";
             }
         canvas.clear();
-        if (!draw_page_content(candidate, spec)) {
+        if (bitmap) { canvas = std::move(*bitmap); ++bitmap_hits; }
+        else if (!draw_page_content(candidate, spec)) {
             error("正文绘制失败：" + body.error());
             return false;
         }
@@ -2459,7 +2487,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             links.clear(); clear_page_history(); link_return.reset(); confirmed_link_return.reset();
             last_recorded.clear();
         }
-        abandon_content(); foreground_job.reset();
+        abandon_content(); foreground_job.reset(); stop_raster();
         stop_counting_job();
         identities.clear();
         font_identity.clear(); effective_font.clear();
@@ -3254,7 +3282,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             message.clear(); draw_storage();
             break;
         case ClearCache:
-            abandon_content(); foreground_job.reset(); stop_counting_job();
+            abandon_content(); foreground_job.reset(); stop_raster(); stop_counting_job();
             covers.clear();
             message = store.clear_cache() == StoreStatus::Ok ? "缓存已清理，原书与阅读记录保留" : "缓存未完全清理，请检查 TF 卡";
             draw_storage();
@@ -3579,7 +3607,7 @@ void ReaderApp::Impl::save_refresh(const ReaderSettings &values) {
 
 ReaderApp::ReaderApp(std::string root, std::string writer, bool controlled_storage, bool async_content)
     : impl_(std::make_unique<Impl>(std::move(root), std::move(writer))) { impl_->controlled_storage = controlled_storage; impl_->async_content = async_content; }
-void ReaderApp::invalidate_identity_cache() { impl_->abandon_content(); impl_->foreground_job.reset(); impl_->stop_counting_job(); impl_->identities.clear(); impl_->font_identity.clear(); impl_->effective_font.clear(); }
+void ReaderApp::invalidate_identity_cache() { impl_->abandon_content(); impl_->foreground_job.reset(); impl_->stop_raster(); impl_->stop_counting_job(); impl_->identities.clear(); impl_->font_identity.clear(); impl_->effective_font.clear(); }
 ReaderApp::~ReaderApp() = default;
 bool ReaderApp::initialize() {
     return impl_->initialize();
@@ -3783,6 +3811,8 @@ CacheUsage ReaderApp::cache_usage() const {
     usage.body_bitmap = impl_->body_canvas ? impl_->body_canvas->pixels().capacity() : 0;
     if (impl_->next_page) usage.next_layout = impl_->next_page->glyphs.capacity() * sizeof(graphics::PositionedGlyph) +
         impl_->next_page->lines.capacity() * sizeof(graphics::TextLine);
+    usage.next_bitmap = impl_->next_bitmap ? impl_->next_bitmap->pixels().capacity() : 0;
+    usage.bitmap_hits = impl_->bitmap_hits;
     usage.page_index = impl_->page_index_bytes();
     for (const auto& cover : impl_->covers) usage.cover_pixels += cover.pixels.capacity();
     usage.ui_glyph_bytes = impl_->ui.cached_glyph_bytes(); usage.body_glyph_bytes = impl_->body.cached_glyph_bytes();
@@ -3792,24 +3822,26 @@ CacheUsage ReaderApp::cache_usage() const {
 }
 bool ReaderApp::content_busy() const { return !!impl_->foreground_job || impl_->pending_content.has_value(); }
 bool ReaderApp::background_due() const {
-    return impl_->prefetch_due() || impl_->counting_due();
+    return !!impl_->raster_job || impl_->prefetch_due() || impl_->counting_due();
 }
 const char *ReaderApp::background_state() const {
     if (impl_->content_loading) {
         const auto kind = impl_->pending_content ? impl_->pending_content->kind : impl_->foreground_job->request.kind;
         return kind == ContentJob::Kind::Open ? "opening" : kind == ContentJob::Kind::Chapter ? "chapter" : "image";
     }
-    if (impl_->prefetch_due()) return "prefetch";
+    if (impl_->raster_job || impl_->prefetch_due()) return "prefetch";
     if (!impl_->has_book() || impl_->pages_complete) return "idle";
     if (impl_->pages_failed) return "failed";
     return impl_->counting_blocked == impl_->chapter_index ? "waiting" : "counting";
 }
 void ReaderApp::poll_background(bool cancel) {
     if (cancel && impl_->counting_job) impl_->counting_job->cancel();
+    impl_->poll_raster();
     impl_->poll_counting_job();
     if (!cancel || !impl_->content_loading) impl_->poll_content();
 }
 void ReaderApp::background_step(const std::function<bool()>& stop) {
+    impl_->poll_raster();
     impl_->poll_counting_job();
     if (stop && stop()) { if (impl_->counting_job) impl_->counting_job->cancel(); return; }
     if (impl_->prefetch_due()) impl_->prepare_next(stop);

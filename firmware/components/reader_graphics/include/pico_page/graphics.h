@@ -130,7 +130,9 @@ struct Page {
 Page layout_page(Font& font, std::u32string_view text, std::size_t start,
                  const LayoutSpec& spec = {}, bool collect = true,
                  const std::function<bool()>& stop = {});
-bool render_page(Canvas& canvas, Font& font, const Page& page, std::uint8_t gray = 1);
+/** Cancellation may leave partial pixels; use an unpublished destination when stop is provided. */
+bool render_page(Canvas& canvas, Font& font, const Page& page, std::uint8_t gray = 1,
+                 const std::function<bool()>& stop = {});
 
 /** Number of image decode attempts in this process, including failures. */
 std::uint64_t image_decode_count();
