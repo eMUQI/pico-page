@@ -1,5 +1,6 @@
 #pragma once
 #include "pico_page/document.h"
+#include "page_cache.h"
 #include "pico_page/graphics.h"
 #include "pico_page/store.h"
 #include <sys/types.h>
@@ -23,7 +24,7 @@ std::string image_cache_key(const std::string& book_id, const std::string& resou
 /** A single job owns its parser and font. Only done() permits access to its result. */
 class ContentJob {
 public:
-    enum class Kind { Pagination, FontIdentity, Image, Open, Chapter, RasterPage, SaveProgress, LibraryCovers };
+    enum class Kind { Pagination, FontIdentity, Image, Open, Chapter, RasterPage, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite };
     enum class Target { Start, End, Before, Anchor, Fragment };
     struct CoverSource {
         std::string path, cache_name, cache_header;
@@ -42,6 +43,9 @@ public:
         graphics::LayoutSpec layout;
         graphics::Page page;
         std::vector<CoverSource> covers;
+        std::string cache_header;
+        std::optional<PageCache> page_cache;
+        std::vector<SpineItem> spine;
         std::optional<ReadingRecord> record;
         bool save_last_book = false;
         std::uint64_t generation = 0;
@@ -61,7 +65,8 @@ public:
         std::size_t chapter_index = 0;
         ConfigResult configuration;
         ProgressResult progress;
-        bool last_book_saved = false;
+        bool last_book_saved = false, cache_finished = false;
+        std::optional<PageCache> page_cache;
         off_t file_size = 0;
         time_t file_modified = 0;
         ino_t file_inode = 0;

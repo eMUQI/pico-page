@@ -977,6 +977,14 @@ int main(int argc, char** argv) {
         }
         assert(app.book_pages() && app.book_pages()->total > 40);
         const auto total = app.book_pages()->total;
+        opened(app, "Count/worker.epub"); driver.present();
+        assert(!app.book_pages());
+        while (app.background_due()) {
+            app.background_step(); app.poll_background();
+            assert(!app.pending_frame() && std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(app.book_pages() && app.book_pages()->total == total);
         fs::copy_file(fixtures / "long-chapter.epub", card / "Count/worker-stale.epub");
         opened(app, "Count/worker-stale.epub"); driver.present();
         // A result from the previous book cannot publish counts into the new session.

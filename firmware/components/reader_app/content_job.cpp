@@ -44,7 +44,8 @@ ContentJob::~ContentJob() { cancel(); wait(); }
 bool ContentJob::start() {
     if (started_) return false;
 #ifdef ESP_PLATFORM
-    if ((request.kind == Kind::Pagination || request.kind == Kind::FontIdentity || request.kind == Kind::RasterPage || request.kind == Kind::LibraryCovers) &&
+    if ((request.kind == Kind::Pagination || request.kind == Kind::FontIdentity || request.kind == Kind::RasterPage || request.kind == Kind::LibraryCovers ||
+         request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite) &&
         heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < 64U * 1024) return false;
     started_ = xTaskCreate([](void* opaque) {
         auto* job = static_cast<ContentJob*>(opaque);
@@ -79,6 +80,15 @@ void ContentJob::run() {
         return;
     }
     if (stop()) return;
+    if (request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite) {
+        FileStore store(request.root);
+        if (request.kind == Kind::PageCacheRead)
+            result.page_cache = read_page_cache(store, request.cache_name, request.cache_header, request.spine, stop);
+        else if (request.page_cache)
+            write_page_cache(store, request.cache_name, request.cache_header, request.page_cache->pages, request.page_cache->counted, stop);
+        result.cache_finished = !stop();
+        return;
+    }
     if (request.kind == ContentJob::Kind::FontIdentity) {
         result.font_identity = request.font.empty() ? graphics::Font::fallback_identity() : sha256_file(request.font, stop);
         if (result.font_identity.empty() && !stop()) result.error = "Font identity read failed";

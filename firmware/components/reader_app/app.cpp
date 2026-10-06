@@ -394,9 +394,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     // an item whose parts are all present. Non-linear items are outside the reading order and
     // count as finished without pages.
     static constexpr std::size_t not_counting = static_cast<std::size_t>(-1);
-    static constexpr std::uint32_t uncounted_item = 0xffffffffU;
-    static constexpr std::size_t max_pages_bytes = 1U << 20;
-    std::vector<std::vector<std::vector<std::uint32_t>>> chapter_pages;
+    static constexpr std::size_t max_pages_bytes = kPageIndexBytes;
+    PageIndices chapter_pages;
     std::vector<bool> counted;
     // Only indices bound to verified content, font and layout identities serve navigation.
     std::vector<bool> counted_live;
@@ -559,6 +558,15 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto& request = job->request;
         const auto& result = job->result;
         if (request.generation != counting_generation) return;
+        if (request.kind == ContentJob::Kind::PageCacheRead) {
+            if (result.cache_finished) pages_cache_pending = false;
+            if (job->result.page_cache) adopt_pages(std::move(*job->result.page_cache));
+            return;
+        }
+        if (request.kind == ContentJob::Kind::PageCacheWrite) {
+            if (result.cache_finished) pages_dirty = false;
+            return;
+        }
         if (request.kind == ContentJob::Kind::FontIdentity) {
             if (!result.error.empty()) pages_failed = true;
             else if (!result.font_identity.empty()) {
@@ -588,7 +596,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     // The visible chapter during which memory was too low to load another one for counting.
     std::size_t counting_blocked = not_counting;
     bool counting_loaded = false;
-    bool pages_complete = false, pages_failed = false, pages_dirty = false;
+    bool pages_complete = false, pages_failed = false, pages_dirty = false, pages_cache_pending = false;
 
     Impl(std::string card, std::string id)
         : root(std::move(card)), writer(std::move(id)), store(root) {}
@@ -1483,7 +1491,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         for (std::size_t i = 0; i < spine.size(); ++i) counted[i] = !spine[i].linear;
         counting_index = counting_blocked = not_counting;
         release_counting();
-        pages_failed = pages_dirty = false;
+        pages_failed = pages_dirty = pages_cache_pending = false;
         pages_complete = std::find(counted.begin(), counted.end(), false) == counted.end();
         pages_name.clear();
         if (builtin_body) font_identity = graphics::Font::fallback_identity();
@@ -1510,55 +1518,15 @@ struct ReaderApp::Impl final : DisplayBackend {
         pages_name = name;
         pages_header = std::string("PPPAGES3\n") + content_revision + ":pagination-v1\n" + book_path + "\n" + font_file + "\n" + geometry +
             document.metadata().book_id + "\n" + font_identity + "\n";
-        std::string cached;
-        if (store.load_cache(pages_name, pages_header.size() + max_pages_bytes + 32, cached) != StoreStatus::Ok ||
-            cached.compare(0, pages_header.size(), pages_header) != 0)
-            return;
-        if (cached.size() < pages_header.size() + 32) return;
-        const auto checksum = cached.substr(cached.size() - 32);
-        cached.resize(cached.size() - 32);
-        if (md5_hex(cached) != checksum) return;
-        // Payload, as 32-bit words in the little-endian order native to the device and the host:
-        // per spine item the number of parts, or uncounted_item for an item that was not
-        // finished, then per part a count and that many ascending page starts.
-        auto loaded = chapter_pages;
-        auto finished = counted;
-        std::size_t at = pages_header.size();
-        std::size_t retained = loaded.capacity() * sizeof(decltype(loaded)::value_type);
-        if (retained > max_pages_bytes) return;
-        const auto word = [&](std::uint32_t &value) {
-            if (cached.size() - at < sizeof(value)) return false;
-            std::memcpy(&value, cached.data() + at, sizeof(value));
-            at += sizeof(value);
-            return true;
-        };
-        for (std::size_t i = 0; i < spine.size(); ++i) {
-            std::uint32_t parts = 0;
-            if (!word(parts)) return;
-            if (parts == uncounted_item) continue;
-            if (parts > (cached.size() - at) / sizeof(std::uint32_t) || (!spine[i].linear && parts)) return;
-            if (parts > (max_pages_bytes - retained) / sizeof(std::vector<std::uint32_t>)) return;
-            retained += parts * sizeof(std::vector<std::uint32_t>);
-            loaded[i].resize(parts);
-            for (auto &starts : loaded[i]) {
-                std::uint32_t count = 0;
-                if (!word(count) || count > (cached.size() - at) / sizeof(std::uint32_t)) return;
-                if (count > (max_pages_bytes - retained) / sizeof(std::uint32_t)) return;
-                retained += count * sizeof(std::uint32_t);
-                starts.resize(count);
-                for (auto &start : starts)
-                    if (!word(start)) return;
-                if (!std::is_sorted(starts.begin(), starts.end()) ||
-                    std::adjacent_find(starts.begin(), starts.end()) != starts.end()) return;
-            }
-            finished[i] = true;
-        }
-        if (at != cached.size()) return;
-        chapter_pages = std::move(loaded);
-        counted = std::move(finished);
+        if (async_content) { pages_cache_pending = true; return; }
+        if (auto cached = read_page_cache(store, pages_name, pages_header, spine)) adopt_pages(std::move(*cached));
+    }
+    void adopt_pages(PageCache cached) {
+        chapter_pages = std::move(cached.pages); counted = std::move(cached.counted);
         counted_live = counted;
         pages_complete = std::find(counted.begin(), counted.end(), false) == counted.end();
     }
+
     std::size_t page_index_bytes() const {
         std::size_t bytes = chapter_pages.capacity() * sizeof(decltype(chapter_pages)::value_type);
         for (const auto& parts : chapter_pages) {
@@ -1599,39 +1567,12 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     /** Writes counted chapters to PicoPage/cache so that a later open resumes instead of recounting. */
     void save_pages() {
-        if (!pages_dirty || pages_name.empty()) return;
-        const StageTimer timer{"pages_cache_commit"};
-        std::size_t payload = chapter_pages.size() * sizeof(std::uint32_t);
-        if (payload > max_pages_bytes) return;
-        for (std::size_t i = 0; i < chapter_pages.size(); ++i) {
-            if (!counted[i]) continue;
-            for (const auto& starts : chapter_pages[i]) {
-                const auto words = starts.size() + 1;
-                if (words > (max_pages_bytes - payload) / sizeof(std::uint32_t)) return;
-                payload += words * sizeof(std::uint32_t);
-            }
-        }
-        std::string bytes;
-        bytes.reserve(pages_header.size() + payload + 32);
-        bytes = pages_header;
-        const auto word = [&](std::uint32_t value) {
-            bytes.append(reinterpret_cast<const char *>(&value), sizeof(value));
-        };
-        for (std::size_t i = 0; i < chapter_pages.size(); ++i) {
-            word(counted[i] ? static_cast<std::uint32_t>(chapter_pages[i].size()) : uncounted_item);
-            if (!counted[i]) continue;
-            for (const auto &starts : chapter_pages[i]) {
-                word(static_cast<std::uint32_t>(starts.size()));
-                for (const auto start : starts) word(start);
-            }
-        }
-        bytes += md5_hex(bytes);
-        if (store.save_cache(pages_name, bytes) == StoreStatus::Ok)
-            pages_dirty = false;
+        if (async_content || !pages_dirty || pages_name.empty()) return;
+        if (write_page_cache(store, pages_name, pages_header, chapter_pages, counted)) pages_dirty = false;
     }
     bool counting_due() const {
         return view == View::Reading && has_book() && card_available && !usb_prepared &&
-               !display.busy() && !deferred && !save_job && !foreground_job && !pending_content && !raster_job && !pages_complete && !pages_failed &&
+               !display.busy() && !deferred && !save_job && !foreground_job && !pending_content && !raster_job && (!pages_complete || pages_cache_pending || pages_dirty) && !pages_failed &&
                counting_blocked != chapter_index;
     }
     /** Frees the chapter loaded for counting; its partial count resumes after a reload. */
@@ -1681,6 +1622,25 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
             return;
         }
+        if (async_content && (pages_cache_pending || pages_dirty)) {
+            if (counting_job) return;
+#ifdef ESP_PLATFORM
+            if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 4U * 1024 * 1024 ||
+                heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 2U * 1024 * 1024) {
+                counting_blocked = chapter_index; return;
+            }
+#endif
+            ContentJob::Request request;
+            request.kind = pages_cache_pending ? ContentJob::Kind::PageCacheRead : ContentJob::Kind::PageCacheWrite;
+            request.root = root; request.cache_name = pages_name; request.cache_header = pages_header;
+            request.generation = counting_generation;
+            if (pages_cache_pending) request.spine = spine;
+            else request.page_cache = PageCache{chapter_pages, counted};
+            counting_job = std::make_unique<ContentJob>(std::move(request));
+            if (!counting_job->start()) { counting_job.reset(); counting_blocked = chapter_index; }
+            return;
+        }
+        if (pages_complete) return;
         if (counting_index == not_counting) {
             auto next = static_cast<std::size_t>(std::find(counted.begin(), counted.end(), false) - counted.begin());
             if (chapter_index < spine.size() && !counted[chapter_index] && chapter.resource == spine[chapter_index].resource)
@@ -3931,6 +3891,7 @@ const char *ReaderApp::background_state() const {
     }
     if (impl_->cover_job || impl_->pending_covers) return "covers";
     if (impl_->raster_job || impl_->prefetch_due()) return "prefetch";
+    if (impl_->pages_cache_pending || impl_->pages_dirty) return "page-cache";
     if (!impl_->has_book() || impl_->pages_complete) return "idle";
     if (impl_->pages_failed) return "failed";
     return impl_->counting_blocked == impl_->chapter_index ? "waiting" : "counting";
