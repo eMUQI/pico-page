@@ -237,10 +237,21 @@ int main(int argc, char** argv) {
         assert(app.initialize()); driver.present(); opened(app, "Books/cover.epub"); driver.present();
         assert(app.saved_record() && app.saved_record()->anchor.node == "/html[1]/body[1]/img[1]" && app.saved_record()->anchor.offset == 0);
         const auto saved = *app.saved_record();
+        const auto decodes = graphics::image_decode_count();
+        const auto body_pixels = app.canvas().pixels();
+        driver.tap(342, 500); driver.present(); driver.close(); driver.present();
+        assert(app.canvas().pixels() == body_pixels && graphics::image_decode_count() == decodes);
         assert(app.prepare_sleep()); driver.present();
         assert(app.view() == View::Sleeping && *app.saved_record() == saved);
         assert(app.canvas().pixel(100, 400) == 0 && app.canvas().pixel(100, 800) == 5);
+        const auto sleeping_decodes = graphics::image_decode_count();
         app.wake(); driver.present(); assert(*app.saved_record() == saved);
+        assert(graphics::image_decode_count() == sleeping_decodes);
+        ReaderApp reopened(card.string()); Driver again{reopened};
+        assert(reopened.initialize()); again.present();
+        const auto before_open = graphics::image_decode_count();
+        opened(reopened, "Books/cover.epub"); again.present();
+        assert(graphics::image_decode_count() == before_open);
     }
     {
         fs::copy_file(fixtures / "long-chapter.epub", card / "Books/long.epub");
@@ -291,8 +302,10 @@ int main(int argc, char** argv) {
         driver.key(Input::K3); app.complete_frame(true);
         assert(*app.saved_record() == second);
         driver.tap(342, 500);
-        assert(app.view() == View::Tools && app.saved_record()->local_revision == second.local_revision + 1);
-        driver.present(); driver.close(); driver.present();
+        assert(app.view() == View::Tools && *app.saved_record() == second);
+        driver.present();
+        assert(app.saved_record()->local_revision == second.local_revision + 1);
+        driver.close(); driver.present();
         driver.key(Input::K3); app.complete_frame(true);
         const auto unsaved = app.saved_record()->local_revision;
         assert(app.prepare_sleep() && app.saved_record()->local_revision == unsaved + 1);

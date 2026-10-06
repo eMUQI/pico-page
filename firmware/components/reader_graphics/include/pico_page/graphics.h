@@ -6,6 +6,8 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+#include <deque>
+#include <list>
 
 namespace pico_page::graphics {
 
@@ -64,15 +66,17 @@ private:
     int pixel_size_ = 0;
     std::string error_;
     std::unordered_map<std::uint64_t, int> advances_;
+    std::deque<std::uint64_t> advance_order_;
+    std::list<std::uint64_t> glyph_order_;
     struct Glyph {
         int left = 0, top = 0;
         unsigned width = 0, rows = 0;
         std::vector<std::uint8_t> coverage;  // Row-major, one byte per pixel.
-        std::uint32_t used = 0;  // glyph_tick_ at the most recent draw.
+        std::list<std::uint64_t>::iterator age;
     };
     std::unordered_map<std::uint64_t, Glyph> glyphs_;
     std::size_t glyph_bytes_ = 0;
-    std::uint32_t glyph_tick_ = 0;
+
 };
 
 struct LayoutSpec {
@@ -122,6 +126,8 @@ bool render_page(Canvas& canvas, Font& font, const Page& page, std::uint8_t gray
  * Failure leaves the canvas unchanged. Temporary pixels are bounded by the box dimensions;
  * the scaling tables hold one 16-bit entry per source column and row.
  */
+/** Number of image decode attempts in this process, including failures. */
+std::uint64_t image_decode_count();
 bool render_image(Canvas& canvas, const std::vector<std::uint8_t>& encoded,
                   int x, int y, int width, int height, std::string& error, bool crop = false);
 

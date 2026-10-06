@@ -166,6 +166,23 @@ struct ReaderApp::Impl final : DisplayBackend {
     EpubDocument document;
     Chapter chapter;
     graphics::Page page;
+    std::optional<graphics::Canvas> body_canvas;
+    graphics::LayoutSpec body_spec;
+    std::vector<Hit> body_links;
+    void clear_body_cache() { body_canvas.reset(); body_links.clear(); }
+    static bool same_layout(const graphics::LayoutSpec& a, const graphics::LayoutSpec& b) {
+        return a.left == b.left && a.top == b.top && a.width == b.width && a.height == b.height &&
+               a.font_px == b.font_px && a.line_height == b.line_height &&
+               a.indent_chars == b.indent_chars && a.paragraph_gap == b.paragraph_gap;
+    }
+    static bool body_cache_room() {
+#ifdef ESP_PLATFORM
+        return heap_caps_get_free_size(MALLOC_CAP_SPIRAM) > 2U * 1024 * 1024 &&
+               heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) > 416U * 1024;
+#else
+        return true;
+#endif
+    }
     std::optional<graphics::Page> next_page;
     graphics::LayoutSpec next_spec;
     std::size_t warm_cursor = 0;
@@ -235,7 +252,12 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::optional<ReadingRecord> upload_record, acknowledged_record, uncertain_record;
     sync::Config acknowledged_config, uncertain_config;
     std::string server_state = "未检查", remote_state = "未检查";
-    sync::Config sync_config;
+    sync::Config sync_config, badge_config;
+    bool badge_configured = false, tools_save_pending = false;
+    void refresh_badge_config() {
+        std::string detail;
+        badge_configured = sync::load_config(root, badge_config, detail);
+    }
     std::uint64_t network_sequence = 0, active_network = 0;
     bool sync_checked = false, uploading = false;
     std::string sync_status;
@@ -551,8 +573,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (session.needs_save()) return "尚未保存";
         if (active_network) return "同步中";
         if (remote_anchor) return "位置不同 ›";
-        sync::Config config; std::string detail;
-        if (!sync::load_config(root, config, detail)) return "未配置";
+        if (!badge_configured) return "未配置";
+        const auto& config = badge_config;
         if (uncertain_record && uncertain_record->book_id == document.metadata().book_id && same_account(config, uncertain_config))
             return "待核实";
         if (acknowledged_record && session.saved_record() && *acknowledged_record == *session.saved_record() && same_account(config, acknowledged_config))
@@ -654,6 +676,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto &selected = preview ? *preview : settings;
         if (effective_font == selected.font && !builtin_body)
             return;
+        clear_body_cache();
         clear_prefetch();
         font_fallback = false;
         builtin_body = false;
@@ -668,6 +691,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         effective_font = selected.font;
     }
     bool initialize() {
+        refresh_badge_config();
         if (!ui.open(root + "/PicoPage/fonts/NotoSansSC-Regular.otf") && !ui.open_fallback())
             return false;
         settings = store.load_settings().settings;
@@ -921,6 +945,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             };
     }
     bool open(std::string path) {
+        refresh_badge_config();
+        clear_body_cache();
         clear_prefetch();
         if (display.busy() || !card_available)
             return false;
@@ -1020,6 +1046,7 @@ struct ReaderApp::Impl final : DisplayBackend {
      */
     bool load_with(std::size_t index, const std::function<bool(Chapter &, std::string &)> &load,
                    const std::string &missing = "") {
+        clear_body_cache();
         clear_prefetch();
         std::string detail;
         Chapter candidate;
@@ -1137,6 +1164,7 @@ struct ReaderApp::Impl final : DisplayBackend {
      * The entry is bound to the book file, the body font file and the page geometry.
      */
     void reset_pages() {
+        clear_body_cache();
         clear_prefetch();
         const auto &spine = document.spine();
         chapter_pages.assign(spine.size(), {});
@@ -1328,11 +1356,33 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool draw_page_content(const graphics::Page& planned, const graphics::LayoutSpec& spec) {
         const StageTimer timer{"page_draw"};
         if (const auto* image = image_at(planned.start)) {
+            const auto cache_name = "images/gray-v1/" + document.metadata().book_id + "/" +
+                md5_hex(image->resource + ":" + std::to_string(spec.left) + ":" + std::to_string(spec.top) +
+                        ":" + std::to_string(spec.width) + ":" + std::to_string(spec.height));
+            if (body_cache_room()) {
+                std::string cached;
+                if (store.load_cache(cache_name, canvas.pixels().size() + 32, cached) == StoreStatus::Ok &&
+                    cached.size() == canvas.pixels().size() + 32) {
+                    const auto digest = cached.substr(cached.size() - 32);
+                    cached.resize(cached.size() - 32);
+                    if (md5_hex(cached) == digest) {
+                        std::memcpy(canvas.data(), cached.data(), cached.size());
+                        return true;
+                    }
+                }
+            }
             std::vector<std::uint8_t> encoded;
             std::string detail;
             if (document.read_image(image->resource, encoded, detail) &&
-                graphics::render_image(canvas, encoded, spec.left, spec.top, spec.width, spec.height, detail))
+                graphics::render_image(canvas, encoded, spec.left, spec.top, spec.width, spec.height, detail)) {
+                std::vector<std::uint8_t>().swap(encoded);
+                if (body_cache_room()) {
+                    std::string pixels(reinterpret_cast<const char*>(canvas.data()), canvas.pixels().size());
+                    pixels += md5_hex(pixels);
+                    store.save_cache(cache_name, pixels);
+                }
                 return true;
+            }
             outline(spec.left, spec.top + 12, spec.width, spec.height - 24, 2);
             center("图片无法显示", spec.left + 8, spec.top + spec.height / 2 - 36, spec.width - 16, 28);
             center("图片缺失、损坏或格式不支持", spec.left + 8, spec.top + spec.height / 2 + 16,
@@ -1344,10 +1394,14 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool render_body(std::size_t start) {
         const StageTimer timer{"body_prepare"};
         const auto spec = layout(settings, link_return ? 144 : 64);
-        const bool same_spec = next_spec.left == spec.left && next_spec.top == spec.top &&
-            next_spec.width == spec.width && next_spec.height == spec.height &&
-            next_spec.font_px == spec.font_px && next_spec.line_height == spec.line_height &&
-            next_spec.indent_chars == spec.indent_chars && next_spec.paragraph_gap == spec.paragraph_gap;
+        if (body_canvas && start == page.start && same_layout(body_spec, spec)) {
+            canvas = *body_canvas;
+            links = body_links;
+            offset = page.start;
+            footer();
+            return true;
+        }
+        const bool same_spec = same_layout(next_spec, spec);
         auto candidate = next_page && same_spec && next_page->start == readable_offset(start)
                              ? std::move(*next_page) : plan_page(start, spec);
         clear_prefetch();
@@ -1397,6 +1451,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             canvas.line(0, 102, 683, 102, 1, 3);
             links.push_back({0, 0, 684, 104, LinkReturn});
         }
+        if (body_cache_room()) { body_canvas = canvas; body_spec = spec; body_links = links; }
+        else clear_body_cache();
         return true;
     }
     bool show_page(std::size_t start) {
@@ -1543,11 +1599,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
     }
     void draw_tools() {
-        // The header reports the save state; commit a position still waiting for idle time.
-        if (session.needs_save() && !persist()) {
-            error(message);
-            return;
-        }
+        tools_save_pending = session.needs_save();
         view = View::Tools;
         hits.clear();
         load_fonts();
@@ -2373,6 +2425,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         cancel_sync();
         server_state = "检查中"; remote_state = "检查中";
         std::string detail;
+        refresh_badge_config();
         if (!sync::load_config(root, sync_config, detail)) {
             server_state = "未配置"; remote_state = "未检查";
             sync_status = "同步未配置或配置无效：" + detail;
@@ -3192,6 +3245,7 @@ bool ReaderApp::initialize() {
     return impl_->initialize();
 }
 bool ReaderApp::open_book(const std::string &path) {
+    impl_->clear_body_cache();
     impl_->clear_prefetch();
     impl_->release_counting();
     return !impl_->usb_prepared && impl_->open(path);
@@ -3232,6 +3286,9 @@ void ReaderApp::complete_frame(bool success) {
                 impl_->last_recorded = impl_->book_path;
         }
     }
+    if (success && impl_->view == View::Tools && std::exchange(impl_->tools_save_pending, false)) {
+        if (!impl_->persist()) impl_->error(impl_->message);
+    }
     if (auto work = std::exchange(impl_->deferred, nullptr); work && success)
         work();
     if (!success) {
@@ -3266,6 +3323,7 @@ bool ReaderApp::prepare_usb_transfer() {
     impl_->save_pages();
     if (!impl_->ui.open_fallback()) return false;
     impl_->document.close();
+    impl_->clear_body_cache();
     impl_->clear_prefetch();
     impl_->release_counting();
     impl_->body.open_fallback();
@@ -3294,6 +3352,7 @@ bool ReaderApp::prepare_portal() {
     if (impl_->usb_prepared || impl_->display.busy() || impl_->active_network ||
         !impl_->card_available || !impl_->persist()) return false;
     impl_->cancel_sync();
+    impl_->clear_body_cache();
     impl_->clear_prefetch();
     impl_->release_counting();
     impl_->portal = {};
@@ -3308,6 +3367,7 @@ void ReaderApp::show_portal(const PortalStatus &status) {
     if (status.phase == PortalPhase::Closed) {
         // A refused start arrives while the requesting page is still shown.
         if (view != View::Portal && view != View::Import && view != View::SyncSettings) return;
+        impl_->refresh_badge_config();
         impl_->portal = {};
         impl_->portal_closing = false;
         impl_->message = status.detail;
@@ -3328,6 +3388,7 @@ bool ReaderApp::prepare_sleep() {
         return false;
     if (impl_->has_book() && !impl_->session.visible_record()) return false;
     impl_->save_pages();
+    impl_->clear_body_cache();
     impl_->clear_prefetch();
     impl_->release_counting();
     const auto sync_state = impl_->sync_badge();
@@ -3348,6 +3409,7 @@ void ReaderApp::wake() {
     }
 }
 void ReaderApp::card_removed() {
+    impl_->clear_body_cache();
     impl_->clear_prefetch();
     impl_->release_counting();
     if (impl_->usb_prepared) { show_usb_transfer(false, "TF 卡已移除，请退出并重启。"); return; }

@@ -113,6 +113,8 @@ Font::~Font() {
 
 void Font::close() {
     advances_.clear();
+    advance_order_.clear();
+    glyph_order_.clear();
     glyphs_.clear();
     glyph_bytes_ = 0;
     if (face_) FT_Done_Face(static_cast<FT_Face>(face_));
@@ -189,8 +191,12 @@ int Font::advance(char32_t scalar) {
         error_ = "Font glyph metrics failed"; return -1;
     }
     // Bound per-face metrics memory across all sizes; reopening invalidates every entry.
-    if (advances_.size() >= 8192) advances_.clear();
+    if (advances_.size() >= 8192) {
+        advances_.erase(advance_order_.front());
+        advance_order_.pop_front();
+    }
     advances_.emplace(key, width);
+    advance_order_.push_back(key);
     return width;
 }
 
@@ -219,7 +225,7 @@ bool Font::warm(char32_t scalar, bool bold) {
         const auto& bitmap = slot->bitmap;
         if (bitmap.pixel_mode != FT_PIXEL_MODE_GRAY && bitmap.pixel_mode != FT_PIXEL_MODE_MONO &&
             bitmap.rows) { error_ = "Unsupported glyph pixel format"; return false; }
-        Glyph glyph{slot->bitmap_left, slot->bitmap_top, bitmap.width, bitmap.rows, {}};
+        Glyph glyph{slot->bitmap_left, slot->bitmap_top, bitmap.width, bitmap.rows, {}, {}};
         glyph.coverage.resize(static_cast<std::size_t>(bitmap.width) * bitmap.rows);
         for (unsigned row = 0; row < bitmap.rows; ++row) {
             const auto* bytes = bitmap.buffer + (bitmap.pitch >= 0 ? row : bitmap.rows - 1 - row) *
@@ -230,30 +236,18 @@ bool Font::warm(char32_t scalar, bool bold) {
                         ? ((bytes[col / 8] & (0x80 >> (col & 7))) ? 255 : 0) : bytes[col];
         }
         constexpr std::size_t glyph_cache_limit = 1024 * 1024;
-        if (glyph_bytes_ + glyph.coverage.size() > glyph_cache_limit) {
-            // Keep the more recently drawn half so the page being drawn stays cached.
-            std::vector<std::uint32_t> stamps;
-            stamps.reserve(glyphs_.size());
-            for (const auto& entry : glyphs_) stamps.push_back(entry.second.used);
-            const auto middle = stamps.begin() + stamps.size() / 2;
-            std::nth_element(stamps.begin(), middle, stamps.end());
-            for (auto entry = glyphs_.begin(); middle != stamps.end() && entry != glyphs_.end();) {
-                if (entry->second.used < *middle) {
-                    glyph_bytes_ -= entry->second.coverage.size();
-                    entry = glyphs_.erase(entry);
-                } else {
-                    ++entry;
-                }
-            }
-            if (glyph_bytes_ + glyph.coverage.size() > glyph_cache_limit) {
-                glyphs_.clear();
-                glyph_bytes_ = 0;
-            }
+        while (!glyph_order_.empty() && glyph_bytes_ + glyph.coverage.size() > glyph_cache_limit) {
+            const auto oldest = glyph_order_.front();
+            glyph_bytes_ -= glyphs_.at(oldest).coverage.size();
+            glyphs_.erase(oldest);
+            glyph_order_.pop_front();
         }
+        glyph_order_.push_back(key);
+        glyph.age = std::prev(glyph_order_.end());
         glyph_bytes_ += glyph.coverage.size();
         cached = glyphs_.emplace(key, std::move(glyph)).first;
     }
-    cached->second.used = ++glyph_tick_;
+    glyph_order_.splice(glyph_order_.end(), glyph_order_, cached->second.age);
     return true;
 }
 

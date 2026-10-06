@@ -84,6 +84,15 @@ int main(int argc, char** argv) {
     canvas.clear();
     assert(font.draw(canvas, U'中', 40, 80, 1, true));
     assert(canvas.pixels() == bold);
+    const auto previous_advance = font.advance(U'中');
+    for (char32_t cp = 0x4e00; cp < 0x4e00 + 9000; ++cp) assert(font.advance(cp) >= 0);
+    assert(font.advance(U'中') == previous_advance);
+    assert(font.size(64));
+    for (char32_t cp = 0x4e00; cp < 0x4e00 + 1024; ++cp) assert(font.warm(cp));
+    assert(font.size(28));
+    canvas.clear();
+    assert(font.draw(canvas, U'中', 40, 80));
+    assert(canvas.pixels() == regular);
     canvas.clear();
     std::u32string text;
     const auto paragraph = decode_utf8("中文阅读：完整行分页。中文﹐中文﹒中文﹖中文﹗“中文”。English words stay together where possible.\n");

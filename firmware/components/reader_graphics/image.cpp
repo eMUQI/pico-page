@@ -4,6 +4,7 @@
 #include "tjpgd.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -15,6 +16,7 @@
 
 namespace pico_page::graphics {
 namespace {
+std::atomic<std::uint64_t> decode_count{0};
 constexpr std::size_t kEncodedLimit = 2 * 1024 * 1024;
 constexpr std::uint64_t kPixelLimit = 8 * 1024 * 1024;
 
@@ -162,9 +164,12 @@ bool jpeg(const std::vector<std::uint8_t>& input, int width, int height, Raster&
 }
 } // namespace
 
+std::uint64_t image_decode_count() { return decode_count.load(std::memory_order_relaxed); }
+
 bool render_image(Canvas& canvas, const std::vector<std::uint8_t>& encoded,
                   int x, int y, int width, int height, std::string& error, bool crop) {
     const StageTimer timer{"image_decode_draw"};
+    decode_count.fetch_add(1, std::memory_order_relaxed);
     error.clear();
     if (x < 0 || y < 0 || width <= 0 || height <= 0 || width > canvas.width() || height > canvas.height() ||
         x > canvas.width() - width || y > canvas.height() - height || std::uint64_t(width) * height > 684U * 1216U)
