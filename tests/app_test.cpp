@@ -1,6 +1,7 @@
 #include "pico_page/app.h"
 #include "pico_page/store.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdlib>
 #include <filesystem>
@@ -38,19 +39,56 @@ struct Driver {
         app.input({{sequence, Phase::Begin, Input::TouchCenter}, true, x, y});
         app.input({{sequence, Phase::End, Input::TouchCenter}, true, x, y});
     }
-    void present() { assert(app.pending_frame()); app.complete_frame(true); }
+    // Mirrors the firmware loop: every frame queued by deferred work, then the idle-time save.
+    // A contact that began while the previous frame was still in flight.
+    void queued(Input key, bool touch = false, int x = 0, int y = 0) {
+        ++sequence;
+        app.input({{sequence, Phase::Begin, key}, touch, x, y, true});
+        app.input({{sequence, Phase::End, key}, touch, x, y, true});
+    }
+    void present() {
+        assert(app.pending_frame());
+        while (app.pending_frame()) app.complete_frame(true);
+        if (app.save_due()) app.save_progress();
+    }
+    void close() {
+        if (app.view() == View::Tools) tap(342, 500);
+        else if (app.view() == View::Typography) tap(628, 700);
+        else if (app.view() == View::Contents) tap(628, 150);
+        else if (app.view() == View::Refresh) tap(628, 550);
+        else if (app.view() == View::Sync) {
+            tap(628, 550);
+            if (!app.pending_frame()) tap(100, 950);
+        }
+        else if (app.view() == View::Error || app.view() == View::Confirmation || app.view() == View::UsbTransfer) tap(100, 1100);
+        else tap(60, 50);
+    }
+    void refresh() {
+        const auto view = app.view();
+        const auto pixels = app.canvas().pixels();
+        const auto record = app.saved_record();
+        key(Input::K2);
+        assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::ManualRefresh);
+        assert(app.pending_frame()->refresh == RefreshIntent::FullClean);
+        const auto token = app.pending_frame()->token;
+        key(Input::K2);
+        assert(app.pending_frame()->token == token);
+        present();
+        assert(app.view() == view && app.canvas().pixels() == pixels && app.saved_record() == record);
+        assert(!app.pending_frame());
+    }
     void sync_view() {
         tap(342, 500); assert(app.view() == View::Tools); present();
         tap(342, 1140); assert(app.view() == View::Sync); present();
     }
     NetworkOperation check_remote() {
-        tap(342, 620); present();
+        tap(342, 960); present();
         auto request = app.take_network_request();
         assert(request && request->request.method == "GET");
         return *request;
     }
     void typography() {
-        tap(342, 500); assert(app.view() == View::Tools); present();
+        tap(342, 500); assert(app.view() == View::Tools); present(); refresh();
         tap(205, 1140); assert(app.view() == View::Typography); present();
     }
 };
@@ -63,6 +101,7 @@ int main(int argc, char** argv) {
     fs::create_directories(card / "Books");
     fs::create_directories(card / "PicoPage");
     fs::copy_file(fixtures / "valid.epub", card / "Books/book.epub");
+    fs::copy_file(fixtures / "nested-toc.epub", card / "Books/nested.epub");
     fs::copy_file(fixtures / "image-cover.epub", card / "Books/cover.epub");
     fs::copy_file(fixtures / "image-flow.epub", card / "Books/images.epub");
     const auto progress = card / "Books/book.epub.picopage/progress.json";
@@ -71,23 +110,64 @@ int main(int argc, char** argv) {
     {
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present();
+        driver.tap(240, 482); driver.present();
+        // Undecoded covers first appear as titles; the cover replaces the title in a second frame.
+        driver.tap(610, 384);
+        assert(app.canvas().pixel(270, 490) == 15);
+        app.complete_frame(true);
+        assert(app.pending_frame() && app.view() == View::Library);
+        assert(app.canvas().pixel(270, 490) == 0 && app.canvas().pixel(270, 610) == 5);
+        driver.present();
+        driver.refresh();
+        const auto original_cover = read(card / "Books/cover.epub");
+        write(card / "Books/cover.epub", "broken");
+        driver.tap(520, 384); driver.present(); driver.tap(610, 384); driver.present();
+        assert(app.canvas().pixel(270, 490) == 15);
+        write(card / "Books/cover.epub", original_cover);
+        driver.tap(520, 384); driver.present(); driver.tap(610, 384); driver.present();
+        assert(app.canvas().pixel(270, 490) == 0 && app.canvas().pixel(270, 610) == 5);
+        driver.tap(520, 384); driver.present();
         assert(!app.open_book("Books/book.epub") && app.view() == View::Error);
         driver.present(); assert(!app.saved_record() && !fs::exists(progress));
-        driver.key(Input::K2); driver.present();
+        driver.close(); driver.present();
         assert(app.view() == View::Library);
         opened(app, "Books/cover.epub");
         assert(app.canvas().pixel(100, 400) == 0 && app.canvas().pixel(100, 800) == 5);
         driver.present(); const auto cover = *app.saved_record();
         driver.key(Input::K3); assert(app.view() == View::Error); driver.present();
         assert(*app.saved_record() == cover);
-        driver.key(Input::K2); driver.present();
+        driver.close(); driver.present();
         assert(app.view() == View::Reading && *app.saved_record() == cover);
+    }
+    {
+        // A cached thumbnail survives a restart; an entry that fails validation is rebuilt from the EPUB.
+        constexpr std::size_t thumbnail_bytes = 82 * 184;
+        fs::path cached;
+        for (const auto& item : fs::directory_iterator(card / "PicoPage/cache/covers")) {
+            const auto bytes = read(item.path());
+            if (bytes.find("\nBooks/cover.epub\n") != std::string::npos && bytes.size() > thumbnail_bytes) cached = item.path();
+        }
+        assert(!cached.empty());
+        auto bytes = read(cached);
+        std::fill(bytes.end() - thumbnail_bytes, bytes.end(), '\xff');
+        write(cached, bytes);
+        const auto grid_pixel = [&](int x, int y) {
+            ReaderApp app(card.string()); Driver driver{app};
+            assert(app.initialize()); driver.present();
+            driver.tap(240, 482); driver.present();
+            driver.tap(610, 384); driver.present();
+            return app.canvas().pixel(x, y);
+        };
+        assert(grid_pixel(270, 490) == 15);
+        write(cached, "stale");
+        assert(grid_pixel(270, 490) == 0 && grid_pixel(270, 610) == 5);
+        assert(read(cached).size() > thumbnail_bytes);
     }
     fs::create_directories(card / "PicoPage/fonts");
     fs::copy_file(argv[2], card / "PicoPage/fonts/LXGWWenKai-Regular.ttf");
     {
         ReaderApp app(card.string()); Driver driver{app};
-        assert(app.initialize()); driver.present();
+        assert(app.initialize()); driver.present(); driver.refresh();
         opened(app, "Books/book.epub"); assert(!app.saved_record()); driver.present();
         assert(app.saved_record()); const auto first = *app.saved_record();
         driver.key(Input::K3); assert(app.pending_frame());
@@ -97,15 +177,32 @@ int main(int argc, char** argv) {
         assert(app.saved_record() && *app.saved_record() == first && app.view() == View::Error);
         driver.present();
         driver.key(Input::K3); assert(!app.pending_frame() && *app.saved_record() == first);
-        driver.key(Input::K2); assert(app.pending_frame() && app.pending_frame()->anchor == first.anchor); driver.present();
+        driver.close(); assert(app.pending_frame() && app.pending_frame()->anchor == first.anchor); driver.present();
         driver.key(Input::K3); assert(app.pending_frame() && app.pending_frame()->anchor == failed_anchor); driver.present();
         confirmed = *app.saved_record(); const auto before_refresh = read(progress);
         driver.key(Input::K2);
         assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::ManualRefresh && app.pending_frame()->refresh == RefreshIntent::FullClean);
         driver.present(); assert(*app.saved_record() == confirmed && read(progress) == before_refresh);
-        driver.typography(); driver.tap(580, 948); driver.present();
-        driver.key(Input::K2); assert(app.view() == View::Reading); driver.present();
+        driver.typography();
+        const auto applied_preview = app.canvas().pixels();
+        driver.tap(500, 1130); assert(!app.pending_frame());
+        driver.tap(580, 948); driver.present();
+        assert(app.canvas().pixels() != applied_preview);
+        driver.refresh(); assert(!fs::exists(settings));
+        driver.close(); assert(app.view() == View::Reading); driver.present();
         assert(!fs::exists(settings) && *app.saved_record() == confirmed);
+        driver.tap(342, 500); driver.present(); driver.tap(68, 1150); driver.present();
+        assert(app.view() == View::Contents); driver.refresh();
+        driver.tap(205, 150); driver.present(); assert(app.view() == View::Typography);
+        driver.close(); driver.present();
+        driver.tap(342, 500); driver.present(); driver.tap(60, 50);
+        assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean);
+        driver.present();
+        assert(app.view() == View::Library); driver.refresh();
+        driver.tap(610, 384); driver.present(); driver.refresh();
+        driver.tap(520, 384); driver.present();
+        driver.tap(390, 384); driver.present();
+        assert(*app.saved_record() == confirmed);
     }
     {
         ReaderApp app(card.string()); Driver driver{app};
@@ -113,7 +210,7 @@ int main(int argc, char** argv) {
         assert(app.pending_frame()->anchor == confirmed.anchor);
         app.complete_frame(false); driver.present();
         assert(*app.saved_record() == confirmed);
-        driver.key(Input::K2);
+        driver.close();
         assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Body && app.pending_frame()->anchor == confirmed.anchor);
         driver.present();
         driver.typography(); driver.tap(580, 948); driver.present(); driver.tap(500, 1130);
@@ -128,7 +225,7 @@ int main(int argc, char** argv) {
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present();
         assert(!app.open_book("Books/book.epub") && app.view() == View::Error);
-        driver.present(); driver.key(Input::K2); driver.present();
+        driver.present(); driver.close(); driver.present();
         assert(read(progress) == invalid);
     }
     write(progress, valid_progress);
@@ -136,6 +233,92 @@ int main(int argc, char** argv) {
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present(); opened(app, "Books/cover.epub"); driver.present();
         assert(app.saved_record() && app.saved_record()->anchor.node == "/html[1]/body[1]/img[1]" && app.saved_record()->anchor.offset == 0);
+        const auto saved = *app.saved_record();
+        assert(app.prepare_sleep()); driver.present();
+        assert(app.view() == View::Sleeping && *app.saved_record() == saved);
+        assert(app.canvas().pixel(100, 400) == 0 && app.canvas().pixel(100, 800) == 5);
+        app.wake(); driver.present(); assert(*app.saved_record() == saved);
+    }
+    {
+        fs::copy_file(fixtures / "long-chapter.epub", card / "Books/long.epub");
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        // Books sorts book, cover, images, long: the fourth list row opens after a status frame.
+        driver.tap(240, 482); driver.present();
+        driver.tap(240, 432 + 3 * 126 + 40);
+        assert(app.view() == View::Library && app.pending_frame()->purpose == FramePurpose::Overlay && !app.saved_record());
+        app.complete_frame(true);
+        assert(app.view() == View::Reading && app.pending_frame()->purpose == FramePurpose::Body);
+        driver.present();
+        driver.tap(342, 500); driver.present();
+        driver.tap(68, 1140); assert(app.view() == View::Contents); driver.present();
+        driver.tap(300, 204 + 88 + 44); assert(app.view() == View::Reading); driver.present();
+        const auto second = *app.saved_record();
+        assert(second.anchor.resource.find("chapter2") != std::string::npos);
+        // Turning back into a long chapter announces the layout and keeps the confirmed position meanwhile.
+        driver.key(Input::K1);
+        assert(app.pending_frame()->purpose == FramePurpose::Overlay && *app.saved_record() == second);
+        app.complete_frame(true);
+        assert(app.pending_frame()->purpose == FramePurpose::Body);
+        driver.present();
+        const auto last = *app.saved_record();
+        assert(last.anchor.resource.find("chapter1") != std::string::npos);
+        // The page starts found by that layout serve the next backward turn directly.
+        driver.key(Input::K1);
+        assert(app.pending_frame()->purpose == FramePurpose::Body);
+        driver.present();
+        assert(!(app.saved_record()->anchor == last.anchor));
+        driver.key(Input::K3); driver.present();
+        assert(app.saved_record()->anchor == last.anchor);
+        driver.key(Input::K3); driver.present();
+        assert(app.saved_record()->anchor == second.anchor);
+    }
+    {
+        // A presented page is committed at idle time, or earlier when its save state is shown or the book is left.
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/long.epub"); driver.present();
+        const auto start = *app.saved_record();
+        driver.key(Input::K3); app.complete_frame(true);
+        assert(app.save_due() && *app.saved_record() == start);
+        driver.key(Input::K3); app.complete_frame(true);
+        assert(app.save_due() && *app.saved_record() == start);
+        app.save_progress();
+        const auto second = *app.saved_record();
+        assert(!app.save_due() && !app.pending_frame() && second.local_revision == start.local_revision + 2);
+        driver.key(Input::K3); app.complete_frame(true);
+        assert(*app.saved_record() == second);
+        driver.tap(342, 500);
+        assert(app.view() == View::Tools && app.saved_record()->local_revision == second.local_revision + 1);
+        driver.present(); driver.close(); driver.present();
+        driver.key(Input::K3); app.complete_frame(true);
+        const auto unsaved = app.saved_record()->local_revision;
+        assert(app.prepare_sleep() && app.saved_record()->local_revision == unsaved + 1);
+        driver.present();
+    }
+    {
+        // Input made during a refresh continues a page turn and is otherwise dropped.
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/long.epub"); driver.present();
+        const auto first = app.canvas().pixels();
+        driver.queued(Input::K3);
+        driver.queued(Input::TouchCenter, true, 600, 600);
+        assert(!app.pending_frame() && app.canvas().pixels() == first);
+        driver.key(Input::K3); driver.present();
+        const auto second = app.canvas().pixels();
+        driver.queued(Input::TouchCenter, true, 342, 600);
+        driver.queued(Input::K2);
+        driver.queued(Input::TouchCenter, true, 600, 1180);
+        assert(!app.pending_frame() && app.view() == View::Reading);
+        driver.queued(Input::TouchCenter, true, 600, 600);
+        assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Body);
+        driver.present();
+        assert(app.canvas().pixels() != second);
+        driver.queued(Input::K1); driver.present();
+        assert(app.canvas().pixels() == second);
+        driver.tap(342, 500); driver.present();
+        driver.queued(Input::TouchCenter, true, 68, 1140);
+        driver.queued(Input::K3);
+        assert(!app.pending_frame() && app.view() == View::Tools);
     }
     ReadingRecord image_record, after_image;
     {
@@ -156,7 +339,7 @@ int main(int argc, char** argv) {
         assert(app.canvas().pixel(100, 100) == 0);
         driver.tap(580, 948); driver.present();
         assert(app.canvas().pixel(100, 100) == 0 && *app.saved_record() == image_record);
-        driver.key(Input::K2); driver.present(); assert(*app.saved_record() == image_record);
+        driver.close(); driver.present(); assert(*app.saved_record() == image_record);
         driver.key(Input::K3); driver.present(); after_image = *app.saved_record();
         assert(after_image.anchor.node.find("/p[2]/") != std::string::npos);
         driver.key(Input::K3);
@@ -194,8 +377,10 @@ int main(int argc, char** argv) {
         const auto before = *app.saved_record();
         const std::string remote = R"({"progress":"/body[1]/DocFragment[1]/body[1]/h1[1]/text()[1].0","percentage":0.1})";
         driver.sync_view(); const auto cancelled = driver.check_remote();
+        driver.refresh(); assert(!cancelled.cancelled->load());
+        assert(!app.prepare_usb_transfer());
         assert(cancelled.request.url.find("https://example.invalid/") == 0);
-        driver.key(Input::K2); driver.present();
+        driver.close(); driver.present();
         app.complete_network(cancelled.id, 200, remote, "");
         assert(!app.pending_frame() && !app.take_network_request() && *app.saved_record() == before);
 
@@ -204,10 +389,10 @@ int main(int argc, char** argv) {
         auto switched_account = sync_config;
         switched_account.replace(switched_account.find("test-user"), 9, "other-user");
         write(card / "PicoPage/sync.toml", switched_account);
-        driver.tap(342, 752);
+        driver.tap(500, 950);
         assert(app.view() == View::Sync && app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Overlay);
         driver.present(); assert(*app.saved_record() == before && !app.take_network_request());
-        driver.key(Input::K2); driver.present();
+        driver.close(); driver.present();
         write(card / "PicoPage/sync.toml", sync_config);
 
         driver.sync_view(); const auto stale = driver.check_remote();
@@ -218,9 +403,29 @@ int main(int argc, char** argv) {
         assert(!app.pending_frame() && !app.take_network_request() && *app.saved_record() == cover);
         app.complete_network(current.id, 200, "{}", ""); driver.present();
         assert(*app.saved_record() == cover && !app.take_network_request());
-        driver.tap(342, 884); assert(app.view() == View::Confirmation); driver.present();
-        driver.key(Input::K2); driver.present();
+        driver.tap(342, 1075); assert(app.view() == View::Confirmation); driver.present();
+        driver.refresh(); assert(!app.take_network_request());
+        driver.close(); driver.present();
         assert(app.view() == View::Reading && !app.take_network_request() && *app.saved_record() == cover);
+        opened(app, "Books/book.epub"); driver.present();
+        const auto sync_saved = *app.saved_record();
+        driver.sync_view(); const auto no_record = driver.check_remote();
+        app.complete_network(no_record.id, 200, "{}", ""); driver.present();
+        driver.tap(342, 1075); driver.present(); driver.tap(500, 1120); driver.present();
+        auto upload = app.take_network_request(); assert(upload && upload->request.method == "PUT");
+        driver.close(); driver.present();
+        assert(upload->cancelled->load());
+        app.complete_network(upload->id, 200, "{}", "");
+        assert(!app.pending_frame() && *app.saved_record() == sync_saved);
+        driver.sync_view(); const auto recheck = driver.check_remote();
+        app.complete_network(recheck.id, 401, "{}", ""); driver.present(); driver.refresh();
+        assert(!app.take_network_request() && *app.saved_record() == sync_saved);
+        const auto retry = driver.check_remote();
+        app.complete_network(retry.id, 200, "{}", ""); driver.present();
+        driver.tap(342, 1075); driver.present(); driver.tap(500, 1120); driver.present();
+        upload = app.take_network_request(); assert(upload && upload->request.method == "PUT");
+        app.complete_network(upload->id, 200, "{}", ""); driver.present(); driver.refresh();
+        assert(*app.saved_record() == sync_saved);
     }
     {
         ReaderApp app(card.string()); Driver driver{app};
@@ -229,7 +434,7 @@ int main(int argc, char** argv) {
         const std::string external = "schema_version=1\n[reader]\nfont_size_px=48\nline_height=1.6\nmargin_x_px=44\n[display]\nrefresh_preset='clear'\n";
         write(settings, external);
         driver.typography(); driver.tap(580, 948); driver.present();
-        driver.key(Input::K2); driver.present();
+        driver.close(); driver.present();
         assert(read(settings) == external && *app.saved_record() == saved);
         driver.typography(); driver.tap(580, 948); driver.present(); driver.tap(500, 1130); driver.present();
         auto actual = FileStore(card.string()).load_settings("Books/book.epub").settings;
@@ -240,11 +445,18 @@ int main(int argc, char** argv) {
         write(settings, "schema_version=1\n[reader]\nfont_size_px=54\nline_height=1.55\nmargin_x_px=32\n[display]\nrefresh_preset='balanced'\n");
         driver.tap(342, 500); driver.present(); driver.tap(480, 1140); driver.present();
         assert(app.view() == View::Refresh);
-        driver.tap(342, 700); driver.present();
+        const auto refresh_file = read(settings);
+        driver.tap(342, 930); driver.present();
+        assert(app.view() == View::RefreshConfirm && read(settings) == refresh_file);
+        driver.refresh();
+        driver.tap(150, 1120); driver.present();
+        assert(app.view() == View::Refresh && read(settings) == refresh_file);
+        driver.tap(342, 930); driver.present();
+        driver.tap(500, 1120); driver.present();
         actual = FileStore(card.string()).load_settings("Books/book.epub").settings;
         if (actual.refresh_preset != "fast") std::cerr << "Refresh edit failed: " << app.status() << '\n';
         assert(actual.font_size_px == 54 && actual.line_height == 1.55 && actual.margin_x_px == 32 && actual.refresh_preset == "fast");
-        driver.key(Input::K2); driver.present();
+        driver.close(); driver.present();
         assert(*app.saved_record() == saved && app.canvas().pixels() == body_before_refresh);
 
         driver.typography(); driver.tap(566, 1038); driver.present();
@@ -263,7 +475,7 @@ int main(int argc, char** argv) {
         assert(FileStore(card.string()).load_settings().settings.font_size_px == actual.font_size_px + 2);
         assert(FileStore(card.string()).load_settings("Books/book.epub").settings.font_size_px == actual.font_size_px);
         assert(read(settings) == book_overrides && *app.saved_record() == saved);
-        driver.key(Input::K2); driver.present();
+        driver.close(); driver.present();
         assert(std::equal(applied_pixels.begin(), applied_pixels.begin() + 342 * 1128,
                           app.canvas().pixels().begin()) && *app.saved_record() == saved);
 
@@ -272,7 +484,7 @@ int main(int argc, char** argv) {
         driver.tap(342, 500); driver.present(); driver.tap(205, 1140);
         assert(app.view() == View::Error); driver.present();
         assert(read(settings) == invalid && *app.saved_record() == saved);
-        driver.key(Input::K2); driver.present();
+        driver.close(); driver.present();
         driver.tap(342, 500); driver.present(); driver.tap(480, 1140);
         assert(app.view() == View::Error); driver.present();
         assert(read(settings) == invalid && *app.saved_record() == saved);
@@ -294,6 +506,160 @@ int main(int argc, char** argv) {
         assert(FileStore(card.string()).load_settings("Books/book.epub").settings.font_size_px == inherited - 2);
         assert(read(settings) == overrides && *app.saved_record() == saved);
         assert(!std::equal(before.begin(), before.begin() + 342 * 1128, app.canvas().pixels().begin()));
+    }
+    {
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+        const auto saved = *app.saved_record();
+        fs::create_directory(progress.string() + ".tmp");
+        driver.key(Input::K3); driver.present();
+        if (app.pending_frame()) driver.present();
+        assert(!app.prepare_usb_transfer() && *app.saved_record() == saved);
+        assert(!app.prepare_sleep() && *app.saved_record() == saved);
+        fs::remove(progress.string() + ".tmp");
+        app.save_progress();
+        assert(app.saved_record()->local_revision > saved.local_revision);
+    }
+    {
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize());
+        assert(!app.prepare_usb_transfer());
+        driver.present(); opened(app, "Books/book.epub"); driver.present();
+        const auto saved = *app.saved_record();
+        assert(app.prepare_usb_transfer());
+        assert(!app.prepare_usb_transfer());
+        const auto detached = card.string() + "-detached";
+        fs::rename(card, detached);
+        app.show_usb_transfer(true, ""); driver.present();
+        assert(!app.open_book("Books/book.epub"));
+        assert(!app.prepare_sleep());
+        app.complete_network(123, 200, "{}", "");
+        driver.refresh();
+        assert(app.take_usb_transfer_action() == UsbTransferAction::None);
+        driver.tap(342, 1100); driver.present();
+        driver.refresh();
+        driver.close(); driver.present();
+        assert(app.take_usb_transfer_action() == UsbTransferAction::None);
+        driver.tap(342, 1100); driver.present();
+        driver.tap(500, 1100);
+        assert(app.take_usb_transfer_action() == UsbTransferAction::Exit);
+        assert(app.take_usb_transfer_action() == UsbTransferAction::None);
+        assert(*app.saved_record() == saved);
+        fs::rename(detached, card);
+    }
+    {
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/nested.epub"); driver.present();
+        const auto saved = *app.saved_record();
+        driver.tap(342, 500); driver.present(); driver.tap(68, 1150); driver.present();
+        const auto collapsed = app.canvas().pixels();
+        driver.tap(615, 248); driver.present();
+        assert(app.view() == View::Contents && app.canvas().pixels() != collapsed && *app.saved_record() == saved);
+        driver.refresh();
+        driver.tap(615, 248); driver.present();
+        assert(app.canvas().pixels() == collapsed && *app.saved_record() == saved);
+        driver.tap(615, 248); driver.present();
+        driver.tap(200, 340); driver.present();
+        assert(app.view() == View::Reading && app.saved_record()->anchor != saved.anchor);
+    }
+    {
+        write(card / "PicoPage/settings.toml", "schema_version=1\n# preserved\n");
+        write(settings, "schema_version=1\n");
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+        const auto saved = *app.saved_record();
+        driver.tap(340, 500); driver.present(); driver.tap(480, 1140); driver.present();
+        driver.tap(340, 1170); driver.present();
+        assert(app.view() == View::RefreshInterval); driver.refresh();
+        driver.tap(600, 480); driver.present(); driver.tap(500, 1120); driver.present();
+        assert(FileStore(card.string()).load_settings("Books/book.epub").settings.balanced_full_refresh_pages == 9);
+        assert(*app.saved_record() == saved);
+        driver.close(); driver.present();
+        driver.tap(340, 500); driver.present(); driver.tap(50, 50); driver.present();
+        driver.tap(100, 480); driver.present();
+        driver.tap(600, 480); driver.present();
+        assert(app.view() == View::BookDetails && *app.saved_record() == saved);
+        driver.refresh(); driver.close(); driver.present();
+        assert(app.view() == View::Library && *app.saved_record() == saved);
+        driver.tap(610, 384); driver.present();
+        driver.tap(100, 680); driver.present();
+        assert(app.view() == View::BookDetails && *app.saved_record() == saved);
+        driver.refresh(); driver.close(); driver.present();
+        driver.tap(600, 50); driver.present();
+        driver.tap(340, 710); driver.present();
+        assert(app.view() == View::PowerSettings); driver.refresh();
+        const auto global_before = read(card / "PicoPage/settings.toml");
+        driver.tap(340, 390); driver.present(); driver.tap(600, 750); driver.present();
+        driver.refresh(); driver.tap(150, 1120); driver.present();
+        assert(read(card / "PicoPage/settings.toml") == global_before && app.auto_sleep_minutes() == 10);
+        driver.tap(340, 710); driver.present(); driver.tap(340, 390); driver.present();
+        driver.tap(600, 750); driver.present(); driver.tap(500, 1120); driver.present();
+        assert(app.auto_sleep_minutes() == 15 && FileStore(card.string()).load_settings().settings.sleep_screen == "reading");
+        assert(app.prepare_sleep());
+        assert(app.view() == View::Sleeping && app.pending_frame()->refresh == RefreshIntent::FullClean);
+        driver.present(); assert(*app.saved_record() == saved);
+        driver.key(Input::K3); assert(!app.pending_frame());
+        app.wake(); driver.present(); assert(*app.saved_record() == saved);
+        driver.tap(340, 500); driver.present(); driver.tap(50, 50); driver.present();
+        driver.tap(600, 50); driver.present(); driver.tap(340, 840); driver.present();
+        assert(app.view() == View::StorageSettings); driver.refresh();
+        write(card / "PicoPage/cache/layout", "cache");
+        const auto book_before = read(card / "Books/book.epub");
+        const auto progress_before = read(progress);
+        driver.tap(340, 1080); driver.present();
+        assert(!fs::exists(card / "PicoPage/cache/layout") && read(progress) == progress_before);
+        assert(read(card / "Books/book.epub") == book_before && *app.saved_record() == saved);
+        driver.close(); driver.present(); driver.tap(340, 710); driver.present();
+        driver.tap(340, 250); driver.present();
+        write(card / "PicoPage/settings.toml", global_before + "# external edit\n");
+        driver.tap(500, 1120); driver.present();
+        assert(app.view() == View::Error && app.auto_sleep_minutes() == 15);
+        assert(read(card / "PicoPage/settings.toml") == global_before + "# external edit\n");
+    }
+    {
+        write(card / "PicoPage/settings.toml", "schema_version=1\n[power]\nsleep_screen='reading'\n");
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+        const auto saved = *app.saved_record();
+        driver.key(Input::K3); assert(app.pending_frame());
+        app.complete_frame(false); driver.present();
+        assert(app.view() == View::Error && *app.saved_record() == saved);
+        assert(app.prepare_sleep()); driver.present();
+        app.wake(); assert(app.pending_frame()->anchor == saved.anchor); driver.present();
+        assert(*app.saved_record() == saved);
+    }
+    {
+        fs::create_directories(card / "Manage");
+        fs::copy_file(fixtures / "valid.epub", card / "Manage/only.epub");
+        write(card / "PicoPage/settings.toml", "schema_version=1\n[library]\nroots=['Manage']\n");
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Manage/only.epub"); driver.present();
+        driver.key(Input::K3); driver.present();
+        const auto saved = *app.saved_record();
+        const auto sidecar = card / "Manage/only.epub.picopage/progress.json";
+        driver.tap(342, 500); driver.present(); driver.tap(60, 50); driver.present();
+        driver.tap(240, 480); driver.present();
+        driver.tap(610, 480); driver.present();
+        assert(app.view() == View::BookDetails);
+        driver.tap(342, 918); driver.present();
+        assert(app.view() == View::BookManagement); driver.refresh();
+        driver.tap(100, 1120); driver.present();
+        assert(app.view() == View::BookDetails && *app.saved_record() == saved);
+        driver.tap(342, 918); driver.present(); driver.tap(500, 1120); driver.present();
+        assert(app.view() == View::BookDetails && !app.saved_record());
+        FileStore store(card.string());
+        assert(store.load_progress("Manage/only.epub", saved.book_id, saved.content_revision).status == StoreStatus::Cleared);
+        const auto cleared = read(sidecar);
+        fs::remove(sidecar);
+        driver.tap(342, 670); driver.present();
+        assert(app.view() == View::Reading && app.saved_record() && app.saved_record()->anchor != saved.anchor);
+        assert(read(sidecar.string() + ".bak") == cleared);
+        const auto reset_record = read(sidecar);
+        driver.tap(342, 500); driver.present(); driver.tap(60, 50); driver.present(); driver.tap(610, 480); driver.present();
+        driver.tap(342, 1010); driver.present(); driver.refresh();
+        driver.tap(500, 1120); driver.present();
+        assert(app.view() == View::Library && !app.saved_record());
+        assert(!fs::exists(card / "Manage/only.epub") && read(sidecar) == reset_record);
     }
     fs::remove_all(card);
     std::cout << "reader app display, progress protection, typography, cover and stale network checks: passed\n";

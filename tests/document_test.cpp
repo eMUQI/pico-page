@@ -91,6 +91,18 @@ int main(int argc, char** argv) {
         assert(!images.read_image("EPUB/chapter1.xhtml", encoded, error) && encoded.empty());
         assert(images.open(fixture_dir + "complex-svg-cover.epub", error) && images.load_chapter(0, first, error));
         assert(first.images.size() == 1 && first.images[0].resource.empty());
+        const auto identity = book.metadata().book_id;
+        for (const auto* name : {"epub3-cover", "epub2-cover", "guide-cover", "image-cover", "svg-cover"}) {
+            assert(EpubDocument::read_cover(fixture_dir + name + ".epub", encoded, error));
+            assert(encoded.size() > 32 && error.empty());
+        }
+        for (const auto* name : {"valid", "unsafe-cover", "image-flow", "complex-svg-cover", "malformed"}) {
+            encoded.assign(10, 1);
+            assert(!EpubDocument::read_cover(fixture_dir + name + ".epub", encoded, error));
+            assert(encoded.empty() && !error.empty());
+        }
+        assert(book.metadata().book_id == identity);
+        assert(book.load_chapter(0, first, error) && first.resource == "EPUB/chapter1.xhtml");
     }
     return 0;
 }

@@ -111,7 +111,7 @@ def main() -> int:
             check((p.parent / target).exists(), f'Broken local link in {rel}: {target}')
 
     agents = (ROOT / 'AGENTS.md').read_text(encoding='utf-8')
-    check('正文页 K2 = ForceRefresh' in agents, 'Missing reading K2 full-refresh rule')
+    check('所有可交互页面 K2 = ForceRefresh' in agents, 'Missing global K2 full-refresh rule')
     check('NVS 不保存隐藏的权威阅读配置/进度' in agents, 'Missing file-first storage rule')
     check(len(agents.encode('utf-8')) < 16000, 'Root AGENTS is too long for this handoff')
     font_ext = {'.ttf', '.otf', '.ttc', '.otc', '.woff', '.woff2', '.dfont'}

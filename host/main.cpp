@@ -159,6 +159,9 @@ struct Host {
                       << "\n";
             if (!okay)
                 return false;
+            // The desktop preview has no input sampling to protect and commits at once.
+            if (!app.pending_frame() && app.save_due())
+                app.save_progress();
         }
         return true;
     }
@@ -296,7 +299,7 @@ int main(int argc, char **argv) {
         if (!SDL_WaitEventTimeout(&event, 50))
             continue;
         if (event.type == SDL_QUIT) {
-            host.app.retry_save();
+            host.app.save_progress();
             running = false;
         } else if (event.type == SDL_WINDOWEVENT &&
                    (event.window.event == SDL_WINDOWEVENT_EXPOSED ||

@@ -17,10 +17,15 @@ margin_x_px = 36
 [display]
 # Refresh presets: clear / balanced / fast. Physical behavior still requires device validation.
 refresh_preset = "balanced"
+# Body updates between full refreshes in each mode; valid range 1..30.
+balanced_full_refresh_pages = 8
+fast_full_refresh_pages = 5
 
 [power]
 # Minutes without input before the device sleeps; 0 disables idle sleep. Range 0..240.
 auto_sleep_minutes = 10
+# Sleep screen: cover / reading / simple.
+sleep_screen = "cover"
 
 # No input-remapping configuration in the first version.
-# Reading K2 = ForceRefresh; panels keep their own close/cancel semantics.
+# K2 = ForceRefresh on every interactive page; use on-screen close/cancel controls.

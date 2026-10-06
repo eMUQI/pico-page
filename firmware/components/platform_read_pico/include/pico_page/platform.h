@@ -22,6 +22,8 @@ struct Event {
     std::uint64_t sequence = 0;
     int x = 0;
     int y = 0;
+    /** esp_timer time of the controller sample that produced a touch or key event. */
+    std::int64_t time_us = 0;
 };
 
 struct Battery {
@@ -47,6 +49,13 @@ const std::string& card_error();
 /** Closes and remounts the card without formatting. Close all files first. */
 bool refresh_card(std::string& error);
 
+/** Releases the application mount after all consumers close their files. */
+bool release_card_for_usb(std::string& error);
+/** Starts exclusive raw-card MSC access on the application task; failure requires restart. */
+bool start_usb_storage(std::string& error);
+/** Stops new USB I/O, waits for synchronous writes, and disconnects before restart. */
+bool stop_usb_storage(std::string& error);
+
 /**
  * Presents a 684x1216 portrait frame synchronously. Packed grayscale uses
  * even x in the low nibble, odd x in the high nibble, 0 black and 15 white.
@@ -61,8 +70,16 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
  * Polls one event; EventKind::None means no new event. Touch coordinates use
  * portrait pixels; K1/K2/K3 retain their controller coordinates below the panel.
  * A held input never repeats. Read failures cancel an active touch sequence.
+ * A sampler task records touch and key events every 5 ms, including while the
+ * application task is blocked; they are returned here in order with their sample time.
  */
 bool poll(Event& event, std::string& error);
+
+/** Blocks the application task until a sampled event is waiting or the timeout expires. */
+void wait_for_input(std::uint32_t timeout_ms);
+
+/** True when the next waiting touch or key event was sampled before time_us. */
+bool input_waiting_before(std::int64_t time_us);
 
 /**
  * Selects the maximum CPU frequency (true) or allows the idle frequency (false).

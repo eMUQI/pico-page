@@ -5,17 +5,7 @@ namespace pico_page {
 
 Action MapInput(Context context, Input input) {
     if (context == Context::Sleeping) return Action::None;
-    if (input == Input::K2) {
-        switch (context) {
-        case Context::Reading: return Action::ForceRefresh;
-        case Context::Tools: case Context::Contents: case Context::Library: return Action::Close;
-        case Context::Typography: return Action::CancelPreview;
-        case Context::Conflict: return Action::KeepLocal;
-        case Context::Confirmation: return Action::Cancel;
-        case Context::Transfer: return Action::EndTransfer;
-        default: return Action::None;
-        }
-    }
+    if (input == Input::K2) return Action::ForceRefresh;
     if (context == Context::Reading && input == Input::TouchCenter) return Action::OpenTools;
     if (context == Context::Reading || context == Context::Contents || context == Context::Library ||
         context == Context::LibraryRoot || context == Context::Transfer) {

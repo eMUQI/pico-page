@@ -6,7 +6,7 @@ endif()
 
 set(ft_sources)
 foreach(source base/ftbase.c base/ftinit.c base/ftsystem.c base/ftdebug.c
-               base/ftbitmap.c base/ftglyph.c base/ftmm.c
+               base/ftbitmap.c base/ftglyph.c base/ftmm.c base/ftsynth.c
                truetype/truetype.c cff/cff.c sfnt/sfnt.c psaux/psaux.c
                psnames/psnames.c pshinter/pshinter.c smooth/smooth.c raster/raster.c)
     list(APPEND ft_sources "${ft_source}/src/${source}")

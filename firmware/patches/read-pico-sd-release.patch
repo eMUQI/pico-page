@@ -1,0 +1,30 @@
+--- a/read_pico_sd.c
++++ b/read_pico_sd.c
+@@ -240,6 +240,16 @@
+     return read_pico_sd_start_probe();
+ }
+ 
++esp_err_t read_pico_sd_release(void) {
++    if (!begin_operation()) return ESP_ERR_NOT_FINISHED;
++    esp_err_t err = card ? esp_vfs_fat_sdcard_unmount(SD_MOUNT_POINT, card) : ESP_OK;
++    if (err == ESP_OK) card = NULL;
++    read_pico_sd_info_t info = { .error = err == ESP_OK ? ESP_ERR_INVALID_STATE : err };
++    info.mounted = err != ESP_OK && card != NULL;
++    publish_info(&info);
++    return err;
++}
++
+ esp_err_t read_pico_sd_sync(void) {
+     if (!begin_operation()) return ESP_ERR_NOT_FINISHED;
+     close_card();
+--- a/include/read_pico_sd.h
++++ b/include/read_pico_sd.h
+@@ -40,6 +40,8 @@
+ esp_err_t read_pico_sd_format(void);
+ /// 已挂载则卸载落盘。探测未完成返回 ESP_ERR_NOT_FINISHED。
+ /// / Unmount if mounted so writes land. ESP_ERR_NOT_FINISHED while probing.
++/** Unmount and release the card after all consumers close their files; propagate errors. */
++esp_err_t read_pico_sd_release(void);
+ esp_err_t read_pico_sd_sync(void);
+ 
+ #ifdef __cplusplus

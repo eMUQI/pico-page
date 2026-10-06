@@ -8,6 +8,8 @@ namespace pico_page::console {
 
 /** Configures nonblocking stdin on the application task; disabled builds are inert. */
 bool initialize(std::string &error);
+/** Stops the diagnostic driver before USB PHY handoff; rejects an active import. */
+bool shutdown(std::string &error);
 
 /**
  * Processes at most one bounded command on the application task. card_root is

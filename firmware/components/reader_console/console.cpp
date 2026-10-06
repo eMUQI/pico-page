@@ -41,19 +41,31 @@ std::unique_ptr<FileImport> transfer;
 std::int64_t transfer_activity = 0;
 std::uint32_t reply_failures = 0;
 
-void reply(const char *format, ...) __attribute__((format(printf, 1, 2)));
-void reply(const char *format, ...) {
+void send_line(TickType_t wait, const char *format, std::va_list arguments) {
     // Whole protocol lines must not use the log VFS's best-effort, per-byte transmitter.
     static std::array<char, 1536> output;
     output[0] = '\n';
+    const int count = std::vsnprintf(output.data() + 1, output.size() - 1, format, arguments);
+    if (count < 0 || static_cast<std::size_t>(count) >= output.size() - 1 ||
+        usb_serial_jtag_write_bytes(output.data(), static_cast<std::size_t>(count) + 1, wait) != count + 1)
+        ++reply_failures;
+}
+
+void reply(const char *format, ...) __attribute__((format(printf, 1, 2)));
+void reply(const char *format, ...) {
     std::va_list arguments;
     va_start(arguments, format);
-    const int count = std::vsnprintf(output.data() + 1, output.size() - 1, format, arguments);
+    send_line(pdMS_TO_TICKS(1000), format, arguments);
     va_end(arguments);
-    if (count < 0 || static_cast<std::size_t>(count) >= output.size() - 1 ||
-        usb_serial_jtag_write_bytes(output.data(), static_cast<std::size_t>(count) + 1,
-                                    pdMS_TO_TICKS(1000)) != count + 1)
-        ++reply_failures;
+}
+
+void notify(const char *format, ...) __attribute__((format(printf, 1, 2)));
+void notify(const char *format, ...) {
+    // Unsolicited diagnostics must not stall input or progress saving when no host reads USB.
+    std::va_list arguments;
+    va_start(arguments, format);
+    send_line(0, format, arguments);
+    va_end(arguments);
 }
 
 bool token(std::string_view &input, std::string_view &value) {
@@ -97,6 +109,8 @@ const char *view_name(View view) {
         return "refresh";
     case View::Settings:
         return "settings";
+    case View::UsbTransfer:
+        return "usb_transfer";
     case View::Import:
         return "import";
     case View::Sync:
@@ -105,6 +119,13 @@ const char *view_name(View view) {
         return "error";
     case View::Sleeping:
         return "sleeping";
+    case View::RefreshConfirm: return "refresh_confirm";
+    case View::RefreshInterval: return "refresh_interval";
+    case View::BookDetails: return "book_details";
+    case View::PowerSettings: return "power_settings";
+    case View::StorageSettings: return "storage_settings";
+    case View::InputSettings: return "input_settings";
+    case View::BookManagement: return "book_management";
     case View::Confirmation:
         return "confirmation";
     }
@@ -418,8 +439,18 @@ bool initialize(std::string &error_message) {
         return false;
     }
     owner = xTaskGetCurrentTaskHandle();
-    reply("PP 0 READY version=1 max_line=%u max_screen=%u\n", static_cast<unsigned>(line_limit),
+    notify("PP 0 READY version=1 max_line=%u max_screen=%u\n", static_cast<unsigned>(line_limit),
           static_cast<unsigned>(screen_limit));
+    return true;
+}
+
+bool shutdown(std::string &error) {
+    error.clear();
+    if (transfer) { error = "USB import is active"; return false; }
+    owner = nullptr;
+    usb_serial_jtag_vfs_use_nonblocking();
+    if (usb_serial_jtag_is_driver_installed()) usb_serial_jtag_driver_uninstall();
+    used = received_offset = received_size = 0;
     return true;
 }
 
@@ -474,7 +505,7 @@ void frame_completed(const Frame &frame, bool success) {
     frame_success = success;
     frame_purpose = frame.purpose;
     frame_refresh = frame.refresh;
-    reply("PP 0 FRAME number=%llu success=%d purpose=%d clean=%d\n",
+    notify("PP 0 FRAME number=%llu success=%d purpose=%d clean=%d\n",
           static_cast<unsigned long long>(frame_number), success, static_cast<int>(frame.purpose),
           frame.refresh == RefreshIntent::FullClean);
 }
@@ -485,6 +516,7 @@ bool initialize(std::string &error) {
     error.clear();
     return true;
 }
+bool shutdown(std::string &error) { error.clear(); return true; }
 bool poll(ReaderApp &, const char *, std::uint64_t &, bool) {
     return false;
 }

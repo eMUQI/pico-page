@@ -9,13 +9,20 @@
 
 namespace pico_page {
 
-enum class StoreStatus { Ok, Missing, Invalid, UnsupportedVersion, IdentityMismatch, IoError, UnsafePath, ExternalChange };
+enum class StoreStatus { Ok, Missing, Invalid, UnsupportedVersion, IdentityMismatch, IoError, UnsafePath, ExternalChange, Cleared };
 
 struct ProgressResult {
     StoreStatus status = StoreStatus::Missing;
     std::optional<ReadingRecord> record;
     bool recovered_backup = false;
     std::string detail;
+};
+
+struct BookSnapshot {
+    std::string path;
+    std::uint64_t size = 0;
+    std::uint32_t crc32 = 0;
+    std::optional<std::string> progress, backup;
 };
 
 struct ReaderSettings {
@@ -26,9 +33,12 @@ struct ReaderSettings {
     double paragraph_gap_lines = 0;
     int indent_chars = 2;
     std::string refresh_preset = "balanced";
+    int balanced_full_refresh_pages = 8;
+    int fast_full_refresh_pages = 5;
     std::vector<std::string> library_roots = {"Books", "Articles"};
     std::string library_view = "list";
     int auto_sleep_minutes = 10;  // Global only; 0 disables idle sleep.
+    std::string sleep_screen = "cover";  // Global only: cover, reading or simple.
 };
 
 struct ConfigDiagnostic {
@@ -110,7 +120,7 @@ public:
     SettingsSnapshot settings_snapshot(const std::string& book_path = "") const;
 
     /**
-     * Applies changed reader/display values to one layer after comparing both
+     * Applies changed reader/display and global power values to one layer after comparing both
      * source snapshots. Invalid source layers or unsafe TOML edits are rejected.
      * Existing comments and untouched fields are preserved. Book changes equal
      * to global values remove the corresponding override. Library fields are
@@ -142,8 +152,29 @@ public:
     StoreStatus inspect_asset(const std::string& path, std::uint64_t& size,
                               std::uint32_t& crc32, std::string& error) const;
 
+    /** Captures the EPUB digest and exact progress slots before a management confirmation. */
+    StoreStatus book_snapshot(const std::string& path, BookSnapshot& snapshot) const;
+
+    /**
+     * Revalidates the snapshot, then deletes only the original EPUB or commits a
+     * cleared marker to both progress slots. The caller must first stop the book
+     * session and its asynchronous work. Remote records and book settings remain.
+     * Failure may leave a published slot; reload before retrying.
+     */
+    StoreStatus manage_book(const BookSnapshot& snapshot, bool delete_original,
+                            const std::string& book_id, const std::string& revision) const;
+
     /** Delete only PicoPage/cache children after users of those files stop. */
     StoreStatus clear_cache() const;
+
+    /** Reads a rebuildable file below PicoPage/cache. The caller validates its contents. */
+    StoreStatus load_cache(const std::string& name, std::size_t limit, std::string& bytes) const;
+
+    /**
+     * Replaces a rebuildable file below PicoPage/cache, creating parent directories.
+     * An interrupted call may leave the entry missing; it never holds user data.
+     */
+    StoreStatus save_cache(const std::string& name, const std::string& bytes) const;
 
 private:
     std::string root_;

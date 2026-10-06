@@ -10,6 +10,7 @@
 #include "pico_page/platform.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 
 #include "cst836u.h"
@@ -22,6 +23,8 @@
 #include "esp_sleep.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "read_pico_board.h"
 #include "read_pico_epd_timing.h"
@@ -41,20 +44,37 @@ bool ready = false;
 bool display_ready = false;
 bool baseline_valid = false;
 bool mounted = false;
-bool suppress_touch = true;
+bool usb_owns_card = false;
 bool suppress_power = false;
 int panel_vcom = 0;
 std::int64_t rails_deadline = 0;
 std::int64_t last_pmu_poll = 0;
 std::int64_t last_card_poll = 0;
 std::int64_t power_ignore_until = 0;
-std::uint64_t sequence = 0;
+std::atomic<std::uint64_t> sequence{0};
 EpdiyHighlevelState display{};
 cst836u_handle_t touch = nullptr;
 sc7a20h_handle_t accelerometer = nullptr;
-Event active{};
-Event pending{};
 Battery battery_state{};
+// Touch and key events from the sampler task, oldest first.
+QueueHandle_t touch_events = nullptr;
+// Held by the sampler for each controller read and by sleep() around mode changes.
+SemaphoreHandle_t touch_lock = nullptr;
+// Asks the sampler to cancel the contact in progress and ignore input until release.
+std::atomic<bool> suppress_touch{true};
+// Sampling every 5 ms costs the application task about a fifth of its CPU-bound speed, so
+// that rate is kept only around a contact. The controller's interrupt line starts it; the
+// idle period bounds the delay should that line not respond.
+constexpr TickType_t sample_period = pdMS_TO_TICKS(5);
+constexpr TickType_t idle_sample_period = pdMS_TO_TICKS(50);
+constexpr int settle_samples = 40;
+TaskHandle_t sampler = nullptr;
+
+void IRAM_ATTR touch_interrupt(void*) {
+    BaseType_t woken = pdFALSE;
+    vTaskNotifyGiveFromISR(sampler, &woken);
+    if (woken) portYIELD_FROM_ISR();
+}
 std::string mount_error;
 esp_pm_lock_handle_t performance_lock = nullptr;
 bool performance_high = false;
@@ -155,24 +175,88 @@ EventKind hit_test(int x, int y) {
     return x >= 0 && x < width && y >= 0 && y < height ? EventKind::Touch : EventKind::None;
 }
 
-void cancel_touch(Event& event) {
-    if (active.kind != EventKind::None) {
-        event = active;
-        event.phase = EventPhase::Cancel;
+/**
+ * Samples the controller independently of the application task, which blocks for the
+ * duration of layout, panel updates and card writes. A contact that begins and ends
+ * within such a period would otherwise never be observed.
+ */
+void sample_touch(void*) {
+    Event active{};
+    bool suppressed = true;
+    bool failing = false;
+    bool interrupt_seen = false;
+    int fast = settle_samples;
+    const auto emit = [&](EventPhase phase, std::int64_t now) {
+        Event event = active;
+        event.phase = phase;
+        event.time_us = now;
+        // A full queue means the application stopped draining; later contacts are dropped.
+        xQueueSend(touch_events, &event, 0);
+    };
+    const auto cancel = [&](std::int64_t now) {
+        if (active.kind != EventKind::None) emit(EventPhase::Cancel, now);
         active = {};
+        suppressed = true;
+    };
+    for (;;) {
+        const bool signalled = ulTaskNotifyTake(pdTRUE, fast > 0 ? sample_period : idle_sample_period) != 0;
+        if (signalled && !interrupt_seen) {
+            interrupt_seen = true;
+            ESP_LOGI(tag, "Touch interrupt line is active");
+        }
+        if (signalled) {
+            fast = settle_samples;
+            // A burst of edges must not sample more than once per tick.
+            vTaskDelay(1);
+        } else if (fast > 0) {
+            --fast;
+        }
+        cst836u_touch_t sample{};
+        xSemaphoreTake(touch_lock, portMAX_DELAY);
+        const auto result = cst836u_read(touch, &sample);
+        xSemaphoreGive(touch_lock);
+        const auto now = esp_timer_get_time();
+        if (suppress_touch.exchange(false)) cancel(now);
+        if (result != ESP_OK) {
+            if (!failing) ESP_LOGW(tag, "Touch/key read: %s", esp_err_to_name(result));
+            failing = true;
+            cancel(now);
+            continue;
+        }
+        failing = false;
+        if (sample.touched) fast = settle_samples;
+        if (suppressed) {
+            if (!sample.touched) suppressed = false;
+            continue;
+        }
+        if (sample.count > 1) {
+            cancel(now);
+        } else if (sample.touched) {
+            if (active.kind == EventKind::None) {
+                const auto kind = hit_test(sample.x, sample.y);
+                if (kind == EventKind::None) {
+                    suppressed = true;
+                    continue;
+                }
+                active = {kind, EventPhase::Begin, ++sequence, sample.x, sample.y, now};
+                emit(EventPhase::Begin, now);
+            } else if (hit_test(sample.x, sample.y) != active.kind) {
+                cancel(now);
+            } else {
+                active.x = sample.x;
+                active.y = sample.y;
+            }
+        } else if (active.kind != EventKind::None) {
+            emit(EventPhase::End, now);
+            active = {};
+        }
     }
-    suppress_touch = true;
 }
 
+/** Reports a board event; the sampler cancels any contact in progress on its next sample. */
 void system_event(EventKind kind, Event& event) {
-    const Event next{kind, EventPhase::Begin, ++sequence};
-    if (active.kind != EventKind::None) {
-        cancel_touch(event);
-        pending = next;
-    } else {
-        suppress_touch = true;
-        event = next;
-    }
+    suppress_touch = true;
+    event = {kind, EventPhase::Begin, ++sequence};
 }
 
 bool panel_status(sy7636a_status_t& status, std::string& error) {
@@ -254,6 +338,21 @@ bool initialize(std::string& error) {
     input.reset_fn = read_pico_touch_reset;
     result = cst836u_init(read_pico_i2c_bus(), &input, &touch);
     if (result != ESP_OK) return failure(error, "Touch/key initialization", result);
+    touch_events = xQueueCreate(16, sizeof(Event));
+    touch_lock = xSemaphoreCreateMutex();
+    // Above the application task so that sampling continues during its CPU-bound work.
+    if (!touch_events || !touch_lock ||
+        xTaskCreate(sample_touch, "pico_touch", 4096, nullptr, 5, &sampler) != pdPASS) {
+        return failure(error, "Touch/key sampler", ESP_ERR_NO_MEM);
+    }
+    // The line is open-drain and active low. Without it the sampler still polls at its idle period.
+    const auto service = gpio_install_isr_service(0);
+    if ((service != ESP_OK && service != ESP_ERR_INVALID_STATE) ||
+        gpio_set_intr_type(input.int_gpio, GPIO_INTR_NEGEDGE) != ESP_OK ||
+        gpio_isr_handler_add(input.int_gpio, touch_interrupt, nullptr) != ESP_OK) {
+        ESP_LOGW(tag, "Touch interrupt unavailable; sampling every %d ms when idle",
+                 static_cast<int>(pdTICKS_TO_MS(idle_sample_period)));
+    }
     bool unused_short = false;
     bool unused_wake = false;
     if (!pmu_events(unused_short, unused_wake, error)) return false;
@@ -288,6 +387,15 @@ bool refresh_card(std::string& error) {
         return false;
     }
     return await_mount(error);
+}
+
+bool release_card_for_usb(std::string& error) {
+    if (!on_owner(error) || !mounted || usb_owns_card) return false;
+    const auto result = read_pico_sd_release();
+    if (result != ESP_OK) return failure(error, "SD release", result);
+    mounted = false;
+    usb_owns_card = true;
+    return true;
 }
 
 bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
@@ -350,17 +458,12 @@ bool poll(Event& event, std::string& error) {
     event = {};
     error.clear();
     if (!on_owner(error) || !ready) return false;
-    if (pending.kind != EventKind::None) {
-        event = pending;
-        pending = {};
-        return true;
-    }
     const auto now = esp_timer_get_time();
     if (rails_deadline && now >= rails_deadline) {
         epd_poweroff();
         rails_deadline = 0;
     }
-    if (now - last_card_poll >= 500'000) {
+    if (!usb_owns_card && now - last_card_poll >= 500'000) {
         last_card_poll = now;
         const bool was_mounted = mounted;
         observe_card();
@@ -374,7 +477,7 @@ bool poll(Event& event, std::string& error) {
         bool short_press = false;
         bool wake_press = false;
         if (!pmu_events(short_press, wake_press, error)) {
-            cancel_touch(event);
+            suppress_touch = true;
             return false;
         }
         if (suppress_power) {
@@ -384,52 +487,33 @@ bool poll(Event& event, std::string& error) {
             return true;
         }
     }
-    cst836u_touch_t sample{};
-    const auto result = cst836u_read(touch, &sample);
-    if (result != ESP_OK) {
-        cancel_touch(event);
-        return failure(error, "Touch/key read", result);
-    }
-    if (suppress_touch) {
-        if (!sample.touched) suppress_touch = false;
-        return true;
-    }
-    if (sample.count > 1) {
-        cancel_touch(event);
-        return true;
-    }
-    if (sample.touched) {
-        if (active.kind == EventKind::None) {
-            const auto kind = hit_test(sample.x, sample.y);
-            if (kind == EventKind::None) {
-                suppress_touch = true;
-                return true;
-            }
-            active = {kind, EventPhase::Begin, ++sequence, sample.x, sample.y};
-            event = active;
-        } else if (hit_test(sample.x, sample.y) != active.kind) {
-            cancel_touch(event);
-        } else {
-            active.x = sample.x;
-            active.y = sample.y;
-        }
-    } else if (active.kind != EventKind::None) {
-        event = active;
-        event.phase = EventPhase::End;
-        active = {};
-    }
+    xQueueReceive(touch_events, &event, 0);
     return true;
+}
+
+void wait_for_input(std::uint32_t timeout_ms) {
+    Event next;
+    if (touch_events) xQueuePeek(touch_events, &next, pdMS_TO_TICKS(timeout_ms));
+    else vTaskDelay(pdMS_TO_TICKS(timeout_ms));
+}
+
+bool input_waiting_before(std::int64_t time_us) {
+    Event next;
+    return touch_events && xQueuePeek(touch_events, &next, 0) == pdTRUE && next.time_us < time_us;
 }
 
 bool sleep(std::string& error) {
     error.clear();
     if (!on_owner(error) || !ready) return false;
-    active = {};
-    suppress_touch = true;
     epd_poweroff();
     rails_deadline = 0;
+    // The sampler must not address the controller between standby and its reset on wake.
+    xSemaphoreTake(touch_lock, portMAX_DELAY);
     auto result = cst836u_set_mode(touch, CST836U_MODE_DEEPSLEEP);
-    if (result != ESP_OK) return failure(error, "Touch standby", result);
+    if (result != ESP_OK) {
+        xSemaphoreGive(touch_lock);
+        return failure(error, "Touch standby", result);
+    }
 
     const auto irq = static_cast<gpio_num_t>(READ_PICO_IOE_INT_GPIO);
     gpio_config_t config{};
@@ -469,6 +553,9 @@ bool sleep(std::string& error) {
     gpio_wakeup_disable(irq);
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
     const auto touch_result = cst836u_wake(touch);
+    suppress_touch = true;
+    xQueueReset(touch_events);
+    xSemaphoreGive(touch_lock);
     suppress_power = true;
     power_ignore_until = esp_timer_get_time() + 300'000;
     if (touch_result != ESP_OK) return failure(error, "Touch resume", touch_result);

@@ -66,9 +66,9 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
     if (!(book ? allowed_fields(table, {"schema_version", "reader", "display"}, "", diagnostic)
                : allowed_fields(table, {"schema_version", "reader", "display", "library", "power"}, "", diagnostic)) ||
         !allowed_fields(toml_get(table, "reader"), {"font", "font_size_px", "line_height", "margin_x_px", "paragraph_gap_lines", "indent_chars"}, "reader", diagnostic) ||
-        !allowed_fields(toml_get(table, "display"), {"refresh_preset"}, "display", diagnostic) ||
+        !allowed_fields(toml_get(table, "display"), {"refresh_preset", "balanced_full_refresh_pages", "fast_full_refresh_pages"}, "display", diagnostic) ||
         !allowed_fields(toml_get(table, "library"), {"roots", "view"}, "library", diagnostic) ||
-        !allowed_fields(toml_get(table, "power"), {"auto_sleep_minutes"}, "power", diagnostic)) return false;
+        !allowed_fields(toml_get(table, "power"), {"auto_sleep_minutes", "sleep_screen"}, "power", diagnostic)) return false;
 
     auto value = toml_seek(table, "reader.font");
     diagnostic.field = "reader.font";
@@ -107,6 +107,22 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
         diagnostic.detail = "expected clear, balanced or fast";
         if (!string_value(value, settings.refresh_preset) ||
             (settings.refresh_preset != "clear" && settings.refresh_preset != "balanced" && settings.refresh_preset != "fast")) return false;
+    }
+    for (const char* field : {"display.balanced_full_refresh_pages", "display.fast_full_refresh_pages"}) {
+        value = toml_seek(table, field);
+        if (value.type == TOML_UNKNOWN) continue;
+        diagnostic.field = field;
+        diagnostic.detail = "expected integer in range 1..30";
+        if (value.type != TOML_INT64 || value.u.int64 < 1 || value.u.int64 > 30) return false;
+        (std::strcmp(field, "display.fast_full_refresh_pages") == 0 ? settings.fast_full_refresh_pages
+                                                                 : settings.balanced_full_refresh_pages) = static_cast<int>(value.u.int64);
+    }
+    value = toml_seek(table, "power.sleep_screen");
+    if (value.type != TOML_UNKNOWN) {
+        diagnostic.field = "power.sleep_screen";
+        diagnostic.detail = "expected cover, reading or simple";
+        if (!string_value(value, settings.sleep_screen) ||
+            (settings.sleep_screen != "cover" && settings.sleep_screen != "reading" && settings.sleep_screen != "simple")) return false;
     }
     value = toml_seek(table, "power.auto_sleep_minutes");
     if (value.type != TOML_UNKNOWN) {
@@ -186,14 +202,21 @@ std::string number(double value) {
 }
 
 using SettingValues = std::vector<std::pair<std::string, std::string>>;
-SettingValues setting_values(const ReaderSettings& values) {
-    return {{"reader.font", quoted(values.font)},
+SettingValues setting_values(const ReaderSettings& values, bool power = false) {
+    SettingValues fields = {{"reader.font", quoted(values.font)},
             {"reader.font_size_px", std::to_string(values.font_size_px)},
             {"reader.line_height", number(values.line_height)},
             {"reader.margin_x_px", std::to_string(values.margin_x_px)},
             {"reader.paragraph_gap_lines", number(values.paragraph_gap_lines)},
             {"reader.indent_chars", std::to_string(values.indent_chars)},
-            {"display.refresh_preset", quoted(values.refresh_preset)}};
+            {"display.refresh_preset", quoted(values.refresh_preset)},
+            {"display.balanced_full_refresh_pages", std::to_string(values.balanced_full_refresh_pages)},
+            {"display.fast_full_refresh_pages", std::to_string(values.fast_full_refresh_pages)}};
+    if (power) {
+        fields.emplace_back("power.auto_sleep_minutes", std::to_string(values.auto_sleep_minutes));
+        fields.emplace_back("power.sleep_screen", quoted(values.sleep_screen));
+    }
+    return fields;
 }
 
 std::string trim(const std::string& value) {
@@ -341,11 +364,11 @@ StoreStatus save_settings(const std::string& root, const SettingsSnapshot& snaps
         return StoreStatus::Missing;
     }
     if (values.library_roots != effective.library_roots || values.library_view != effective.library_view ||
-        values.auto_sleep_minutes != effective.auto_sleep_minutes) {
-        error = "Library and power settings are read-only through this interface";
+        (book_only && (values.auto_sleep_minutes != effective.auto_sleep_minutes || values.sleep_screen != effective.sleep_screen))) {
+        error = "Library fields are read-only; power fields are global only";
         return StoreStatus::Invalid;
     }
-    const auto desired = setting_values(values);
+    const auto desired = setting_values(values, !book_only);
     std::string serialized = "schema_version = 1\n";
     for (const auto& entry : desired) serialized += entry.first + " = " + entry.second + "\n";
     ReaderSettings checked;
@@ -357,8 +380,8 @@ StoreStatus save_settings(const std::string& root, const SettingsSnapshot& snaps
     const auto path = book_only ? snapshot.book_path + ".picopage/settings.toml" : "PicoPage/settings.toml";
     const auto& expected = book_only ? snapshot.book_source : snapshot.global_source;
     std::string source = expected.value_or("schema_version = 1\n");
-    const auto previous = setting_values(book_only ? effective : global);
-    const auto inherited = setting_values(global);
+    const auto previous = setting_values(book_only ? effective : global, !book_only);
+    const auto inherited = setting_values(global, !book_only);
     bool changed = false;
     for (std::size_t index = 0; index < desired.size(); ++index) {
         if (!reset && desired[index].second == previous[index].second) continue;
@@ -377,7 +400,7 @@ StoreStatus save_settings(const std::string& root, const SettingsSnapshot& snaps
         return StoreStatus::Invalid;
     }
     const auto expected_values = reset ? inherited : desired;
-    if (setting_values(checked) != expected_values) {
+    if (setting_values(checked, !book_only) != expected_values) {
         error = path + ": the edited configuration differs from the requested values";
         return StoreStatus::Invalid;
     }

@@ -54,7 +54,7 @@ public:
     bool contains(char32_t scalar) const;
     int advance(char32_t scalar);
     FontMetrics metrics() const;
-    bool draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8_t gray = 1);
+    bool draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8_t gray = 1, bool bold = false);
 private:
     void close();
     void* library_ = nullptr;
@@ -116,9 +116,12 @@ Page layout_page(Font& font, std::u32string_view text, std::size_t start,
                  const LayoutSpec& spec = {});
 bool render_page(Canvas& canvas, Font& font, const Page& page, std::uint8_t gray = 1);
 
-/** Decode PNG/baseline JPEG, fit and center in the box. Failure leaves the canvas unchanged. */
+/** Decode PNG/baseline JPEG centered in the box. Crop fills the box; otherwise fit the whole image.
+ * Failure leaves the canvas unchanged. Temporary pixels are bounded by the box dimensions;
+ * the scaling tables hold one 16-bit entry per source column and row.
+ */
 bool render_image(Canvas& canvas, const std::vector<std::uint8_t>& encoded,
-                  int x, int y, int width, int height, std::string& error);
+                  int x, int y, int width, int height, std::string& error, bool crop = false);
 
 /** Invalid UTF-8 sequences become U+FFFD; valid non-BMP characters remain one scalar. */
 std::u32string decode_utf8(std::string_view text);

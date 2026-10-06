@@ -119,6 +119,18 @@ int main() {
     assert(size == 9 && crc == 0xcbf43926u);
     assert(!store.begin_import("Books/published.epub", 9, crc, error));
 
+    failing_directory.clear();
+    pico_page::BookSnapshot snapshot;
+    assert(store.book_snapshot("Books/book.epub", snapshot) == pico_page::StoreStatus::Ok);
+    fail_file_sync = true;
+    assert(store.manage_book(snapshot, false, "book", "source-v1") == pico_page::StoreStatus::IoError);
+    assert(store.load_progress("Books/book.epub", "book", "source-v1").record);
+    fail_file_sync = false;
+    assert(store.book_snapshot("Books/book.epub", snapshot) == pico_page::StoreStatus::Ok);
+    assert(store.manage_book(snapshot, false, "book", "source-v1") == pico_page::StoreStatus::Ok);
+    fs::remove(root / "Books/book.epub.picopage/progress.json");
+    assert(store.load_progress("Books/book.epub", "book", "source-v1").status == pico_page::StoreStatus::Cleared);
+
     fs::remove_all(root);
     std::cout << "store: failed durability remains unacknowledged across retries\n";
 }

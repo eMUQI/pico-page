@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <vector>
 #ifdef ESP_PLATFORM
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -26,22 +27,46 @@ bool dimensions(unsigned width, unsigned height) {
 struct Raster {
     unsigned source_width = 0, source_height = 0;
     unsigned width = 0, height = 0, stride = 0;
+    unsigned scaled_width = 0, scaled_height = 0, crop_x = 0, crop_y = 0;
+    bool crop = false;
     std::unique_ptr<std::uint8_t, decltype(&std::free)> pixels{nullptr, &std::free};
     std::uint64_t samples = 0;
     bool done = false;
+    // Destination edge of every source column and row; sample() runs once per source pixel.
+    std::vector<std::uint16_t> columns, rows;
     bool create(unsigned source_w, unsigned source_h, int box_w, int box_h) {
-        source_width = source_w; source_height = source_h;
         width = static_cast<unsigned>(box_w);
         height = std::max(1U, static_cast<unsigned>(std::uint64_t(source_h) * width / source_w));
-        if (height > static_cast<unsigned>(box_h)) {
+        if ((!crop && height > static_cast<unsigned>(box_h)) ||
+            (crop && height < static_cast<unsigned>(box_h))) {
             height = static_cast<unsigned>(box_h);
             width = std::max(1U, static_cast<unsigned>(std::uint64_t(source_w) * height / source_h));
+        }
+        scaled_width = width; scaled_height = height;
+        if (crop) {
+            width = static_cast<unsigned>(box_w); height = static_cast<unsigned>(box_h);
+            crop_x = (scaled_width - width) / 2; crop_y = (scaled_height - height) / 2;
         }
         stride = (width + 1) / 2;
         pixels.reset(static_cast<std::uint8_t*>(std::malloc(std::size_t(stride) * height)));
         if (!pixels) return false;
         std::memset(pixels.get(), 0xff, std::size_t(stride) * height);
+        source(source_w, source_h);
         return true;
+    }
+    /** Sets the decoded size, which a prescaling decoder reduces after create(). */
+    void source(unsigned source_w, unsigned source_h) {
+        source_width = source_w; source_height = source_h;
+        columns.resize(source_w + 1);
+        rows.resize(source_h + 1);
+        for (unsigned x = 0; x <= source_w; ++x)
+            columns[x] = static_cast<std::uint16_t>(mapped(x, scaled_width, source_w, crop_x, width));
+        for (unsigned y = 0; y <= source_h; ++y)
+            rows[y] = static_cast<std::uint16_t>(mapped(y, scaled_height, source_h, crop_y, height));
+    }
+    static unsigned mapped(unsigned coordinate, unsigned scaled, unsigned source, unsigned offset, unsigned limit) {
+        const auto position = (std::uint64_t(coordinate) * scaled + source - 1) / source;
+        return position <= offset ? 0 : static_cast<unsigned>(std::min<std::uint64_t>(position - offset, limit));
     }
     void sample(unsigned x, unsigned y, unsigned w, unsigned h, const std::uint8_t* rgb, unsigned alpha = 255) {
         ++samples;
@@ -50,10 +75,8 @@ struct Raster {
 #endif
         if (x >= source_width || y >= source_height) return;
         // Each destination pixel samples its source coordinate; Adam7 updates are progressively refined.
-        const unsigned left = (x * width + source_width - 1) / source_width;
-        const unsigned right = (std::min(x + w, source_width) * width + source_width - 1) / source_width;
-        const unsigned top = (y * height + source_height - 1) / source_height;
-        const unsigned bottom = (std::min(y + h, source_height) * height + source_height - 1) / source_height;
+        const unsigned left = columns[x], right = columns[std::min(x + w, source_width)];
+        const unsigned top = rows[y], bottom = rows[std::min(y + h, source_height)];
         if (left == right || top == bottom) return;
         const unsigned luminance = (77U * rgb[0] + 150U * rgb[1] + 29U * rgb[2] + 128U) >> 8;
         const unsigned blended = (luminance * alpha + 255U * (255U - alpha) + 127U) / 255U;
@@ -123,8 +146,7 @@ bool jpeg(const std::vector<std::uint8_t>& input, int width, int height, Raster&
     if (!raster.create(decoder.width, decoder.height, width, height)) return fail(error, "Image canvas allocation failed");
     unsigned scale = 0;
     while (scale < 3 && (decoder.width >> (scale + 1)) >= raster.width && (decoder.height >> (scale + 1)) >= raster.height) ++scale;
-    raster.source_width = decoder.width >> scale;
-    raster.source_height = decoder.height >> scale;
+    raster.source(decoder.width >> scale, decoder.height >> scale);
     result = jd_decomp(&decoder, [](JDEC* decoder, void* bitmap, JRECT* rect) -> int {
         auto& raster = static_cast<JpegInput*>(decoder->device)->raster;
         const auto* rgb = static_cast<const std::uint8_t*>(bitmap);
@@ -140,13 +162,14 @@ bool jpeg(const std::vector<std::uint8_t>& input, int width, int height, Raster&
 } // namespace
 
 bool render_image(Canvas& canvas, const std::vector<std::uint8_t>& encoded,
-                  int x, int y, int width, int height, std::string& error) {
+                  int x, int y, int width, int height, std::string& error, bool crop) {
     error.clear();
     if (x < 0 || y < 0 || width <= 0 || height <= 0 || width > canvas.width() || height > canvas.height() ||
         x > canvas.width() - width || y > canvas.height() - height || std::uint64_t(width) * height > 684U * 1216U)
         return fail(error, "Invalid image drawing area");
     if (encoded.empty() || encoded.size() > kEncodedLimit) return fail(error, "Encoded image exceeds 2 MiB limit");
     Raster raster;
+    raster.crop = crop;
     bool success;
     if (encoded.size() >= 8 && std::memcmp(encoded.data(), "\x89PNG\r\n\x1a\n", 8) == 0)
         success = png(encoded, width, height, raster, error);

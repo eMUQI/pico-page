@@ -1,4 +1,6 @@
 #include "pico_page/core.h"
+#include "../firmware/components/platform_read_pico/usb_block_range.h"
+#include "../firmware/components/platform_read_pico/include/pico_page/released_tap.h"
 #include <cstdlib>
 #include <iostream>
 #include <vector>
@@ -17,22 +19,50 @@ struct Recorder final : DisplayBackend {
 };
 
 int main() {
+    CHECK(usb_block_range(8, 0, 0, 512));
+    CHECK(usb_block_range(8, 1, 511, 2));
+    CHECK(usb_block_range(8, 7, 511, 1));
+    CHECK(!usb_block_range(8, 7, 511, 2));
+    CHECK(!usb_block_range(8, UINT32_MAX, UINT32_MAX, UINT32_MAX));
+    CHECK(!usb_block_range(8, 8, 0, 1));
+    {
+        using namespace pico_page::platform;
+        ReleasedTap taps;
+        CHECK(!taps.accept({EventKind::Touch, EventPhase::Begin, 1, 600, 500}, 1));
+        CHECK(!taps.accept({EventKind::Touch, EventPhase::Begin, 1, 300, 500}, 1));
+        const auto first_tap = taps.accept({EventKind::Touch, EventPhase::End, 1, 300, 500}, 1);
+        CHECK(first_tap && first_tap->x == 600 && first_tap->phase == EventPhase::Begin);
+        CHECK(!taps.accept({EventKind::Touch, EventPhase::End, 1}, 1));
+        // UI work starts with no held contact, so the next tap has independent ownership.
+        CHECK(!taps.accept({EventKind::K3, EventPhase::Begin, 2}, 1));
+        CHECK(!taps.accept({EventKind::K3, EventPhase::End, 1}, 1));
+        CHECK(taps.accept({EventKind::K3, EventPhase::End, 2}, 1));
+        CHECK(!taps.accept({EventKind::Touch, EventPhase::Begin, 3, 600, 500}, 1));
+        CHECK(!taps.accept({EventKind::Touch, EventPhase::Cancel, 3}, 1));
+        CHECK(!taps.accept({EventKind::Touch, EventPhase::End, 3}, 1));
+        CHECK(!taps.accept({EventKind::K2, EventPhase::Begin, 4}, 1));
+        CHECK(taps.accept({EventKind::K2, EventPhase::End, 4}, 1));
+        CHECK(!taps.accept({EventKind::Touch, EventPhase::Begin, 5, 600, 500}, 1));
+        CHECK(!taps.accept({EventKind::Touch, EventPhase::End, 5, 600, 500}, 2));
+        CHECK(!taps.accept({EventKind::K3, EventPhase::Begin, 6}, 2));
+        CHECK(taps.accept({EventKind::K3, EventPhase::End, 6}, 2));
+    }
     // IN03/IN04: a context change cannot reuse the input that opened it.
     InputRouter input;
     CHECK(input.route(Context::Reading, {1, Phase::Begin, Input::TouchCenter}) == Action::OpenTools);
     CHECK(input.route(Context::Tools, {1, Phase::End, Input::TouchCenter}) == Action::None);
-    CHECK(input.route(Context::Tools, {2, Phase::Begin, Input::K2}) == Action::Close);
+    CHECK(input.route(Context::Tools, {2, Phase::Begin, Input::K2}) == Action::ForceRefresh);
     CHECK(input.route(Context::Reading, {2, Phase::End, Input::K2}) == Action::None);
     CHECK(input.route(Context::Reading, {2, Phase::Begin, Input::K2}) == Action::None);
     CHECK(input.route(Context::Sleeping, {3, Phase::Begin, Input::K2}, true) == Action::Wake);
     CHECK(input.route(Context::Reading, {3, Phase::End, Input::K2}) == Action::None);
     CHECK(input.route(Context::Sleeping, {4, Phase::Begin, Input::K2}) == Action::None);
     CHECK(input.route(Context::Sleeping, {4, Phase::End, Input::K2}) == Action::None);
-    CHECK(MapInput(Context::Typography, Input::K2) == Action::CancelPreview);
-    CHECK(MapInput(Context::Conflict, Input::K2) == Action::KeepLocal);
-    CHECK(MapInput(Context::Confirmation, Input::K2) == Action::Cancel);
-    CHECK(MapInput(Context::LibraryRoot, Input::K2) == Action::None);
-    CHECK(MapInput(Context::Transfer, Input::K2) == Action::EndTransfer);
+    CHECK(MapInput(Context::Typography, Input::K2) == Action::ForceRefresh);
+    CHECK(MapInput(Context::Conflict, Input::K2) == Action::ForceRefresh);
+    CHECK(MapInput(Context::Confirmation, Input::K2) == Action::ForceRefresh);
+    CHECK(MapInput(Context::LibraryRoot, Input::K2) == Action::ForceRefresh);
+    CHECK(MapInput(Context::Transfer, Input::K2) == Action::ForceRefresh);
     for (auto context : {Context::Tools, Context::Typography, Context::Conflict, Context::Confirmation}) {
         CHECK(MapInput(context, Input::K1) == Action::None);
         CHECK(MapInput(context, Input::K3) == Action::None);

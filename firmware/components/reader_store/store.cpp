@@ -120,6 +120,17 @@ ProgressResult decode(const std::string& bytes, const std::string& book_id,
     const auto* schema = cJSON_GetObjectItemCaseSensitive(object.get(), "schema_version");
     if (!cJSON_IsNumber(schema) || !std::isfinite(schema->valuedouble) ||
         std::floor(schema->valuedouble) != schema->valuedouble) return result;
+    if (schema->valuedouble == 2 &&
+        fields(object.get(), {"schema_version", "state", "book_id", "content_revision"})) {
+        std::string state, identity, revision;
+        if (string_field(object.get(), "state", state) && state == "cleared" &&
+            string_field(object.get(), "book_id", identity) && text_value(identity, 256) &&
+            string_field(object.get(), "content_revision", revision) && text_value(revision, 256)) {
+            if (identity != book_id || revision != content_revision)
+                return {StoreStatus::IdentityMismatch, {}, false, "cleared record identity differs"};
+            return {StoreStatus::Cleared, {}, false, {}};
+        }
+    }
     if (schema->valuedouble > 1) {
         result.status = StoreStatus::UnsupportedVersion;
         result.detail = "unsupported progress schema_version";
@@ -361,16 +372,17 @@ StoreStatus read_file(const std::string& root, const std::string& path,
     struct stat info{};
     if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode)) { close(fd); return StoreStatus::IoError; }
     if (info.st_size < 0 || static_cast<std::uint64_t>(info.st_size) > limit) { close(fd); return StoreStatus::Invalid; }
-    contents.clear();
-    char buffer[512];
-    while (true) {
-        const auto count = read(fd, buffer, sizeof(buffer));
+    // One request per file lets FatFs transfer whole clusters instead of single sectors.
+    contents.assign(static_cast<std::size_t>(info.st_size), '\0');
+    std::size_t filled = 0;
+    while (filled < contents.size()) {
+        const auto count = read(fd, contents.data() + filled, contents.size() - filled);
         if (count < 0 && errno == EINTR) continue;
         if (count < 0) { close(fd); return StoreStatus::IoError; }
         if (count == 0) break;
-        if (contents.size() + static_cast<std::size_t>(count) > limit) { close(fd); return StoreStatus::Invalid; }
-        contents.append(buffer, static_cast<std::size_t>(count));
+        filled += static_cast<std::size_t>(count);
     }
+    contents.resize(filled);
     return close(fd) == 0 ? StoreStatus::Ok : StoreStatus::IoError;
 }
 
@@ -575,7 +587,7 @@ ProgressResult FileStore::save_progress(const std::string& book_path, const Read
     const auto path = directory + "/progress.json";
     auto previous = read_progress(root_, path, record.book_id, record.content_revision);
     const bool main_valid = previous.status == StoreStatus::Ok;
-    if (main_valid) {
+    if (main_valid || previous.status == StoreStatus::Cleared) {
         const auto backup = read_progress(root_, path + ".bak", record.book_id, record.content_revision);
         if (backup.status == StoreStatus::UnsupportedVersion || backup.status == StoreStatus::IdentityMismatch) return backup;
     }
@@ -583,7 +595,7 @@ ProgressResult FileStore::save_progress(const std::string& book_path, const Read
         auto backup = read_progress(root_, path + ".bak", record.book_id, record.content_revision);
         if (backup.status != StoreStatus::Missing) previous = backup;
     }
-    if (previous.status != StoreStatus::Ok && previous.status != StoreStatus::Missing && previous.status != StoreStatus::Invalid) return previous;
+    if (previous.status != StoreStatus::Ok && previous.status != StoreStatus::Missing && previous.status != StoreStatus::Invalid && previous.status != StoreStatus::Cleared) return previous;
     if (previous.record && previous.record->writer_id == record.writer_id &&
         previous.record->local_revision >= record.local_revision && !(*previous.record == record)) {
         return {StoreStatus::Invalid, {}, false, "local_revision does not advance within writer scope"};
@@ -607,12 +619,82 @@ ProgressResult FileStore::save_progress(const std::string& book_path, const Read
     return checked;
 }
 
+StoreStatus FileStore::book_snapshot(const std::string& path, BookSnapshot& snapshot) const {
+    snapshot = {};
+    auto lower = path;
+    for (auto& c : lower) if (c >= 'A' && c <= 'Z') c += 32;
+    if (lower.size() < 6 || lower.substr(lower.size() - 5) != ".epub" ||
+        lower.rfind("picopage/", 0) == 0 || lower.find(".picopage/") != std::string::npos)
+        return StoreStatus::UnsafePath;
+    auto status = asset_digest(root_, path, snapshot.size, snapshot.crc32);
+    if (status != StoreStatus::Ok) return status;
+    snapshot.path = path;
+    const auto progress = path + ".picopage/progress.json";
+    for (const auto& slot : {std::make_pair(progress, &snapshot.progress),
+                             std::make_pair(progress + ".bak", &snapshot.backup)}) {
+        std::string bytes;
+        status = store_internal::read_file(root_, slot.first, progress_limit, bytes);
+        if (status == StoreStatus::Ok) *slot.second = std::move(bytes);
+        else if (status != StoreStatus::Missing) return status;
+    }
+    return StoreStatus::Ok;
+}
+
+StoreStatus FileStore::manage_book(const BookSnapshot& snapshot, bool delete_original,
+                                 const std::string& book_id, const std::string& revision) const {
+    BookSnapshot current;
+    const auto status = book_snapshot(snapshot.path, current);
+    if (status != StoreStatus::Ok) return status;
+    if (current.size != snapshot.size || current.crc32 != snapshot.crc32 ||
+        current.progress != snapshot.progress || current.backup != snapshot.backup)
+        return StoreStatus::ExternalChange;
+    if (delete_original) {
+        if (unlink((root_ + "/" + snapshot.path).c_str()) != 0) return StoreStatus::IoError;
+        const auto slash = snapshot.path.rfind('/');
+        return sync_directory(slash == std::string::npos ? root_ : root_ + "/" + snapshot.path.substr(0, slash))
+            ? StoreStatus::Ok : StoreStatus::IoError;
+    }
+    if (!text_value(book_id, 256) || !text_value(revision, 256)) return StoreStatus::Invalid;
+    for (const auto& source : {snapshot.progress, snapshot.backup}) {
+        if (!source) continue;
+        const auto parsed = decode(*source, book_id, revision);
+        if (parsed.status != StoreStatus::Ok && parsed.status != StoreStatus::Cleared &&
+            parsed.status != StoreStatus::Invalid) return parsed.status;
+    }
+    Json object(cJSON_CreateObject(), cJSON_Delete);
+    if (!object || !cJSON_AddNumberToObject(object.get(), "schema_version", 2) ||
+        !cJSON_AddStringToObject(object.get(), "state", "cleared") ||
+        !cJSON_AddStringToObject(object.get(), "book_id", book_id.c_str()) ||
+        !cJSON_AddStringToObject(object.get(), "content_revision", revision.c_str())) return StoreStatus::IoError;
+    char* printed = cJSON_PrintUnformatted(object.get());
+    if (!printed) return StoreStatus::IoError;
+    const std::string bytes(printed);
+    cJSON_free(printed);
+    const auto path = snapshot.path + ".picopage/progress.json";
+    std::string error;
+    // Publish the cleared backup first so a missing main slot cannot recover an old position.
+    auto committed = store_internal::commit_file(root_, path + ".bak", snapshot.backup, bytes, progress_limit, error, true);
+    if (committed != StoreStatus::Ok) return committed;
+    return store_internal::commit_file(root_, path, snapshot.progress, bytes, progress_limit, error, true);
+}
+
 StoreStatus FileStore::clear_cache() const {
     const std::string path = "PicoPage/cache";
     const auto safe = store_internal::safe_path(root_, path);
     if (safe == StoreStatus::Missing) return StoreStatus::Ok;
     if (safe != StoreStatus::Ok) return safe;
     return remove_children(root_ + "/" + path, 0);
+}
+
+StoreStatus FileStore::load_cache(const std::string& name, std::size_t limit, std::string& bytes) const {
+    return store_internal::read_file(root_, "PicoPage/cache/" + name, limit, bytes);
+}
+
+StoreStatus FileStore::save_cache(const std::string& name, const std::string& bytes) const {
+    const auto path = "PicoPage/cache/" + name;
+    if (!store_internal::relative_path(path)) return StoreStatus::UnsafePath;
+    return resource_parents(root_, path) && write_synced(root_, path + ".tmp", bytes) &&
+           publish(root_, path + ".tmp", path) ? StoreStatus::Ok : StoreStatus::IoError;
 }
 
 StoreStatus FileStore::save_last_book(const std::string& book_path, std::string& error) const {

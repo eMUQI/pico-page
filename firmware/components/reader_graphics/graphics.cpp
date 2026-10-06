@@ -6,6 +6,8 @@
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include FT_ADVANCES_H
+#include FT_SYNTHESIS_H
 #ifdef ESP_PLATFORM
 #include FT_MODULE_H
 #include "esp_heap_caps.h"
@@ -172,10 +174,20 @@ int Font::advance(char32_t scalar) {
     const auto key = (std::uint64_t(pixel_size_) << 32) | std::uint32_t(scalar);
     const auto cached = advances_.find(key);
     if (cached != advances_.end()) return cached->second;
-    if (!face_ || FT_Load_Char(static_cast<FT_Face>(face_), scalar, FT_LOAD_DEFAULT)) {
+    const auto face = static_cast<FT_Face>(face_);
+    if (!face) { error_ = "Font glyph metrics failed"; return -1; }
+    int width;
+    FT_Fixed design = 0;
+    // For static SFNT faces the hinted loader yields the scaled design advance rounded to a whole
+    // pixel. Reading that advance alone avoids fetching and scaling the outline from storage.
+    if (FT_IS_SFNT(face) && !FT_HAS_MULTIPLE_MASTERS(face) &&
+        !FT_Get_Advance(face, FT_Get_Char_Index(face, scalar), FT_LOAD_NO_SCALE, &design)) {
+        width = static_cast<int>((FT_MulFix(design, face->size->metrics.x_scale) + 32) >> 6);
+    } else if (!FT_Load_Char(face, scalar, FT_LOAD_DEFAULT)) {
+        width = static_cast<int>((face->glyph->advance.x + 32) >> 6);
+    } else {
         error_ = "Font glyph metrics failed"; return -1;
     }
-    const auto width = static_cast<int>((static_cast<FT_Face>(face_)->glyph->advance.x + 32) >> 6);
     // Bound per-face metrics memory across all sizes; reopening invalidates every entry.
     if (advances_.size() >= 8192) advances_.clear();
     advances_.emplace(key, width);
@@ -190,16 +202,20 @@ FontMetrics Font::metrics() const {
             static_cast<int>((metrics.height + 63) >> 6)};
 }
 
-bool Font::draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8_t gray) {
+bool Font::draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8_t gray, bool bold) {
     if (scalar == U'\n' || scalar == U'\r' || scalar == U'\t') return true;
-    const auto key = (std::uint64_t(pixel_size_) << 32) | std::uint32_t(scalar);
+    const auto key = (std::uint64_t(bold) << 63) | (std::uint64_t(pixel_size_) << 32) | std::uint32_t(scalar);
     auto cached = glyphs_.find(key);
     if (cached == glyphs_.end()) {
         if (!face_ || FT_Load_Char(static_cast<FT_Face>(face_), scalar,
-                                 FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL)) {
+                                 FT_LOAD_DEFAULT | FT_LOAD_TARGET_NORMAL)) {
             error_ = "Font glyph rasterization failed"; return false;
         }
         const auto slot = static_cast<FT_Face>(face_)->glyph;
+        if (bold) FT_GlyphSlot_Embolden(slot);
+        if (FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL)) {
+            error_ = "Font glyph rasterization failed"; return false;
+        }
         const auto& bitmap = slot->bitmap;
         if (bitmap.pixel_mode != FT_PIXEL_MODE_GRAY && bitmap.pixel_mode != FT_PIXEL_MODE_MONO &&
             bitmap.rows) { error_ = "Unsupported glyph pixel format"; return false; }

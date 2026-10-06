@@ -20,7 +20,19 @@ if(read_pico_untracked)
     message(FATAL_ERROR "The pinned Read Pico components contain untracked files.")
 endif()
 
-foreach(component read_pico read_pico_pmu epdiy e0470_epaper_waveform
+# Patch a build-local copy, preserving the verified upstream checkout.
+set(READ_PICO_ADAPTED "${CMAKE_CURRENT_BINARY_DIR}/pico_bsp")
+file(REMOVE_RECURSE "${READ_PICO_ADAPTED}/read_pico")
+file(MAKE_DIRECTORY "${READ_PICO_ADAPTED}")
+file(COPY "${READ_PICO_SOURCE}/components/read_pico" DESTINATION "${READ_PICO_ADAPTED}")
+execute_process(COMMAND git apply --unsafe-paths
+    "${CMAKE_CURRENT_LIST_DIR}/patches/read-pico-sd-release.patch"
+    WORKING_DIRECTORY "${READ_PICO_ADAPTED}/read_pico" RESULT_VARIABLE patch_result)
+if(NOT patch_result EQUAL 0)
+    message(FATAL_ERROR "Cannot apply checked SD ownership patch")
+endif()
+list(APPEND EXTRA_COMPONENT_DIRS "${READ_PICO_ADAPTED}/read_pico")
+foreach(component read_pico_pmu epdiy e0470_epaper_waveform
                   cst836u sc7a20h fca9555 sy7636a pwm_audio)
     list(APPEND EXTRA_COMPONENT_DIRS "${READ_PICO_SOURCE}/components/${component}")
 endforeach()
@@ -31,3 +43,10 @@ project(pico_page)
 if(NOT IDF_VERSION_MAJOR EQUAL 6 OR NOT IDF_VERSION_MINOR EQUAL 1)
     message(FATAL_ERROR "This build baseline requires ESP-IDF 6.1.")
 endif()
+
+# Use TinyUSB's MSC class with synchronous project callbacks. The convenience
+# storage layer queues writes and can remount FAT automatically on USB events.
+idf_component_get_property(usb_component espressif__esp_tinyusb COMPONENT_LIB)
+get_target_property(usb_sources ${usb_component} SOURCES)
+list(FILTER usb_sources EXCLUDE REGEX "(tinyusb_msc|storage_sdmmc|storage_spiflash|storage_blockdev)\\.c$")
+set_property(TARGET ${usb_component} PROPERTY SOURCES "${usb_sources}")

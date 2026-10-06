@@ -83,7 +83,9 @@ int main() {
     CHECK(context == Context::Tools);
     dispatch({6, Phase::Begin, Input::K2});
     dispatch({6, Phase::End, Input::K2});
-    CHECK(context == Context::Reading && recording.submitted.size() == before_count + 1);
+    CHECK(context == Context::Tools && recording.submitted.size() == before_count + 2);
+    CHECK(!session.presented(*display.finish(recording.submitted.back().token, true)));
+    CHECK(*session.visible_record() == before_refresh && !session.needs_save());
 
     std::filesystem::create_directories(root / "Books/synthetic.epub.picopage/prepared");
     std::filesystem::create_directories(root / "PicoPage/cache/layouts");
