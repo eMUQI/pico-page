@@ -16,10 +16,12 @@ int main(int argc, char** argv) {
     const auto fallback_text = decode_utf8("未检测到存储卡，请插入后重新启动。初始化失败，重试。");
     for (const auto c : fallback_text) assert(font.contains(c));
     {
-        // The second draw is served from the glyph cache and must match the rasterized one.
+        // Prewarming an independent font face must preserve the rasterized pixels.
         Canvas rasterized, cached;
         assert(font.size(28) && font.draw(rasterized, fallback_text[0], 40, 60));
-        assert(font.draw(cached, fallback_text[0], 40, 60));
+        Font warmed;
+        assert(warmed.open_fallback() && warmed.size(28) && warmed.warm(fallback_text[0]));
+        assert(warmed.draw(cached, fallback_text[0], 40, 60));
         assert(rasterized.pixels() == cached.pixels() && rasterized.pixels() != Canvas().pixels());
     }
     if (argc > 1) assert(font.open(argv[1]));

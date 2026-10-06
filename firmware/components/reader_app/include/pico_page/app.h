@@ -120,16 +120,18 @@ class ReaderApp {
      * typography; nullopt until every chapter has been counted or outside the reading order.
      */
     std::optional<BookPages> book_pages() const;
-    /** True while the reading page is shown and whole-book page counting has work left. */
+    /** True while the reading page is shown and next-page preparation or counting has work left. */
     bool background_due() const;
     /**
-     * Diagnostic state of page counting: "idle" without a book or when complete, "counting"
+     * Diagnostic state: "prefetch" while the next page is being prepared, "idle" without
+     * a book or when all work is complete, "counting"
      * while chapters remain, "waiting" while memory is too low to load the next chapter, and
      * "failed" after a chapter could not be read or laid out. The string is static.
      */
     const char *background_state() const;
     /**
-     * Runs one slice of page counting, targeting 15 ms of pagination or one chapter load. It presents no frame
+     * Prepares one next-page layout, warms its glyphs in 15 ms slices, then counts pages
+     * in 15 ms slices or one chapter load. It presents no frame
      * and changes no reading position; the footer adopts the result at its next redraw.
      * Call it only while no input is waiting. Counting may hold a second parsed chapter, which
      * every input and every entry point that loads content releases first. stop is checked

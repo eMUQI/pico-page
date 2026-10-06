@@ -54,6 +54,8 @@ public:
     bool contains(char32_t scalar) const;
     int advance(char32_t scalar);
     FontMetrics metrics() const;
+    /** Rasterizes into the existing bounded glyph cache without modifying a canvas. */
+    bool warm(char32_t scalar, bool bold = false);
     bool draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8_t gray = 1, bool bold = false);
 private:
     void close();

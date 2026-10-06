@@ -165,6 +165,60 @@ struct ReaderApp::Impl final : DisplayBackend {
     EpubDocument document;
     Chapter chapter;
     graphics::Page page;
+    std::optional<graphics::Page> next_page;
+    graphics::LayoutSpec next_spec;
+    std::size_t warm_cursor = 0;
+    bool prefetch_done = false;
+    void clear_prefetch() {
+        next_page.reset();
+        warm_cursor = 0;
+        prefetch_done = false;
+    }
+    bool prefetch_due() const {
+        return view == View::Reading && has_book() && card_available && !usb_prepared &&
+               !display.busy() && !deferred && !prefetch_done;
+    }
+    void prepare_next(const std::function<bool()>& stop) {
+        if (stop && stop()) return;
+        const StageTimer timer{"next_page_prepare"};
+        if (!next_page) {
+            const auto start = readable_offset(page.end);
+            if (start >= chapter.text.size() || image_at(start)) { prefetch_done = true; return; }
+#ifdef ESP_PLATFORM
+            if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2048U * 1024 ||
+                heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 256U * 1024) {
+                prefetch_done = true;
+                return;
+            }
+#endif
+            next_spec = layout(settings, link_return ? 144 : 64);
+            auto planned = plan_page(start, next_spec);
+            const auto bytes = planned.glyphs.capacity() * sizeof(graphics::PositionedGlyph) +
+                               planned.lines.capacity() * sizeof(graphics::TextLine);
+            if (!planned.error.empty() || planned.end <= planned.start || bytes > 256U * 1024) {
+                prefetch_done = true;
+                return;
+            }
+            next_page = std::move(planned);
+            return;
+        }
+#ifdef ESP_PLATFORM
+        if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2048U * 1024 ||
+            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 64U * 1024) {
+            next_page.reset(); prefetch_done = true; return;
+        }
+#endif
+        if (!body.size(next_page->font_px)) { next_page.reset(); prefetch_done = true; return; }
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(15);
+        while (warm_cursor < next_page->glyphs.size()) {
+            if ((stop && stop()) || std::chrono::steady_clock::now() >= deadline) return;
+            if (!body.warm(next_page->glyphs[warm_cursor].scalar)) {
+                next_page.reset(); prefetch_done = true; return;
+            }
+            ++warm_cursor;
+        }
+        prefetch_done = true;
+    }
     ReaderSettings settings, draft;
     SettingsSnapshot edit_snapshot;
     View view = View::Library;
@@ -587,6 +641,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto &selected = preview ? *preview : settings;
         if (effective_font == selected.font && !builtin_body)
             return;
+        clear_prefetch();
         font_fallback = false;
         builtin_body = false;
         const std::string path = root + "/PicoPage/" + selected.font;
@@ -853,6 +908,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             };
     }
     bool open(std::string path) {
+        clear_prefetch();
         if (display.busy() || !card_available)
             return false;
         if (!safe_existing(root, path)) {
@@ -951,6 +1007,7 @@ struct ReaderApp::Impl final : DisplayBackend {
      */
     bool load_with(std::size_t index, const std::function<bool(Chapter &, std::string &)> &load,
                    const std::string &missing = "") {
+        clear_prefetch();
         std::string detail;
         Chapter candidate;
         bool loaded = load(candidate, detail);
@@ -1067,6 +1124,7 @@ struct ReaderApp::Impl final : DisplayBackend {
      * The entry is bound to the book file, the body font file and the page geometry.
      */
     void reset_pages() {
+        clear_prefetch();
         const auto &spine = document.spine();
         chapter_pages.assign(spine.size(), {});
         counted.assign(spine.size(), false);
@@ -1271,7 +1329,13 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool render_body(std::size_t start) {
         const StageTimer timer{"body_prepare"};
         const auto spec = layout(settings, link_return ? 144 : 64);
-        auto candidate = plan_page(start, spec);
+        const bool same_spec = next_spec.left == spec.left && next_spec.top == spec.top &&
+            next_spec.width == spec.width && next_spec.height == spec.height &&
+            next_spec.font_px == spec.font_px && next_spec.line_height == spec.line_height &&
+            next_spec.indent_chars == spec.indent_chars && next_spec.paragraph_gap == spec.paragraph_gap;
+        auto candidate = next_page && same_spec && next_page->start == readable_offset(start)
+                             ? std::move(*next_page) : plan_page(start, spec);
+        clear_prefetch();
         if (!candidate.error.empty() || candidate.end <= candidate.start) {
             error("本页无法排版：" + candidate.error);
             return false;
@@ -2989,6 +3053,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!accepted || display.busy() || view == View::Sleeping)
             return;
         release_counting();
+        const bool preserve_prefetch = view == View::Reading &&
+            ((!input.touch && (input.event.input == Input::K3 || input.event.input == Input::K2)) ||
+             (input.touch && input.x >= 479 && input.y < footer_top));
+        if (!preserve_prefetch) clear_prefetch();
         if (input.queued) {
             const bool turn_touch = input.touch && input.y < footer_top && (input.x < 205 || input.x >= 479);
             const bool turn_key = !input.touch && (input.event.input == Input::K1 || input.event.input == Input::K3);
@@ -3105,6 +3173,7 @@ bool ReaderApp::initialize() {
     return impl_->initialize();
 }
 bool ReaderApp::open_book(const std::string &path) {
+    impl_->clear_prefetch();
     impl_->release_counting();
     return !impl_->usb_prepared && impl_->open(path);
 }
@@ -3177,6 +3246,7 @@ bool ReaderApp::prepare_usb_transfer() {
     impl_->save_pages();
     if (!impl_->ui.open_fallback()) return false;
     impl_->document.close();
+    impl_->clear_prefetch();
     impl_->release_counting();
     impl_->body.open_fallback();
     release(impl_->chapter);
@@ -3204,6 +3274,7 @@ bool ReaderApp::prepare_portal() {
     if (impl_->usb_prepared || impl_->display.busy() || impl_->active_network ||
         !impl_->card_available || !impl_->persist()) return false;
     impl_->cancel_sync();
+    impl_->clear_prefetch();
     impl_->release_counting();
     impl_->portal = {};
     impl_->portal_closing = false;
@@ -3237,6 +3308,7 @@ bool ReaderApp::prepare_sleep() {
         return false;
     if (impl_->has_book() && !impl_->session.visible_record()) return false;
     impl_->save_pages();
+    impl_->clear_prefetch();
     impl_->release_counting();
     const auto sync_state = impl_->sync_badge();
     impl_->cancel_sync();
@@ -3256,6 +3328,7 @@ void ReaderApp::wake() {
     }
 }
 void ReaderApp::card_removed() {
+    impl_->clear_prefetch();
     impl_->release_counting();
     if (impl_->usb_prepared) { show_usb_transfer(false, "TF 卡已移除，请退出并重启。"); return; }
     impl_->cancel_sync();
@@ -3279,15 +3352,17 @@ std::optional<BookPages> ReaderApp::book_pages() const {
     return page ? std::optional<BookPages>{{page, impl_->total_pages()}} : std::nullopt;
 }
 bool ReaderApp::background_due() const {
-    return impl_->counting_due();
+    return impl_->prefetch_due() || impl_->counting_due();
 }
 const char *ReaderApp::background_state() const {
+    if (impl_->prefetch_due()) return "prefetch";
     if (!impl_->has_book() || impl_->pages_complete) return "idle";
     if (impl_->pages_failed) return "failed";
     return impl_->counting_blocked == impl_->chapter_index ? "waiting" : "counting";
 }
 void ReaderApp::background_step(const std::function<bool()>& stop) {
-    if (impl_->counting_due()) impl_->count_pages(stop);
+    if (impl_->prefetch_due()) impl_->prepare_next(stop);
+    else if (impl_->counting_due()) impl_->count_pages(stop);
 }
 void ReaderApp::show_error(const std::string &message) {
     if (!impl_->display.busy())

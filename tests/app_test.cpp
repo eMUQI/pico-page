@@ -669,6 +669,7 @@ int main(int argc, char** argv) {
         fs::create_directories(card / "Count");
         fs::copy_file(fixtures / "long-chapter.epub", card / "Count/long.epub");
         std::uint32_t total = 0;
+        std::vector<std::uint8_t> prepared_pixels;
         {
             ReaderApp app(card.string()); Driver driver{app};
             assert(app.initialize()); driver.present(); opened(app, "Count/long.epub"); driver.present();
@@ -678,6 +679,7 @@ int main(int argc, char** argv) {
             app.background_step([] { return true; });
             assert(app.background_due() && !app.book_pages() && !app.pending_frame());
             assert(*app.saved_record() == record && app.canvas().pixels() == pixels);
+            app.background_step();
             unsigned checks = 0;
             app.background_step([&] { return ++checks >= 3; });
             assert(checks >= 3 && app.background_due() && !app.pending_frame());
@@ -690,13 +692,18 @@ int main(int argc, char** argv) {
             driver.key(Input::K3); driver.present();
             assert(app.book_pages()->page == 2 && app.book_pages()->total == total);
             assert(app.canvas().pixels() != pixels);
+            prepared_pixels = app.canvas().pixels();
             driver.key(Input::K1); driver.present();
             assert(app.book_pages()->page == 1);
         }
         {
             ReaderApp app(card.string()); Driver driver{app};
             assert(app.initialize()); driver.present(); opened(app, "Count/long.epub"); driver.present();
-            assert(!app.background_due() && app.book_pages() && app.book_pages()->total == total);
+            assert(app.background_due() && app.book_pages() && app.book_pages()->total == total);
+            assert(std::string(app.background_state()) == "prefetch");
+            driver.key(Input::K3); driver.present();
+            assert(app.canvas().pixels() == prepared_pixels);
+            driver.key(Input::K1); driver.present();
             driver.tap(342, 500); driver.present(); driver.tap(205, 1150); driver.present();
             assert(app.view() == View::Typography);
             driver.tap(588, 948); driver.present(); driver.tap(500, 1136); driver.present();

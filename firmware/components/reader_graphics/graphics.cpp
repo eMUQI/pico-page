@@ -202,7 +202,7 @@ FontMetrics Font::metrics() const {
             static_cast<int>((metrics.height + 63) >> 6)};
 }
 
-bool Font::draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8_t gray, bool bold) {
+bool Font::warm(char32_t scalar, bool bold) {
     if (scalar == U'\n' || scalar == U'\r' || scalar == U'\t') return true;
     const auto key = (std::uint64_t(bold) << 63) | (std::uint64_t(pixel_size_) << 32) | std::uint32_t(scalar);
     auto cached = glyphs_.find(key);
@@ -254,7 +254,14 @@ bool Font::draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8
         cached = glyphs_.emplace(key, std::move(glyph)).first;
     }
     cached->second.used = ++glyph_tick_;
-    const auto& glyph = cached->second;
+    return true;
+}
+
+bool Font::draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8_t gray, bool bold) {
+    if (!warm(scalar, bold)) return false;
+    if (scalar == U'\n' || scalar == U'\r' || scalar == U'\t') return true;
+    const auto key = (std::uint64_t(bold) << 63) | (std::uint64_t(pixel_size_) << 32) | std::uint32_t(scalar);
+    const auto& glyph = glyphs_.at(key);
     for (unsigned row = 0; row < glyph.rows; ++row) {
         const auto* bytes = glyph.coverage.data() + static_cast<std::size_t>(row) * glyph.width;
         for (unsigned col = 0; col < glyph.width; ++col) {
