@@ -205,14 +205,23 @@ struct ReaderApp::Impl final : DisplayBackend {
 #endif
     }
     std::optional<graphics::Page> next_page;
+    std::optional<Chapter> next_chapter;
+    std::size_t next_chapter_index = 0;
     std::unique_ptr<graphics::Canvas> next_bitmap;
     std::unique_ptr<ContentJob> raster_job;
     std::uint64_t prefetch_generation = 0, bitmap_hits = 0;
     void poll_raster() {
         if (!raster_job || !raster_job->done()) return;
         auto job = std::move(raster_job);
-        if (job->request.generation == prefetch_generation && next_page &&
-            job->request.offset == next_page->start && job->request.identity.book_id == document.metadata().book_id) {
+        if (job->request.generation != prefetch_generation || job->request.identity.book_id != document.metadata().book_id) return;
+        if (job->request.prefetch && job->request.kind == ContentJob::Kind::Chapter) {
+            if (job->result.error.empty() && job->result.image) {
+                next_chapter = std::move(job->result.chapter); next_chapter_index = job->request.chapter;
+                next_page = std::move(job->result.page); next_bitmap = std::move(job->result.image);
+            }
+            return;
+        }
+        if (next_page && job->request.offset == next_page->start) {
             if (job->result.error.empty() && job->result.image) next_bitmap = std::move(job->result.image);
             else { raster_disabled = true; prefetch_done = false; }
         }
@@ -225,7 +234,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         ++prefetch_generation;
         if (raster_job) raster_job->cancel();
         next_bitmap.reset();
-        next_page.reset();
+        next_page.reset(); next_chapter.reset();
         warm_cursor = 0;
         prefetch_done = raster_disabled = false;
     }
@@ -238,7 +247,32 @@ struct ReaderApp::Impl final : DisplayBackend {
         const StageTimer timer{"next_page_prepare"};
         if (!next_page) {
             const auto start = readable_offset(page.end);
-            if (start >= chapter.text.size() || image_at(start)) { prefetch_done = true; return; }
+            if (start >= chapter.text.size()) {
+                if (!async_content) { prefetch_done = true; return; }
+                if (counting_job) return;
+                auto index = chapter_index;
+                auto part = chapter.part + 1;
+                if (chapter.last_part) {
+                    part = 0; ++index;
+                    while (index < document.spine().size() && !document.spine()[index].linear) ++index;
+                }
+                if (index >= document.spine().size()) { prefetch_done = true; return; }
+#ifdef ESP_PLATFORM
+                if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 5U * 1024 * 1024 ||
+                    heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 2U * 1024 * 1024) {
+                    prefetch_done = true; return;
+                }
+#endif
+                ContentJob::Request request;
+                request.kind = ContentJob::Kind::Chapter; request.target = ContentJob::Target::Start;
+                request.root = root; request.path = root + "/" + book_path; request.identity = document.metadata();
+                request.font = body_font_path(); request.layout = next_spec = layout(settings, link_return ? 144 : 64);
+                request.chapter = index; request.part = part; request.generation = prefetch_generation; request.prefetch = true;
+                raster_job = std::make_unique<ContentJob>(std::move(request));
+                if (!raster_job->start()) raster_job.reset();
+                prefetch_done = true; return;
+            }
+            if (!async_content && image_at(start)) { prefetch_done = true; return; }
 #ifdef ESP_PLATFORM
             if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2048U * 1024 ||
                 heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 256U * 1024) {
@@ -268,7 +302,12 @@ struct ReaderApp::Impl final : DisplayBackend {
             ContentJob::Request request;
             request.kind = ContentJob::Kind::RasterPage; request.font = body_font_path();
             request.identity = document.metadata(); request.layout = next_spec; request.page = *next_page;
-            request.offset = next_page->start; request.generation = prefetch_generation;
+            request.offset = next_page->start; request.generation = prefetch_generation; request.prefetch = true;
+            if (const auto* image = image_at(next_page->start)) {
+                request.kind = ContentJob::Kind::Image; request.root = root; request.path = root + "/" + book_path;
+                request.image_resource = image->resource;
+                request.cache_name = image_cache_key(request.identity.book_id, image->resource, request.layout);
+            }
             raster_job = std::make_unique<ContentJob>(std::move(request));
             if (raster_job->start()) { prefetch_done = true; return; }
             raster_job.reset(); raster_disabled = true;
@@ -468,6 +507,13 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     bool begin_chapter(std::size_t index, std::uint32_t part, ContentJob::Target target,
                        std::size_t position = 0, const Anchor& anchor = {}, const std::string& fragment = "") {
+        poll_raster();
+        if (target == ContentJob::Target::Start && next_chapter && next_page && next_bitmap &&
+            next_chapter_index == index && next_chapter->part == part && same_layout(next_spec, layout(settings, link_return ? 144 : 64))) {
+            release_counting(); clear_body_cache();
+            chapter = std::move(*next_chapter); next_chapter.reset(); chapter_index = index; offset = next_page->start;
+            return show_page(offset);
+        }
         abandon_content();
         ++counting_generation;
         release_counting();
@@ -1774,7 +1820,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         const bool same_spec = same_layout(next_spec, spec);
         poll_raster();
-        const bool prefetched = next_page && same_spec && next_page->start == readable_offset(start);
+        const bool prefetched = !next_chapter && next_page && same_spec && next_page->start == readable_offset(start);
         auto candidate = prefetched ? std::move(*next_page) : plan_page(start, spec);
         auto bitmap = prefetched ? std::move(next_bitmap) : nullptr;
         clear_prefetch();
@@ -1833,10 +1879,12 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (display.busy())
             return false;
         load_fonts();
+        poll_raster();
         if (async_content && !image_prepared) {
             const auto spec = layout(settings, link_return ? 144 : 64);
             const bool retained = body_canvas && start == page.start && same_layout(body_spec, spec);
-            if (!retained) if (const auto* image = image_at(readable_offset(start))) return begin_image(start, *image);
+            const bool prefetched = !next_chapter && next_page && next_bitmap && next_page->start == readable_offset(start) && same_layout(next_spec, spec);
+            if (!retained && !prefetched) if (const auto* image = image_at(readable_offset(start))) return begin_image(start, *image);
         }
         if (!render_body(start))
             return false;
@@ -3873,6 +3921,7 @@ CacheUsage ReaderApp::cache_usage() const {
         impl_->next_page->lines.capacity() * sizeof(graphics::TextLine);
     usage.next_bitmap = impl_->next_bitmap ? impl_->next_bitmap->pixels().capacity() : 0;
     usage.bitmap_hits = impl_->bitmap_hits;
+    usage.next_content = impl_->next_chapter ? chapter_cache_bytes(*impl_->next_chapter) : 0;
     usage.page_index = impl_->page_index_bytes();
     for (const auto& cover : impl_->covers) usage.cover_pixels += cover.pixels.capacity();
     usage.ui_glyph_bytes = impl_->ui.cached_glyph_bytes(); usage.body_glyph_bytes = impl_->body.cached_glyph_bytes();

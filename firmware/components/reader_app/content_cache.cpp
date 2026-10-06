@@ -8,6 +8,22 @@
 #endif
 
 namespace pico_page {
+std::size_t chapter_cache_bytes(const Chapter& c) {
+    std::size_t bytes = c.text.capacity() * sizeof(char32_t) + c.resource.capacity() +
+        c.blocks.capacity() * sizeof(TextBlock) + c.runs.capacity() * sizeof(TextRun) +
+        c.fragments.capacity() * sizeof(FragmentTarget) + c.links.capacity() * sizeof(DocumentLink) +
+        c.images.capacity() * sizeof(DocumentImage) + c.source_nodes.capacity() * sizeof(SourceTextNode) +
+        (c.css_sources.capacity() + c.warnings.capacity()) * sizeof(std::string);
+    const auto anchor = [](const Anchor& a) { return a.resource.capacity() + a.node.capacity(); };
+    for (const auto& r : c.runs) bytes += anchor(r.source);
+    for (const auto& f : c.fragments) bytes += f.id.capacity();
+    for (const auto& l : c.links) bytes += l.resource.capacity() + l.fragment.capacity();
+    for (const auto& i : c.images) bytes += i.resource.capacity() + i.alt.capacity() + anchor(i.source);
+    for (const auto& n : c.source_nodes) bytes += n.node.capacity() + n.text.capacity() * sizeof(char32_t);
+    for (const auto& css : c.css_sources) bytes += css.capacity();
+    for (const auto& warning : c.warnings) bytes += warning.capacity();
+    return bytes;
+}
 namespace {
 constexpr std::size_t limit = 2U * 1024 * 1024;
 constexpr char version[] = "content-reading-v1";

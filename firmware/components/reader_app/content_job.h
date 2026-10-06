@@ -47,7 +47,7 @@ public:
         std::optional<PageCache> page_cache;
         std::vector<SpineItem> spine;
         std::optional<ReadingRecord> record;
-        bool save_last_book = false;
+        bool save_last_book = false, prefetch = false;
         std::uint64_t generation = 0;
         std::size_t chapter = 0, offset = 0;
         std::uint32_t part = 0;
@@ -61,6 +61,7 @@ public:
         std::vector<std::vector<std::uint8_t>> covers;
         std::unique_ptr<EpubDocument> document;
         Chapter chapter;
+        graphics::Page page;
         std::vector<std::pair<std::uint32_t, std::uint32_t>> history;
         std::size_t chapter_index = 0;
         ConfigResult configuration;
@@ -84,7 +85,8 @@ public:
     Result result;
 private:
     void run();
-    void render_image();
+    void render_image(const std::string& resource, const std::string& cache_name);
+    void prepare_chapter_page();
     void open_book();
     void load_chapter();
     void raster_page();

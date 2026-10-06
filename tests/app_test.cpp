@@ -1034,6 +1034,23 @@ int main(int argc, char** argv) {
         write(font_path, original_font); fs::last_write_time(font_path, font_time);
     }
     {
+        fs::copy_file(fixtures / "image-flow.epub", card / "Books/prefetch-image.epub");
+        ReaderApp app(card.string(), "image-prefetch", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/prefetch-image.epub"); driver.present();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (!app.cache_usage().next_bitmap) {
+            app.background_step(); app.poll_background();
+            assert(!app.pending_frame() && std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        const auto decodes = graphics::image_decode_count();
+        driver.key(Input::K3);
+        assert(app.pending_frame()->purpose == FramePurpose::Body && !app.content_busy());
+        driver.present();
+        assert(app.cache_usage().bitmap_hits == 1 && graphics::image_decode_count() == decodes);
+        assert(app.canvas().pixel(100, 400) == 0 && app.canvas().pixel(100, 800) == 5);
+    }
+    {
         fs::remove_all(card / "PicoPage/cache/images");
         ReaderApp app(card.string(), "image-worker", true, true); Driver driver{app};
         assert(app.initialize()); driver.present();
@@ -1119,8 +1136,17 @@ int main(int argc, char** argv) {
         driver.key(Input::K1); driver.present();
         assert(async.view() == View::Loading && async.saved_record() == previous);
         driver.refresh(); driver.complete_content(); same_body();
+        while (!async.cache_usage().next_bitmap) {
+            async.background_step(); async.poll_background();
+            assert(!async.pending_frame() && std::chrono::steady_clock::now() < prepare_deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        const auto adjacent_hits = async.cache_usage().bitmap_hits;
         ref_driver.key(Input::K3); ref_driver.present();
-        driver.key(Input::K3); driver.present(); driver.complete_content(); same_body();
+        driver.key(Input::K3);
+        assert(async.pending_frame() && async.pending_frame()->purpose == FramePurpose::Body && !async.content_busy());
+        driver.present(); same_body();
+        assert(async.cache_usage().bitmap_hits == adjacent_hits + 1);
         assert(async.saved_record()->anchor == first);
         for (auto* d : {&ref_driver, &driver}) {
             d->tap(342, 500); d->present(); d->tap(68, 1140); d->present();

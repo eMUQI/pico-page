@@ -45,7 +45,7 @@ bool ContentJob::start() {
     if (started_) return false;
 #ifdef ESP_PLATFORM
     if ((request.kind == Kind::Pagination || request.kind == Kind::FontIdentity || request.kind == Kind::RasterPage || request.kind == Kind::LibraryCovers ||
-         request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite) &&
+         request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite || request.prefetch) &&
         heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < 64U * 1024) return false;
     started_ = xTaskCreate([](void* opaque) {
         auto* job = static_cast<ContentJob*>(opaque);
@@ -96,9 +96,13 @@ void ContentJob::run() {
     }
     if (request.kind == Kind::LibraryCovers) { library_covers(); return; }
     if (request.kind == Kind::RasterPage) { raster_page(); return; }
-    if (request.kind == Kind::Chapter) { load_chapter(); return; }
+    if (request.kind == Kind::Chapter) {
+        load_chapter();
+        if (request.prefetch && !stop() && result.error.empty()) prepare_chapter_page();
+        return;
+    }
     if (request.kind == Kind::Open) { open_book(); return; }
-    if (request.kind == Kind::Image) { render_image(); return; }
+    if (request.kind == Kind::Image) { render_image(request.image_resource, request.cache_name); return; }
     EpubDocument document;
     graphics::Font font;
     Chapter source;
@@ -134,7 +138,7 @@ std::string image_cache_key(const std::string& book_id, const std::string& resou
     return "images/gray-v1/" + book_id + "/" + md5_hex(resource + ":" + std::to_string(spec.left) + ":" +
         std::to_string(spec.top) + ":" + std::to_string(spec.width) + ":" + std::to_string(spec.height));
 }
-void ContentJob::render_image() {
+void ContentJob::render_image(const std::string& resource, const std::string& cache_name) {
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
 #ifdef ESP_PLATFORM
     if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 3U * 1024 * 1024 ||
@@ -148,7 +152,7 @@ void ContentJob::render_image() {
     {
         std::string cached;
         const auto size = result.image->pixels().size();
-        if (store.load_cache(request.cache_name, size + 32, cached) == StoreStatus::Ok && cached.size() == size + 32) {
+        if (store.load_cache(cache_name, size + 32, cached) == StoreStatus::Ok && cached.size() == size + 32) {
             const auto checksum = cached.substr(size);
             cached.resize(size);
             if (md5_hex(cached) == checksum) {
@@ -161,14 +165,14 @@ void ContentJob::render_image() {
     EpubDocument document;
     std::vector<std::uint8_t> bytes;
     if (!document.open_verified(request.path, request.identity, result.error, stop) || stop()) return;
-    if (!document.read_image(request.image_resource, bytes, result.error, stop)) return;
+    if (!document.read_image(resource, bytes, result.error, stop)) return;
     const auto& spec = request.layout;
     if (!graphics::render_image(*result.image, bytes, spec.left, spec.top, spec.width, spec.height, result.error, false, stop)) return;
     std::vector<std::uint8_t>().swap(bytes);
     if (stop()) return;
     std::string pixels(reinterpret_cast<const char*>(result.image->data()), result.image->pixels().size());
     pixels += md5_hex(pixels);
-    store.save_cache(request.cache_name, pixels);
+    store.save_cache(cache_name, pixels);
 }
 void ContentJob::open_book() {
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
@@ -250,6 +254,28 @@ void ContentJob::load_chapter() {
         start = readable_offset(result.chapter, page.end);
         if (result.history.size() == 64) result.history.erase(result.history.begin());
         result.history.emplace_back(static_cast<std::uint32_t>(page.start), static_cast<std::uint32_t>(start));
+    }
+}
+void ContentJob::prepare_chapter_page() {
+    const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
+    graphics::Font font;
+    const auto* image = image_at(result.chapter, readable_offset(result.chapter, result.offset));
+    if (!image && !(request.font.empty() ? font.open_fallback() : font.open(request.font))) {
+        result.error = font.error(); return;
+    }
+    result.page = plan_content(font, result.chapter, result.offset, request.layout, true, stop);
+    const auto layout_bytes = result.page.glyphs.capacity() * sizeof(graphics::PositionedGlyph) +
+        result.page.lines.capacity() * sizeof(graphics::TextLine);
+    if (!result.page.error.empty() || result.page.end <= result.page.start || layout_bytes > 256U * 1024 ||
+        chapter_cache_bytes(result.chapter) > 2U * 1024 * 1024) {
+        result.error = "Prefetched page layout failed"; return;
+    }
+    if (image) render_image(image->resource, image_cache_key(request.identity.book_id, image->resource, request.layout));
+    else {
+        result.image = std::make_unique<graphics::Canvas>();
+        if (!graphics::render_page(*result.image, font, result.page, 1, stop)) {
+            result.error = "Prefetched page rasterization failed"; result.image.reset();
+        }
     }
 }
 void ContentJob::raster_page() {
