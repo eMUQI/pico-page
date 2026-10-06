@@ -29,6 +29,13 @@ static void write(const fs::path& path, const std::string& value) {
 }
 static void opened(ReaderApp& app, const std::string& book) {
     if (!app.open_book(book)) { std::cerr << "Open failed: " << app.status() << '\n'; std::abort(); }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (app.content_busy()) {
+        if (app.pending_frame() && app.pending_frame()->purpose != FramePurpose::Body) app.complete_frame(true);
+        app.poll_background();
+        assert(std::chrono::steady_clock::now() < deadline);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Body);
 }
 struct Driver {
@@ -864,6 +871,12 @@ int main(int argc, char** argv) {
             assert(app.saved_record()->anchor == late && app.book_pages() && app.book_pages()->page == late_page);
             driver.key(Input::K1); driver.present();
             assert(app.view() == View::Reading && app.book_pages()->page + 1 >= late_page);
+            const auto restored = app.saved_record()->anchor;
+            ReaderApp async(card.string(), "async-restore", true, true); Driver async_driver{async};
+            assert(async.initialize()); async_driver.present(); opened(async, "Parts/long.epub"); async_driver.present();
+            assert(async.saved_record()->anchor == restored);
+            assert(std::equal(app.canvas().pixels().begin(), app.canvas().pixels().begin() + 342 * 1128,
+                              async.canvas().pixels().begin()));
         }
     }
     {
@@ -981,14 +994,23 @@ int main(int argc, char** argv) {
         assert(app.view() == View::Reading && !app.content_busy());
         const auto pixels = app.canvas().pixels();
         const auto decodes = graphics::image_decode_count();
+        const auto verified_scans = identity_hash_count();
         assert(app.open_book("Books/cover.epub")); driver.present(); driver.complete_content();
         assert(graphics::image_decode_count() == decodes && app.canvas().pixels() == pixels);
+        assert(identity_hash_count() == verified_scans);
         assert(app.open_book("Books/cover.epub")); driver.present(); app.poll_background();
         opened(app, "Books/book.epub"); driver.present();
         const auto switched = app.canvas().pixels();
         const auto switched_record = app.saved_record();
         driver.complete_content();
         assert(app.canvas().pixels() == switched && app.saved_record() == switched_record);
+        assert(app.prepare_sleep()); driver.present();
+        const auto sleep_scans = identity_hash_count();
+        app.wake(); driver.present();
+        assert(app.view() == View::Loading && app.content_busy());
+        driver.refresh(); driver.complete_content();
+        assert(app.view() == View::Reading && app.saved_record()->anchor == switched_record->anchor);
+        assert(identity_hash_count() == sleep_scans + 1);
         assert(app.open_book("Books/cover.epub"));
         const auto before_failure = app.saved_record();
         app.complete_frame(false);

@@ -1,6 +1,8 @@
 #pragma once
 #include "pico_page/document.h"
 #include "pico_page/graphics.h"
+#include "pico_page/store.h"
+#include <sys/types.h>
 #include <atomic>
 #include <memory>
 #ifndef ESP_PLATFORM
@@ -19,11 +21,11 @@ std::string image_cache_key(const std::string& book_id, const std::string& resou
 /** A single job owns its parser and font. Only done() permits access to its result. */
 class ContentJob {
 public:
-    enum class Kind { Pagination, FontIdentity, Image };
+    enum class Kind { Pagination, FontIdentity, Image, Open };
     struct Request {
         std::string path, font;
         Kind kind = Kind::Pagination;
-        std::string root, image_resource, cache_name;
+        std::string root, image_resource, cache_name, relative_path, content_revision;
         DocumentMetadata identity;
         graphics::LayoutSpec layout;
         std::uint64_t generation = 0;
@@ -36,6 +38,14 @@ public:
         bool part_done = false, last_part = false;
         std::string error, font_identity;
         std::unique_ptr<graphics::Canvas> image;
+        std::unique_ptr<EpubDocument> document;
+        Chapter chapter;
+        std::size_t chapter_index = 0;
+        ConfigResult configuration;
+        ProgressResult progress;
+        off_t file_size = 0;
+        time_t file_modified = 0;
+        ino_t file_inode = 0;
     };
     explicit ContentJob(Request request);
     ~ContentJob();
@@ -51,6 +61,7 @@ public:
 private:
     void run();
     void render_image();
+    void open_book();
     std::atomic<bool> cancelled_{false}, done_{false};
     bool started_ = false;
 #ifndef ESP_PLATFORM

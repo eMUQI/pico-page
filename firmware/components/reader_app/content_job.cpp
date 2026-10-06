@@ -1,4 +1,6 @@
 #include "content_job.h"
+#include "content_cache.h"
+#include <sys/stat.h>
 #include "pico_page/store.h"
 #include <cstring>
 #include <algorithm>
@@ -71,11 +73,12 @@ void ContentJob::run() {
         if (result.font_identity.empty() && !stop()) result.error = "Font identity read failed";
         return;
     }
+    if (request.kind == Kind::Open) { open_book(); return; }
     if (request.kind == Kind::Image) { render_image(); return; }
     EpubDocument document;
     graphics::Font font;
     Chapter source;
-    if (!document.open_verified(request.path, request.identity, result.error) || stop()) return;
+    if (!document.open_verified(request.path, request.identity, result.error, stop) || stop()) return;
     if (!(request.font.empty() ? font.open_fallback() : font.open(request.font))) {
         result.error = font.error(); return;
     }
@@ -133,7 +136,7 @@ void ContentJob::render_image() {
     if (stop()) return;
     EpubDocument document;
     std::vector<std::uint8_t> bytes;
-    if (!document.open_verified(request.path, request.identity, result.error) || stop()) return;
+    if (!document.open_verified(request.path, request.identity, result.error, stop) || stop()) return;
     if (!document.read_image(request.image_resource, bytes, result.error, stop)) return;
     const auto& spec = request.layout;
     if (!graphics::render_image(*result.image, bytes, spec.left, spec.top, spec.width, spec.height, result.error, false, stop)) return;
@@ -142,5 +145,43 @@ void ContentJob::render_image() {
     std::string pixels(reinterpret_cast<const char*>(result.image->data()), result.image->pixels().size());
     pixels += md5_hex(pixels);
     store.save_cache(request.cache_name, pixels);
+}
+void ContentJob::open_book() {
+    const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
+    struct stat before{}, after{};
+    if (stat(request.path.c_str(), &before) != 0) { result.error = "Book file unavailable"; return; }
+    result.document = std::make_unique<EpubDocument>();
+    auto& document = *result.document;
+    if (!(request.identity.book_id.empty() ? document.open(request.path, result.error, stop) :
+          document.open_verified(request.path, request.identity, result.error, stop)) || stop()) return;
+    FileStore store(request.root);
+    result.configuration = store.load_settings(request.relative_path);
+    result.progress = store.load_progress(request.relative_path, document.metadata().book_id, request.content_revision);
+    if (result.progress.status != StoreStatus::Ok && result.progress.status != StoreStatus::Missing &&
+        result.progress.status != StoreStatus::Cleared) {
+        result.error = "Reading progress cannot be read; original record preserved"; return;
+    }
+    if (result.progress.record) {
+        const auto& anchor = result.progress.record->anchor;
+        std::uint32_t offset = 0;
+        const auto match = [&](const Chapter& part) { return part.offset_for(anchor, offset); };
+        if (!document.chapter_index_for(anchor.resource, result.chapter_index) ||
+            !find_content(store, document, result.chapter_index, result.chapter, result.error, ChapterLoad::Reading, match, stop) ||
+            !result.chapter.offset_for(anchor, offset)) {
+            if (result.error.empty()) result.error = "Saved position cannot be mapped";
+            return;
+        }
+        result.offset = offset;
+    } else {
+        while (result.chapter_index + 1 < document.spine().size() && !document.spine()[result.chapter_index].linear)
+            ++result.chapter_index;
+        if (!load_content(store, document, result.chapter_index, result.chapter, result.error, ChapterLoad::Reading, 0, stop)) return;
+    }
+    if (stop()) return;
+    if (stat(request.path.c_str(), &after) != 0 || before.st_size != after.st_size ||
+        before.st_mtime != after.st_mtime || before.st_ino != after.st_ino) {
+        result.error = "Book changed while opening"; return;
+    }
+    result.file_size = after.st_size; result.file_modified = after.st_mtime; result.file_inode = after.st_ino;
 }
 } // namespace pico_page

@@ -94,7 +94,7 @@ struct Chapter {
     bool fragment_offset(const std::string& id, std::uint32_t& offset) const;
 };
 
-/** Number of complete EPUB identity scans in this process. */
+/** Number of full-file EPUB identity scan attempts in this process. */
 std::uint64_t identity_hash_count();
 
 /** SHA-256 of a file, read in 8 KiB chunks. Empty on read failure or cancellation. */
@@ -131,12 +131,15 @@ public:
     ~EpubDocument();
     EpubDocument(const EpubDocument&) = delete;
     EpubDocument& operator=(const EpubDocument&) = delete;
-    bool open(const std::string& path, std::string& error);
+    /** Transfers exclusive ownership; a moved-from document may be destroyed or reopened. */
+    EpubDocument(EpubDocument&&) noexcept;
+    EpubDocument& operator=(EpubDocument&&) noexcept;
+    bool open(const std::string& path, std::string& error, const std::function<bool()>& stop = {});
     /** Reuses a previously verified digest only under exclusive, unchanged storage ownership.
      * The caller must invalidate that trust after import, removal, sleep or external access.
      * ZIP structure and metadata are still read. File attributes alone do not establish trust.
      */
-    bool open_verified(const std::string& path, const DocumentMetadata& identity, std::string& error);
+    bool open_verified(const std::string& path, const DocumentMetadata& identity, std::string& error, const std::function<bool()>& stop = {});
     void close();
     const DocumentMetadata& metadata() const;
     const std::vector<SpineItem>& spine() const;
@@ -160,7 +163,7 @@ public:
      * at the given detail, before the stylesheet fields of a Mapping load are final.
      */
     bool find_chapter_part(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
-                           const std::function<bool(const Chapter&)>& match);
+                           const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop = {});
     bool chapter_index_for(const std::string& resource, std::size_t& index) const;
     /** Read an internal PNG/JPEG resource, at most 2 MiB; output is cleared on failure. */
     bool read_image(const std::string& resource, std::vector<std::uint8_t>& bytes, std::string& error,
@@ -171,7 +174,7 @@ public:
     static bool read_cover(const std::string& path, std::vector<std::uint8_t>& bytes, std::string& error);
 private:
     bool open_impl(const std::string& path, std::string& error, bool cover_only,
-                   const DocumentMetadata* identity = nullptr);
+                   const DocumentMetadata* identity = nullptr, const std::function<bool()>& stop = {});
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

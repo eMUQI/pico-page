@@ -696,18 +696,20 @@ struct EpubDocument::Impl {
 
 EpubDocument::EpubDocument() : impl_(new Impl) {}
 EpubDocument::~EpubDocument() = default;
+EpubDocument::EpubDocument(EpubDocument&&) noexcept = default;
+EpubDocument& EpubDocument::operator=(EpubDocument&&) noexcept = default;
 void EpubDocument::close() { impl_.reset(new Impl); }
 const DocumentMetadata& EpubDocument::metadata() const { return impl_->metadata; }
 const std::vector<SpineItem>& EpubDocument::spine() const { return impl_->spine; }
 const std::vector<TocEntry>& EpubDocument::toc() const { return impl_->toc; }
 
-bool EpubDocument::open(const std::string& path, std::string& error) {
-    return open_impl(path, error, false);
+bool EpubDocument::open(const std::string& path, std::string& error, const std::function<bool()>& stop) {
+    return open_impl(path, error, false, nullptr, stop);
 }
 
 std::uint64_t identity_hash_count() { return identity_scans.load(std::memory_order_relaxed); }
 
-bool EpubDocument::open_verified(const std::string& path, const DocumentMetadata& identity, std::string& error) {
+bool EpubDocument::open_verified(const std::string& path, const DocumentMetadata& identity, std::string& error, const std::function<bool()>& stop) {
     const auto hex = [](const std::string& s, std::size_t size) {
         return s.size() == size && std::all_of(s.begin(), s.end(), [](char c) {
             return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
@@ -715,12 +717,13 @@ bool EpubDocument::open_verified(const std::string& path, const DocumentMetadata
     };
     if (!hex(identity.book_id, 64) || !hex(identity.partial_md5, 32)) return fail(error, "Invalid verified EPUB identity");
     const auto copy = identity;
-    return open_impl(path, error, false, &copy);
+    return open_impl(path, error, false, &copy, stop);
 }
 
-bool EpubDocument::open_impl(const std::string& path, std::string& error, bool cover_only, const DocumentMetadata* identity) {
+bool EpubDocument::open_impl(const std::string& path, std::string& error, bool cover_only, const DocumentMetadata* identity, const std::function<bool()>& stop) {
     const StageTimer timer{"epub_open"};
     close(); error.clear();
+    if (stop && stop()) return fail(error, "EPUB open cancelled");
     std::unique_ptr<Impl> next(new Impl);
     next->file = std::fopen(path.c_str(), "rb");
     if (!next->file) return fail(error, "Cannot open EPUB");
@@ -748,6 +751,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
     std::set<std::string> names;
     std::uint64_t total = 0;
     for (mz_uint i = 0; i < mz_zip_reader_get_num_files(&next->zip); ++i) {
+        if (stop && stop()) return fail(error, "EPUB open cancelled");
         mz_zip_archive_file_stat stat{};
         if (!mz_zip_reader_file_stat(&next->zip, i, &stat)) return fail(error, "Invalid ZIP entry");
         if (mz_zip_reader_get_filename(&next->zip, i, nullptr, 0) > 512) return fail(error, "ZIP path exceeds limit");
@@ -771,6 +775,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
         Hash sha(false), md5(true); std::array<unsigned char, 8192> buffer{};
         if (std::fseek(next->file, 0, SEEK_SET) != 0) return fail(error, "Cannot hash EPUB");
         for (;;) {
+            if (stop && stop()) return fail(error, "EPUB open cancelled");
             const auto size = std::fread(buffer.data(), 1, buffer.size(), next->file);
             if (size && !sha.update(buffer.data(), size)) return fail(error, "SHA-256 failed");
             if (size < buffer.size()) { if (std::ferror(next->file)) return fail(error, "Cannot hash EPUB"); break; }
@@ -783,13 +788,13 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
         if (!sha.finish(next->metadata.book_id) || !md5.finish(next->metadata.partial_md5)) return fail(error, "EPUB identity hash failed");
     }
     XmlTree container;
-    if (!next->parse("META-INF/container.xml", container.xml, error, 262144)) return false;
+    if (!next->parse("META-INF/container.xml", container.xml, error, 262144, stop)) return false;
     std::string package;
     for (const auto& n : container.nodes) if (n.name == "rootfile" && (get(n, "media-type").empty() || get(n, "media-type") == "application/oebps-package+xml")) { package = get(n, "full-path"); break; }
     std::string normalized;
     if (!path_parts(package, normalized) || package != normalized) return fail(error, "Invalid package path");
     XmlTree opf;
-    if (!next->parse(package, opf.xml, error, 262144)) return false;
+    if (!next->parse(package, opf.xml, error, 262144, stop)) return false;
     if (opf.nodes.empty() || opf.nodes[0].name != "package") return fail(error, "Missing EPUB package");
     struct Item { std::string path, type, properties; };
     std::map<std::string, Item> manifest;
@@ -830,7 +835,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
     if (cover_only) { impl_ = std::move(next); return true; }
     if (!navigation.empty()) {
         XmlTree nav;
-        if (!next->parse(navigation, nav.xml, error, 262144)) return false;
+        if (!next->parse(navigation, nav.xml, error, 262144, stop)) return false;
         for (std::size_t i = 0; i < nav.nodes.size(); ++i) {
             const auto& n = nav.nodes[i];
             if (n.name != "a") continue;
@@ -845,7 +850,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
         }
     } else if (!ncx.empty()) {
         XmlTree nav;
-        if (!next->parse(ncx, nav.xml, error, 262144)) return false;
+        if (!next->parse(ncx, nav.xml, error, 262144, stop)) return false;
         for (std::size_t i = 0; i < nav.nodes.size(); ++i) if (nav.nodes[i].name == "navPoint") {
             TocEntry entry;
             for (auto p = nav.nodes[i].parent; p > 0; p = nav.nodes[p].parent) if (nav.nodes[p].name == "navPoint") ++entry.depth;
@@ -924,8 +929,8 @@ bool EpubDocument::load_chapter(std::size_t index, Chapter& chapter, std::string
     return impl_->load(index, chapter, error, detail, part, nullptr, stop);
 }
 bool EpubDocument::find_chapter_part(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
-                                     const std::function<bool(const Chapter&)>& match) {
-    return impl_->load(index, chapter, error, detail, 0, &match);
+                                     const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop) {
+    return impl_->load(index, chapter, error, detail, 0, &match, stop);
 }
 bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
                               std::uint32_t wanted, const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop) {

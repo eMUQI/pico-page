@@ -215,7 +215,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     bool prefetch_due() const {
         return view == View::Reading && has_book() && card_available && !usb_prepared &&
-               !display.busy() && !deferred && !image_job && !prefetch_done;
+               !display.busy() && !deferred && !foreground_job && !pending_content && !prefetch_done;
     }
     void prepare_next(const std::function<bool()>& stop) {
         if (stop && stop()) return;
@@ -349,20 +349,21 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool async_content = false;
     std::uint64_t counting_generation = 0;
     std::unique_ptr<ContentJob> counting_job;
-    std::unique_ptr<ContentJob> image_job;
+    std::unique_ptr<ContentJob> foreground_job;
+    std::optional<ContentJob::Request> pending_content;
     std::unique_ptr<graphics::Canvas> prepared_image;
     std::uint64_t foreground_generation = 0;
-    bool image_loading = false, image_prepared = false;
+    bool content_loading = false, image_prepared = false;
     std::string prepared_image_error;
-    void abandon_image() {
+    void abandon_content() {
         ++foreground_generation;
-        if (image_job) image_job->cancel();
-        image_loading = image_prepared = false;
+        if (foreground_job) foreground_job->cancel();
+        pending_content.reset();
+        content_loading = image_prepared = false;
         prepared_image.reset();
     }
     bool begin_image(std::size_t start, const DocumentImage& image) {
-        abandon_image();
-        if (image_job) image_job.reset();
+        abandon_content();
         release_counting();
         ContentJob::Request request;
         request.kind = ContentJob::Kind::Image;
@@ -372,8 +373,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         request.cache_name = image_cache_key(request.identity.book_id, image.resource, request.layout);
         request.generation = foreground_generation; request.chapter = chapter_index;
         request.part = chapter.part; request.offset = start;
-        image_job = std::make_unique<ContentJob>(std::move(request));
-        image_loading = true;
+        pending_content = std::move(request);
+        content_loading = true;
+        view = View::Loading;
         clear_body_cache(); clear_prefetch(); covers.clear();
         canvas.fill_rect(0, footer_top, 684, 88, 15);
         text("正在准备图片…", 36, 1156, 24, 400, 3);
@@ -381,23 +383,64 @@ struct ReaderApp::Impl final : DisplayBackend {
         overlay();
         return true;
     }
-    void poll_image() {
-        if (!image_job) return;
-        if (!image_job->started()) {
-            if (!image_loading) { image_job.reset(); return; }
+    bool begin_open(const std::string& path) {
+        cancel_sync();
+        ContentJob::Request request;
+        request.kind = ContentJob::Kind::Open;
+        request.root = root; request.relative_path = path; request.path = root + "/" + path;
+        request.content_revision = content_revision; request.generation = foreground_generation;
+        struct stat info{};
+        const auto found = identities.find(path);
+        if (controlled_storage && found != identities.end() && stat(request.path.c_str(), &info) == 0 &&
+            found->second.size == info.st_size && found->second.modified == info.st_mtime && found->second.inode == info.st_ino)
+            request.identity = found->second.identity;
+        pending_content = std::move(request);
+        content_loading = true;
+        view = View::Loading;
+        clear_body_cache(); clear_prefetch(); covers.clear(); release(chapter); page = {};
+        canvas.fill_rect(0, footer_top, 684, 88, 15);
+        text("正在准备书籍…", 36, 1156, 24, 400, 3);
+        button(Dismiss, "取消", 488, 1140, 160, 64, false, 24);
+        overlay();
+        return true;
+    }
+    void poll_content() {
+        if (foreground_job && (!content_loading || foreground_job->request.generation != foreground_generation)) {
+            if (foreground_job->started() && !foreground_job->done()) return;
+            foreground_job.reset();
+        }
+        if (!foreground_job && pending_content) {
+            foreground_job = std::make_unique<ContentJob>(std::move(*pending_content));
+            pending_content.reset();
+        }
+        if (!foreground_job) return;
+        if (!foreground_job->started()) {
+            if (!content_loading) { foreground_job.reset(); return; }
             if (display.busy() || counting_job) return;
-            if (!image_job->start()) {
-                image_job.reset(); image_loading = false;
-                error("图片任务无法启动，请返回后重试。");
+            if (!foreground_job->start()) {
+                foreground_job.reset(); content_loading = false;
+                error("内容任务无法启动，请返回后重试。");
             }
             return;
         }
-        if (!image_job->done() || display.busy()) return;
-        auto job = std::move(image_job);
+        if (!foreground_job->done() || display.busy()) return;
+        auto job = std::move(foreground_job);
         const auto& request = job->request;
-        if (!image_loading || request.generation != foreground_generation || request.chapter != chapter_index ||
-            request.part != chapter.part) return;
-        image_loading = false;
+        if (!content_loading || request.generation != foreground_generation) return;
+        if (request.kind == ContentJob::Kind::Open) {
+            content_loading = false;
+            if (!job->result.error.empty()) { error("无法打开 EPUB：" + job->result.error); return; }
+            document = std::move(*job->result.document);
+            if (controlled_storage) {
+                if (identities.size() >= 8 && !identities.count(request.relative_path)) identities.erase(identities.begin());
+                identities[request.relative_path] = {job->result.file_size, job->result.file_modified,
+                    job->result.file_inode, document.metadata()};
+            }
+            finish_open(request.relative_path, &job->result);
+            return;
+        }
+        if (request.chapter != chapter_index || request.part != chapter.part) return;
+        content_loading = false;
         image_prepared = true;
         prepared_image = std::move(job->result.image);
         prepared_image_error = job->result.error;
@@ -1064,14 +1107,12 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     bool open(std::string path) {
         if (display.busy() || !card_available) return false;
-        abandon_image();
+        abandon_content();
         ++counting_generation;
         if (counting_job) counting_job->cancel();
         refresh_badge_config();
         clear_body_cache();
         clear_prefetch();
-        if (display.busy() || !card_available)
-            return false;
         if (!safe_existing(root, path)) {
             error("书籍路径无效或包含符号链接");
             return false;
@@ -1081,6 +1122,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             return false;
         }
         save_pages();
+        if (async_content) return begin_open(path);
         std::string detail;
         if (!open_document(path, detail)) {
             book_path.clear();
@@ -1088,18 +1130,22 @@ struct ReaderApp::Impl final : DisplayBackend {
             error("无法打开 EPUB：" + detail);
             return false;
         }
+        return finish_open(path);
+    }
+    bool finish_open(const std::string& path, ContentJob::Result* loaded = nullptr) {
+        std::string detail;
         cancel_sync();
         link_return.reset();
         confirmed_link_return.reset();
         book_path = path;
         last_book = path;
-        const auto configuration = store.load_settings(path);
+        const auto configuration = loaded ? loaded->configuration : store.load_settings(path);
         settings = configuration.settings;
         load_fonts();
         clear_page_history();
         reset_pages();
         const auto restored =
-            store.load_progress(path, document.metadata().book_id, content_revision);
+            loaded ? loaded->progress : store.load_progress(path, document.metadata().book_id, content_revision);
         session.open(document.metadata().book_id, content_revision, writer, restored.record);
         if (restored.status != StoreStatus::Ok && restored.status != StoreStatus::Missing && restored.status != StoreStatus::Cleared) {
             error("原进度读取失败，已停止开书以保护记录");
@@ -1114,7 +1160,11 @@ struct ReaderApp::Impl final : DisplayBackend {
             message = "所选字体不可用，已使用替代字体";
         if (restored.status != StoreStatus::Ok && restored.status != StoreStatus::Missing && restored.status != StoreStatus::Cleared)
             message = "原进度无法读取，未覆盖原记录";
-        if (restored.record) {
+        if (loaded) {
+            chapter = std::move(loaded->chapter);
+            chapter_index = loaded->chapter_index;
+            offset = loaded->offset;
+        } else if (restored.record) {
             const auto holds = [&](const Chapter &part) {
                 std::uint32_t ignored;
                 return part.offset_for(restored.record->anchor, ignored);
@@ -1419,7 +1469,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     bool counting_due() const {
         return view == View::Reading && has_book() && card_available && !usb_prepared &&
-               !display.busy() && !deferred && !image_job && !pages_complete && !pages_failed &&
+               !display.busy() && !deferred && !foreground_job && !pending_content && !pages_complete && !pages_failed &&
                counting_blocked != chapter_index;
     }
     /** Frees the chapter loaded for counting; its partial count resumes after a reload. */
@@ -2363,7 +2413,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             links.clear(); clear_page_history(); link_return.reset(); confirmed_link_return.reset();
             last_recorded.clear();
         }
-        abandon_image(); image_job.reset();
+        abandon_content(); foreground_job.reset();
         stop_counting_job();
         identities.clear();
         font_identity.clear(); effective_font.clear();
@@ -2799,7 +2849,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         overlay();
     }
     void error(const std::string &detail) {
-        abandon_image();
+        abandon_content();
         if (drawing_error) return;
         drawing_error = true;
         // The page offers a save retry only for a failed commit, not for one still pending.
@@ -2808,7 +2858,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         cancel_sync();
         link_return = confirmed_link_return;
         message = detail;
-        const bool retained = !image_job && card_available && has_book() && session.visible_record() &&
+        const bool retained = !foreground_job && card_available && has_book() && session.visible_record() &&
                               restore_confirmed_position() && panel_background(752);
         view = View::Error;
         hits.clear();
@@ -3140,7 +3190,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             message.clear(); draw_storage();
             break;
         case ClearCache:
-            abandon_image(); image_job.reset(); stop_counting_job();
+            abandon_content(); foreground_job.reset(); stop_counting_job();
             covers.clear();
             message = store.clear_cache() == StoreStatus::Ok ? "缓存已清理，原书与阅读记录保留" : "缓存未完全清理，请检查 TF 卡";
             draw_storage();
@@ -3335,10 +3385,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!accepted || display.busy() || view == View::Sleeping)
             return;
         release_counting();
-        if (image_loading) {
+        if (content_loading) {
             if (!input.touch && input.event.input == Input::K2) force_refresh();
             else if (!input.queued && input.touch && input.x >= 488 && input.y >= 1140) {
-                abandon_image();
+                abandon_content();
                 draw_library(); overlay();
             }
             return;
@@ -3458,7 +3508,7 @@ void ReaderApp::Impl::save_refresh(const ReaderSettings &values) {
 
 ReaderApp::ReaderApp(std::string root, std::string writer, bool controlled_storage, bool async_content)
     : impl_(std::make_unique<Impl>(std::move(root), std::move(writer))) { impl_->controlled_storage = controlled_storage; impl_->async_content = async_content; }
-void ReaderApp::invalidate_identity_cache() { impl_->abandon_image(); impl_->image_job.reset(); impl_->stop_counting_job(); impl_->identities.clear(); impl_->font_identity.clear(); impl_->effective_font.clear(); }
+void ReaderApp::invalidate_identity_cache() { impl_->abandon_content(); impl_->foreground_job.reset(); impl_->stop_counting_job(); impl_->identities.clear(); impl_->font_identity.clear(); impl_->effective_font.clear(); }
 ReaderApp::~ReaderApp() = default;
 bool ReaderApp::initialize() {
     return impl_->initialize();
@@ -3511,7 +3561,7 @@ void ReaderApp::complete_frame(bool success) {
     if (auto work = std::exchange(impl_->deferred, nullptr); work && success)
         work();
     if (!success) {
-        impl_->abandon_image();
+        impl_->abandon_content();
         if (impl_->usb_prepared) {
             impl_->message = "屏幕更新失败，请退出并重启。";
             impl_->draw_usb(); impl_->overlay(true);
@@ -3570,7 +3620,7 @@ PortalAction ReaderApp::take_portal_action() {
     return std::exchange(impl_->portal_action, PortalAction::None);
 }
 bool ReaderApp::prepare_portal() {
-    if (impl_->usb_prepared || impl_->display.busy() || impl_->active_network ||
+    if (impl_->content_loading || impl_->usb_prepared || impl_->display.busy() || impl_->active_network ||
         !impl_->card_available || !impl_->persist()) return false;
     impl_->cancel_sync();
     impl_->clear_body_cache();
@@ -3623,9 +3673,10 @@ bool ReaderApp::prepare_sleep() {
 void ReaderApp::wake() {
     if (impl_->display.busy())
         return;
-    if (impl_->has_book())
-        impl_->recover_body();
-    else {
+    if (impl_->has_book()) {
+        if (impl_->async_content) impl_->open(impl_->book_path);
+        else impl_->recover_body();
+    } else {
         impl_->draw_library();
         impl_->overlay(true);
     }
@@ -3668,12 +3719,15 @@ CacheUsage ReaderApp::cache_usage() const {
     usage.ui_advances = impl_->ui.cached_advances(); usage.body_advances = impl_->body.cached_advances();
     return usage;
 }
-bool ReaderApp::content_busy() const { return !!impl_->image_job; }
+bool ReaderApp::content_busy() const { return !!impl_->foreground_job || impl_->pending_content.has_value(); }
 bool ReaderApp::background_due() const {
     return impl_->prefetch_due() || impl_->counting_due();
 }
 const char *ReaderApp::background_state() const {
-    if (impl_->image_loading) return "image";
+    if (impl_->content_loading) {
+        const auto kind = impl_->pending_content ? impl_->pending_content->kind : impl_->foreground_job->request.kind;
+        return kind == ContentJob::Kind::Open ? "opening" : "image";
+    }
     if (impl_->prefetch_due()) return "prefetch";
     if (!impl_->has_book() || impl_->pages_complete) return "idle";
     if (impl_->pages_failed) return "failed";
@@ -3682,7 +3736,7 @@ const char *ReaderApp::background_state() const {
 void ReaderApp::poll_background(bool cancel) {
     if (cancel && impl_->counting_job) impl_->counting_job->cancel();
     impl_->poll_counting_job();
-    if (!cancel || !impl_->image_loading) impl_->poll_image();
+    if (!cancel || !impl_->content_loading) impl_->poll_content();
 }
 void ReaderApp::background_step(const std::function<bool()>& stop) {
     impl_->poll_counting_job();

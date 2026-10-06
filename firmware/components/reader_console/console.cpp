@@ -95,6 +95,7 @@ void error(std::uint32_t id, const char *reason) {
 
 const char *view_name(View view) {
     switch (view) {
+    case View::Loading: return "loading";
     case View::Library:
         return "library";
     case View::Reading:

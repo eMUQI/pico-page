@@ -9,5 +9,5 @@ bool load_content(const FileStore& store, EpubDocument& document, std::size_t in
                   const std::function<bool()>& stop = {});
 bool find_content(const FileStore& store, EpubDocument& document, std::size_t index,
                   Chapter& chapter, std::string& error, ChapterLoad detail,
-                  const std::function<bool(const Chapter&)>& match);
+                  const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop = {});
 } // namespace pico_page

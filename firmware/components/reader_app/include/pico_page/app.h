@@ -30,7 +30,8 @@ enum class View {
     InputSettings,
     BookManagement,
     SyncSettings,
-    Portal
+    Portal,
+    Loading
 };
 enum class UsbTransferAction { None, Start, Exit };
 enum class PortalAction { None, Start, Stop };
@@ -82,7 +83,7 @@ class ReaderApp {
     /** Drops all verified identities before storage can change outside this application. */
     void invalidate_identity_cache();
     bool initialize();
-    /** Accepts an open request; asynchronous images finish through poll_background and body presentation. */
+    /** Accepts an open request; asynchronous content finishes through poll_background and body presentation. */
     bool open_book(const std::string &relative_path);
     /** Updates the latest battery reading for the next render; nullopt means unknown. */
     void set_battery(std::optional<int> percent);
@@ -136,7 +137,7 @@ class ReaderApp {
     /** True until a foreground content job has completed or acknowledged cancellation. */
     bool content_busy() const;
     /**
-     * Diagnostic state: "image" while an image is prepared, "prefetch" while the next page is being prepared, "idle" without
+     * Diagnostic state: "opening" during book preparation, "image" while an image is prepared, "prefetch" while the next page is being prepared, "idle" without
      * a book or when all work is complete, "counting"
      * while chapters remain, "waiting" while memory is too low to load the next chapter, and
      * "failed" after a chapter could not be read or laid out. The string is static.

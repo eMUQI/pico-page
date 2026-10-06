@@ -159,18 +159,19 @@ bool load_content(const FileStore& store, EpubDocument& doc, std::size_t index, 
     return true;
 }
 bool find_content(const FileStore& store, EpubDocument& doc, std::size_t index, Chapter& chapter,
-                  std::string& error, ChapterLoad detail, const std::function<bool(const Chapter&)>& match) {
+                  std::string& error, ChapterLoad detail, const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop) {
     if (detail == ChapterLoad::Reading) {
         release(chapter); error.clear();
         for (std::uint32_t part = 0; part < 4096; ++part) {
+            if (stop && stop()) { release(chapter); error = kChapterCancelled; return false; }
             if (!load(store, doc, index, part, chapter)) break;
             if (match(chapter)) return true;
             if (chapter.last_part) break;
             release(chapter);
         }
     }
-    if (!doc.find_chapter_part(index, chapter, error, detail, match)) return false;
-    if (detail == ChapterLoad::Reading) save(store, doc, index, chapter);
+    if (!doc.find_chapter_part(index, chapter, error, detail, match, stop)) return false;
+    if (detail == ChapterLoad::Reading && !(stop && stop())) save(store, doc, index, chapter);
     return true;
 }
 } // namespace pico_page
