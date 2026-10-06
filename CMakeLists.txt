@@ -42,13 +42,19 @@ set(document_fixtures ${CMAKE_CURRENT_BINARY_DIR}/document-fixtures)
 add_custom_command(OUTPUT ${document_fixtures}/valid.epub
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/make_document_fixtures.py ${document_fixtures}
     DEPENDS tests/make_document_fixtures.py tests/make_epub_fixture.py)
-add_custom_target(document_fixtures_target DEPENDS ${document_fixtures}/valid.epub)
+# multi-part.epub is the newest fixture; an older fixture directory is regenerated for it.
+add_custom_command(OUTPUT ${document_fixtures}/multi-part.epub
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/make_document_fixtures.py ${document_fixtures}
+    DEPENDS tests/make_document_fixtures.py tests/make_epub_fixture.py)
+add_custom_target(document_fixtures_target DEPENDS ${document_fixtures}/valid.epub ${document_fixtures}/multi-part.epub)
 add_executable(document_test tests/document_test.cpp)
 add_dependencies(document_test document_fixtures_target)
 target_link_libraries(document_test PRIVATE reader_document)
 target_compile_options(document_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME document COMMAND document_test ${document_fixtures}/valid.epub
-    ${document_fixtures}/malformed.epub ${document_fixtures}/oversized-chapter.epub ${document_fixtures}/styled.epub)
+    ${document_fixtures}/malformed.epub ${document_fixtures}/oversized-chapter.epub ${document_fixtures}/styled.epub
+    ${document_fixtures}/image-flow.epub ${document_fixtures}/long-chapter.epub ${document_fixtures}/nested-toc.epub
+    ${document_fixtures}/multi-part.epub)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)

@@ -63,6 +63,13 @@ def generate(directory: Path) -> None:
     entries["EPUB/chapter1.xhtml"] = ('<html xmlns="http://www.w3.org/1999/xhtml"><body>' +
                                       "<p>这一章用于检查长章节的回翻与页起点。</p>" * 2000 + "</body></html>")
     write_fixture(directory / "long-chapter.epub", entries)
+    entries = fixture_entries()
+    entries["EPUB/chapter1.xhtml"] = ('<html xmlns="http://www.w3.org/1999/xhtml"><body>' + "".join(
+        f'<p{" id=" + chr(34) + "late" + chr(34) if number == 4500 else ""}>第{number}段：这一段用于检查长章节按段落边界分成多个部分。</p>'
+        for number in range(5000)) + "</body></html>")
+    entries["EPUB/nav.xhtml"] = entries["EPUB/nav.xhtml"].replace(
+        '<li><a href="chapter2.xhtml">', '<li><a href="chapter1.xhtml#late">后段</a></li><li><a href="chapter2.xhtml">')
+    write_fixture(directory / "multi-part.epub", entries)
 
 
 if __name__ == "__main__":

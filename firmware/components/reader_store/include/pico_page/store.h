@@ -123,8 +123,9 @@ public:
      * Applies changed reader/display and global power values to one layer after comparing both
      * source snapshots. Invalid source layers or unsafe TOML edits are rejected.
      * Existing comments and untouched fields are preserved. Book changes equal
-     * to global values remove the corresponding override. Library fields are
-     * read-only through this API. Refresh the snapshot after every successful save.
+     * to global values remove the corresponding override. library.roots is
+     * read-only through this API; library.view is saved with the global layer only.
+     * Refresh the snapshot after every successful save.
      */
     StoreStatus apply_settings(const SettingsSnapshot& snapshot, const ReaderSettings& values,
                                bool book_only, std::string& error) const;
@@ -163,6 +164,9 @@ public:
      */
     StoreStatus manage_book(const BookSnapshot& snapshot, bool delete_original,
                             const std::string& book_id, const std::string& revision) const;
+
+    /** Reports the capacity and free space of the mounted card in bytes; false when unavailable. */
+    bool card_space(std::uint64_t& total, std::uint64_t& available) const;
 
     /** Delete only PicoPage/cache children after users of those files stop. */
     StoreStatus clear_cache() const;

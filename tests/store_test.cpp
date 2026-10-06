@@ -253,6 +253,18 @@ int main() {
     assert(store.apply_settings(snapshot, preview, false, error) == StoreStatus::Ok);
     assert(store.load_settings().settings.sleep_screen == "reading" && store.load_settings().settings.auto_sleep_minutes == 15);
     assert(store.load_settings().settings.fast_full_refresh_pages == 3 && get(global).find("# idle") != std::string::npos);
+    snapshot = store.settings_snapshot(); preview = snapshot.config.settings;
+    preview.library_view = "grid";
+    assert(store.apply_settings(snapshot, preview, false, error) == StoreStatus::Ok);
+    assert(store.load_settings().settings.library_view == "grid" && get(global).find("# user comment") != std::string::npos);
+    assert(store.load_settings().settings.auto_sleep_minutes == 15);
+    preview.library_roots = {"Elsewhere"};
+    assert(store.apply_settings(store.settings_snapshot(), preview, false, error) == StoreStatus::Invalid);
+    snapshot = store.settings_snapshot(book); preview = snapshot.config.settings;
+    preview.library_view = "list";
+    assert(store.apply_settings(snapshot, preview, true, error) == StoreStatus::Invalid);
+    std::uint64_t card_total = 0, card_free = 0;
+    assert(store.card_space(card_total, card_free) && card_total >= card_free && card_total > 0);
     snapshot = store.settings_snapshot(book); preview = snapshot.config.settings;
     preview.sleep_screen = "simple";
     assert(store.apply_settings(snapshot, preview, true, error) == StoreStatus::Invalid);

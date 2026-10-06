@@ -17,7 +17,7 @@ void usage() {
     std::cout
         << "Pico Page --card DIRECTORY [--book Books/file.epub] [--script FILE] [--headless]\n"
            "Keys: Left/1=K1, R/2=K2 full refresh, Right/3=K3, Escape=K2, Space=sleep/wake.\n"
-           "Script: k1 | k2 | k3 | tap X Y | capture FILE.bmp | sleep | wake | open PATH\n";
+           "Script: k1 | k2 | k3 | tap X Y | capture FILE.bmp | sleep | wake | open PATH | count\n";
 }
 struct Response {
     std::uint64_t id = 0;
@@ -222,6 +222,12 @@ struct Host {
             std::getline(input >> std::ws, path);
             return app.open_book(path) && flush();
         }
+        if (command == "count") {
+            // Finishes whole-book page counting, which the device spreads over idle time.
+            while (app.background_due())
+                app.background_step();
+            return true;
+        }
         if (command == "sleep")
             return app.prepare_sleep() && flush();
         if (command == "wake") {
@@ -296,8 +302,10 @@ int main(int argc, char **argv) {
     while (running) {
         host.poll_network();
         SDL_Event event;
-        if (!SDL_WaitEventTimeout(&event, 50))
+        if (!SDL_WaitEventTimeout(&event, host.app.background_due() ? 1 : 50)) {
+            host.app.background_step();
             continue;
+        }
         if (event.type == SDL_QUIT) {
             host.app.save_progress();
             running = false;

@@ -126,6 +126,7 @@ const char *view_name(View view) {
     case View::StorageSettings: return "storage_settings";
     case View::InputSettings: return "input_settings";
     case View::BookManagement: return "book_management";
+    case View::SyncSettings: return "sync_settings";
     case View::Confirmation:
         return "confirmation";
     }
@@ -147,13 +148,18 @@ void status(std::uint32_t id, const ReaderApp &app, bool card_available) {
     const auto battery = platform::battery();
     const auto crc = esp_rom_crc32_le(0, pixels.data(), pixels.size());
     const auto revision = app.saved_record() ? app.saved_record()->local_revision : 0;
-    reply("PP %lu OK view=%s pending=%d card=%d saved=%d revision=%llu frame=%llu frame_ok=%d "
+    const auto pages = app.book_pages();
+    reply("PP %lu OK view=%s pending=%d card=%d saved=%d revision=%llu page=%lu pages=%lu count=%s "
+          "largest_psram=%u frame=%llu frame_ok=%d "
           "purpose=%d clean=%d bytes=%u crc32=%08lx heap=%u min_heap=%u internal=%u "
           "largest_internal=%u "
           "psram=%u stack_bytes=%u battery_valid=%d battery_pct=%d importing=%d received=%llu "
           "tx_failures=%lu uptime_ms=%llu copy_ms=%u power_ms=%u draw_ms=%u\n",
           static_cast<unsigned long>(id), view_name(app.view()), !!app.pending_frame(),
           card_available, !!app.saved_record(), static_cast<unsigned long long>(revision),
+          static_cast<unsigned long>(pages ? pages->page : 0),
+          static_cast<unsigned long>(pages ? pages->total : 0), app.background_state(),
+          static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)),
           static_cast<unsigned long long>(frame_number), frame_success,
           static_cast<int>(frame_purpose), frame_refresh == RefreshIntent::FullClean,
           static_cast<unsigned>(pixels.size()), static_cast<unsigned long>(crc),

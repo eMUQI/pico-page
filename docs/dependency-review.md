@@ -96,6 +96,33 @@ ASan/UBSan 检查无运行时错误，不能据此代替上游安全维护或最
 
 实现结果：封面缓存、状态行和页起点记录均为本项目自行实现，没有复制上述项目的代码。许可证义务没有变化。
 
+## 2026-10-06 · 全书页数与设置页的来源核对
+
+本轮只读源码和文档，没有复制代码或新增第三方依赖。
+
+| 来源 | 版本 | 许可证 | 查看范围 |
+|---|---|---|---|
+| [turgu1/EPub-InkPlate](https://github.com/turgu1/EPub-InkPlate) `src/models/page_locs.hpp`、`page_locs.cpp` | master，2026-10-06 查看 | MIT（源文件头） | 全书页位置的后台计算、缓存文件和完成前的显示 |
+| CrossMux（本机检出，远端 `eMUQI/crossmux`） | `3fb809f6ceeb753a7c40fef86dee7c9d40eabdf3` | MIT（顶层） | 状态栏的章内页数与全书百分比、设置页取存储容量 |
+| ESP-IDF | `fff9895c82d744c7237be8847347bdd1b07c6643`（v6.1） | Apache-2.0 | `esp_vfs_fat_info`、`esp_app_get_description`；官方示例 `examples/storage/fatfs/ext_flash` |
+
+- EPub-InkPlate 用独立任务排完整本书，页位置连同字号、字体、方向等参数存为原书旁的 `.locs` 文件，参数不符时重算；
+  计算完成前界面显示已完成的章节百分比，完成后才显示页码和总页数。前台需要某一章时发消息让后台优先处理。
+- CrossMux 与 CrossPoint 只统计章内页数，未排完的章节按已消耗字节外推；全书百分比按各章节在 EPUB 中的累计大小计算，没有全书页数。
+- KOReader 的 crengine 在开书时排完整本书，页码始终精确；本项目的“当前页优先”规则不允许开书时整书排版。
+- 采用：空闲时统计全书分页、结果按排版参数缓存、完成前显示估算百分比（按章节大小加权）。
+- 不采用：独立后台任务。本项目的文档、字体和会话由应用任务独占，改为在应用任务的空闲时间分片执行；
+  也不把缓存放在原书旁，沿用 `PicoPage/cache`。
+- 资源审计时补看 CrossMux 检出中沿用 CrossPoint 的工程规则（`docs/engineering/memory-and-allocation.md`、
+  `hardware-constraints.md`，MIT）和章节解析器接口 `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.h`：
+  关闭异常时裸 `new` 失败即 abort，大分配须先检查可用总量和最大连续块并保留余量（`memory::hasAllocationHeadroom`）；
+  追加循环前先 `reserve`；章节以可续接的步骤流式解析，页面生成后立即写入 TF 卡，内存中不保留整章。
+  本项目采用其中的余量检查和预留做法；统计仍在内存中解析整章，但改为有上界的精简解析。只读规则与接口，未复制代码。
+  用户说明：设备厂商页面列出的 Pico Reader 为业余人员借助 AI 开发，参考以 CrossPoint 和 KOReader 为主。
+- 容量与版本使用乐鑫官方接口：`esp_vfs_fat_info` 读取 FAT 卷的总容量和可用空间，`esp_app_get_description` 读取固件版本。
+  ESP-IDF 的 FatFs 配置 `FF_FS_NOFSINFO` 为 0，FAT32 的可用簇数优先取自 FSInfo 扇区。host 使用 `statvfs`。
+  `reader_store` 新增对 `fatfs` 组件的依赖，`reader_app` 新增对 `esp_app_format` 的依赖，均为 ESP-IDF 自带组件。
+
 - `CONFIG_FATFS_VFS_FSTAT_BLKSIZE=4096` 经真机对照后未采用：顺序读没有可见收益，
   字形的随机小块读取变慢，新页准备时间增加约六成。官方建议针对顺序吞吐，不适用于本项目的字体访问方式。
 - 字宽改用 FreeType 自带的 `FT_Get_Advance`（[接口说明](https://freetype.org/freetype2/docs/reference/ft2-quick_advance.html)），

@@ -1,4 +1,5 @@
 #include "pico_page/app.h"
+#include "pico_page/document.h"
 #include "pico_page/store.h"
 
 #include <algorithm>
@@ -9,6 +10,7 @@
 #include <iostream>
 #include <iterator>
 #include <unistd.h>
+#include <vector>
 
 namespace fs = std::filesystem;
 using namespace pico_page;
@@ -660,6 +662,163 @@ int main(int argc, char** argv) {
         driver.tap(500, 1120); driver.present();
         assert(app.view() == View::Library && !app.saved_record());
         assert(!fs::exists(card / "Manage/only.epub") && read(sidecar) == reset_record);
+    }
+    {
+        // Whole-book page counting runs in idle slices, numbers pages exactly, survives a
+        // restart through the cache and restarts when the typography changes.
+        fs::create_directories(card / "Count");
+        fs::copy_file(fixtures / "long-chapter.epub", card / "Count/long.epub");
+        std::uint32_t total = 0;
+        {
+            ReaderApp app(card.string()); Driver driver{app};
+            assert(app.initialize()); driver.present(); opened(app, "Count/long.epub"); driver.present();
+            assert(app.background_due() && !app.book_pages());
+            const auto record = *app.saved_record();
+            const auto pixels = app.canvas().pixels();
+            unsigned slices = 0;
+            while (app.background_due()) { app.background_step(); ++slices; assert(!app.pending_frame()); }
+            assert(slices > 1 && *app.saved_record() == record && app.canvas().pixels() == pixels);
+            assert(app.book_pages() && app.book_pages()->page == 1 && app.book_pages()->total > 40);
+            total = app.book_pages()->total;
+            driver.key(Input::K3); driver.present();
+            assert(app.book_pages()->page == 2 && app.book_pages()->total == total);
+            assert(app.canvas().pixels() != pixels);
+            driver.key(Input::K1); driver.present();
+            assert(app.book_pages()->page == 1);
+        }
+        {
+            ReaderApp app(card.string()); Driver driver{app};
+            assert(app.initialize()); driver.present(); opened(app, "Count/long.epub"); driver.present();
+            assert(!app.background_due() && app.book_pages() && app.book_pages()->total == total);
+            driver.tap(342, 500); driver.present(); driver.tap(205, 1150); driver.present();
+            assert(app.view() == View::Typography);
+            driver.tap(588, 948); driver.present(); driver.tap(500, 1136); driver.present();
+            assert(app.view() == View::Reading && app.background_due() && !app.book_pages());
+            while (app.background_due()) app.background_step();
+            assert(app.book_pages() && app.book_pages()->total > total);
+            total = app.book_pages()->total;
+        }
+        {
+            // A cache entry cut short is ignored and the book is counted again.
+            const auto entry = *fs::directory_iterator(card / "PicoPage/cache/pages");
+            const auto bytes = read(entry.path());
+            write(entry.path(), bytes.substr(0, bytes.size() - 2));
+            ReaderApp app(card.string()); Driver driver{app};
+            assert(app.initialize()); driver.present(); opened(app, "Count/long.epub"); driver.present();
+            assert(app.background_due() && !app.book_pages());
+            // Inputs release the chapter loaded for counting; the count resumes to the same total.
+            for (unsigned slice = 1; app.background_due(); ++slice) {
+                app.background_step();
+                if (slice % 3 == 0) driver.refresh();
+            }
+            assert(app.book_pages() && app.book_pages()->total == total);
+        }
+        {
+            // A chapter beyond the parser limits cannot be shown; it has no pages and does not
+            // stop the count of the other chapters.
+            fs::copy_file(fixtures / "oversized-chapter.epub", card / "Count/oversized.epub");
+            ReaderApp app(card.string()); Driver driver{app};
+            assert(app.initialize()); driver.present(); opened(app, "Count/oversized.epub"); driver.present();
+            while (app.background_due()) app.background_step();
+            assert(app.book_pages() && app.book_pages()->page == 1 && app.book_pages()->total >= 1);
+            driver.key(Input::K3);
+            assert(app.view() == View::Error || app.book_pages()->page <= app.book_pages()->total);
+        }
+    }
+    {
+        // Settings sub-pages return to the settings list, K2 keeps them, and the library
+        // default view is written to the global settings file without touching other fields.
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        driver.tap(600, 50); driver.present(); assert(app.view() == View::Settings);
+        driver.tap(300, 180); driver.present(); assert(app.view() == View::Import);
+        driver.tap(60, 50); driver.present(); assert(app.view() == View::Settings);
+        driver.tap(300, 310); driver.present(); assert(app.view() == View::SyncSettings); driver.refresh();
+        driver.tap(60, 50); driver.present(); assert(app.view() == View::Settings);
+        driver.tap(300, 840); driver.present(); assert(app.view() == View::StorageSettings); driver.refresh();
+        driver.tap(60, 50); driver.present(); assert(app.view() == View::Settings);
+        driver.tap(300, 580); driver.present(); assert(app.view() == View::InputSettings);
+        assert(FileStore(card.string()).load_settings().settings.library_view == "list");
+        driver.tap(300, 150); driver.present();
+        assert(app.view() == View::InputSettings && app.status().empty());
+        assert(FileStore(card.string()).load_settings().settings.library_view == "grid");
+        assert(read(card / "PicoPage/settings.toml").find("roots=['Manage']") != std::string::npos);
+        // A settings file changed into an invalid one is left alone and the row reports it.
+        const auto valid = read(card / "PicoPage/settings.toml");
+        write(card / "PicoPage/settings.toml", "schema_version=9\n");
+        driver.tap(300, 150); driver.present();
+        assert(app.view() == View::Error && read(card / "PicoPage/settings.toml") == "schema_version=9\n");
+        write(card / "PicoPage/settings.toml", valid);
+    }
+    {
+        // Turning into a chapter that does not fit in memory: the visible chapter is released
+        // and the load repeated; a second failure shows an error and keeps the confirmed page.
+        fs::create_directories(card / "Memory");
+        fs::copy_file(fixtures / "valid.epub", card / "Memory/book.epub");
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Memory/book.epub"); driver.present();
+        const auto start = *app.saved_record();
+        const auto pixels = app.canvas().pixels();
+        static unsigned checks;
+        set_chapter_memory_probe([](std::size_t) { return false; });
+        for (unsigned turn = 0; turn < 20 && app.view() == View::Reading; ++turn) { driver.key(Input::K3); driver.present(); }
+        assert(app.view() == View::Error && app.status().find("内存不足") != std::string::npos);
+        const auto kept = *app.saved_record();
+        assert(kept.anchor.resource == start.anchor.resource);
+        set_chapter_memory_probe(nullptr);
+        driver.close(); driver.present();
+        assert(app.view() == View::Reading && *app.saved_record() == kept);
+        // The first attempt fails, the attempt after releasing the visible chapter succeeds.
+        checks = 0;
+        set_chapter_memory_probe([](std::size_t) { return ++checks != 1; });
+        driver.key(Input::K3); driver.present();
+        set_chapter_memory_probe(nullptr);
+        assert(app.view() == View::Reading && app.saved_record()->anchor.resource != start.anchor.resource);
+        assert(app.canvas().pixels() != pixels);
+        driver.key(Input::K1); driver.present();
+        assert(app.view() == View::Reading && app.saved_record()->anchor.resource == start.anchor.resource);
+    }
+    {
+        // A chapter longer than one part: pages turn across part boundaries in both directions
+        // with consecutive page numbers, and a position inside a later part is reached from the
+        // contents and restored after a restart.
+        fs::create_directories(card / "Parts");
+        fs::copy_file(fixtures / "multi-part.epub", card / "Parts/long.epub");
+        std::uint32_t late_page = 0;
+        Anchor late;
+        {
+            ReaderApp app(card.string()); Driver driver{app};
+            assert(app.initialize()); driver.present(); opened(app, "Parts/long.epub"); driver.present();
+            while (app.background_due()) app.background_step();
+            assert(app.book_pages() && app.book_pages()->page == 1);
+            const auto total = app.book_pages()->total;
+            std::vector<Anchor> forward{app.saved_record()->anchor};
+            for (std::uint32_t page = 2; page <= total; ++page) {
+                driver.key(Input::K3); driver.present();
+                assert(app.view() == View::Reading && app.book_pages()->page == page);
+                forward.push_back(app.saved_record()->anchor);
+            }
+            assert(total > 200 && forward.back().resource != forward.front().resource);
+            for (auto page = forward.size() - 1; page-- > 0;) {
+                driver.key(Input::K1); driver.present();
+                assert(app.view() == View::Reading && app.saved_record()->anchor == forward[page]);
+                assert(app.book_pages()->page == page + 1);
+            }
+            driver.tap(342, 500); driver.present(); driver.tap(68, 1150); driver.present();
+            assert(app.view() == View::Contents);
+            driver.tap(300, 336); driver.present();
+            assert(app.view() == View::Reading);
+            late = app.saved_record()->anchor;
+            late_page = app.book_pages()->page;
+            assert(late.node.find("/p[4501]/") != std::string::npos && late_page > total / 2);
+        }
+        {
+            ReaderApp app(card.string()); Driver driver{app};
+            assert(app.initialize()); driver.present(); opened(app, "Parts/long.epub"); driver.present();
+            assert(app.saved_record()->anchor == late && app.book_pages() && app.book_pages()->page == late_page);
+            driver.key(Input::K1); driver.present();
+            assert(app.view() == View::Reading && app.book_pages()->page + 1 >= late_page);
+        }
     }
     fs::remove_all(card);
     std::cout << "reader app display, progress protection, typography, cover and stale network checks: passed\n";

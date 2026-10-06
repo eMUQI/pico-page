@@ -202,7 +202,8 @@ std::string number(double value) {
 }
 
 using SettingValues = std::vector<std::pair<std::string, std::string>>;
-SettingValues setting_values(const ReaderSettings& values, bool power = false) {
+/** Fields of one layer in a fixed order; the global layer adds the library view and power values. */
+SettingValues setting_values(const ReaderSettings& values, bool global = false) {
     SettingValues fields = {{"reader.font", quoted(values.font)},
             {"reader.font_size_px", std::to_string(values.font_size_px)},
             {"reader.line_height", number(values.line_height)},
@@ -212,7 +213,8 @@ SettingValues setting_values(const ReaderSettings& values, bool power = false) {
             {"display.refresh_preset", quoted(values.refresh_preset)},
             {"display.balanced_full_refresh_pages", std::to_string(values.balanced_full_refresh_pages)},
             {"display.fast_full_refresh_pages", std::to_string(values.fast_full_refresh_pages)}};
-    if (power) {
+    if (global) {
+        fields.emplace_back("library.view", quoted(values.library_view));
         fields.emplace_back("power.auto_sleep_minutes", std::to_string(values.auto_sleep_minutes));
         fields.emplace_back("power.sleep_screen", quoted(values.sleep_screen));
     }
@@ -363,9 +365,10 @@ StoreStatus save_settings(const std::string& root, const SettingsSnapshot& snaps
         error = "The book is no longer available";
         return StoreStatus::Missing;
     }
-    if (values.library_roots != effective.library_roots || values.library_view != effective.library_view ||
-        (book_only && (values.auto_sleep_minutes != effective.auto_sleep_minutes || values.sleep_screen != effective.sleep_screen))) {
-        error = "Library fields are read-only; power fields are global only";
+    if (values.library_roots != effective.library_roots ||
+        (book_only && (values.library_view != effective.library_view ||
+                       values.auto_sleep_minutes != effective.auto_sleep_minutes || values.sleep_screen != effective.sleep_screen))) {
+        error = "library.roots is read-only; library.view and power fields are global only";
         return StoreStatus::Invalid;
     }
     const auto desired = setting_values(values, !book_only);

@@ -2,14 +2,20 @@
 #include "pico_page/document.h"
 #include "pico_page/store.h"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <dirent.h>
 #include <functional>
 #include <map>
 #include <set>
 #include <sys/stat.h>
 #include <utility>
+#ifdef ESP_PLATFORM
+#include "esp_app_desc.h"
+#include "esp_heap_caps.h"
+#endif
 
 namespace pico_page {
 namespace {
@@ -88,6 +94,8 @@ enum Control {
     DetailReset,
     DetailDelete,
     ManageConfirm,
+    SyncSettings,
+    LibraryView,
     EntryBase = 100,
     TocBase = 1000,
     TocToggleBase = 10000,
@@ -179,12 +187,13 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::vector<CoverThumbnail> covers;
     std::vector<Hit> hits, links;
     std::optional<Anchor> link_return, confirmed_link_return;
-    std::map<std::size_t, std::vector<std::size_t>> page_starts;
+    // Page starts already laid out, by spine item and part.
+    std::map<std::pair<std::size_t, std::uint32_t>, std::vector<std::size_t>> page_starts;
     std::size_t chapter_index = 0, offset = 0, library_page = 0, toc_page = 0;
     std::vector<std::size_t> toc_starts, toc_visible;
     std::set<std::size_t> toc_collapsed;
     bool toc_locate_current = false, library_grid = false, library_descending = false;
-    bool footer_chapters = false, refresh_from_settings = false;
+    bool footer_chapters = false, refresh_from_settings = false, import_from_settings = false;
     std::string detail_path, detail_position, detail_error;
     BookSnapshot management_snapshot;
     bool delete_original = false, drawing_error = false;
@@ -203,6 +212,26 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool save_failed = false;
     // The most recent accepted input turned a page; see AppInput::queued.
     bool turned = false;
+    // Whole-book page counting. chapter_pages[i][p] holds the page starts of part p of spine item
+    // i, laid out from the beginning of the part under the applied typography; counted[i] marks
+    // an item whose parts are all present. Non-linear items are outside the reading order and
+    // count as finished without pages.
+    static constexpr std::size_t not_counting = static_cast<std::size_t>(-1);
+    static constexpr std::uint32_t uncounted_item = 0xffffffffU;
+    static constexpr std::size_t max_pages_bytes = 1U << 20;
+    std::vector<std::vector<std::vector<std::uint32_t>>> chapter_pages;
+    std::vector<bool> counted;
+    std::string pages_name, pages_header;
+    // counting_chapter is a second parsed chapter. It exists only while the reading page is
+    // idle: every input releases it first, because the device cannot hold it together with the
+    // chapters that a page turn or another view may load. The partial count survives a release.
+    Chapter counting_chapter;
+    std::size_t counting_index = not_counting, counting_offset = 0;
+    std::uint32_t counting_part = 0;
+    // The visible chapter during which memory was too low to load another one for counting.
+    std::size_t counting_blocked = not_counting;
+    bool counting_loaded = false;
+    bool pages_complete = false, pages_failed = false, pages_dirty = false;
 
     Impl(std::string card, std::string id)
         : root(std::move(card)), writer(std::move(id)), store(root) {}
@@ -269,13 +298,35 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         return rows * line;
     }
-    void center(const std::string &value, int x, int top, int w, int size = 28,
-                std::uint8_t gray = 1, bool bold = false) {
+    int text_width(const std::string &value, int size) {
         ui.size(size);
         int length = 0;
         for (auto c : decode_utf8(value))
             length += ui.advance(c);
-        text(value, x + std::max(0, (w - length) / 2), top, size, w, gray, bold);
+        return length;
+    }
+    void center(const std::string &value, int x, int top, int w, int size = 28,
+                std::uint8_t gray = 1, bool bold = false) {
+        text(value, x + std::max(0, (w - text_width(value, size)) / 2), top, size, w, gray, bold);
+    }
+    /**
+     * One list row: title, optional description and a right-aligned value. A non-zero id makes
+     * the row a control and appends a chevron to the value.
+     */
+    void value_row(int id, const std::string &title, const std::string &description,
+                   const std::string &value, int y, int height = 104, bool bold_value = false) {
+        const auto shown = !id ? value : value.empty() ? "›" : value + " ›";
+        const int value_width = std::min(text_width(shown, 24), 400);
+        const int title_width = 612 - value_width - 16;
+        if (description.empty())
+            text(title, 36, y + (height - 26) / 2 - 6, 26, title_width);
+        else {
+            text(title, 36, y + height / 2 - 42, 26, title_width);
+            text(description, 36, y + height / 2 + 4, 20, title_width, 3);
+        }
+        text(shown, 648 - value_width, y + (height - 24) / 2 - 6, 24, value_width, 1, bold_value);
+        canvas.line(36, y + height - 1, 647, y + height - 1, 12, 2);
+        if (id) hits.push_back({24, y, 636, height, id});
     }
     void outline(int x, int y, int w, int h, int weight = 2) {
         canvas.fill_rect(x, y, w, weight, 1);
@@ -292,14 +343,18 @@ struct ReaderApp::Impl final : DisplayBackend {
         center(title, x, y + (h - size) / 2 - 3, w, size, selected ? 15 : 1);
         hits.push_back({x, y, w, h, id});
     }
-    void header(const std::string &title, int back = Back) {
+    /** Page header: a back cell naming the parent page, when back is non-zero, and the title. */
+    void header(const std::string &title, int back = Back, const std::string &parent = "返回") {
         canvas.fill_rect(0, 0, 684, 104, 15);
-        canvas.line(0, 103, 683, 103, 12);
+        int left = 28;
         if (back) {
-            text("‹ 返回", 28, 32, 28, 130);
-            hits.push_back({0, 0, 170, 104, back});
+            text("‹ " + parent, 28, 32, 28, 104);
+            canvas.line(140, 0, 140, 103, 1, 2);
+            hits.push_back({0, 0, 140, 104, back});
+            left = 168;
         }
-        center(title, 174, 28, 336, 34);
+        text(title, left, 30, 32, 660 - left, 1, true);
+        canvas.line(0, 103, 683, 103, 1, 3);
     }
     void dashed(int x, int y, int w, int h) {
         for (int i = 0; i < w; i += 12) {
@@ -353,9 +408,69 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (item.resource == chapter.resource) return item.label;
         return "第 " + std::to_string(chapter_index + 1) + " 章";
     }
-    std::string chapter_progress() const {
-        const auto percent = chapter.text.empty() ? 0 : std::min<std::size_t>(100, page.end * 100 / chapter.text.size());
-        return "本章约 " + std::to_string(percent) + "%";
+    std::uint32_t total_pages() const {
+        std::size_t total = 0;
+        for (const auto &item : chapter_pages)
+            for (const auto &starts : item) total += starts.size();
+        return static_cast<std::uint32_t>(total);
+    }
+    /**
+     * 1-based number of the counted page that holds the first visible character; 0 until every
+     * chapter is counted. A page reached from a restored or linked position may span two counted
+     * pages, so consecutive turns can repeat or skip a number.
+     */
+    std::uint32_t current_page() const {
+        return current_page(page.start);
+    }
+    std::uint32_t current_page(std::size_t start) const {
+        const auto &spine = document.spine();
+        if (!pages_complete || chapter_index >= spine.size() || !spine[chapter_index].linear) return 0;
+        const auto &parts = chapter_pages[chapter_index];
+        if (chapter.part >= parts.size() || parts[chapter.part].empty()) return 0;
+        std::size_t before = 0;
+        for (std::size_t i = 0; i < chapter_index; ++i)
+            for (const auto &starts : chapter_pages[i]) before += starts.size();
+        for (std::uint32_t part = 0; part < chapter.part; ++part) before += parts[part].size();
+        const auto &starts = parts[chapter.part];
+        const auto within = std::upper_bound(starts.begin(), starts.end(), static_cast<std::uint32_t>(start)) - starts.begin();
+        return static_cast<std::uint32_t>(before + std::max<std::ptrdiff_t>(1, within));
+    }
+    /** Position weighted by the uncompressed size of each linear chapter; used until pages are counted. */
+    int estimated_percent(std::size_t end) const {
+        const auto &spine = document.spine();
+        std::uint64_t read = 0, total = 0;
+        for (std::size_t i = 0; i < spine.size(); ++i) {
+            if (!spine[i].linear) continue;
+            total += spine[i].bytes;
+            if (i < chapter_index) read += spine[i].bytes;
+            else if (i == chapter_index && !chapter.text.empty()) {
+                // The number of parts is unknown before the item is counted; one more is assumed.
+                const std::uint64_t parts = chapter.part + (chapter.last_part ? 1 : 2);
+                const std::uint64_t within = chapter.part * chapter.text.size() + std::min(end, chapter.text.size());
+                read += spine[i].bytes * within / (parts * chapter.text.size());
+            }
+        }
+        return total ? static_cast<int>(read * 100 / total) : 0;
+    }
+    /** Whole-book percentage of a page spanning [start, end) of the loaded chapter. */
+    std::string book_percent(std::size_t start, std::size_t end) const {
+        if (const auto current = current_page(start))
+            return std::to_string(static_cast<std::uint64_t>(current) * 100 / total_pages()) + "%";
+        return "约 " + std::to_string(estimated_percent(end)) + "%";
+    }
+    std::string book_percent() const {
+        return book_percent(page.start, page.end);
+    }
+    /** Page number, page total and percentage; the percentage alone until every chapter is counted. */
+    std::string book_position(std::size_t start, std::size_t end) const {
+        if (const auto current = current_page(start))
+            return "第 " + std::to_string(current) + " / " + std::to_string(total_pages()) + " 页 · " + book_percent(start, end);
+        if (pages_complete) return "共 " + std::to_string(total_pages()) + " 页 · " + book_percent(start, end);
+        return book_percent(start, end);
+    }
+    std::string book_progress() const {
+        const auto position = book_position(page.start, page.end);
+        return pages_complete || pages_failed ? position : position + " · 正在统计页数";
     }
     std::string sync_badge() const {
         if (session.needs_save()) return "尚未保存";
@@ -375,7 +490,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         hits.push_back({0, 0, 128, 104, Library});
         text(chapter_label(), 132, 14, 30, 380, 1, true);
         text(document.metadata().title, 132, 60, 22, 212, 3);
-        text("· " + chapter_progress(), 352, 60, 22, 176, 3);
+        text("· " + book_percent(), 352, 60, 22, 176, 3);
         button(Sync, sync_badge(), 536, 26, 124, 54, session.needs_save() || remote_anchor.has_value(), 22);
         canvas.line(0, 103, 683, 103, 1, 3);
     }
@@ -559,6 +674,12 @@ struct ReaderApp::Impl final : DisplayBackend {
     static std::string entry_title(const Entry &entry) {
         return entry.directory ? entry.name : entry.name.substr(0, entry.name.size() - 5);
     }
+    /** FNV-1a of a card-relative path; names the cache entries of one book. */
+    static unsigned long long path_hash(const std::string &relative) {
+        std::uint64_t hash = 1469598103934665603ULL;
+        for (const unsigned char c : relative) hash = (hash ^ c) * 1099511628211ULL;
+        return hash;
+    }
     struct CoverEntry {
         std::string name, header;
         std::size_t bytes;
@@ -566,10 +687,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     /** Names the PicoPage/cache entry for one size of a cover; the header binds it to a file version. */
     static CoverEntry cover_entry(const std::string &relative, const struct stat &info, int width,
                                   int height, bool crop) {
-        std::uint64_t hash = 1469598103934665603ULL;
-        for (const unsigned char c : relative) hash = (hash ^ c) * 1099511628211ULL;
         char name[64];
-        std::snprintf(name, sizeof(name), "covers/%016llx-%dx%d%s", static_cast<unsigned long long>(hash),
+        std::snprintf(name, sizeof(name), "covers/%016llx-%dx%d%s", path_hash(relative),
                       width, height, crop ? "c" : "");
         return {name, "PPCOVER1\n" + relative + "\n" + std::to_string(info.st_size) + " " +
                           std::to_string(static_cast<long long>(info.st_mtime)) + "\n",
@@ -736,6 +855,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             error(message);
             return false;
         }
+        save_pages();
         std::string detail;
         if (!document.open(root + "/" + path, detail)) {
             book_path.clear();
@@ -752,6 +872,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         settings = configuration.settings;
         load_fonts();
         page_starts.clear();
+        reset_pages();
         const auto restored =
             store.load_progress(path, document.metadata().book_id, content_revision);
         session.open(document.metadata().book_id, content_revision, writer, restored.record);
@@ -769,10 +890,14 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (restored.status != StoreStatus::Ok && restored.status != StoreStatus::Missing && restored.status != StoreStatus::Cleared)
             message = "原进度无法读取，未覆盖原记录";
         if (restored.record) {
+            const auto holds = [&](const Chapter &part) {
+                std::uint32_t ignored;
+                return part.offset_for(restored.record->anchor, ignored);
+            };
             if (!document.chapter_index_for(restored.record->anchor.resource, chapter_index) ||
-                !document.load_chapter(chapter_index, chapter, detail) ||
+                !document.find_chapter_part(chapter_index, chapter, detail, ChapterLoad::Reading, holds) ||
                 !chapter.offset_for(restored.record->anchor, restored_offset)) {
-                error("保存的位置无法映射，请保留进度文件并检查 EPUB");
+                error(memory_error(detail) ? chapter_error(detail) : "保存的位置无法映射，请保留进度文件并检查 EPUB");
                 return false;
             }
             offset = restored_offset;
@@ -793,14 +918,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             overlay();
             return false;
         }
-        std::size_t index;
         std::uint32_t position;
-        if (!document.chapter_index_for(record->anchor.resource, index) ||
-            ((index != chapter_index || chapter.resource != record->anchor.resource) && !load_chapter(index)) ||
-            !chapter.offset_for(record->anchor, position)) {
-            error("已显示位置无法恢复");
+        if (!seek(record->anchor, position, "已显示位置无法恢复"))
             return false;
-        }
         offset = position;
         return true;
     }
@@ -808,11 +928,30 @@ struct ReaderApp::Impl final : DisplayBackend {
         return restore_confirmed_position() && show_page(offset);
     }
     std::uint32_t restored_offset = 0;
-    bool load_chapter(std::size_t index) {
+    static bool memory_error(const std::string &detail) {
+        return detail.rfind(kChapterMemoryError, 0) == 0;
+    }
+    static std::string chapter_error(const std::string &detail) {
+        return memory_error(detail) ? "本章内容过大，设备内存不足，无法显示。" : "章节读取失败：" + detail;
+    }
+    /**
+     * Makes the part that load produces the chapter being read. The visible chapter stays in
+     * memory during the load so that a failure leaves the page intact. When the parser stops for
+     * lack of memory, the visible chapter is released and the load repeated; if it fails again,
+     * the error page reloads the chapter of the last confirmed position. missing is the message
+     * for a part that does not exist.
+     */
+    bool load_with(std::size_t index, const std::function<bool(Chapter &, std::string &)> &load,
+                   const std::string &missing = "") {
         std::string detail;
         Chapter candidate;
-        if (!document.load_chapter(index, candidate, detail)) {
-            error("章节读取失败：" + detail);
+        bool loaded = load(candidate, detail);
+        if (!loaded && memory_error(detail) && !chapter.text.empty()) {
+            release(chapter);
+            loaded = load(candidate, detail);
+        }
+        if (!loaded) {
+            error(!missing.empty() && detail.rfind("Chapter part is not available", 0) == 0 ? missing : chapter_error(detail));
             return false;
         }
         chapter = std::move(candidate);
@@ -820,45 +959,286 @@ struct ReaderApp::Impl final : DisplayBackend {
         offset = 0;
         return true;
     }
+    bool load_chapter(std::size_t index, std::uint32_t part = 0) {
+        return load_with(index, [&](Chapter &loaded, std::string &detail) {
+            return document.load_chapter(index, loaded, detail, ChapterLoad::Reading, part);
+        });
+    }
+    /** Loads the part that holds anchor, unless it is the loaded one, and returns the offset in it. */
+    bool seek(const Anchor &anchor, std::uint32_t &position, const std::string &missing) {
+        std::size_t index;
+        if (!document.chapter_index_for(anchor.resource, index)) {
+            error(missing);
+            return false;
+        }
+        if (index == chapter_index && chapter.resource == anchor.resource && chapter.offset_for(anchor, position))
+            return true;
+        const auto holds = [&](const Chapter &part) {
+            std::uint32_t ignored;
+            return part.offset_for(anchor, ignored);
+        };
+        return load_with(index, [&](Chapter &loaded, std::string &detail) {
+            return document.find_chapter_part(index, loaded, detail, ChapterLoad::Reading, holds);
+        }, missing) && chapter.offset_for(anchor, position);
+    }
+    /**
+     * Loads the part of a spine item that holds the fragment, or its first part without one. A
+     * fragment recorded at the end of a part marks text that begins the next part.
+     */
+    bool seek_fragment(std::size_t index, const std::string &fragment, std::uint32_t &position,
+                       const std::string &missing) {
+        position = 0;
+        if (fragment.empty()) return load_chapter(index);
+        const auto holds = [&](const Chapter &part) {
+            std::uint32_t ignored;
+            return part.fragment_offset(fragment, ignored);
+        };
+        if (!load_with(index, [&](Chapter &loaded, std::string &detail) {
+                return document.find_chapter_part(index, loaded, detail, ChapterLoad::Reading, holds);
+            }, missing) || !chapter.fragment_offset(fragment, position))
+            return false;
+        if (position >= chapter.text.size() && !chapter.last_part) {
+            position = 0;
+            return load_chapter(index, chapter.part + 1);
+        }
+        return true;
+    }
     void footer() {
         canvas.fill_rect(0, footer_top, 684, 88, 15);
         const auto position = footer_chapters ? "第 " + std::to_string(chapter_index + 1) + " 章 / 共 " +
-            std::to_string(document.spine().size()) + " 章" : chapter_progress();
+            std::to_string(document.spine().size()) + " 章" : book_progress();
         text(message.empty() ? position : message, 36, 1156, 24, 476, 3);
         outline(556, 1165, 32, 17, 2);
         canvas.fill_rect(588, 1170, 3, 7, 1);
         if (battery_percent) canvas.fill_rect(560, 1169, *battery_percent * 24 / 100, 9, 3);
         text(battery_percent ? std::to_string(*battery_percent) + "%" : "—", 600, 1156, 24, 80, 3);
     }
-    std::size_t readable_offset(std::size_t start) const {
+    static std::size_t readable_offset(const Chapter &source, std::size_t start) {
         // Inserted block separators have no source anchor for a saved page start.
         Anchor anchor;
-        while (start < chapter.text.size() &&
-               !chapter.anchor_at(static_cast<std::uint32_t>(start), anchor))
+        while (start < source.text.size() &&
+               !source.anchor_at(static_cast<std::uint32_t>(start), anchor))
             ++start;
         return start;
     }
-    const DocumentImage* image_at(std::size_t start) const {
-        for (const auto& image : chapter.images)
-            if (image.begin <= start && start < image.end && image.end <= chapter.text.size())
+    std::size_t readable_offset(std::size_t start) const {
+        return readable_offset(chapter, start);
+    }
+    static const DocumentImage* image_at(const Chapter &source, std::size_t start) {
+        for (const auto& image : source.images)
+            if (image.begin <= start && start < image.end && image.end <= source.text.size())
                 return &image;
         return nullptr;
     }
+    const DocumentImage* image_at(std::size_t start) const {
+        return image_at(chapter, start);
+    }
     graphics::Page plan_page(std::size_t start, const graphics::LayoutSpec& spec) {
+        return plan_page(chapter, start, spec);
+    }
+    graphics::Page plan_page(const Chapter &source, std::size_t start, const graphics::LayoutSpec& spec) {
         // Media ranges occupy one page; text layout must not consume their placeholders.
-        start = readable_offset(start);
-        if (const auto* image = image_at(start)) {
+        start = readable_offset(source, start);
+        if (const auto* image = image_at(source, start)) {
             graphics::Page result;
             result.start = image->begin;
             result.end = image->end;
             result.font_px = spec.font_px;
             return result;
         }
-        auto end = chapter.text.size();
-        for (const auto& image : chapter.images)
-            if (image.begin > start && image.begin < image.end && image.end <= chapter.text.size())
+        auto end = source.text.size();
+        for (const auto& image : source.images)
+            if (image.begin > start && image.begin < image.end && image.end <= source.text.size())
                 end = std::min<std::size_t>(end, image.begin);
-        return graphics::layout_page(body, std::u32string_view(chapter.text).substr(0, end), start, spec);
+        return graphics::layout_page(body, std::u32string_view(source.text).substr(0, end), start, spec);
+    }
+    /**
+     * Restarts page counting for the applied typography and adopts a matching cache entry.
+     * The entry is bound to the book file, the body font file and the page geometry.
+     */
+    void reset_pages() {
+        const auto &spine = document.spine();
+        chapter_pages.assign(spine.size(), {});
+        counted.assign(spine.size(), false);
+        for (std::size_t i = 0; i < spine.size(); ++i) counted[i] = !spine[i].linear;
+        counting_index = counting_blocked = not_counting;
+        release_counting();
+        pages_failed = pages_dirty = false;
+        pages_complete = std::find(counted.begin(), counted.end(), false) == counted.end();
+        pages_name.clear();
+        struct stat book {}, font {};
+        const std::string font_file = builtin_body ? "" : font_fallback ? "fonts/LXGWWenKai-Regular.ttf" : settings.font;
+        if (stat((root + "/" + book_path).c_str(), &book) != 0 ||
+            (!font_file.empty() && stat((root + "/PicoPage/" + font_file).c_str(), &font) != 0)) {
+            pages_failed = true;
+            return;
+        }
+        const auto spec = layout(settings);
+        char name[32], geometry[160];
+        std::snprintf(name, sizeof(name), "pages/%016llx", path_hash(book_path));
+        std::snprintf(geometry, sizeof(geometry), "%lld %lld\n%lld %lld\n%d %d %d %d %d %d %d %d %zu\n",
+                      static_cast<long long>(book.st_size), static_cast<long long>(book.st_mtime),
+                      static_cast<long long>(font.st_size), static_cast<long long>(font.st_mtime),
+                      spec.left, spec.top, spec.width, spec.height, spec.font_px, spec.line_height,
+                      spec.indent_chars, spec.paragraph_gap, spine.size());
+        pages_name = name;
+        pages_header = std::string("PPPAGES2\n") + content_revision + "\n" + book_path + "\n" + font_file + "\n" + geometry;
+        std::string cached;
+        if (store.load_cache(pages_name, pages_header.size() + max_pages_bytes, cached) != StoreStatus::Ok ||
+            cached.compare(0, pages_header.size(), pages_header) != 0)
+            return;
+        // Payload, as 32-bit words in the little-endian order native to the device and the host:
+        // per spine item the number of parts, or uncounted_item for an item that was not
+        // finished, then per part a count and that many ascending page starts.
+        auto loaded = chapter_pages;
+        auto finished = counted;
+        std::size_t at = pages_header.size();
+        const auto word = [&](std::uint32_t &value) {
+            if (cached.size() - at < sizeof(value)) return false;
+            std::memcpy(&value, cached.data() + at, sizeof(value));
+            at += sizeof(value);
+            return true;
+        };
+        for (std::size_t i = 0; i < spine.size(); ++i) {
+            std::uint32_t parts = 0;
+            if (!word(parts)) return;
+            if (parts == uncounted_item) continue;
+            if (parts > (cached.size() - at) / sizeof(std::uint32_t) || (!spine[i].linear && parts)) return;
+            loaded[i].resize(parts);
+            for (auto &starts : loaded[i]) {
+                std::uint32_t count = 0;
+                if (!word(count) || count > (cached.size() - at) / sizeof(std::uint32_t)) return;
+                starts.resize(count);
+                for (auto &start : starts)
+                    if (!word(start)) return;
+                if (!std::is_sorted(starts.begin(), starts.end())) return;
+            }
+            finished[i] = true;
+        }
+        if (at != cached.size()) return;
+        chapter_pages = std::move(loaded);
+        counted = std::move(finished);
+        pages_complete = std::find(counted.begin(), counted.end(), false) == counted.end();
+    }
+    /** Writes counted chapters to PicoPage/cache so that a later open resumes instead of recounting. */
+    void save_pages() {
+        if (!pages_dirty || pages_name.empty()) return;
+        std::string bytes = pages_header;
+        const auto word = [&](std::uint32_t value) {
+            bytes.append(reinterpret_cast<const char *>(&value), sizeof(value));
+        };
+        for (std::size_t i = 0; i < chapter_pages.size(); ++i) {
+            word(counted[i] ? static_cast<std::uint32_t>(chapter_pages[i].size()) : uncounted_item);
+            if (!counted[i]) continue;
+            for (const auto &starts : chapter_pages[i]) {
+                word(static_cast<std::uint32_t>(starts.size()));
+                for (const auto start : starts) word(start);
+            }
+        }
+        // A book whose counts exceed the entry limit is recounted on every open.
+        if (bytes.size() - pages_header.size() <= max_pages_bytes && store.save_cache(pages_name, bytes) == StoreStatus::Ok)
+            pages_dirty = false;
+    }
+    bool counting_due() const {
+        return view == View::Reading && has_book() && card_available && !usb_prepared &&
+               !display.busy() && !deferred && !pages_complete && !pages_failed &&
+               counting_blocked != chapter_index;
+    }
+    /** Frees the chapter loaded for counting; its partial count resumes after a reload. */
+    void release_counting() {
+        release(counting_chapter);
+        counting_loaded = false;
+    }
+    /**
+     * True when a layout load of one part of a spine item with this many XHTML bytes fits in
+     * memory with room to spare. The parser stops by itself when memory runs short; this check
+     * avoids starting a parse that would. The text is one reserved block of four bytes per XHTML
+     * byte, at most two part lengths, and the records, retained link and fragment strings and
+     * parser buffers of one part stay below 1.5 MiB. The rest of the 2 MiB allowance is headroom.
+     */
+    static bool counting_memory(std::uint32_t bytes) {
+#ifdef ESP_PLATFORM
+        const std::size_t text = 4U * (std::min<std::uint32_t>(bytes, 2 * kChapterPartScalars) + 1024);
+        return heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >= text + 64U * 1024 &&
+               heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= text + 2048U * 1024;
+#else
+        static_cast<void>(bytes);
+        return true;
+#endif
+    }
+    void finish_counting() {
+        counted[counting_index] = true;
+        counting_index = not_counting;
+        release_counting();
+        pages_dirty = true;
+        pages_complete = std::find(counted.begin(), counted.end(), false) == counted.end();
+        if (pages_complete) save_pages();
+    }
+    /**
+     * Counts pages for one time slice. The item being read is measured first, then the rest in
+     * reading order, each part by part. The part on screen is measured in place; any other part
+     * is loaded for layout, which takes a slice of its own. That bounds the delay of an input
+     * arriving meanwhile to one part load or one slice of layout.
+     */
+    void count_pages() {
+        const auto &spine = document.spine();
+        if (counting_index == not_counting) {
+            auto next = static_cast<std::size_t>(std::find(counted.begin(), counted.end(), false) - counted.begin());
+            if (chapter_index < spine.size() && !counted[chapter_index] && chapter.resource == spine[chapter_index].resource)
+                next = chapter_index;
+            counting_index = next;
+            counting_part = 0;
+            counting_offset = 0;
+            chapter_pages[next].assign(1, {});
+        }
+        const bool in_place = counting_index == chapter_index && counting_part == chapter.part &&
+                              chapter.resource == spine[counting_index].resource;
+        if (in_place) release_counting();
+        else if (!counting_loaded || counting_chapter.part != counting_part ||
+                 counting_chapter.resource != spine[counting_index].resource) {
+            release_counting();
+            if (!counting_memory(spine[counting_index].bytes)) {
+                counting_blocked = chapter_index;
+                return;
+            }
+            std::string detail;
+            if (document.load_chapter(counting_index, counting_chapter, detail, ChapterLoad::Layout, counting_part))
+                counting_loaded = true;
+            else if (memory_error(detail))
+                counting_blocked = chapter_index;
+            else if (detail.find("limit") != std::string::npos) {
+                // An item beyond the parser limits cannot be shown either; it has no pages.
+                chapter_pages[counting_index].assign(1, {});
+                finish_counting();
+            } else
+                pages_failed = true;
+            return;
+        }
+        const Chapter &source = in_place ? chapter : counting_chapter;
+        const auto spec = layout(settings);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(40);
+        do {
+            const auto start = readable_offset(source, counting_offset);
+            if (start >= source.text.size()) {
+                if (source.last_part) {
+                    finish_counting();
+                    return;
+                }
+                ++counting_part;
+                counting_offset = 0;
+                chapter_pages[counting_index].emplace_back();
+                release_counting();
+                return;
+            }
+            const auto planned = plan_page(source, start, spec);
+            if (!planned.error.empty() || planned.end <= planned.start) {
+                pages_failed = true;
+                release_counting();
+                return;
+            }
+            chapter_pages[counting_index][counting_part].push_back(static_cast<std::uint32_t>(planned.start));
+            counting_offset = planned.end;
+        } while (std::chrono::steady_clock::now() < deadline);
     }
     bool draw_page_content(const graphics::Page& planned, const graphics::LayoutSpec& spec) {
         if (const auto* image = image_at(planned.start)) {
@@ -940,7 +1320,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             error("本页没有可保存的来源位置");
             return false;
         }
-        auto &starts = page_starts[chapter_index];
+        auto &starts = page_starts[{chapter_index, chapter.part}];
         if (std::find(starts.begin(), starts.end(), page.start) == starts.end()) {
             starts.push_back(page.start);
             std::sort(starts.begin(), starts.end());
@@ -962,7 +1342,7 @@ struct ReaderApp::Impl final : DisplayBackend {
      */
     bool paginate(std::size_t limit, std::size_t &previous) {
         const auto spec = layout(settings, link_return ? 144 : 64);
-        auto &starts = page_starts[chapter_index];
+        auto &starts = page_starts[{chapter_index, chapter.part}];
         std::size_t start = 0;
         previous = 0;
         while (start < limit) {
@@ -998,6 +1378,13 @@ struct ReaderApp::Impl final : DisplayBackend {
         else
             show_page_before(limit);
     }
+    // Reaching a later part parses the spine item from its beginning; an item this large is
+    // announced first.
+    static constexpr std::uint32_t announced_bytes = 150000;
+    void change_part(std::size_t index, std::function<void()> work) {
+        if (document.spine()[index].bytes > announced_bytes) defer("正在排版…", std::move(work));
+        else work();
+    }
     void turn(bool forward) {
         if (!has_book())
             return;
@@ -1006,7 +1393,12 @@ struct ReaderApp::Impl final : DisplayBackend {
             const auto next_offset = readable_offset(page.end);
             if (next_offset < chapter.text.size())
                 show_page(next_offset);
-            else if (chapter_index + 1 < document.spine().size()) {
+            else if (!chapter.last_part) {
+                const auto next = chapter.part + 1;
+                change_part(chapter_index, [this, next] {
+                    if (load_chapter(chapter_index, next)) show_page(0);
+                });
+            } else if (chapter_index + 1 < document.spine().size()) {
                 auto next = chapter_index + 1;
                 while (next < document.spine().size() && !document.spine()[next].linear)
                     ++next;
@@ -1019,16 +1411,31 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
         } else {
             if (offset == readable_offset(0)) {
+                if (chapter.part > 0) {
+                    const auto previous = chapter.part - 1;
+                    change_part(chapter_index, [this, previous] {
+                        if (load_chapter(chapter_index, previous)) show_page_before(chapter.text.size());
+                    });
+                    return;
+                }
                 if (chapter_index == 0)
                     return;
                 auto previous_chapter = chapter_index - 1;
                 while (previous_chapter > 0 && !document.spine()[previous_chapter].linear)
                     --previous_chapter;
-                if (!document.spine()[previous_chapter].linear || !load_chapter(previous_chapter))
+                if (!document.spine()[previous_chapter].linear)
+                    return;
+                if (document.spine()[previous_chapter].bytes > announced_bytes) {
+                    defer("正在排版…", [this, previous_chapter] {
+                        if (load_chapter(previous_chapter, kLastChapterPart)) show_page_before(chapter.text.size());
+                    });
+                    return;
+                }
+                if (!load_chapter(previous_chapter, kLastChapterPart))
                     return;
                 turn_back_to(chapter.text.size());
             } else {
-                const auto &starts = page_starts[chapter_index];
+                const auto &starts = page_starts[{chapter_index, chapter.part}];
                 auto i = std::lower_bound(starts.begin(), starts.end(), offset);
                 if (i != starts.begin()) {
                     show_page(*std::prev(i));
@@ -1192,9 +1599,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         auto value = [&](int id) -> std::string {
             switch (id) {
             case FontChoice:
-                return draft.font.find("WenKai") != std::string::npos     ? "文楷"
-                       : draft.font.find("NotoSans") != std::string::npos ? "思源黑体"
-                                                                          : basename(draft.font);
+                return font_name(draft.font);
             case FontSize:
                 return std::to_string(draft.font_size_px) + " px";
             case LineHeight:
@@ -1242,6 +1647,11 @@ struct ReaderApp::Impl final : DisplayBackend {
             note("字体缺失或损坏，预览使用替代字体。", 596);
         }
     }
+    static std::string font_name(const std::string &font) {
+        return font.find("WenKai") != std::string::npos     ? "文楷"
+               : font.find("NotoSans") != std::string::npos ? "思源黑体"
+                                                            : basename(font);
+    }
     static std::string decimal(double value) {
         char buf[24];
         std::snprintf(buf, sizeof(buf), "%.2f", value);
@@ -1284,12 +1694,12 @@ struct ReaderApp::Impl final : DisplayBackend {
             reading_header();
         } else {
             canvas.clear();
-            header("显示与刷新");
+            header("显示与刷新", Back, "设置");
         }
         canvas.fill_rect(0, top, 684, 1216 - top, 15);
         if (refresh_from_settings) {
             hits.clear();
-            header("显示与刷新");
+            header("显示与刷新", Back, "设置");
         }
         return true;
     }
@@ -1346,24 +1756,29 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void draw_settings() {
         view = View::Settings;
-        hits.clear(); canvas.clear(); header("设置");
+        hits.clear(); canvas.clear(); header("设置", Back, "书库");
         const auto cfg = store.load_settings();
         const auto &values = cfg.settings;
-        settings_row(Import, "网络与传输", "USB 文件传输 · 由电脑管理 TF 卡", 120);
-        settings_row(Sync, "KOReader 同步", has_book() ? sync_badge() : "打开书籍后检查同步", 252);
+        sync::Config account;
+        std::string detail;
+        const bool configured = sync::load_config(root, account, detail);
+        std::uint64_t card_total = 0, card_free = 0;
+        const bool measured = store.card_space(card_total, card_free);
+        settings_row(Import, "网络与传输", "USB 文件传输 · 未开启", 120);
+        settings_row(SyncSettings, "KOReader 同步", configured ? server_name(account) + " · " + account.username : "未配置", 252);
         settings_row(Refresh, "显示与刷新", refresh_name(values) + " · " +
                      (values.refresh_preset == "clear" ? "每页全刷" : "每 " + std::to_string(refresh_interval(values)) + " 页全刷"), 384);
-        settings_row(InputSettings, "输入与阅读", "翻页操作与当前阅读排版", 516);
+        settings_row(InputSettings, "输入与阅读", std::string(values.library_view == "grid" ? "卡片" : "列表") + "视图 · " + typography_summary(values), 516);
         settings_row(PowerSettings, "电源与休眠", sleep_name(values) + " · " +
                      (values.auto_sleep_minutes ? std::to_string(values.auto_sleep_minutes) + " 分钟" : "不自动休眠"), 648);
-        settings_row(StorageSettings, "存储与设备", "文件位置、设备信息与缓存清理", 780);
+        settings_row(StorageSettings, "存储与设备", (measured ? "可用 " + file_size(card_free) : "可用空间未知") + " · 固件 " + firmware_version(), 780);
         if (!cfg.diagnostics.empty()) note("设置文件无效，请检查后重新打开。", 950);
         else if (!message.empty()) note(message, 950);
         if (session.needs_save()) button(SaveRetry, "重试保存进度", 24, 1056, 636, 96);
     }
     void draw_power() {
         view = View::PowerSettings;
-        hits.clear(); canvas.clear(); header("电源与休眠");
+        hits.clear(); canvas.clear(); header("电源与休眠", Back, "设置");
         text("休眠画面", 36, 144, 24, 612, 3);
         choice(SleepCover, "书籍封面", "无可用封面时显示书名与作者", 200, draft.sleep_screen == "cover", draft.sleep_screen != edit_snapshot.config.settings.sleep_screen);
         choice(SleepReading, "保留正文", "保留当前页，底部显示休眠状态", 332, draft.sleep_screen == "reading", draft.sleep_screen != edit_snapshot.config.settings.sleep_screen);
@@ -1377,41 +1792,132 @@ struct ReaderApp::Impl final : DisplayBackend {
         button(Back, "取消", 24, 1080, 306, 96);
         button(PowerSave, "保存设置", 354, 1080, 306, 96, true);
     }
+    static std::string server_name(const sync::Config &account) {
+        const auto scheme = account.endpoint.find("://");
+        return scheme == std::string::npos ? account.endpoint : account.endpoint.substr(scheme + 3);
+    }
+    static std::string typography_summary(const ReaderSettings &values) {
+        return font_name(values.font) + " · " + std::to_string(values.font_size_px) + " px · " + decimal(values.line_height);
+    }
+    static std::string firmware_version() {
+#ifdef ESP_PLATFORM
+        return esp_app_get_description()->version;
+#else
+        return "桌面预览";
+#endif
+    }
+    /**
+     * Sums regular files below a card-relative directory; epub_only keeps EPUB names only.
+     * The walk blocks the application task, so it stops after 2000 entries. nullopt when a
+     * directory cannot be read or that limit is exceeded.
+     */
+    std::optional<std::uint64_t> tree_bytes(const std::string &relative, bool epub_only) {
+        unsigned remaining = 2000;
+        std::uint64_t total = 0;
+        std::vector<std::string> pending{relative};
+        while (!pending.empty()) {
+            const auto directory = std::move(pending.back());
+            pending.pop_back();
+            DIR *dir = opendir((root + "/" + directory).c_str());
+            if (!dir) return std::nullopt;
+            while (const auto *item = readdir(dir)) {
+                const std::string name = item->d_name;
+                if (name == "." || name == "..") continue;
+                struct stat st{};
+#ifdef ESP_PLATFORM
+                const int result = stat((root + "/" + directory + "/" + name).c_str(), &st);
+#else
+                const int result = lstat((root + "/" + directory + "/" + name).c_str(), &st);
+#endif
+                if (result != 0 || !remaining--) {
+                    closedir(dir);
+                    return std::nullopt;
+                }
+                if (S_ISDIR(st.st_mode)) pending.push_back(directory + "/" + name);
+                else if (S_ISREG(st.st_mode) && (!epub_only || epub_name(name))) total += static_cast<std::uint64_t>(st.st_size);
+            }
+            closedir(dir);
+        }
+        return total;
+    }
     void draw_storage() {
         view = View::StorageSettings;
-        hits.clear(); canvas.clear(); header("存储与设备");
-        text("原书", 36, 166, 26); note("位于 TF 卡的书籍文件夹", 214);
-        text("缓存", 36, 294, 26); note("可重建；不包含原书、字体和阅读记录", 342);
-        text("可用空间", 36, 422, 26); note("未知；可在电脑连接 TF 卡后查看", 470);
+        hits.clear(); canvas.clear(); header("存储与设备", Back, "设置");
+        std::optional<std::uint64_t> books = 0;
+        for (const auto &path : store.load_settings().settings.library_roots) {
+            struct stat st{};
+            if (!safe_existing(root, path) || stat((root + "/" + path).c_str(), &st) != 0) continue;
+            const auto bytes = tree_bytes(path, true);
+            books = books && bytes ? std::optional<std::uint64_t>(*books + *bytes) : std::nullopt;
+        }
+        struct stat cache_directory{};
+        const auto cache = stat((root + "/PicoPage/cache").c_str(), &cache_directory) == 0
+                               ? tree_bytes("PicoPage/cache", false) : std::optional<std::uint64_t>(0);
+        std::uint64_t card_total = 0, card_free = 0;
+        const bool measured = store.card_space(card_total, card_free);
+        const auto size = [](const std::optional<std::uint64_t> &bytes) { return bytes ? file_size(*bytes) : std::string("未知"); };
+        text("存储卡", 36, 128, 22, 612, 3);
+        value_row(0, "书籍原文件", "", size(books), 164, 70);
+        value_row(0, "缓存（可重建）", "", size(cache), 234, 70);
+        value_row(0, "可用空间", "", measured ? file_size(card_free) : "未知", 304, 70, true);
+        text("设备", 36, 402, 22, 612, 3);
+        value_row(0, "固件版本", "", firmware_version(), 438, 70);
 #ifdef ESP_PLATFORM
-        text("设备：Read Pico", 36, 558, 28);
+        value_row(0, "硬件", "", "Read Pico", 508, 70);
 #else
-        text("设备：桌面预览", 36, 558, 28);
+        value_row(0, "硬件", "", "桌面预览", 508, 70);
 #endif
-        note("固件：Pico Page 离线阅读初版", 626);
-        note("配置：PicoPage/settings.toml", 694);
-        note("进度：原书旁的 .picopage 目录", 762);
-        if (!message.empty()) note(message, 880);
-        button(ClearCache, "清理全部缓存", 24, 1032, 636, 96);
-        note("保留原书、阅读位置和排版设置。", 1152);
+        text("文件位置", 36, 606, 22, 612, 3);
+        value_row(0, "设置", "", "PicoPage/settings.toml", 642, 70);
+        value_row(0, "阅读进度", "", "原书旁的 .picopage 目录", 712, 70);
+        if (!message.empty()) note(message, 830);
+        canvas.line(0, 1056, 683, 1056, 1, 3);
+        text("清理全部缓存", 36, 1086, 26, 540, 1, true);
+        text("不删除书和阅读进度，下次打开会稍慢", 36, 1130, 20, 540, 3);
+        text("›", 620, 1098, 28, 40);
+        hits.push_back({0, 1058, 684, 158, ClearCache});
     }
     void draw_input_settings() {
         view = View::InputSettings;
-        hits.clear(); canvas.clear(); header("输入与阅读");
-        settings_row(FullRefresh, "立即全刷（K2）", "所有可交互页面均保持当前页面与位置", 152);
-        text("正文翻页", 36, 334, 28, 612, 1, true);
-        note("K1 上一页，K3 下一页。", 390);
-        note("触摸正文左右区域翻页，中部打开工具。", 448);
-        note("关闭和取消使用屏幕控件。", 506);
-        if (has_book()) button(Typography, "当前书籍排版", 24, 648, 636, 96);
-        else note("打开一本书后，可在工具中调整排版。", 680);
-        note("排版页可将有效参数设为阅读默认。", 810);
+        hits.clear(); canvas.clear(); header("输入与阅读", Back, "设置");
+        const auto values = store.load_settings().settings;
+        value_row(LibraryView, "书库默认视图", "", values.library_view == "grid" ? "卡片" : "列表", 104);
+        value_row(has_book() ? Typography : 0, "阅读默认排版", typography_summary(values), "", 208);
+        value_row(FullRefresh, "立即全刷", "K2 在所有页面全刷当前画面，不改变位置", "", 312);
+        text("正文翻页", 36, 452, 22, 612, 3);
+        note("K1 上一页，K3 下一页。", 496);
+        note("触摸正文左右区域翻页，中部打开工具。", 548);
+        note("关闭和取消使用屏幕控件。", 600);
+        if (!has_book()) note("打开一本书后，可在排版页调整阅读默认排版。", 652);
+        if (!message.empty()) {
+            canvas.line(0, 1012, 683, 1012, 1, 3);
+            wrapped(message, 36, 1044, 612, 22);
+        }
+    }
+    void draw_sync_settings() {
+        view = View::SyncSettings;
+        hits.clear(); canvas.clear(); header("KOReader 同步", Back, "设置");
+        sync::Config account;
+        std::string detail;
+        const bool configured = sync::load_config(root, account, detail);
+        value_row(0, "服务地址", "", configured ? server_name(account) : "未配置", 104, 70);
+        value_row(0, "账户", "", configured ? account.username : "未配置", 174, 70);
+        value_row(0, "凭据", "", configured ? "已隐藏" : "未配置", 244, 70);
+        wrapped(configured ? "在电脑上编辑 PicoPage/sync.toml 可修改地址或账户，保存后重新打开此页。"
+                           : "PicoPage/sync.toml 不存在或内容无效。请在电脑上填写服务地址和账户后重新打开此页。",
+                36, 340, 612, 22);
+        text("同步策略", 36, 452, 22, 612, 3);
+        value_row(0, "检查与上传", "在正文工具的“同步”中手动执行", "手动", 488);
+        value_row(0, "书籍匹配方式", "按原书内容识别，与文件名无关", "按内容", 592);
+        if (has_book() && configured) button(Sync, "检查当前书籍的同步", 24, 1056, 636, 96);
+        else note(configured ? "打开一本书后，可在工具中检查同步。" : "配置完成前不会联网。", 1090);
     }
     static std::string file_size(std::uint64_t bytes) {
         if (bytes < 1024) return std::to_string(bytes) + " B";
         if (bytes < 1024 * 1024) return std::to_string((bytes + 1023) / 1024) + " KiB";
         char value[40];
-        std::snprintf(value, sizeof(value), "%.1f MiB", bytes / 1048576.0);
+        if (bytes < 1024ULL * 1024 * 1024) std::snprintf(value, sizeof(value), "%.1f MiB", bytes / 1048576.0);
+        else std::snprintf(value, sizeof(value), "%.1f GiB", bytes / 1073741824.0);
         return value;
     }
     void inspect_book(const std::string &path, bool keep_message = false) {
@@ -1440,7 +1946,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void draw_details() {
         view = View::BookDetails;
-        hits.clear(); canvas.clear(); header("书籍详情");
+        hits.clear(); canvas.clear(); header("书籍详情", Back, "书库");
         const auto title = detail_metadata.title.empty() ? basename(detail_path) : detail_metadata.title;
         struct stat info{};
         std::vector<std::uint8_t> cover;
@@ -1497,7 +2003,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (detail_path == book_path) {
             cancel_sync();
             session.open("", "", writer);
-            document.close(); book_path.clear(); chapter = {}; page = {};
+            document.close(); book_path.clear(); release(chapter); page = {};
             links.clear(); page_starts.clear(); link_return.reset(); confirmed_link_return.reset();
             last_recorded.clear();
         }
@@ -1539,8 +2045,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         hits.clear();
         load_fonts();
         if (has_book() && !restore_confirmed_position()) return;
-        const auto position = chapter.text.empty() ? std::string("位置已保存") :
-            "本章约 " + std::to_string(std::min<std::size_t>(100, offset * 100 / chapter.text.size())) + "%";
+        const auto position = has_book() ? book_position(offset, offset) : std::string("位置已保存");
         if (settings.sleep_screen == "simple") {
             canvas.clear();
             text("已休眠", 72, 440, 40, 540, 1, true);
@@ -1590,12 +2095,12 @@ struct ReaderApp::Impl final : DisplayBackend {
         view = View::Import;
         hits.clear();
         canvas.clear();
-        header("USB 文件传输");
+        header("USB 文件传输", Back, import_from_settings ? "设置" : "书库");
         note("开启后，电脑可以直接管理 TF 卡。", 200);
         note("传输期间暂停阅读和同步。", 280);
         note("请在电脑安全弹出后退出。", 360);
         note("退出将重启，恢复阅读与 USB 烧录。", 440);
-        button(UsbStart, "USB 文件传输：关闭", 24, 600, 636, 96);
+        button(UsbStart, "开启 USB 文件传输", 24, 600, 636, 96);
         if (!message.empty()) note(message, 800);
         button(Dismiss, "返回书库", 24, 1056, 636, 96);
     }
@@ -1644,7 +2149,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     void draw_sync() {
         view = View::Sync;
         if (!has_book()) {
-            hits.clear(); canvas.clear(); header("阅读同步");
+            hits.clear(); canvas.clear(); header("阅读同步", Back, "书库");
             note("请先打开一本 EPUB。", 246); return;
         }
         refresh_from_settings = false;
@@ -1764,11 +2269,15 @@ struct ReaderApp::Impl final : DisplayBackend {
         std::string xpointer;
         Chapter source;
         std::size_t index;
+        const auto holds = [&](const Chapter &part) {
+            std::uint32_t ignored;
+            return part.offset_for(record.anchor, ignored);
+        };
         if (!document.chapter_index_for(record.anchor.resource, index) ||
-            !document.load_chapter(index, source, detail) ||
+            !document.find_chapter_part(index, source, detail, ChapterLoad::Mapping, holds) ||
             !sync::to_xpointer(document, source, record.anchor, sync_config.dom_version, xpointer,
                                detail)) {
-            sync_status = "此位置暂不支持精确同步：" + detail;
+            sync_status = memory_error(detail) ? "设备内存不足，暂时无法计算同步位置。" : "此位置暂不支持精确同步：" + detail;
             draw_sync();
             overlay();
             return;
@@ -1856,7 +2365,8 @@ struct ReaderApp::Impl final : DisplayBackend {
                     }
                 } else {
                     remote_state = "无法映射";
-                    sync_status = "远端位置无法精确映射，未跳转。可继续阅读或明确上传本机位置。";
+                    sync_status = memory_error(detail) ? "设备内存不足，暂时无法映射远端位置，未跳转。"
+                                                       : "远端位置无法精确映射，未跳转。可继续阅读或明确上传本机位置。";
                 }
             } else {
                 sync_checked = false; remote_state = "未检查";
@@ -1905,6 +2415,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             draw_refresh(); overlay(); return;
         }
         if (view == View::PowerSettings || view == View::StorageSettings || view == View::InputSettings ||
+            view == View::SyncSettings || (view == View::Import && import_from_settings) ||
             (view == View::Refresh && refresh_from_settings)) {
             draw_settings(); overlay(); return;
         }
@@ -2005,13 +2516,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             const auto origin = session.visible_record();
             if (!origin)
                 return;
-            if (!load_chapter(index))
-                return;
             std::uint32_t target = 0;
-            if (!link.fragment.empty() && !chapter.fragment_offset(link.fragment, target)) {
-                error("链接锚点不存在");
+            if (!seek_fragment(index, link.fragment, target, "链接锚点不存在"))
                 return;
-            }
             if (!link_return)
                 link_return = origin->anchor;
             page_starts.clear();
@@ -2028,13 +2535,9 @@ struct ReaderApp::Impl final : DisplayBackend {
                 error("目录目标不在正文中");
                 return;
             }
-            if (!load_chapter(target))
-                return;
             std::uint32_t position = 0;
-            if (!item.fragment.empty() && !chapter.fragment_offset(item.fragment, position)) {
-                error("目录锚点不存在");
+            if (!seek_fragment(target, item.fragment, position, "目录锚点不存在"))
                 return;
-            }
             show_page(position);
             return;
         }
@@ -2058,13 +2561,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (!link_return)
                 return;
             const auto target = *link_return;
-            std::size_t index;
             std::uint32_t target_offset;
-            if (!document.chapter_index_for(target.resource, index) || !load_chapter(index) ||
-                !chapter.offset_for(target, target_offset)) {
-                error("原位置无法恢复");
+            if (!seek(target, target_offset, "原位置无法恢复"))
                 return;
-            }
             link_return.reset();
             page_starts.clear();
             show_page(target_offset);
@@ -2086,6 +2585,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 error(message);
                 return;
             }
+            save_pages();
             scan_library();
             draw_library();
             overlay(true);
@@ -2212,12 +2712,33 @@ struct ReaderApp::Impl final : DisplayBackend {
             draw_storage();
             break;
         case InputSettings:
+            message.clear();
             draw_input_settings();
             break;
+        case SyncSettings:
+            draw_sync_settings();
+            break;
+        case LibraryView: {
+            if (!begin_settings_edit(true)) return;
+            auto values = edit_snapshot.config.settings;
+            const std::string previous = values.library_view == "grid" ? "卡片" : "列表";
+            values.library_view = values.library_view == "grid" ? "list" : "grid";
+            std::string detail;
+            if (store.apply_settings(edit_snapshot, values, false, detail) == StoreStatus::Ok) {
+                settings.library_view = values.library_view;
+                library_grid = values.library_view == "grid";
+                library_page = 0;
+                message.clear();
+            } else
+                message = "“书库默认视图”未保存，仍按原设置（" + previous + "）生效。请检查存储卡。";
+            draw_input_settings();
+            break;
+        }
         case Settings:
             draw_settings();
             break;
         case Import:
+            import_from_settings = view == View::Settings;
             draw_import();
             break;
         case Sync:
@@ -2250,13 +2771,9 @@ struct ReaderApp::Impl final : DisplayBackend {
                 return;
             }
             const auto target = *remote_anchor;
-            std::size_t index;
             std::uint32_t start;
-            if (!document.chapter_index_for(target.resource, index) || !load_chapter(index) ||
-                !chapter.offset_for(target, start)) {
-                error("远端位置无法恢复");
+            if (!seek(target, start, "远端位置无法恢复"))
                 return;
-            }
             const auto origin = session.visible_record();
             cancel_sync();
             if (origin) link_return = origin->anchor;
@@ -2383,6 +2900,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         const bool accepted = router.accept(input.event);
         if (!accepted || display.busy() || view == View::Sleeping)
             return;
+        release_counting();
         if (input.queued) {
             const bool turn_touch = input.touch && input.y < footer_top && (input.x < 205 || input.x >= 479);
             const bool turn_key = !input.touch && (input.event.input == Input::K1 || input.event.input == Input::K3);
@@ -2467,6 +2985,7 @@ void ReaderApp::Impl::apply_typography() {
     }
     load_fonts();
     page_starts.clear();
+    reset_pages();
     session.change_layout();
     show_page(offset);
 }
@@ -2498,6 +3017,7 @@ bool ReaderApp::initialize() {
     return impl_->initialize();
 }
 bool ReaderApp::open_book(const std::string &path) {
+    impl_->release_counting();
     return !impl_->usb_prepared && impl_->open(path);
 }
 void ReaderApp::set_battery(std::optional<int> percent) {
@@ -2566,10 +3086,12 @@ bool ReaderApp::prepare_usb_transfer() {
     if (impl_->usb_prepared || impl_->display.busy() || impl_->active_network ||
         !impl_->card_available || !impl_->persist()) return false;
     impl_->cancel_sync();
+    impl_->save_pages();
     if (!impl_->ui.open_fallback()) return false;
     impl_->document.close();
+    impl_->release_counting();
     impl_->body.open_fallback();
-    impl_->chapter = {};
+    release(impl_->chapter);
     impl_->page = {};
     impl_->links.clear();
     impl_->entries.clear();
@@ -2592,6 +3114,8 @@ bool ReaderApp::prepare_sleep() {
     if (impl_->display.busy() || impl_->active_network || !impl_->persist())
         return false;
     if (impl_->has_book() && !impl_->session.visible_record()) return false;
+    impl_->save_pages();
+    impl_->release_counting();
     const auto sync_state = impl_->sync_badge();
     impl_->cancel_sync();
     impl_->draw_sleep(sync_state);
@@ -2610,6 +3134,7 @@ void ReaderApp::wake() {
     }
 }
 void ReaderApp::card_removed() {
+    impl_->release_counting();
     if (impl_->usb_prepared) { show_usb_transfer(false, "TF 卡已移除，请退出并重启。"); return; }
     impl_->cancel_sync();
     impl_->covers.clear();
@@ -2626,6 +3151,21 @@ bool ReaderApp::save_due() const {
 void ReaderApp::save_progress() {
     if (impl_->usb_prepared || impl_->display.busy()) return;
     if (!impl_->persist()) impl_->error(impl_->message);
+}
+std::optional<BookPages> ReaderApp::book_pages() const {
+    const auto page = impl_->has_book() ? impl_->current_page() : 0;
+    return page ? std::optional<BookPages>{{page, impl_->total_pages()}} : std::nullopt;
+}
+bool ReaderApp::background_due() const {
+    return impl_->counting_due();
+}
+const char *ReaderApp::background_state() const {
+    if (!impl_->has_book() || impl_->pages_complete) return "idle";
+    if (impl_->pages_failed) return "failed";
+    return impl_->counting_blocked == impl_->chapter_index ? "waiting" : "counting";
+}
+void ReaderApp::background_step() {
+    if (impl_->counting_due()) impl_->count_pages();
 }
 void ReaderApp::show_error(const std::string &message) {
     if (!impl_->display.busy())

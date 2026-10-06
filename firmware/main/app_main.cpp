@@ -19,6 +19,9 @@ constexpr std::int64_t idle_slow_us = 3'000'000;
 // A progress commit blocks input sampling for its duration, so it waits until the page has
 // been left alone this long. Leaving the book, sleeping and USB transfer commit immediately.
 constexpr std::int64_t idle_save_us = 2'000'000;
+// Whole-book page counting shares the application task with input handling and starts only
+// after the page has been left alone this long, so consecutive page turns are not delayed.
+constexpr std::int64_t idle_background_us = 1'000'000;
 std::uint64_t presentation_sequence = 0;
 // When the most recent frame and its follow-up work finished; contacts sampled earlier were
 // made while the previous screen was still being replaced.
@@ -274,12 +277,25 @@ extern "C" void app_main() {
             app->save_progress();
             present(*app);
         }
-        if (!usb_mode && idle >= idle_slow_us && !app->pending_frame())
+        const bool background = !usb_mode && idle >= idle_background_us && !physical_source &&
+                                !network_busy && !sleep_requested && !app->pending_frame() &&
+                                !pico_page::console::transfer_active() && app->background_due();
+        if (background) {
+            const auto started = esp_timer_get_time();
+            app->background_step();
+            // A slice that outlasts its 40 ms budget delays any input that arrives meanwhile.
+            const auto elapsed_ms = (esp_timer_get_time() - started) / 1000;
+            if (elapsed_ms >= 150)
+                ESP_LOGI(tag, "Page counting slice: %lld ms state=%s", static_cast<long long>(elapsed_ms),
+                         app->background_state());
+        }
+        else if (!usb_mode && idle >= idle_slow_us && !app->pending_frame())
             pico_page::platform::set_performance(false);
         const std::int64_t sleep_after = app->auto_sleep_minutes() * 60'000'000LL;
         if (!usb_mode && sleep_after > 0 && idle >= sleep_after)
             sleep_requested = true;
         if (pico_page::console::transfer_active()) vTaskDelay(pdMS_TO_TICKS(1));
-        else pico_page::platform::wait_for_input(20);
+        // A full tick between counting slices lets lower-priority tasks run.
+        else pico_page::platform::wait_for_input(background ? portTICK_PERIOD_MS : 20);
     }
 }

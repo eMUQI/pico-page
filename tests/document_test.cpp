@@ -47,6 +47,125 @@ int main(int argc, char** argv) {
     assert(second.text.find(U"第二章：远山") == 0 && second.text.size() > 1900);
     assert(!second.offset_for(non_bmp, note));
     assert(!book.load_chapter(2, second, error) && second.text.empty());
+    {
+        // A parse that would leave too little free memory stops with the memory error and
+        // releases the chapter; the same load succeeds once memory is available again.
+        static std::size_t allowance;
+        allowance = 100;
+        set_chapter_memory_probe([](std::size_t bytes) { return bytes <= allowance; });
+        Chapter limited;
+        for (const auto detail : {ChapterLoad::Mapping, ChapterLoad::Reading, ChapterLoad::Layout}) {
+            limited.text.assign(64, U'x');
+            assert(!book.load_chapter(0, limited, error, detail));
+            assert(error.rfind(kChapterMemoryError, 0) == 0 && limited.text.empty() && limited.text.capacity() < 64);
+        }
+        static unsigned checks;
+        checks = 0;
+        set_chapter_memory_probe([](std::size_t) { return ++checks < 4; });
+        assert(!book.load_chapter(0, limited, error) && error.rfind(kChapterMemoryError, 0) == 0);
+        set_chapter_memory_probe(nullptr);
+        assert(book.load_chapter(0, limited, error) && limited.text == first.text);
+    }
+    {
+        // A long chapter is read in parts that end at block boundaries. Joined, the parts give
+        // the whole text; every scalar keeps its source anchor, and a part can be found by an
+        // anchor or a fragment inside it.
+        const std::string fixture = argv[1];
+        EpubDocument long_book;
+        assert(long_book.open(fixture.substr(0, fixture.rfind('/') + 1) + "multi-part.epub", error));
+        std::u32string expected;
+        for (int number = 0; number < 5000; ++number) {
+            if (number) expected += U'\n';
+            expected += U"第";
+            for (const char digit : std::to_string(number)) expected += static_cast<char32_t>(digit);
+            expected += U"段：这一段用于检查长章节按段落边界分成多个部分。";
+        }
+        for (const auto detail : {ChapterLoad::Mapping, ChapterLoad::Reading, ChapterLoad::Layout}) {
+            std::u32string joined;
+            std::uint32_t count = 0;
+            Chapter piece;
+            do {
+                assert(long_book.load_chapter(0, piece, error, detail, count) && piece.part == count && !piece.split_node);
+                // A part closes at the block that reaches the threshold; its final separator is dropped.
+                assert(piece.text.size() + 1 >= kChapterPartScalars || piece.last_part);
+                assert(piece.text.size() < kChapterPartScalars + 64 && piece.text.back() != U'\n');
+                if (detail == ChapterLoad::Mapping) assert(piece.source_nodes.size() == piece.runs.size());
+                if (count) joined += U'\n';
+                joined += piece.text;
+                ++count;
+            } while (!piece.last_part);
+            assert(count == 3 && joined == expected);
+            assert(!long_book.load_chapter(0, piece, error, detail, count) && piece.text.empty());
+            assert(long_book.load_chapter(0, piece, error, detail, kLastChapterPart) && piece.part == count - 1 && piece.last_part);
+        }
+        Chapter middle, found;
+        assert(long_book.load_chapter(0, middle, error, ChapterLoad::Reading, 1));
+        Anchor anchor;
+        assert(middle.anchor_at(1234, anchor));
+        assert(long_book.find_chapter_part(0, found, error, ChapterLoad::Reading, [&](const Chapter& candidate) {
+            std::uint32_t offset = 0;
+            return candidate.offset_for(anchor, offset);
+        }));
+        std::uint32_t offset = 0;
+        assert(found.part == 1 && found.text == middle.text && found.offset_for(anchor, offset) && offset == 1234);
+        assert(long_book.find_chapter_part(0, found, error, ChapterLoad::Reading, [](const Chapter& candidate) {
+            std::uint32_t target = 0;
+            return candidate.fragment_offset("late", target);
+        }));
+        assert(found.part == 2 && found.fragment_offset("late", offset) && found.text.compare(offset, 6, U"第4500段") == 0);
+        assert(!long_book.find_chapter_part(0, found, error, ChapterLoad::Reading, [](const Chapter&) { return false; }));
+        // A single block longer than a part is divided inside the block.
+        EpubDocument block_book;
+        assert(block_book.open(argv[3], error));
+        assert(block_book.load_chapter(1, found, error, ChapterLoad::Reading) && found.split_node && !found.last_part);
+        assert(found.text.size() == 2 * kChapterPartScalars);
+        assert(block_book.load_chapter(1, middle, error, ChapterLoad::Reading, kLastChapterPart) && middle.part == 1 && middle.split_node);
+        assert(found.text.size() + middle.text.size() == 200001);
+    }
+    // A layout-only load fails or succeeds like a full load and paginates identically: the same
+    // text, blocks, images and run boundaries, with no source strings kept.
+    for (int argument = 1; argument < argc; ++argument) {
+        EpubDocument source;
+        if (!source.open(argv[argument], error)) continue;
+        for (std::size_t index = 0; index < source.spine().size(); ++index) {
+            Chapter full, layout;
+            std::string full_error, layout_error;
+            const bool loaded = source.load_chapter(index, full, full_error);
+            assert(source.load_chapter(index, layout, layout_error, ChapterLoad::Layout) == loaded && layout_error == full_error);
+            // A reading load differs from a full one only in the mapping data it leaves empty.
+            Chapter reading;
+            std::string reading_error;
+            assert(source.load_chapter(index, reading, reading_error, ChapterLoad::Reading) == loaded && reading_error == full_error);
+            assert(reading.text == full.text && reading.runs.size() == full.runs.size() && reading.links.size() == full.links.size() &&
+                   reading.fragments.size() == full.fragments.size() && reading.images.size() == full.images.size());
+            for (std::size_t i = 0; i < full.runs.size(); ++i)
+                assert(reading.runs[i].begin == full.runs[i].begin && reading.runs[i].end == full.runs[i].end &&
+                       reading.runs[i].source == full.runs[i].source &&
+                       reading.runs[i].element_reference == full.runs[i].element_reference);
+            for (std::uint32_t offset = 0; offset < full.text.size(); ++offset) {
+                Anchor expected, actual;
+                const bool anchored = full.anchor_at(offset, expected);
+                assert(reading.anchor_at(offset, actual) == anchored && (!anchored || actual == expected));
+            }
+            assert(reading.source_nodes.empty());
+            for (const auto& css : reading.css_sources) assert(css.empty());
+            assert(reading.text.capacity() - reading.text.size() <= 4096);
+            assert(layout.text == full.text && layout.blocks.size() == full.blocks.size());
+            for (std::size_t i = 0; i < full.blocks.size(); ++i)
+                assert(layout.blocks[i].begin == full.blocks[i].begin && layout.blocks[i].end == full.blocks[i].end &&
+                       layout.blocks[i].kind == full.blocks[i].kind);
+            assert(layout.images.size() == full.images.size() && layout.runs.size() == full.runs.size());
+            for (std::size_t i = 0; i < full.images.size(); ++i)
+                assert(layout.images[i].begin == full.images[i].begin && layout.images[i].end == full.images[i].end &&
+                       layout.images[i].resource == full.images[i].resource);
+            for (std::size_t i = 0; i < full.runs.size(); ++i)
+                assert(layout.runs[i].begin == full.runs[i].begin && layout.runs[i].end == full.runs[i].end &&
+                       layout.runs[i].element_reference == full.runs[i].element_reference &&
+                       layout.runs[i].source.node.empty() && layout.runs[i].source.resource.empty());
+            assert(layout.source_nodes.empty());
+            for (const auto& css : layout.css_sources) assert(css.empty());
+        }
+    }
     std::cout << "native EPUB metadata, identities, chapters, anchors, links: passed\n";
     if (argc >= 3) {
         EpubDocument malformed;
@@ -57,7 +176,7 @@ int main(int argc, char** argv) {
         EpubDocument isolated;
         assert(isolated.open(argv[3], error));
         assert(isolated.load_chapter(0, first, error));
-        assert(!isolated.load_chapter(1, second, error) && second.text.empty());
+        assert(isolated.load_chapter(1, second, error) && !second.last_part);
     }
     if (argc >= 5) {
         EpubDocument styled;

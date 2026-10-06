@@ -59,7 +59,9 @@
 输入命令的 `accepted` 只表示已交给 App，不能代替后续 `FRAME success=1`。
 `FRAME success=1` 是驱动结果，不证明像素的物理成像或完整硬件验收。
 
-`status` 中所有内存值和 `stack_bytes` 单位均为字节。
+`status` 中所有内存值和 `stack_bytes` 单位均为字节。`page`、`pages` 为全书页码与总页数，统计完成前为 0；
+`count` 为页数统计状态：`idle`（无书或已完成）、`counting`、`waiting`（内存不足以读取下一章）、`failed`；
+`largest_psram` 为 PSRAM 最大连续空闲块。
 `crc32` 为当前画布的标准 CRC-32，兼容 `zlib.crc32()`；`revision` 仅来自已确认保存记录。
 `importing` 表示当前是否有资源导入，`received` 是该事务已接收字节数。
 不输出书籍正文、源锚点、凭据、配置原文或任意文件内容。

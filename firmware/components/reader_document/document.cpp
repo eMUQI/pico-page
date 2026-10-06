@@ -13,6 +13,7 @@
 #include <set>
 #include <utility>
 #ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
 #include "esp_random.h"
 #include "psa/crypto.h"
 #else
@@ -23,9 +24,31 @@
 namespace pico_page {
 namespace {
 constexpr std::uint64_t kMaxBook = 256ULL * 1024 * 1024;
-constexpr std::uint32_t kMaxXmlBytes = 2 * 1024 * 1024;
-constexpr std::uint32_t kMaxText = 200000;
-constexpr std::size_t kMaxNodes = 20000;
+// XHTML is parsed as a stream and kept one part at a time, so these two bound parsing time
+// rather than memory.
+constexpr std::uint32_t kMaxXmlBytes = 16 * 1024 * 1024;
+constexpr std::uint32_t kMaxText = 2 * kChapterPartScalars;
+// A part is closed at the first block boundary past the first set of thresholds and inside a
+// block past the second; the record limits further below are therefore never reached by text.
+constexpr std::size_t kPartRecords = 4096, kPartMetadata = 256 * 1024;
+constexpr std::size_t kPartRecordsHard = 6000, kPartMetadataHard = 448 * 1024;
+constexpr char kPartComplete[] = "Chapter part complete";
+bool platform_memory_room(std::size_t bytes) {
+#ifdef ESP_PLATFORM
+    // Free PSRAM kept while a chapter is parsed. An allocation failure aborts the firmware, so
+    // the parser stops first. Allocations between two checks are smaller than this reserve: one
+    // decoded XML chunk, record vectors growing within their limits, and strings below the
+    // checked sizes.
+    constexpr std::size_t reserve = 768 * 1024;
+    return heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= bytes + reserve &&
+           (bytes < 64 * 1024 || heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >= bytes);
+#else
+    static_cast<void>(bytes);
+    return true;
+#endif
+}
+bool (*memory_room)(std::size_t) = platform_memory_room;
+constexpr std::size_t kMaxNodes = 400000;
 constexpr std::size_t kMaxPath = 2048;
 constexpr std::size_t kMaxCssBytes = 256 * 1024;
 
@@ -275,11 +298,19 @@ struct ChapterParser {
         BlockKind kind = BlockKind::Paragraph;
         std::size_t link = std::numeric_limits<std::size_t>::max();
         std::size_t source_node = std::numeric_limits<std::size_t>::max();
+        std::string node;  // Path of the current text node when the chapter keeps no source_nodes paths.
         std::size_t image = std::numeric_limits<std::size_t>::max();
         bool simple_svg = true;
         unsigned svg_images = 0, svg_width = 0, svg_height = 0;
     };
-    Chapter& chapter;
+    // chapter is the part being collected; the wanted part is moved to result when it closes.
+    Chapter chapter;
+    Chapter& result;
+    std::uint32_t wanted = 0;  // Part number, or kLastChapterPart.
+    const std::function<bool(const Chapter&)>* match = nullptr;  // Replaces wanted when set.
+    std::uint32_t part = 0;
+    std::size_t part_nodes = 0;
+    bool split_pending = false, captured = false;
     Xml xml;
     std::vector<Frame> frames;
     std::uint32_t block_start = 0, source_count = 0;
@@ -287,9 +318,15 @@ struct ChapterParser {
     std::size_t css_bytes = 0;
     std::vector<std::string> css_links;
     bool pending_space = false, seen_body = false;
+    // Every ChapterLoad level applies the same limits and run boundaries; the flags only select
+    // what is stored. keep_mapping: source node paths and text, stylesheets. keep_anchors: the
+    // resource and node of each run.
+    bool keep_mapping = true, keep_anchors = true;
+    std::string last_run_node;  // Node of the last run when runs keep no anchors.
     Anchor pending_anchor;
     BlockKind block_kind = BlockKind::Paragraph;
-    explicit ChapterParser(Chapter& value) : chapter(value) {
+    ChapterParser(Chapter& value, const std::string& resource) : result(value) {
+        chapter.resource = resource;
         xml.start = [this](const std::string& name, const char** attrs) { start(name, attrs); };
         xml.end = [this](const std::string&) { end(); };
         xml.text = [this](const char* text, std::size_t count) { characters(text, count); };
@@ -301,6 +338,18 @@ struct ChapterParser {
         };
         xml.complex_markup = [this]() { if (!frames.empty() && frames.back().body) chapter.plain_dom = false; };
     }
+    bool room(std::size_t bytes) {
+        if (memory_room(bytes)) return true;
+        xml.stop(kChapterMemoryError);
+        return false;
+    }
+    /** Appends to the chapter text; growth doubles the buffer while the old one is still held. */
+    bool push(char32_t cp) {
+        if (chapter.text.size() == chapter.text.capacity() &&
+            !room(2 * sizeof(char32_t) * std::max<std::size_t>(chapter.text.capacity(), 16))) return false;
+        chapter.text.push_back(cp);
+        return true;
+    }
     bool retain_css(const std::string& css) {
         if (css.size() > kMaxCssBytes - css_bytes || chapter.css_sources.size() >= 256) {
             chapter.plain_dom = false;
@@ -308,27 +357,108 @@ struct ChapterParser {
             return false;
         }
         css_bytes += css.size();
-        chapter.css_sources.push_back(css);
+        chapter.css_sources.push_back(keep_mapping ? css : std::string());
+        return true;
+    }
+    bool soft_full() const {
+        return chapter.text.size() >= kChapterPartScalars || chapter.runs.size() >= kPartRecords ||
+               part_nodes >= kPartRecords || retained_metadata_bytes >= kPartMetadata;
+    }
+    bool hard_full() const {
+        return chapter.text.size() >= kMaxText || chapter.runs.size() >= kPartRecordsHard ||
+               part_nodes >= kPartRecordsHard || retained_metadata_bytes >= kPartMetadataHard;
+    }
+    bool selected() const {
+        return match ? (*match)(chapter) : wanted != kLastChapterPart && part == wanted;
+    }
+    /** Hands the collected part to the caller; the stylesheet state stays with the parser. */
+    void capture(bool last) {
+        auto css = std::move(chapter.css_sources);
+        auto warnings = std::move(chapter.warnings);
+        const bool plain = chapter.plain_dom;
+        if (!chapter.text.empty() && chapter.text.back() == U'\n') chapter.text.pop_back();
+        chapter.part = part;
+        chapter.last_part = last;
+        result = std::move(chapter);
+        chapter = Chapter();
+        chapter.resource = result.resource;
+        chapter.css_sources = std::move(css);
+        chapter.warnings = std::move(warnings);
+        chapter.plain_dom = plain;
+        captured = true;
+    }
+    /**
+     * Closes the collected part because more text follows. Returns false when parsing stops
+     * here: the wanted part is complete and nothing later in the document is needed.
+     */
+    bool next_part() {
+        const bool inside_block = !split_pending;
+        const auto none = std::numeric_limits<std::size_t>::max();
+        if (inside_block) { finish_block(); chapter.split_node = true; }
+        split_pending = false;
+        for (const auto& frame : frames)
+            if (frame.link < chapter.links.size()) chapter.links[frame.link].end = static_cast<std::uint32_t>(chapter.text.size());
+        // The text node being read continues in the new part. At a block boundary none of its
+        // text belongs to the closed part, so its entry moves; inside a block both parts keep one.
+        std::vector<std::pair<Frame*, SourceTextNode>> open;
+        for (auto& frame : frames) {
+            if (!frame.in_text || frame.source_node == none) continue;
+            open.emplace_back(&frame, keep_mapping ? chapter.source_nodes[frame.source_node] : SourceTextNode{});
+            if (keep_mapping && !inside_block && frame.source_node + 1 == chapter.source_nodes.size()) chapter.source_nodes.pop_back();
+        }
+        // A whitespace-only first child of an element that is still open decides how KOReader
+        // numbers the later text nodes of that element, so it stays visible to the next part.
+        std::vector<SourceTextNode> carried;
+        for (const auto& node : chapter.source_nodes) {
+            const auto parent = node.node.substr(0, node.node.rfind('/'));
+            if (node.first_child && std::all_of(node.text.begin(), node.text.end(), space) &&
+                std::any_of(frames.begin(), frames.end(), [&](const Frame& frame) { return frame.path == parent; }))
+                carried.push_back(node);
+        }
+        if (!captured && selected()) {
+            capture(false);
+            // Position mapping reads the stylesheets and structure of the whole document.
+            if (!keep_mapping) { xml.stop(kPartComplete); return false; }
+        }
+        chapter.text.clear(); chapter.blocks.clear(); chapter.runs.clear(); chapter.fragments.clear();
+        chapter.links.clear(); chapter.images.clear();
+        chapter.source_nodes = std::move(carried);
+        chapter.split_node = inside_block;
+        // Carried entries are not counted: the limits must divide a document identically at
+        // every ChapterLoad level, and only a Mapping load has them.
+        retained_metadata_bytes = 0; part_nodes = 0;
+        block_start = 0; source_count = 0; pending_space = false; last_run_node.clear();
+        for (auto& frame : frames) frame.source_node = frame.link = frame.image = none;
+        for (auto& [frame, node] : open) {
+            ++part_nodes;
+            retained_metadata_bytes += frame->node.size();
+            frame->source_node = chapter.source_nodes.size();
+            if (keep_mapping) { node.first_child = false; chapter.source_nodes.push_back(std::move(node)); }
+        }
+        ++part;
         return true;
     }
     void finish_block() {
         pending_space = false;
         const auto end = static_cast<std::uint32_t>(chapter.text.size());
-        if (end > block_start) { chapter.blocks.push_back({block_start, end, block_kind}); chapter.text.push_back(U'\n'); }
+        if (end > block_start) { chapter.blocks.push_back({block_start, end, block_kind}); push(U'\n'); }
         block_start = static_cast<std::uint32_t>(chapter.text.size());
+        if (soft_full()) split_pending = true;
     }
     void append(char32_t cp, const Anchor* source) {
-        if (chapter.text.size() >= kMaxText) { xml.stop("Chapter text scalar limit exceeded"); return; }
+        // A part is closed only when text follows it, so the last part is never empty.
+        if ((split_pending || hard_full()) && !next_part()) return;
         const auto begin = static_cast<std::uint32_t>(chapter.text.size());
-        chapter.text.push_back(cp);
-        if (!source) return;
+        if (!push(cp) || !source) return;
         if (!chapter.runs.empty()) {
             auto& last = chapter.runs.back();
-            if (last.end == begin && last.source.node == source->node && last.source.offset + last.end - last.begin == source->offset) { ++last.end; return; }
+            const auto& node = keep_anchors ? last.source.node : last_run_node;
+            if (last.end == begin && node == source->node && last.source.offset + last.end - last.begin == source->offset) { ++last.end; return; }
         }
         retained_metadata_bytes += source->node.size() + source->resource.size();
         if (chapter.runs.size() >= 8192 || retained_metadata_bytes > 512 * 1024) { xml.stop("Chapter source mapping limit exceeded"); return; }
-        chapter.runs.push_back({begin, begin + 1, *source});
+        if (keep_anchors) chapter.runs.push_back({begin, begin + 1, *source});
+        else { chapter.runs.push_back({begin, begin + 1, {{}, {}, source->offset}}); last_run_node = source->node; }
     }
     void start(const std::string& name, const char** attrs) {
         const auto simple_image_style = [](const char** attributes) {
@@ -337,6 +467,7 @@ struct ChapterParser {
             const auto aspect = attr(attributes, "preserveAspectRatio");
             return aspect.empty() || aspect == "xMidYMid meet";
         };
+        if (!room(0)) return;
         static const std::set<std::string> plain_elements = {"html", "head", "title", "meta", "link", "style", "body", "h1", "h2", "h3", "h4", "h5", "h6", "p", "div", "section", "article", "aside", "header", "footer", "nav", "blockquote", "span", "em", "strong", "b", "i", "u", "s", "a", "ul", "ol", "li", "br", "code", "small", "sub", "sup", "mark", "abbr", "cite", "q", "del", "ins"};
         if (!plain_elements.count(name) || xml.foreign_namespace || !attr(attrs, "space").empty()) chapter.plain_dom = false;
         Frame frame; frame.name = name;
@@ -405,7 +536,8 @@ struct ChapterParser {
                 for (auto c : scalar) append(c, nullptr);
                 retained_metadata_bytes += frame.path.size() + chapter.resource.size();
                 if (chapter.runs.size() >= 8192 || retained_metadata_bytes > 512 * 1024) { xml.stop("Chapter source mapping limit exceeded"); return; }
-                chapter.runs.push_back({begin, static_cast<std::uint32_t>(chapter.text.size()), {chapter.resource, frame.path, 0}, true});
+                if (keep_anchors) chapter.runs.push_back({begin, static_cast<std::uint32_t>(chapter.text.size()), {chapter.resource, frame.path, 0}, true});
+                else { chapter.runs.push_back({begin, static_cast<std::uint32_t>(chapter.text.size()), {}, true}); last_run_node = frame.path; }
                 if (name == "img" || name == "image" || name == "svg") {
                     if (chapter.images.size() >= 256) { xml.stop("Chapter image reference limit exceeded"); return; }
                     DocumentImage image{begin, static_cast<std::uint32_t>(chapter.text.size()), "", attr(attrs, "alt"), {chapter.resource, frame.path, 0}};
@@ -438,11 +570,12 @@ struct ChapterParser {
         if (!frames.empty()) { frames.back().in_text = false; block_kind = frames.back().kind; }
     }
     void characters(const char* bytes, std::size_t size) {
-        if (frames.empty()) return;
+        if (frames.empty() || !room(0)) return;
         auto& frame = frames.back();
         if (frame.css != std::numeric_limits<std::size_t>::max()) {
             if (size <= kMaxCssBytes - css_bytes) {
-                chapter.css_sources[frame.css].append(bytes, size); css_bytes += size;
+                if (keep_mapping) chapter.css_sources[frame.css].append(bytes, size);
+                css_bytes += size;
             } else { chapter.plain_dom = false; warn(chapter, "Stylesheet mapping limit exceeded"); }
         }
         const bool new_node = !frame.in_text;
@@ -457,15 +590,23 @@ struct ChapterParser {
             frame.source_offset += static_cast<std::uint32_t>(scalars.size());
             return;
         }
-        if (new_node) {
-            auto node = frame.path + "/text()[" + std::to_string(frame.text_index) + ']';
-            retained_metadata_bytes += node.size();
-            if (chapter.source_nodes.size() >= 8192 || retained_metadata_bytes > 512 * 1024) { xml.stop("Chapter source node limit exceeded"); return; }
+        // A node that continues after a part was closed inside it is entered again in the new part.
+        if (new_node || frame.source_node == std::numeric_limits<std::size_t>::max()) {
+            if (new_node) frame.node = frame.path + "/text()[" + std::to_string(frame.text_index) + ']';
+            retained_metadata_bytes += frame.node.size();
+            if (part_nodes >= 8192 || retained_metadata_bytes > 512 * 1024) { xml.stop("Chapter source node limit exceeded"); return; }
+            ++part_nodes;
             frame.source_node = chapter.source_nodes.size();
-            chapter.source_nodes.push_back({std::move(node), {}, first_child});
+            if (keep_mapping) chapter.source_nodes.push_back({frame.node, {}, new_node && first_child});
         }
-        chapter.source_nodes[frame.source_node].text += scalars;
-        Anchor source{chapter.resource, chapter.source_nodes[frame.source_node].node, 0};
+        if (keep_mapping) {
+            auto& raw = chapter.source_nodes[frame.source_node].text;
+            const auto size = raw.size() + scalars.size();
+            if (size > raw.capacity() && !room(sizeof(char32_t) * std::max(2 * raw.capacity(), size))) return;
+            raw += scalars;
+        }
+        // The loop below may close the part, which invalidates references into the chapter.
+        Anchor source{chapter.resource, frame.node, 0};
         for (auto cp : scalars) {
             source.offset = frame.source_offset++;
             if (!frame.pre && space(cp)) {
@@ -515,6 +656,8 @@ struct EpubDocument::Impl {
         if (offset > kMaxBook || std::fseek(self->file, static_cast<long>(offset), SEEK_SET) != 0) return 0;
         return std::fread(buffer, 1, size, self->file);
     }
+    bool load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
+              std::uint32_t wanted, const std::function<bool(const Chapter&)>* match);
     bool parse(const std::string& path, Xml& xml, std::string& error, std::uint32_t max_bytes = kMaxXmlBytes) {
         const int index = mz_zip_reader_locate_file(&zip, path.c_str(), nullptr, MZ_ZIP_FLAG_CASE_SENSITIVE);
         mz_zip_archive_file_stat stat{};
@@ -635,7 +778,10 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
     for (const auto& n : opf.nodes) if (n.name == "itemref" && opf.nodes[n.parent].name == "spine") {
         const auto id = get(n, "idref"); auto item = manifest.find(id);
         if (item == manifest.end() || item->second.type != "application/xhtml+xml" || !names.count(item->second.path)) return fail(error, "Unsupported or missing spine resource");
-        next->spine.push_back({item->second.path, id, get(n, "linear") != "no"});
+        mz_zip_archive_file_stat stat{};
+        const int member = mz_zip_reader_locate_file(&next->zip, item->second.path.c_str(), nullptr, MZ_ZIP_FLAG_CASE_SENSITIVE);
+        if (member < 0 || !mz_zip_reader_file_stat(&next->zip, member, &stat)) return fail(error, "Unsupported or missing spine resource");
+        next->spine.push_back({item->second.path, id, get(n, "linear") != "no", static_cast<std::uint32_t>(stat.m_uncomp_size)});
     }
     if (next->spine.empty()) return fail(error, "EPUB spine is empty");
     if (next->metadata.title.empty()) { auto slash = path.rfind('/'); next->metadata.title = path.substr(slash == std::string::npos ? 0 : slash + 1); }
@@ -681,38 +827,90 @@ bool EpubDocument::read_cover(const std::string& path, std::vector<std::uint8_t>
     EpubDocument book;
     if (!book.open_impl(path, error, true)) return false;
     if (!book.impl_->cover.empty() && book.read_image(book.impl_->cover, bytes, error)) return true;
-    Chapter chapter;
-    chapter.resource = book.impl_->cover_page.empty() ? book.impl_->spine.front().resource : book.impl_->cover_page;
-    if (!book.impl_->cover_page.empty() && book.read_image(chapter.resource, bytes, error)) return true;
+    Chapter unused;
+    const auto resource = book.impl_->cover_page.empty() ? book.impl_->spine.front().resource : book.impl_->cover_page;
+    if (!book.impl_->cover_page.empty() && book.read_image(resource, bytes, error)) return true;
     error.clear();
-    ChapterParser parser(chapter);
-    if (!book.impl_->parse(chapter.resource, parser.xml, error, 262144)) return false;
+    // A cover page is a single image; a page long enough to span parts is not one.
+    ChapterParser parser(unused, resource);
+    if (!book.impl_->parse(resource, parser.xml, error, 262144)) return false;
     parser.finish_block();
-    if (chapter.images.size() != 1 || chapter.blocks.size() != 1 || chapter.blocks.front().kind != BlockKind::Image)
+    const auto& chapter = parser.chapter;
+    if (parser.part != 0 || chapter.images.size() != 1 || chapter.blocks.size() != 1 || chapter.blocks.front().kind != BlockKind::Image)
         return fail(error, "EPUB has no supported cover");
     return book.read_image(chapter.images.front().resource, bytes, error);
 }
 
-bool EpubDocument::load_chapter(std::size_t index, Chapter& chapter, std::string& error) {
-    chapter = {}; error.clear();
-    if (!impl_->file || index >= impl_->spine.size()) return fail(error, "Invalid EPUB chapter index");
-    ChapterParser parser(chapter); chapter.resource = impl_->spine[index].resource;
-    if (!impl_->parse(chapter.resource, parser.xml, error)) { chapter = {}; return false; }
-    for (const auto& path : parser.css_links) {
-        mz_zip_archive_file_stat info{};
-        const auto member = mz_zip_reader_locate_file(&impl_->zip, path.c_str(), nullptr, MZ_ZIP_FLAG_CASE_SENSITIVE);
-        if (member < 0 || !mz_zip_reader_file_stat(&impl_->zip, member, &info) || info.m_uncomp_size > kMaxCssBytes - parser.css_bytes) {
-            chapter.plain_dom = false; warn(chapter, "Missing or oversized stylesheet is not loaded"); continue;
-        }
-        std::string css(static_cast<std::size_t>(info.m_uncomp_size), '\0');
-        if (!mz_zip_reader_extract_to_mem(&impl_->zip, member, css.data(), css.size(), 0)) {
-            chapter.plain_dom = false; warn(chapter, "Invalid stylesheet is not loaded"); continue;
-        }
-        parser.retain_css(css);
+void set_chapter_memory_probe(bool (*probe)(std::size_t bytes)) {
+    memory_room = probe ? probe : platform_memory_room;
+}
+
+void release(Chapter& chapter) {
+    // Assigning an empty value may keep the capacity of the strings; swapping hands the buffers
+    // to a temporary that frees them.
+    Chapter empty;
+    std::swap(chapter, empty);
+}
+
+bool EpubDocument::load_chapter(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail, std::uint32_t part) {
+    return impl_->load(index, chapter, error, detail, part, nullptr);
+}
+bool EpubDocument::find_chapter_part(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
+                                     const std::function<bool(const Chapter&)>& match) {
+    return impl_->load(index, chapter, error, detail, 0, &match);
+}
+bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
+                              std::uint32_t wanted, const std::function<bool(const Chapter&)>* match) {
+    pico_page::release(chapter); error.clear();
+    if (!file || index >= spine.size()) return fail(error, "Invalid EPUB chapter index");
+    ChapterParser parser(chapter, spine[index].resource);
+    parser.wanted = wanted;
+    parser.match = match;
+    if (detail != ChapterLoad::Mapping) {
+        parser.keep_mapping = false;
+        parser.keep_anchors = detail == ChapterLoad::Reading;
+        // Decoded text holds at most one scalar per XHTML byte and a part is closed at kMaxText;
+        // reserving that avoids the transient copies of geometric growth.
+        const auto scalars = std::min<std::size_t>(spine[index].bytes, kMaxText) + 1024;
+        if (memory_room(scalars * sizeof(char32_t))) parser.chapter.text.reserve(scalars);
+        else if (detail == ChapterLoad::Layout) return fail(error, std::string(kChapterMemoryError) + ": " + spine[index].resource);
     }
-    parser.finish_block();
-    if (!parser.seen_body || chapter.text.empty()) { chapter = {}; return fail(error, "Chapter contains no supported body content"); }
-    if (chapter.text.back() == U'\n') chapter.text.pop_back();
+    const bool parsed = parse(spine[index].resource, parser.xml, error);
+    if (!parsed && parser.xml.error != kPartComplete) { pico_page::release(chapter); return false; }
+    error.clear();
+    if (parsed) {
+        parser.finish_block();
+        if (!parser.seen_body || (parser.part == 0 && !parser.captured && parser.chapter.text.empty())) {
+            pico_page::release(chapter);
+            return fail(error, "Chapter contains no supported body content");
+        }
+        if (!parser.captured && (wanted == kLastChapterPart || parser.selected())) parser.capture(true);
+    }
+    if (!parser.captured) { pico_page::release(chapter); return fail(error, "Chapter part is not available: " + spine[index].resource); }
+    if (detail == ChapterLoad::Mapping) {
+        for (const auto& path : parser.css_links) {
+            mz_zip_archive_file_stat info{};
+            const auto member = mz_zip_reader_locate_file(&zip, path.c_str(), nullptr, MZ_ZIP_FLAG_CASE_SENSITIVE);
+            if (member < 0 || !mz_zip_reader_file_stat(&zip, member, &info) || info.m_uncomp_size > kMaxCssBytes - parser.css_bytes) {
+                parser.chapter.plain_dom = false; warn(parser.chapter, "Missing or oversized stylesheet is not loaded"); continue;
+            }
+            std::string css(static_cast<std::size_t>(info.m_uncomp_size), '\0');
+            if (!mz_zip_reader_extract_to_mem(&zip, member, css.data(), css.size(), 0)) {
+                parser.chapter.plain_dom = false; warn(parser.chapter, "Invalid stylesheet is not loaded"); continue;
+            }
+            parser.retain_css(css);
+        }
+        // Stylesheets and structure are properties of the whole document, known only now.
+        chapter.css_sources = std::move(parser.chapter.css_sources);
+        chapter.warnings = std::move(parser.chapter.warnings);
+        chapter.plain_dom = parser.chapter.plain_dom;
+    }
+    // A chapter kept for reading gives back the unused part of its reservation.
+    if (detail == ChapterLoad::Reading && chapter.text.capacity() - chapter.text.size() > 4096 &&
+        memory_room(chapter.text.size() * sizeof(char32_t))) {
+        std::u32string exact(chapter.text.begin(), chapter.text.end());
+        chapter.text.swap(exact);
+    }
     return true;
 }
 bool EpubDocument::chapter_index_for(const std::string& resource, std::size_t& index) const {

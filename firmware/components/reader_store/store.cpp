@@ -16,7 +16,10 @@
 #include <unistd.h>
 #ifdef ESP_PLATFORM
 #include "esp_rom_crc.h"
+#include "esp_vfs_fat.h"
 #include "sdkconfig.h"
+#else
+#include <sys/statvfs.h>
 #endif
 
 namespace pico_page {
@@ -684,6 +687,20 @@ StoreStatus FileStore::clear_cache() const {
     if (safe == StoreStatus::Missing) return StoreStatus::Ok;
     if (safe != StoreStatus::Ok) return safe;
     return remove_children(root_ + "/" + path, 0);
+}
+
+bool FileStore::card_space(std::uint64_t& total, std::uint64_t& available) const {
+#ifdef ESP_PLATFORM
+    // The first call after mounting reads the free-cluster count from the FAT32 FSInfo sector;
+    // FatFs scans the whole allocation table only when that sector holds no valid count.
+    return esp_vfs_fat_info(root_.c_str(), &total, &available) == ESP_OK;
+#else
+    struct statvfs info {};
+    if (statvfs(root_.c_str(), &info) != 0) return false;
+    total = static_cast<std::uint64_t>(info.f_blocks) * info.f_frsize;
+    available = static_cast<std::uint64_t>(info.f_bavail) * info.f_frsize;
+    return true;
+#endif
 }
 
 StoreStatus FileStore::load_cache(const std::string& name, std::size_t limit, std::string& bytes) const {

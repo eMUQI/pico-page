@@ -112,6 +112,7 @@ CssProfile css_profile(const Chapter& chapter) {
 
 bool mapping_profile(const Chapter& chapter, CssProfile& css, std::string& error) {
     if (!chapter.plain_dom) { error = "This chapter contains an unsupported KOReader DOM structure"; return false; }
+    if (chapter.split_node) { error = "This chapter part divides a text node"; return false; }
     css = css_profile(chapter);
     if (!css.normal_whitespace) { error = "This chapter requires CSS whitespace or generated-content mapping"; return false; }
     return true;
@@ -196,17 +197,26 @@ bool from_xpointer(EpubDocument& document, const std::string& xpointer, int dom_
     }
     const auto index = static_cast<std::size_t>(parts[1].index - 1);
     Chapter chapter;
-    if (!document.load_chapter(index, chapter, error)) return false;
     const std::string source = "/html[1]" + canonical(parts, 2);
+    const std::string_view parent(source.data(), source.rfind('/'));
+    const auto locate = [&](const Chapter& candidate, const CssProfile& css) -> const SourceTextNode* {
+        for (const auto& item : candidate.source_nodes) {
+            if (std::string_view(item.node).substr(0, item.node.rfind('/')) != parent) continue;
+            std::string path, ignored;
+            if (mapped_path(candidate, item, css, path, ignored) && path == source) return &item;
+        }
+        return nullptr;
+    };
+    // The part is chosen before the stylesheets are complete; the profile check below repeats
+    // the lookup with them and rejects what they make inexact.
+    if (!document.find_chapter_part(index, chapter, error, ChapterLoad::Mapping,
+                                    [&](const Chapter& candidate) { return locate(candidate, CssProfile{}) != nullptr; })) {
+        if (error.rfind("Chapter part is not available", 0) == 0) error = "KOReader text node cannot be mapped exactly";
+        return false;
+    }
     CssProfile css;
     if (!mapping_profile(chapter, css, error)) return false;
-    const SourceTextNode* node = nullptr;
-    const std::string_view parent(source.data(), source.rfind('/'));
-    for (const auto& item : chapter.source_nodes) {
-        if (std::string_view(item.node).substr(0, item.node.rfind('/')) != parent) continue;
-        std::string path, ignored;
-        if (mapped_path(chapter, item, css, path, ignored) && path == source) { node = &item; break; }
-    }
+    const SourceTextNode* node = locate(chapter, css);
     if (!node) { error = "KOReader text node cannot be mapped exactly"; return false; }
     const auto offsets = normalized_offsets(*node);
     if (offset >= offsets.size()) { error = "KOReader text offset is outside the source node"; return false; }

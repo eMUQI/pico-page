@@ -1,5 +1,6 @@
 if(ESP_PLATFORM)
-    idf_component_register(SRCS app.cpp INCLUDE_DIRS include REQUIRES reader_core reader_store reader_document reader_graphics reader_sync)
+    idf_component_register(SRCS app.cpp INCLUDE_DIRS include REQUIRES reader_core reader_store reader_document reader_graphics reader_sync
+        PRIV_REQUIRES esp_app_format)
     target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_17)
 else()
     add_library(reader_app app.cpp)

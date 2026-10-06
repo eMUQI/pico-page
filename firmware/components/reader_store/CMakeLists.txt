@@ -1,7 +1,7 @@
 set(store_sources store.cpp config.cpp third_party/tomlc17/tomlc17.c third_party/cjson/cJSON.c)
 if(ESP_PLATFORM)
     idf_component_register(SRCS ${store_sources} INCLUDE_DIRS include
-        PRIV_INCLUDE_DIRS third_party/tomlc17 third_party/cjson REQUIRES reader_core PRIV_REQUIRES esp_rom)
+        PRIV_INCLUDE_DIRS third_party/tomlc17 third_party/cjson REQUIRES reader_core PRIV_REQUIRES esp_rom fatfs)
     target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_17 PRIVATE c_std_17)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE CJSON_NESTING_LIMIT=16)
 else()

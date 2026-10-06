@@ -27,9 +27,14 @@ enum class View {
     PowerSettings,
     StorageSettings,
     InputSettings,
-    BookManagement
+    BookManagement,
+    SyncSettings
 };
 enum class UsbTransferAction { None, Start, Exit };
+struct BookPages {
+    std::uint32_t page;   // 1-based, counted from the first linear chapter.
+    std::uint32_t total;
+};
 struct NetworkOperation {
     std::uint64_t id;
     sync::HttpRequest request;
@@ -86,6 +91,26 @@ class ReaderApp {
     bool save_due() const;
     /** Commits the presented position now; a failure replaces the page with the error view. */
     void save_progress();
+    /**
+     * Page number of the visible page and the page total of the open book under the applied
+     * typography; nullopt until every chapter has been counted or outside the reading order.
+     */
+    std::optional<BookPages> book_pages() const;
+    /** True while the reading page is shown and whole-book page counting has work left. */
+    bool background_due() const;
+    /**
+     * Diagnostic state of page counting: "idle" without a book or when complete, "counting"
+     * while chapters remain, "waiting" while memory is too low to load the next chapter, and
+     * "failed" after a chapter could not be read or laid out. The string is static.
+     */
+    const char *background_state() const;
+    /**
+     * Runs one slice of page counting, about 40 ms or one chapter load. It presents no frame
+     * and changes no reading position; the footer adopts the result at its next redraw.
+     * Call it only while no input is waiting. Counting may hold a second parsed chapter, which
+     * every input and every entry point that loads content releases first.
+     */
+    void background_step();
     void show_error(const std::string &message);
     /** Copies one queued request for an external worker; never call from that worker. */
     std::optional<NetworkOperation> take_network_request();
