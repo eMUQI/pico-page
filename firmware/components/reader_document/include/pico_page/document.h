@@ -100,6 +100,9 @@ std::string md5_hex(std::string_view bytes);
 /** Frees all memory held by a chapter; assigning an empty chapter may keep string capacity. */
 void release(Chapter& chapter);
 
+/** Exact load_chapter error when its stop callback requests cancellation. */
+inline constexpr char kChapterCancelled[] = "Chapter load cancelled";
+
 /**
  * Start of the load_chapter error when parsing stopped because free memory would have fallen
  * below the amount kept in reserve. The caller may release other memory and load again.
@@ -131,9 +134,14 @@ public:
      * Below Mapping the text is reserved once, at most twice kChapterPartScalars, instead of
      * growing geometrically; a Reading part is then trimmed to its length. A Layout load fails
      * with kChapterMemoryError when that reservation does not fit.
+     * stop is called synchronously before loading, between XML chunks of at most 4096 bytes,
+     * and around linked stylesheet reads. It must not reenter this document. A true result
+     * releases output and returns false with kChapterCancelled; retry starts parsing again.
+     * Blocking storage and decompressor calls are not interrupted by this callback.
      */
     bool load_chapter(std::size_t index, Chapter& chapter, std::string& error,
-                      ChapterLoad detail = ChapterLoad::Mapping, std::uint32_t part = 0);
+                      ChapterLoad detail = ChapterLoad::Mapping, std::uint32_t part = 0,
+                      const std::function<bool()>& stop = {});
     /**
      * Like load_chapter, for the first part that match accepts. match sees each complete part
      * at the given detail, before the stylesheet fields of a Mapping load are final.

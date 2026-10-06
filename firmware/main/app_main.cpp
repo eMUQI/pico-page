@@ -509,8 +509,10 @@ extern "C" void app_main() {
                                 !pico_page::console::transfer_active() && app->background_due();
         if (background) {
             const auto started = esp_timer_get_time();
-            app->background_step();
-            // A slice that outlasts its 40 ms budget delays any input that arrives meanwhile.
+            app->background_step([] {
+                return pico_page::platform::input_waiting_before(std::numeric_limits<std::int64_t>::max());
+            });
+            // Storage, decompression and one page layout can exceed the pagination target.
             const auto elapsed_ms = (esp_timer_get_time() - started) / 1000;
             if (elapsed_ms >= 150)
                 ESP_LOGI(tag, "Page counting slice: %lld ms state=%s", static_cast<long long>(elapsed_ms),

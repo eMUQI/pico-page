@@ -1185,14 +1185,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         pages_complete = std::find(counted.begin(), counted.end(), false) == counted.end();
         if (pages_complete) save_pages();
     }
-    /**
-     * Counts pages for one time slice. The item being read is measured first, then the rest in
-     * reading order, each part by part. The part on screen is measured in place; any other part
-     * is loaded for layout, which takes a slice of its own. That bounds the delay of an input
-     * arriving meanwhile to one part load or one slice of layout.
-     */
-    void count_pages() {
+    /** Counts pages on the owner task, retaining completed page boundaries on cancellation. */
+    void count_pages(const std::function<bool()>& stop) {
         const StageTimer timer{"count_slice"};
+        if (stop && stop()) return;
         const auto &spine = document.spine();
         if (counting_index == not_counting) {
             auto next = static_cast<std::size_t>(std::find(counted.begin(), counted.end(), false) - counted.begin());
@@ -1215,8 +1211,10 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
             std::string detail;
             const StageTimer load_timer{"chapter_counting"};
-            if (document.load_chapter(counting_index, counting_chapter, detail, ChapterLoad::Layout, counting_part))
+            if (document.load_chapter(counting_index, counting_chapter, detail, ChapterLoad::Layout, counting_part, stop))
                 counting_loaded = true;
+            else if (detail == kChapterCancelled)
+                return;
             else if (memory_error(detail))
                 counting_blocked = chapter_index;
             else if (detail.find("limit") != std::string::npos) {
@@ -1229,8 +1227,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         const Chapter &source = in_place ? chapter : counting_chapter;
         const auto spec = layout(settings);
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(40);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(15);
         do {
+            if (stop && stop()) return;
             const auto start = readable_offset(source, counting_offset);
             if (start >= source.text.size()) {
                 if (source.last_part) {
@@ -3287,8 +3286,8 @@ const char *ReaderApp::background_state() const {
     if (impl_->pages_failed) return "failed";
     return impl_->counting_blocked == impl_->chapter_index ? "waiting" : "counting";
 }
-void ReaderApp::background_step() {
-    if (impl_->counting_due()) impl_->count_pages();
+void ReaderApp::background_step(const std::function<bool()>& stop) {
+    if (impl_->counting_due()) impl_->count_pages(stop);
 }
 void ReaderApp::show_error(const std::string &message) {
     if (!impl_->display.busy())

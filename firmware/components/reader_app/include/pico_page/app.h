@@ -3,6 +3,7 @@
 #include "pico_page/graphics.h"
 #include "pico_page/sync.h"
 #include <memory>
+#include <functional>
 #include <atomic>
 #include <string>
 
@@ -128,12 +129,15 @@ class ReaderApp {
      */
     const char *background_state() const;
     /**
-     * Runs one slice of page counting, about 40 ms or one chapter load. It presents no frame
+     * Runs one slice of page counting, targeting 15 ms of pagination or one chapter load. It presents no frame
      * and changes no reading position; the footer adopts the result at its next redraw.
      * Call it only while no input is waiting. Counting may hold a second parsed chapter, which
-     * every input and every entry point that loads content releases first.
+     * every input and every entry point that loads content releases first. stop is checked
+     * between pages and XML chunks; cancellation retains completed page indices. Storage,
+     * decompression and a single page layout can exceed the target; this is not a hard bound.
+     * Call on the application owner task; stop must not call back into ReaderApp.
      */
-    void background_step();
+    void background_step(const std::function<bool()>& stop = {});
     void show_error(const std::string &message);
     /** Copies one queued request for an external worker; never call from that worker. */
     std::optional<NetworkOperation> take_network_request();

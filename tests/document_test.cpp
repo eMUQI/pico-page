@@ -98,6 +98,18 @@ int main(int argc, char** argv) {
             assert(!long_book.load_chapter(0, piece, error, detail, count) && piece.text.empty());
             assert(long_book.load_chapter(0, piece, error, detail, kLastChapterPart) && piece.part == count - 1 && piece.last_part);
         }
+        {
+            Chapter interrupted, retried, baseline;
+            unsigned checks = 0;
+            assert(!long_book.load_chapter(0, interrupted, error, ChapterLoad::Reading, 2,
+                                          [&] { return ++checks == 8; }));
+            assert(checks >= 8 && error == kChapterCancelled && interrupted.text.empty() && interrupted.runs.empty());
+            assert(long_book.load_chapter(0, retried, error, ChapterLoad::Reading, 2, [] { return false; }));
+            assert(long_book.load_chapter(0, baseline, error, ChapterLoad::Reading, 2));
+            assert(retried.text == baseline.text && retried.part == 2);
+            Anchor a, b;
+            assert(retried.anchor_at(1234, a) && baseline.anchor_at(1234, b) && a == b);
+        }
         Chapter middle, found;
         assert(long_book.load_chapter(0, middle, error, ChapterLoad::Reading, 1));
         Anchor anchor;

@@ -658,16 +658,35 @@ struct EpubDocument::Impl {
         return std::fread(buffer, 1, size, self->file);
     }
     bool load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
-              std::uint32_t wanted, const std::function<bool(const Chapter&)>* match);
-    bool parse(const std::string& path, Xml& xml, std::string& error, std::uint32_t max_bytes = kMaxXmlBytes) {
+              std::uint32_t wanted, const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop = {});
+    bool parse(const std::string& path, Xml& xml, std::string& error, std::uint32_t max_bytes = kMaxXmlBytes, const std::function<bool()>& stop = {}) {
         const StageTimer timer{"xml_read_inflate_parse"};
         const int index = mz_zip_reader_locate_file(&zip, path.c_str(), nullptr, MZ_ZIP_FLAG_CASE_SENSITIVE);
         mz_zip_archive_file_stat stat{};
         if (index < 0 || !mz_zip_reader_file_stat(&zip, index, &stat)) return fail(error, "Missing EPUB resource: " + path);
         if (stat.m_uncomp_size > max_bytes) return fail(error, "EPUB XML resource exceeds limit: " + path);
+        struct Feed {
+            Xml& xml;
+            const std::function<bool()>& stop;
+            bool cancelled = false;
+        } feed{xml, stop};
         const bool extracted = mz_zip_reader_extract_to_callback(&zip, index, [](void* opaque, mz_uint64, const void* data, std::size_t count) -> std::size_t {
-            return static_cast<Xml*>(opaque)->feed(static_cast<const char*>(data), count, false) ? count : 0;
-        }, &xml, 0);
+            auto& feed = *static_cast<Feed*>(opaque);
+            for (std::size_t offset = 0; offset < count;) {
+                if (feed.stop && feed.stop()) {
+                    feed.cancelled = true;
+                    return 0;
+                }
+                const auto size = std::min<std::size_t>(4096, count - offset);
+                if (!feed.xml.feed(static_cast<const char*>(data) + offset, size, false)) return 0;
+                offset += size;
+            }
+            return count;
+        }, &feed, 0);
+        if (feed.cancelled || (stop && stop())) {
+            xml.error = kChapterCancelled;
+            return fail(error, kChapterCancelled);
+        }
         if (!extracted || !xml.feed("", 0, true)) return fail(error, xml.error.empty() ? "Invalid compressed EPUB resource: " + path : xml.error + ": " + path);
         return true;
     }
@@ -863,16 +882,18 @@ void release(Chapter& chapter) {
     std::swap(chapter, empty);
 }
 
-bool EpubDocument::load_chapter(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail, std::uint32_t part) {
-    return impl_->load(index, chapter, error, detail, part, nullptr);
+bool EpubDocument::load_chapter(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail, std::uint32_t part,
+                                const std::function<bool()>& stop) {
+    return impl_->load(index, chapter, error, detail, part, nullptr, stop);
 }
 bool EpubDocument::find_chapter_part(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
                                      const std::function<bool(const Chapter&)>& match) {
     return impl_->load(index, chapter, error, detail, 0, &match);
 }
 bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
-                              std::uint32_t wanted, const std::function<bool(const Chapter&)>* match) {
+                              std::uint32_t wanted, const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop) {
     pico_page::release(chapter); error.clear();
+    if (stop && stop()) return fail(error, kChapterCancelled);
     if (!file || index >= spine.size()) return fail(error, "Invalid EPUB chapter index");
     ChapterParser parser(chapter, spine[index].resource);
     parser.wanted = wanted;
@@ -886,7 +907,7 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
         if (memory_room(scalars * sizeof(char32_t))) parser.chapter.text.reserve(scalars);
         else if (detail == ChapterLoad::Layout) return fail(error, std::string(kChapterMemoryError) + ": " + spine[index].resource);
     }
-    const bool parsed = parse(spine[index].resource, parser.xml, error);
+    const bool parsed = parse(spine[index].resource, parser.xml, error, kMaxXmlBytes, stop);
     if (!parsed && parser.xml.error != kPartComplete) { pico_page::release(chapter); return false; }
     error.clear();
     if (parsed) {
@@ -900,6 +921,7 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
     if (!parser.captured) { pico_page::release(chapter); return fail(error, "Chapter part is not available: " + spine[index].resource); }
     if (detail == ChapterLoad::Mapping) {
         for (const auto& path : parser.css_links) {
+            if (stop && stop()) { pico_page::release(chapter); return fail(error, kChapterCancelled); }
             mz_zip_archive_file_stat info{};
             const auto member = mz_zip_reader_locate_file(&zip, path.c_str(), nullptr, MZ_ZIP_FLAG_CASE_SENSITIVE);
             if (member < 0 || !mz_zip_reader_file_stat(&zip, member, &info) || info.m_uncomp_size > kMaxCssBytes - parser.css_bytes) {
@@ -909,6 +931,7 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
             if (!mz_zip_reader_extract_to_mem(&zip, member, css.data(), css.size(), 0)) {
                 parser.chapter.plain_dom = false; warn(parser.chapter, "Invalid stylesheet is not loaded"); continue;
             }
+            if (stop && stop()) { pico_page::release(chapter); return fail(error, kChapterCancelled); }
             parser.retain_css(css);
         }
         // Stylesheets and structure are properties of the whole document, known only now.

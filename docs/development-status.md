@@ -12,6 +12,33 @@ Read Pico 开书崩溃已修复；离线开书、翻页、排版取消/应用、
 已完成字体 PSRAM 分配器及全局排版反馈。当前 host 与 ASan/UBSan 各 9/9 通过，
 字宽缓存改前/改后的 2,060 页边界与像素摘要一致。最新事实以本轮记录和设备验证页为准。
 
+## 2026-10-06 · 阅读响应性专项：统计协作式取消
+
+- 第一批诊断与输入溢出恢复已按用户要求提交为 `1f34bc4`；未推送。
+  提交未纳入工作区已有的 BSP 更新及其开发记录。
+- 第二批接入 `background_step(stop)`：固件检查采样队列是否存在待处理事件。
+  统计在入口、页间和章节解析检查点返回主循环；XML 每次最多送入 4096 字节后检查取消。
+  分页批次目标由 40 ms 调整为 15 ms。解析器、正文 FT_Face、画布仍由应用任务独占，
+  本批没有增加并发访问或新工作任务。
+- `load_chapter` 的同步取消回调返回真时释放输出，用独立错误常量报告取消。
+  统计不会将取消标成失败，也不会丢弃已完成的分页边界；空闲后可继续统计。
+  未完成的章节解析没有保存解压游标，下次仍从资源入口重读；频繁输入可能推迟统计完成。
+- 验证：现有 document 测试补充多段章节后段的中途取消、重新读取和源锚点一致性；
+  app 测试补充统计入口/页间取消后画布、保存记录不变，随后仍完成统计。
+  保留原有长章节拼接、分页缓存和排版变更检查，没有新增测试框架。
+- 实际执行（仓库根目录）：
+  - `cmake --build build/host --parallel 8`、`ctest --test-dir build/host --output-on-failure`：11/11。
+  - `cmake --build build/sanitized --parallel 8`、`ctest --test-dir build/sanitized --output-on-failure`：11/11，无 sanitizer 报告。
+  - `sh tools/build_firmware.sh`：成功。
+  - 日志：`.local/responsiveness-cancel-host.log`、`.local/responsiveness-cancel-sanitized.log`、
+    `.local/responsiveness-cancel-firmware.log`；CTest 结果在各构建目录的 `Testing/Temporary/LastTest.log`。
+- 限制：15 ms 不是硬时间上限。同步 SD I/O、miniz 单次解压、单页排版和最终缓存提交仍不可中断；
+  开书、正文图片及 `defer()` 尚未迁移。当前取消来源是触摸/电容键采样队列，
+  PMU 电源键、诊断串口仍由主循环轮询。没有声称达到 P95/P99 目标。
+- 本批未提交、推送或烧录；实体输入延迟、取消检查点最长耗时及峰值内存仍需真机验证。
+- 下一步：拆出可恢复的内容计算状态并明确工作任务交接；继续保护当前页与保存版本，
+  再将下一页准备放在全书统计之前。未增加内容缓存前，取消后的重复解析成本仍存在。
+
 ## 2026-10-06 · 阅读响应性专项：第一批诊断与输入溢出恢复
 
 - 对照审阅意见检查当前实现：`count_pages()` 的 40 ms 截止时间不覆盖章节加载，

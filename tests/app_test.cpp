@@ -675,6 +675,13 @@ int main(int argc, char** argv) {
             assert(app.background_due() && !app.book_pages());
             const auto record = *app.saved_record();
             const auto pixels = app.canvas().pixels();
+            app.background_step([] { return true; });
+            assert(app.background_due() && !app.book_pages() && !app.pending_frame());
+            assert(*app.saved_record() == record && app.canvas().pixels() == pixels);
+            unsigned checks = 0;
+            app.background_step([&] { return ++checks >= 3; });
+            assert(checks >= 3 && app.background_due() && !app.pending_frame());
+            assert(*app.saved_record() == record && app.canvas().pixels() == pixels);
             unsigned slices = 0;
             while (app.background_due()) { app.background_step(); ++slices; assert(!app.pending_frame()); }
             assert(slices > 1 && *app.saved_record() == record && app.canvas().pixels() == pixels);
