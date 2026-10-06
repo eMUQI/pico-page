@@ -150,12 +150,15 @@ void status(std::uint32_t id, const ReaderApp &app, bool card_available) {
     const auto crc = esp_rom_crc32_le(0, pixels.data(), pixels.size());
     const auto revision = app.saved_record() ? app.saved_record()->local_revision : 0;
     const auto pages = app.book_pages();
+    const auto caches = app.cache_usage();
     reply("PP %lu OK view=%s pending=%d card=%d saved=%d revision=%llu page=%lu pages=%lu count=%s "
           "largest_psram=%u frame=%llu frame_ok=%d "
           "purpose=%d clean=%d bytes=%u crc32=%08lx heap=%u min_heap=%u internal=%u "
           "largest_internal=%u "
           "psram=%u stack_bytes=%u battery_valid=%d battery_pct=%d importing=%d received=%llu "
-          "tx_failures=%lu uptime_ms=%llu copy_ms=%u power_ms=%u draw_ms=%u\n",
+          "tx_failures=%lu uptime_ms=%llu copy_ms=%u power_ms=%u draw_ms=%u "
+          "cache_body=%u cache_next=%u cache_pages=%u cache_covers=%u "
+          "glyph_ui_bytes=%u glyph_body_bytes=%u glyph_ui=%u glyph_body=%u advances_ui=%u advances_body=%u\n",
           static_cast<unsigned long>(id), view_name(app.view()), !!app.pending_frame(),
           card_available, !!app.saved_record(), static_cast<unsigned long long>(revision),
           static_cast<unsigned long>(pages ? pages->page : 0),
@@ -177,7 +180,12 @@ void status(std::uint32_t id, const ReaderApp &app, bool card_available) {
           static_cast<unsigned long long>(esp_timer_get_time() / 1000),
           static_cast<unsigned>(platform::present_timing().copy_us / 1000),
           static_cast<unsigned>(platform::present_timing().power_us / 1000),
-          static_cast<unsigned>(platform::present_timing().draw_us / 1000));
+          static_cast<unsigned>(platform::present_timing().draw_us / 1000),
+          static_cast<unsigned>(caches.body_bitmap), static_cast<unsigned>(caches.next_layout),
+          static_cast<unsigned>(caches.page_index), static_cast<unsigned>(caches.cover_pixels),
+          static_cast<unsigned>(caches.ui_glyph_bytes), static_cast<unsigned>(caches.body_glyph_bytes),
+          static_cast<unsigned>(caches.ui_glyphs), static_cast<unsigned>(caches.body_glyphs),
+          static_cast<unsigned>(caches.ui_advances), static_cast<unsigned>(caches.body_advances));
 }
 
 void list(std::uint32_t id, const char *root, std::string_view arguments) {

@@ -361,11 +361,12 @@ struct ReaderApp::Impl final : DisplayBackend {
             return;
         }
         auto& starts = chapter_pages[counting_index][counting_part];
+        if (!reserve_page_starts(starts, result.starts.size())) return;
         starts.insert(starts.end(), result.starts.begin(), result.starts.end());
         counting_offset = result.offset;
         if (result.part_done) {
             if (result.last_part) finish_counting();
-            else { ++counting_part; counting_offset = 0; chapter_pages[counting_index].emplace_back(); }
+            else { ++counting_part; counting_offset = 0; add_counting_part(); }
         }
     }
     std::size_t counting_index = not_counting, counting_offset = 0;
@@ -1227,6 +1228,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         auto loaded = chapter_pages;
         auto finished = counted;
         std::size_t at = pages_header.size();
+        std::size_t retained = loaded.capacity() * sizeof(decltype(loaded)::value_type);
+        if (retained > max_pages_bytes) return;
         const auto word = [&](std::uint32_t &value) {
             if (cached.size() - at < sizeof(value)) return false;
             std::memcpy(&value, cached.data() + at, sizeof(value));
@@ -1238,10 +1241,14 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (!word(parts)) return;
             if (parts == uncounted_item) continue;
             if (parts > (cached.size() - at) / sizeof(std::uint32_t) || (!spine[i].linear && parts)) return;
+            if (parts > (max_pages_bytes - retained) / sizeof(std::vector<std::uint32_t>)) return;
+            retained += parts * sizeof(std::vector<std::uint32_t>);
             loaded[i].resize(parts);
             for (auto &starts : loaded[i]) {
                 std::uint32_t count = 0;
                 if (!word(count) || count > (cached.size() - at) / sizeof(std::uint32_t)) return;
+                if (count > (max_pages_bytes - retained) / sizeof(std::uint32_t)) return;
+                retained += count * sizeof(std::uint32_t);
                 starts.resize(count);
                 for (auto &start : starts)
                     if (!word(start)) return;
@@ -1254,11 +1261,61 @@ struct ReaderApp::Impl final : DisplayBackend {
         counted = std::move(finished);
         pages_complete = std::find(counted.begin(), counted.end(), false) == counted.end();
     }
+    std::size_t page_index_bytes() const {
+        std::size_t bytes = chapter_pages.capacity() * sizeof(decltype(chapter_pages)::value_type);
+        for (const auto& parts : chapter_pages) {
+            bytes += parts.capacity() * sizeof(std::vector<std::uint32_t>);
+            for (const auto& starts : parts) bytes += starts.capacity() * sizeof(std::uint32_t);
+        }
+        return bytes;
+    }
+    bool add_counting_part() {
+        auto& parts = chapter_pages[counting_index];
+        if (parts.size() == parts.capacity()) {
+            const auto bytes = page_index_bytes();
+            const auto unit = sizeof(std::vector<std::uint32_t>);
+            if (bytes > max_pages_bytes || max_pages_bytes - bytes < unit) {
+                pages_failed = true; release_counting(); return false;
+            }
+            const auto desired = std::max<std::size_t>(1, parts.capacity() * 2);
+            parts.reserve(std::min(desired, parts.capacity() + (max_pages_bytes - bytes) / unit));
+        }
+        parts.emplace_back();
+        return true;
+    }
+    bool reserve_page_starts(std::vector<std::uint32_t>& starts, std::size_t extra) {
+        const auto bytes = page_index_bytes();
+        const auto required = starts.size() + extra;
+        const auto growth = required > starts.capacity() ? required - starts.capacity() : 0;
+        if (bytes > max_pages_bytes || growth > (max_pages_bytes - bytes) / sizeof(std::uint32_t)) {
+            pages_failed = true;
+            release_counting();
+            return false;
+        }
+        if (growth) {
+            const auto spare = (max_pages_bytes - bytes) / sizeof(std::uint32_t);
+            const auto desired = std::max<std::size_t>(required, std::max<std::size_t>(64, starts.capacity() * 2));
+            starts.reserve(std::min(desired, starts.capacity() + spare));
+        }
+        return true;
+    }
     /** Writes counted chapters to PicoPage/cache so that a later open resumes instead of recounting. */
     void save_pages() {
         if (!pages_dirty || pages_name.empty()) return;
         const StageTimer timer{"pages_cache_commit"};
-        std::string bytes = pages_header;
+        std::size_t payload = chapter_pages.size() * sizeof(std::uint32_t);
+        if (payload > max_pages_bytes) return;
+        for (std::size_t i = 0; i < chapter_pages.size(); ++i) {
+            if (!counted[i]) continue;
+            for (const auto& starts : chapter_pages[i]) {
+                const auto words = starts.size() + 1;
+                if (words > (max_pages_bytes - payload) / sizeof(std::uint32_t)) return;
+                payload += words * sizeof(std::uint32_t);
+            }
+        }
+        std::string bytes;
+        bytes.reserve(pages_header.size() + payload);
+        bytes = pages_header;
         const auto word = [&](std::uint32_t value) {
             bytes.append(reinterpret_cast<const char *>(&value), sizeof(value));
         };
@@ -1323,7 +1380,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             counting_index = next;
             counting_part = 0;
             counting_offset = 0;
-            chapter_pages[next].assign(1, {});
+            chapter_pages[next].clear();
+            if (!add_counting_part()) return;
         }
         if (async_counting) {
             if (counting_job) return;
@@ -1378,7 +1436,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 }
                 ++counting_part;
                 counting_offset = 0;
-                chapter_pages[counting_index].emplace_back();
+                if (!add_counting_part()) return;
                 release_counting();
                 return;
             }
@@ -1389,6 +1447,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 release_counting();
                 return;
             }
+            if (!reserve_page_starts(chapter_pages[counting_index][counting_part], 1)) return;
             chapter_pages[counting_index][counting_part].push_back(static_cast<std::uint32_t>(planned.start));
             counting_offset = planned.end;
         } while (std::chrono::steady_clock::now() < deadline);
@@ -3478,6 +3537,18 @@ void ReaderApp::save_progress() {
 std::optional<BookPages> ReaderApp::book_pages() const {
     const auto page = impl_->has_book() ? impl_->current_page() : 0;
     return page ? std::optional<BookPages>{{page, impl_->total_pages()}} : std::nullopt;
+}
+CacheUsage ReaderApp::cache_usage() const {
+    CacheUsage usage;
+    usage.body_bitmap = impl_->body_canvas ? impl_->body_canvas->pixels().capacity() : 0;
+    if (impl_->next_page) usage.next_layout = impl_->next_page->glyphs.capacity() * sizeof(graphics::PositionedGlyph) +
+        impl_->next_page->lines.capacity() * sizeof(graphics::TextLine);
+    usage.page_index = impl_->page_index_bytes();
+    for (const auto& cover : impl_->covers) usage.cover_pixels += cover.pixels.capacity();
+    usage.ui_glyph_bytes = impl_->ui.cached_glyph_bytes(); usage.body_glyph_bytes = impl_->body.cached_glyph_bytes();
+    usage.ui_glyphs = impl_->ui.cached_glyphs(); usage.body_glyphs = impl_->body.cached_glyphs();
+    usage.ui_advances = impl_->ui.cached_advances(); usage.body_advances = impl_->body.cached_advances();
+    return usage;
 }
 bool ReaderApp::background_due() const {
     return impl_->prefetch_due() || impl_->counting_due();

@@ -901,6 +901,7 @@ int main(int argc, char** argv) {
             app.background_step();
             app.poll_background();
             assert(!app.pending_frame() && app.canvas().pixels() == pixels && *app.saved_record() == record);
+            assert(app.cache_usage().page_index <= 1024U * 1024);
             assert(std::chrono::steady_clock::now() < deadline);
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
@@ -918,6 +919,26 @@ int main(int argc, char** argv) {
         while (reference.background_due()) reference.background_step();
         assert(reference.book_pages() && reference.book_pages()->total == total);
         app.invalidate_identity_cache();
+        bool rejected_oversized_index = false;
+        for (const auto& entry : fs::directory_iterator(card / "PicoPage/cache/pages")) {
+            if (!entry.is_regular_file()) continue;
+            const auto original = read(entry.path());
+            if (original.find("Count/worker.epub\n") == std::string::npos) continue;
+            std::size_t at = 0;
+            for (unsigned n = 0; n < 7; ++n) at = original.find('\n', at) + 1;
+            std::string oversized = original.substr(0, at);
+            const std::uint32_t parts = 50000;
+            oversized.append(reinterpret_cast<const char*>(&parts), sizeof(parts));
+            oversized.append(parts * sizeof(std::uint32_t), '\0');
+            write(entry.path(), oversized);
+            ReaderApp bounded(card.string()); Driver bounded_driver{bounded};
+            assert(bounded.initialize()); bounded_driver.present();
+            opened(bounded, "Count/worker.epub"); bounded_driver.present();
+            assert(!bounded.book_pages() && bounded.cache_usage().page_index <= 1024U * 1024);
+            rejected_oversized_index = true;
+            write(entry.path(), original);
+        }
+        assert(rejected_oversized_index);
     }
     {
         // Phone setup: both entry points only request a session, the page keeps K2 and ignores

@@ -54,6 +54,10 @@ public:
     bool valid() const { return face_ != nullptr; }
     const std::string& error() const { return error_; }
     int pixel_size() const { return pixel_size_; }
+    /** Pixel payload and entry counts exclude allocator and hash-container overhead. */
+    std::size_t cached_glyph_bytes() const { return glyph_bytes_; }
+    std::size_t cached_glyphs() const { return glyphs_.size(); }
+    std::size_t cached_advances() const { return advances_.size(); }
     bool contains(char32_t scalar) const;
     int advance(char32_t scalar);
     FontMetrics metrics() const;

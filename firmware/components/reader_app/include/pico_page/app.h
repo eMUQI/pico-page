@@ -64,6 +64,13 @@ struct AppInput {
     bool queued = false;
 };
 
+/** Retained payload capacities; allocator bookkeeping and hash nodes are excluded. */
+struct CacheUsage {
+    std::size_t body_bitmap = 0, next_layout = 0, page_index = 0, cover_pixels = 0;
+    std::size_t ui_glyph_bytes = 0, body_glyph_bytes = 0, ui_glyphs = 0, body_glyphs = 0;
+    std::size_t ui_advances = 0, body_advances = 0;
+};
+
 /** Owns document, UI, display transactions and reading session on one task. */
 class ReaderApp {
   public:
@@ -132,6 +139,7 @@ class ReaderApp {
      * "failed" after a chapter could not be read or laid out. The string is static.
      */
     const char *background_state() const;
+    CacheUsage cache_usage() const;
     /** Accepts completed results without changing the frame; cancel requests worker cancellation. */
     void poll_background(bool cancel = false);
     /**
