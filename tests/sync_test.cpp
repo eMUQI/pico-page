@@ -9,7 +9,7 @@
 using namespace pico_page;
 
 int main(int argc, char** argv) {
-    assert(argc == 2);
+    assert(argc == 3);
     EpubDocument document;
     Chapter chapter;
     std::string error, pointer;
@@ -88,5 +88,10 @@ int main(int argc, char** argv) {
     assert(!sync::load_config(directory, config, error));
     assert(config.userkey.empty() && error.find("test-private-key") == std::string::npos);
     std::filesystem::remove_all(directory);
+    // argv[2] is a card written by tools/setup_network.py; see tests/test_setup_network.py.
+    assert(sync::load_config(argv[2], config, error));
+    assert(config.endpoint == "https://sync.example.invalid" && config.username == "读者 \"a\\b\"" &&
+           config.userkey == "55d2fddf8ba5768bbc44b083846cf439" && config.device_id == "DEVICE-1" &&
+           config.dom_version == 20240114);
     std::cout << "CREngine-derived text mapping and bounded KOSync protocol checks passed\n";
 }

@@ -28,6 +28,10 @@ add_test(NAME reader_flow COMMAND reader_flow_test)
 find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
 add_test(NAME epub_probe COMMAND ${Python3_EXECUTABLE} -m unittest discover
     -s ${CMAKE_CURRENT_SOURCE_DIR}/tests -p test_epub_probe.py -v)
+set(tool_card ${CMAKE_BINARY_DIR}/setup-network-card)
+add_test(NAME setup_network COMMAND ${CMAKE_COMMAND} -E env PICO_PAGE_TOOL_CARD=${tool_card}
+    ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR}/tests -p test_setup_network.py -v)
+set_tests_properties(setup_network PROPERTIES FIXTURES_SETUP tool_card)
 
 add_subdirectory(firmware/components/reader_document)
 add_subdirectory(firmware/components/reader_graphics)
@@ -35,6 +39,7 @@ add_subdirectory(firmware/components/reader_sync)
 add_subdirectory(firmware/components/reader_app)
 add_executable(graphics_test tests/graphics_test.cpp)
 target_link_libraries(graphics_test PRIVATE reader_graphics)
+target_include_directories(graphics_test PRIVATE firmware/components/reader_graphics/third_party/qrcodegen)
 target_compile_options(graphics_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME graphics COMMAND graphics_test)
 
@@ -70,8 +75,14 @@ target_compile_options(app_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME app COMMAND app_test ${document_fixtures}
     ${CMAKE_CURRENT_SOURCE_DIR}/.local/card/PicoPage/fonts/LXGWWenKai-Regular.ttf)
 
+add_executable(provision_test tests/provision_test.cpp)
+target_link_libraries(provision_test PRIVATE reader_sync)
+target_compile_options(provision_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME provision COMMAND provision_test)
+
 add_executable(sync_test tests/sync_test.cpp)
 add_dependencies(sync_test document_fixtures_target)
 target_link_libraries(sync_test PRIVATE reader_sync)
 target_compile_options(sync_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
-add_test(NAME sync COMMAND sync_test ${document_fixtures}/valid.epub)
+add_test(NAME sync COMMAND sync_test ${document_fixtures}/valid.epub ${tool_card})
+set_tests_properties(sync PROPERTIES FIXTURES_REQUIRED tool_card)

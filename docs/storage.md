@@ -174,6 +174,8 @@ NVS 仅用于设备身份、凭据、必要硬件绑定等小型例外，不是�
 是否加密需实际配置验证，存 NVS 不自动等于加密。
 integrations.toml 放非敏感服务信息和 credential_ref，常规备份不含令牌；显式导出另做。
 不得将 Wi-Fi 密码、令牌、用户 EPUB 或 Flash 备份提交 Git。
+当前实现把 Wi-Fi 密码和同步账户密钥以明文存在 TF 卡的 `PicoPage/network.toml`、`PicoPage/sync.toml`，
+便于手工编辑；`FileStore::save_private()` 替换这两个文件时不留 `.bak`，避免旧凭据残留。
 
 ## 8. 同步与备份
 

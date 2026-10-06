@@ -19,11 +19,6 @@ bool endpoint_valid(const std::string& value) {
         return c <= 32 || c >= 127 || c == '@' || c == '#' || c == '?' || c == '\\';
     }) && value[8] != '/';
 }
-bool valid_config(const Config& config) {
-    return endpoint_valid(config.endpoint) && plain_header(config.username) &&
-           plain_header(config.userkey) && plain_header(config.device_id) &&
-           (config.dom_version == 20240114 || config.dom_version == 20260812);
-}
 bool digest_valid(const std::string& digest) {
     return digest.size() == 32 && std::all_of(digest.begin(), digest.end(), [](char c) {
         return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
@@ -54,6 +49,12 @@ std::string json_string(const cJSON* object, const char* key, std::size_t maximu
     return field->valuestring;
 }
 }  // namespace
+
+bool valid_config(const Config& config) {
+    return endpoint_valid(config.endpoint) && plain_header(config.username) &&
+           plain_header(config.userkey) && plain_header(config.device_id) &&
+           (config.dom_version == 20240114 || config.dom_version == 20260812);
+}
 
 bool load_config(const std::string& card_root, Config& config, std::string& error) {
     config = {};
@@ -89,6 +90,18 @@ bool load_config(const std::string& card_root, Config& config, std::string& erro
 }
 
 std::string account_scope(const Config& config) { return config.endpoint + "\n" + config.username + "\n" + config.device_id; }
+
+bool auth_request(const Config& config, HttpRequest& request, std::string& error) {
+    request = {};
+    if (!valid_config(config)) { error = "Invalid sync configuration"; return false; }
+    request.method = "GET";
+    request.url = config.endpoint + "/users/auth";
+    request.headers = {{"accept", "application/vnd.koreader.v1+json"},
+                       {"x-auth-user", config.username}, {"x-auth-key", config.userkey}};
+    request.scope = account_scope(config);
+    error.clear();
+    return true;
+}
 
 bool get_request(const Config& config, const std::string& partial_md5,
                  HttpRequest& request, std::string& error) {

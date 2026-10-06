@@ -116,17 +116,55 @@ Battery battery();
  */
 bool sleep(std::string& error);
 
-/**
- * Connects using local PicoPage/network.toml and obtains a usable TLS clock.
- * Call only after an explicit user network action. Credentials remain in RAM
- * inside the Wi-Fi driver; this function never writes them to NVS or logs.
- * Connection and HTTP operations block their owning worker task. The first
- * connect_network() establishes a session owner independent of the display/input task.
- */
-bool connect_network(const std::string& card_root, std::string& error);
+/** Where connect_network() stopped. Link carries the Wi-Fi driver's disconnect reason. */
+struct ConnectFailure {
+    enum class Stage { None, Setup, Link, Address, Clock } stage = Stage::None;
+    int reason = 0;
+};
 
-/** Stops Wi-Fi and releases its driver, interface and request-session resources. */
+/**
+ * Joins an open or WPA2-or-later personal network and obtains a usable TLS clock. Call only
+ * after an explicit user network action. The credentials remain in RAM inside the Wi-Fi
+ * driver; this function never writes them to NVS or logs. It blocks its worker task for up
+ * to 20 s for an address and 10 s for the time. The first call establishes a session owner
+ * independent of the display/input task. While an access point from start_access_point() is
+ * up, it stays up and only the station link is replaced; a failure then leaves the access
+ * point running.
+ */
+bool connect_network(const std::string& ssid, const std::string& password, std::string& error,
+                     ConnectFailure* failure = nullptr);
+
+/**
+ * Starts a WPA2 access point at 192.168.4.1 for at most two stations, next to an idle station
+ * interface, and scans once for nearby networks. networks receives up to 20 distinct names,
+ * strongest first, as raw broadcast bytes. password needs 8 to 63 bytes. The calling task
+ * becomes the session owner until disconnect_network(). The access point may change channel,
+ * and briefly drop its stations, when connect_network() joins a network on another channel.
+ */
+bool start_access_point(const std::string& ssid, const std::string& password,
+                        std::vector<std::string>& networks, std::string& error);
+
+/** Stops Wi-Fi, including an access point, and releases the driver, interfaces and session. */
 void disconnect_network();
+
+/**
+ * Produces the HTML answer to GET / (submitted false, empty body) or POST /save. It runs on
+ * the HTTP server task and must not block for long.
+ */
+using PortalHandler = std::string (*)(void* context, bool submitted, const std::string& body);
+
+/**
+ * Serves handler over plain HTTP on port 80 to at most three connections; POST bodies above
+ * body_limit bytes are refused. Requests for any other path are redirected to the page, and a
+ * name service on UDP port 53 answers every host name with the access point address, so a
+ * phone that has just joined presents the page as the network's sign-in page. Call after
+ * start_access_point(). context must outlive stop_portal_server().
+ */
+bool start_portal_server(PortalHandler handler, void* context, std::size_t body_limit,
+                         std::string& error);
+
+/** Stops the name service and the server, waiting for a running handler to return. */
+void stop_portal_server();
 
 /**
  * Performs one HTTPS GET/PUT/POST after connect_network(), without redirects.

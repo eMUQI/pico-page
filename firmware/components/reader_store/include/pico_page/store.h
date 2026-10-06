@@ -165,6 +165,14 @@ public:
     StoreStatus manage_book(const BookSnapshot& snapshot, bool delete_original,
                             const std::string& book_id, const std::string& revision) const;
 
+    /**
+     * Replaces PicoPage/network.toml or PicoPage/sync.toml with exact bytes of at most 8 KiB.
+     * The previous contents are not kept as a backup because they hold credentials.
+     * Any other name is rejected. The caller validates the contents.
+     */
+    StoreStatus save_private(const std::string& name, const std::string& bytes,
+                             std::string& error) const;
+
     /** Reports the capacity and free space of the mounted card in bytes; false when unavailable. */
     bool card_space(std::uint64_t& total, std::uint64_t& available) const;
 

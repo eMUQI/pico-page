@@ -127,6 +127,7 @@ const char *view_name(View view) {
     case View::InputSettings: return "input_settings";
     case View::BookManagement: return "book_management";
     case View::SyncSettings: return "sync_settings";
+    case View::Portal: return "portal";
     case View::Confirmation:
         return "confirmation";
     }

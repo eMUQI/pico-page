@@ -1,5 +1,6 @@
 #include "pico_page/app.h"
 #include "pico_page/document.h"
+#include "pico_page/provision.h"
 #include "pico_page/store.h"
 #include <algorithm>
 #include <chrono>
@@ -96,6 +97,8 @@ enum Control {
     ManageConfirm,
     SyncSettings,
     LibraryView,
+    PortalStart,
+    PortalStop,
     EntryBase = 100,
     TocBase = 1000,
     TocToggleBase = 10000,
@@ -166,6 +169,9 @@ struct ReaderApp::Impl final : DisplayBackend {
     View view = View::Library;
     bool usb_prepared = false, usb_active = false, usb_confirm = false;
     UsbTransferAction usb_action = UsbTransferAction::None;
+    PortalAction portal_action = PortalAction::None;
+    PortalStatus portal;
+    bool portal_closing = false;
     std::optional<Frame> pending;
     std::optional<NetworkOperation> network_request;
     std::shared_ptr<std::atomic_bool> network_cancel;
@@ -1764,7 +1770,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         const bool configured = sync::load_config(root, account, detail);
         std::uint64_t card_total = 0, card_free = 0;
         const bool measured = store.card_space(card_total, card_free);
-        settings_row(Import, "网络与传输", "USB 文件传输 · 未开启", 120);
+        provision::WifiCredentials wifi;
+        settings_row(Import, "网络与传输", std::string("Wi-Fi：") +
+                     (provision::load_wifi(root, wifi, detail) ? wifi.ssid : "未配置") + " · USB 文件传输", 120);
         settings_row(SyncSettings, "KOReader 同步", configured ? server_name(account) + " · " + account.username : "未配置", 252);
         settings_row(Refresh, "显示与刷新", refresh_name(values) + " · " +
                      (values.refresh_preset == "clear" ? "每页全刷" : "每 " + std::to_string(refresh_interval(values)) + " 页全刷"), 384);
@@ -1903,12 +1911,13 @@ struct ReaderApp::Impl final : DisplayBackend {
         value_row(0, "服务地址", "", configured ? server_name(account) : "未配置", 104, 70);
         value_row(0, "账户", "", configured ? account.username : "未配置", 174, 70);
         value_row(0, "凭据", "", configured ? "已隐藏" : "未配置", 244, 70);
-        wrapped(configured ? "在电脑上编辑 PicoPage/sync.toml 可修改地址或账户，保存后重新打开此页。"
-                           : "PicoPage/sync.toml 不存在或内容无效。请在电脑上填写服务地址和账户后重新打开此页。",
+        wrapped(configured ? "可用手机配置修改地址或账户，也可在电脑上编辑 PicoPage/sync.toml。"
+                           : "PicoPage/sync.toml 不存在或内容无效。可用手机配置填写服务地址和账户。",
                 36, 340, 612, 22);
         text("同步策略", 36, 452, 22, 612, 3);
         value_row(0, "检查与上传", "在正文工具的“同步”中手动执行", "手动", 488);
         value_row(0, "书籍匹配方式", "按原书内容识别，与文件名无关", "按内容", 592);
+        button(PortalStart, "用手机配置", 24, 760, 636, 96);
         if (has_book() && configured) button(Sync, "检查当前书籍的同步", 24, 1056, 636, 96);
         else note(configured ? "打开一本书后，可在工具中检查同步。" : "配置完成前不会联网。", 1090);
     }
@@ -2095,14 +2104,72 @@ struct ReaderApp::Impl final : DisplayBackend {
         view = View::Import;
         hits.clear();
         canvas.clear();
-        header("USB 文件传输", Back, import_from_settings ? "设置" : "书库");
-        note("开启后，电脑可以直接管理 TF 卡。", 200);
-        note("传输期间暂停阅读和同步。", 280);
-        note("请在电脑安全弹出后退出。", 360);
-        note("退出将重启，恢复阅读与 USB 烧录。", 440);
-        button(UsbStart, "开启 USB 文件传输", 24, 600, 636, 96);
-        if (!message.empty()) note(message, 800);
+        header("网络与传输", Back, import_from_settings ? "设置" : "书库");
+        text("USB 文件传输", 36, 128, 22, 612, 3);
+        note("开启后，电脑可以直接管理 TF 卡。", 172);
+        note("传输期间暂停阅读和同步。", 220);
+        note("请在电脑安全弹出后退出。", 268);
+        note("退出将重启，恢复阅读与 USB 烧录。", 316);
+        button(UsbStart, "开启 USB 文件传输", 24, 384, 636, 96);
+        canvas.line(36, 520, 647, 520, 12, 2);
+        text("Wi-Fi 与 KOReader 同步", 36, 548, 22, 612, 3);
+        provision::WifiCredentials wifi;
+        std::string detail;
+        note(provision::load_wifi(root, wifi, detail) ? "Wi-Fi：" + wifi.ssid : "Wi-Fi 未配置", 592);
+        note("用手机填写，设备验证后保存。", 640);
+        button(PortalStart, "开启手机配置", 24, 708, 636, 96);
+        if (!message.empty()) note(message, 860);
         button(Dismiss, "返回书库", 24, 1056, 636, 96);
+    }
+    void draw_portal() {
+        view = View::Portal;
+        hits.clear();
+        canvas.clear();
+        header("手机配置", 0);
+        if (portal.access_ssid.empty()) {
+            note(portal_closing ? "正在结束配置…" : "正在开启设备热点…", 200);
+        } else {
+            text("1  用手机连接设备热点", 36, 128, 26, 612, 1, true);
+            graphics::draw_qr(canvas, provision::wifi_qr({portal.access_ssid, portal.access_password}), 36, 176, 264);
+            text("热点名称", 324, 196, 22, 324, 3);
+            text(portal.access_ssid, 324, 230, 28, 324);
+            text("密码", 324, 300, 22, 324, 3);
+            text(portal.access_password, 324, 334, 28, 324);
+            text("扫码可直接连接", 324, 400, 22, 324, 3);
+            text("2  连接后扫码打开配置页", 36, 472, 26, 612, 1, true);
+            graphics::draw_qr(canvas, portal.url, 36, 520, 264);
+            text("或在浏览器输入", 324, 540, 22, 324, 3);
+            const auto scheme = portal.url.find("://");
+            text(scheme == std::string::npos ? portal.url : portal.url.substr(scheme + 3), 324, 574, 28, 324);
+            text("只支持 2.4 GHz 网络", 324, 660, 22, 324, 3);
+            canvas.line(0, 816, 683, 816, 1, 3);
+            std::string title, body = portal.detail;
+            switch (portal.phase) {
+            case PortalPhase::JoiningWifi:
+                title = "正在连接“" + portal.detail + "”…";
+                body = "验证期间，手机可能暂时断开设备热点。";
+                break;
+            case PortalPhase::CheckingAccount:
+                title = "正在验证同步账户…";
+                body.clear();
+                break;
+            case PortalPhase::Saved:
+                title = "已保存";
+                body += "可以结束配置，或在手机上继续修改。";
+                break;
+            case PortalPhase::Failed:
+                title = "未保存";
+                body += "请在手机上重新填写。";
+                break;
+            default:
+                title = "等待手机提交";
+                body = "在配置页填写后，设备先验证，成功后才保存。";
+            }
+            if (portal_closing) { title = "正在结束配置…"; body.clear(); }
+            text(title, 36, 844, 28, 612, 1, true);
+            wrapped(body, 36, 904, 612, 24);
+        }
+        if (!portal_closing) button(PortalStop, "结束配置", 24, 1080, 636, 96);
     }
     void draw_usb() {
         view = View::UsbTransfer;
@@ -2406,6 +2473,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!display.busy()) overlay();
     }
     void back() {
+        if (view == View::Portal) return;
         if (view == View::BookManagement) { draw_details(); overlay(); return; }
         if (usb_prepared) {
             if (usb_confirm) { usb_confirm = false; draw_usb(); overlay(); }
@@ -2470,6 +2538,18 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (view == View::Sync && (id == Contents || id == Typography || id == Refresh)) cancel_sync();
         if (usb_prepared && id != UsbExit && id != UsbExitConfirm && id != UsbCancel)
             return;
+        if (view == View::Portal) {
+            if (id == PortalStop && !portal_closing) {
+                portal_action = PortalAction::Stop;
+                portal_closing = true;
+                draw_portal(); overlay();
+            }
+            return;
+        }
+        if (id == PortalStart) {
+            portal_action = PortalAction::Start;
+            return;
+        }
         if (id == UsbStart) {
             usb_action = UsbTransferAction::Start;
             return;
@@ -3109,8 +3189,42 @@ void ReaderApp::show_usb_transfer(bool active, const std::string& error) {
     else impl_->draw_import();
     impl_->overlay(true);
 }
+PortalAction ReaderApp::take_portal_action() {
+    return std::exchange(impl_->portal_action, PortalAction::None);
+}
+bool ReaderApp::prepare_portal() {
+    if (impl_->usb_prepared || impl_->display.busy() || impl_->active_network ||
+        !impl_->card_available || !impl_->persist()) return false;
+    impl_->cancel_sync();
+    impl_->release_counting();
+    impl_->portal = {};
+    impl_->portal_closing = false;
+    impl_->draw_portal();
+    impl_->overlay();
+    return true;
+}
+void ReaderApp::show_portal(const PortalStatus &status) {
+    if (impl_->usb_prepared || impl_->display.busy()) return;
+    const auto view = impl_->view;
+    if (status.phase == PortalPhase::Closed) {
+        // A refused start arrives while the requesting page is still shown.
+        if (view != View::Portal && view != View::Import && view != View::SyncSettings) return;
+        impl_->portal = {};
+        impl_->portal_closing = false;
+        impl_->message = status.detail;
+        impl_->draw_settings();
+        impl_->overlay();
+        return;
+    }
+    if (view != View::Portal) return;
+    // The codes must be scannable under every refresh preset, so their first frame clears the panel.
+    const bool codes_appear = impl_->portal.access_ssid.empty() && !status.access_ssid.empty();
+    impl_->portal = status;
+    impl_->draw_portal();
+    impl_->overlay(codes_appear);
+}
 bool ReaderApp::prepare_sleep() {
-    if (impl_->usb_prepared) return false;
+    if (impl_->usb_prepared || impl_->view == View::Portal) return false;
     if (impl_->display.busy() || impl_->active_network || !impl_->persist())
         return false;
     if (impl_->has_book() && !impl_->session.visible_record()) return false;

@@ -20,8 +20,9 @@ string(REGEX REPLACE "(..)" "0x\\1," fallback_bytes "${fallback_hex}")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/fallback_font.h"
     "static const unsigned char kFallbackFont[] = {${fallback_bytes}};\nstatic const unsigned long kFallbackFontSize = sizeof(kFallbackFont);\n")
 
-set(image_sources image.cpp third_party/pngle/pngle.c third_party/tjpgd/tjpgd.c)
-set(image_includes third_party/pngle third_party/tjpgd ../reader_document/third_party/miniz)
+set(image_sources image.cpp qr.cpp third_party/pngle/pngle.c third_party/tjpgd/tjpgd.c
+    third_party/qrcodegen/qrcodegen.c)
+set(image_includes third_party/pngle third_party/tjpgd third_party/qrcodegen ../reader_document/third_party/miniz)
 if(ESP_PLATFORM)
     idf_component_register(SRCS graphics.cpp ${image_sources} ${ft_sources}
         INCLUDE_DIRS include
@@ -34,7 +35,7 @@ else()
         PRIVATE "${ft_source}/include" "." "${CMAKE_CURRENT_BINARY_DIR}" ${image_includes})
     target_link_libraries(reader_graphics PRIVATE reader_document)
     set(graphics_target reader_graphics)
-    set_source_files_properties(graphics.cpp image.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")
+    set_source_files_properties(graphics.cpp image.cpp qr.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")
 endif()
 target_compile_features(${graphics_target} PUBLIC cxx_std_17)
 target_compile_definitions(${graphics_target} PRIVATE FT2_BUILD_LIBRARY

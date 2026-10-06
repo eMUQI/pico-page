@@ -1,4 +1,7 @@
 #include "pico_page/graphics.h"
+extern "C" {
+#include "qrcodegen.h"
+}
 #include "image_fixtures.h"
 
 #include <cassert>
@@ -124,6 +127,30 @@ int main(int argc, char** argv) {
         assert(repaginated.start == 113 && repaginated.glyphs.front().index == 113);
         const auto indented = layout_page(font, U"　　中文段落", 0, spec);
         assert(indented.error.empty() && indented.glyphs.front().x == spec.left);
+    }
+    {
+        // Every module lands where the encoder put it: 264 px holds version 2 at 8 px a module.
+        const std::string address = "http://192.168.4.1";
+        std::vector<std::uint8_t> work(qrcodegen_BUFFER_LEN_FOR_VERSION(10)), code(work.size());
+        assert(qrcodegen_encodeText(address.c_str(), work.data(), code.data(), qrcodegen_Ecc_MEDIUM, 1, 10,
+                                    qrcodegen_Mask_AUTO, false));
+        const int modules = qrcodegen_getSize(code.data());
+        assert(modules == 25);
+        Canvas qr;
+        qr.fill_rect(0, 0, 684, 1216, 7);
+        assert(draw_qr(qr, address, 36, 520, 264));
+        const int origin = (264 - modules * 8) / 2;
+        for (int row = -4; row < modules + 4; ++row)
+            for (int column = -4; column < modules + 4; ++column) {
+                const bool dark = row >= 0 && column >= 0 && row < modules && column < modules &&
+                                  qrcodegen_getModule(code.data(), column, row);
+                for (const int inset : {0, 7})
+                    assert(qr.pixel(36 + origin + column * 8 + inset, 520 + origin + row * 8 + inset) == (dark ? 0 : 15));
+            }
+        assert(qr.pixel(35, 520) == 7 && qr.pixel(300, 783) == 7 && qr.pixel(36, 520) == 15 && qr.pixel(299, 783) == 15);
+        const auto before = qr.pixels();
+        assert(!draw_qr(qr, std::string(300, 'x'), 36, 520, 264) && !draw_qr(qr, address, 36, 520, 90));
+        assert(qr.pixels() == before);
     }
     auto too_short = LayoutSpec{};
     too_short.line_height = 1;

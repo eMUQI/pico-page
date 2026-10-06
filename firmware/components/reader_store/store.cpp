@@ -707,6 +707,22 @@ StoreStatus FileStore::load_cache(const std::string& name, std::size_t limit, st
     return store_internal::read_file(root_, "PicoPage/cache/" + name, limit, bytes);
 }
 
+StoreStatus FileStore::save_private(const std::string& name, const std::string& bytes,
+                                    std::string& error) const {
+    error.clear();
+    if (name != "network.toml" && name != "sync.toml") return StoreStatus::UnsafePath;
+    const auto path = "PicoPage/" + name;
+    std::string current;
+    const auto status = store_internal::read_file(root_, path, 8192, current);
+    if (status != StoreStatus::Ok && status != StoreStatus::Missing) {
+        error = path + ": current file cannot be read";
+        return status;
+    }
+    return store_internal::commit_file(root_, path,
+                                       status == StoreStatus::Ok ? std::optional<std::string>(current) : std::nullopt,
+                                       bytes, 8192, error, true);
+}
+
 StoreStatus FileStore::save_cache(const std::string& name, const std::string& bytes) const {
     const auto path = "PicoPage/cache/" + name;
     if (!store_internal::relative_path(path)) return StoreStatus::UnsafePath;

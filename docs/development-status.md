@@ -1,12 +1,12 @@
 # 开发状态
 
-最后更新：2026-10-06。设备上是版本 E：全书页数、设置页补齐、章节分段读取；此前打不开的 35.5 万字章节已在真机上正常显示，详见下方第一条记录。此前的版本包含交互耗时修复、延后保存，以及独立的触摸采样和连续翻页补执行；
+最后更新：2026-10-06。设备上是手机配置版本（版本 E 加 Wi-Fi 与同步账户的手机配置，配置功能尚未在真机运行）。版本 E 包含全书页数、设置页补齐、章节分段读取；此前打不开的 35.5 万字章节已在真机上正常显示，详见下方第一条记录。此前的版本包含交互耗时修复、延后保存，以及独立的触摸采样和连续翻页补执行；
 用户已实际操作确认连点翻页的响应和休眠唤醒后的触摸，触摸中断线已在设备日志中确认。面板目视与空闲电流仍未验收。
 保留已实现的 USB 文件传输及现有 TF 资源，71 个 EPUB 文件名清理已完成。
 
 Read Pico 开书崩溃已修复；离线开书、翻页、排版取消/应用、刷新及切书恢复已实测通过。
 最终离线应用已仅写入 `ota_0` 并通过摘要校验；重启后同页恢复已通过，修订号 24、正文 CRC32 `d1b7e837` 保持一致。
-**USB 退出重启已由用户实际操作并经串口确认；正文物理目视、完整实体输入、睡眠及 TF 掉电仍未验收。用户已明确暂不配置 Wi-Fi，先完成离线阅读。**
+**USB 退出重启已由用户实际操作并经串口确认；正文物理目视、完整实体输入、睡眠及 TF 掉电仍未验收。用户已于 2026-10-06 要求实现配网和 KOReader 同步配置，见下方前两条记录；真机联网尚未进行。**
 
 修复了 miniz 与 ESP32-S3 ROM 的 ABI 冲突、内部内存分配压力和默认字体路径不一致；
 已完成字体 PSRAM 分配器及全局排版反馈。当前 host 与 ASan/UBSan 各 9/9 通过，
@@ -22,6 +22,86 @@ Read Pico 开书崩溃已修复；离线开书、翻页、排版取消/应用、
 - ChatGPT GitHub 连接账号为 `eMUQI`，安装采用仅选定仓库授权；读取新仓库的 `README.md` 返回 404。
   GitHub 授权设置要求用户重新验证身份；仓库读取权限尚未验证成功。
 - 本批未修改固件或运行产品测试。下一步：将新仓库纳入 ChatGPT Connector 授权范围，再实际读取文件验证。
+
+## 2026-10-06 · 手机配置版本已安装（配置功能尚未在真机运行）
+
+- 用户确认（“你烧录吧”）后写入 `.local/provisioning-20261006/pico_page.bin`，仅 `0x10000`，`Hash of data verified`
+  （`flash.log`）。写入前核对：只连接一台设备，USB 序列号与芯片 MAC 均为 `…:18:B8`；设备在正文，
+  进度已保存（修订号 9，第 3 / 409 页，`pre-status.log`）。
+- 重启后进入书库，TF 已挂载，首帧成功；启动后可用内部 RAM 137,659 字节，最大连续块 90,112 字节，
+  与安装前的数值相同（`post-status.log`）。
+- 没有注入任何输入，没有开启热点，没有打开书籍。配置功能的全部真机项仍未验证，见下一条记录。
+- 测试时注意：配置会话期间诊断串口的 `tap`、`key` 返回 `busy`（与同步请求期间相同），只能读 `status`；
+  会话只能由屏幕上的“结束配置”、电源键或 10 分钟超时结束。
+
+## 2026-10-06 · 手机配置 Wi-Fi 与同步账户（实现记录）
+
+- 用户要求把配网和同步配置全部实现，之后统一测试（D19）。实现前核对的来源和取舍见 [依赖审查](dependency-review.md)。
+- 新增：
+  - `reader_sync/provision`：表单解析、`network.toml` / `sync.toml` 的读写规则、配置页 HTML、结果文案、加入热点的二维码内容。
+    `network.toml` 的解析从板级代码移到这里，host 可测。`sync::auth_request()` 生成账户验证请求。
+  - `reader_graphics`：`draw_qr()`，编码器为未修改的 qrcodegen（MIT）。
+  - `reader_store`：`FileStore::save_private()` 只替换两个凭据文件，不留备份。
+  - 板级：`connect_network()` 改为接收名称和密码并报告失败阶段；`start_access_point()`、`start_portal_server()`
+    （HTTP 表单、未知路径跳转、DNS 应答）。说明和预算见 [板级运行说明](platform-runtime.md) 的“手机配置会话”。
+  - 应用：`View::Portal` 配置页，入口在“网络与传输”和“KOReader 同步”；界面规则见 [UI 实现](ui-implementation.md) 第 13 节。
+  - 主循环：网络任务运行配置会话，验证通过后才写文件；结束条件为屏幕按钮、10 分钟无提交、配置页被取代、电源键。
+- 行为变化：同步请求的联网路径改为“网络任务读 `network.toml` 后调用 `connect_network(名称, 密码)`”，错误文本不变。
+  “网络与传输”页布局调整，USB 按钮位置上移。
+- 实际执行（仓库根目录）：
+  - `cmake --build build/host --parallel 8`，`ctest --test-dir build/host`：**11/11**。
+  - `cmake --build build/sanitized --parallel 8`，`ctest --test-dir build/sanitized`：**11/11**，无 ASan/UBSan 报告。
+  - `.local/font-tools/bin/python tools/setup_fonts_subset.py --strings firmware/components/reader_app/app.cpp
+    --strings firmware/components/reader_sync/provision.cpp --strings firmware/main/app_main.cpp`：537 个字符（原 507）。
+  - `sh tools/build_firmware.sh`：成功，日志 `.local/provisioning-20261006/firmware-build.log`。
+  - `python3 tools/check_handoff.py`：通过。
+- 新增检查：
+  - `provision_test`：表单解码与各种无效输入、userkey 与已知 MD5、写出的两个文件被固件解析器读回且字段相同、
+    替换凭据文件后目录里没有旧密码和备份、手写的无效 `network.toml` 被拒绝且错误不含原文、
+    配置页对扫描到的名称和已保存值做 HTML 转义、结果文案、账户验证请求。
+  - `graphics_test`：二维码每个模块的位置与编码器输出逐一相同，静区为白，放不下或过小时画布不变。
+  - `app_test`：两个入口只发出请求；被拒绝时不进入配置页；二维码首帧整屏刷新；配置页上 K2 保持画面，
+    K1/K3、返回格和正文区点击无动作，不能休眠；“结束配置”只发一次停止请求；结束后回到设置，
+    迟到的状态被忽略；有书时会话前后已保存的进度相同。
+  - 桌面预览截图中的两个二维码用 macOS CoreImage 解码，得到 `WIFI:T:WPA;S:PicoPage-PREVIEW;P:preview0;;`
+    和 `http://192.168.4.1`。
+- 产物：`.local/provisioning-20261006/pico_page.bin`，2,225,888 字节，
+  SHA-256 `08a722f8122f7af09f6f5a8ac27772570836da5fb14345d9bd40769271d62479`，已安装（见上一条记录）；比版本 E 大 103,008 字节，
+  3 MiB 构建分区剩余 29%。
+- 未验证（全部需要真机，板级和主循环的新增代码没有任何 host 覆盖）：
+  - 热点能否启动、手机能否加入、配置页是否自动弹出（iOS 和安卓各自的探测行为）、二维码在面板上能否被扫。
+  - APSTA 下连接家用路由器、对时、HTTPS、`/users/auth` 的实际结果；失败原因编号与文案是否对应。
+  - 内部 RAM 最低值、HTTP 和 DNS 任务的栈余量、会话结束后内存是否回到原值、反复开关会话是否泄漏套接字。
+  - 原有同步路径在 `connect_network()` 改动后的真机行为（此前同样未在真机运行过）。
+  - 热点开启期间的耗电；10 分钟超时。
+- 已知限制：见板级运行说明；另外表单提交失败后手机上已填的内容不保留，需要重填。
+- 下一步（需要用户确认烧录并在设备旁）：安装后先从“KOReader 同步 › 用手机配置”完成一次配置并记录 `status` 的内存数字，
+  再做同步检查和与 KOReader 的双向接续。
+
+## 2026-10-06 · 配网与同步配置：方案和电脑端配置脚本（未涉及设备）
+
+- 用户要求先做配网和 KOReader 同步配置的填写，并询问是否用 SmartConfig。结论与取舍：
+  - 不用 SmartConfig：只能传 SSID 和密码，同步服务地址和账户仍需另一个入口；需要专用 App 或微信，
+    且手机当时必须连在 2.4 GHz 上；原稿 S09-2 已定为设备热点加手机配置页。
+  - 参考：CrossMux（检出 `3fb809f`）用屏幕键盘输入 Wi-Fi 密码和 KOReader 账户，另有网页可改设置；
+    KOReader 用屏幕键盘。墨水屏逐字输入长密码很慢，屏幕键盘留作后备，本阶段不做。
+  - 用户同意分两步：先用电脑写配置文件，在真机上验证现有联网路径；再做设备热点配置页。
+- 本批只做第一步的电脑端部分。新增 `tools/setup_network.py`：
+  - 询问 Wi-Fi 名称和密码、同步账户、服务地址和密码，写入存储卡的 `PicoPage/network.toml` 和 `PicoPage/sync.toml`。
+    同步密码只以 MD5（KOReader 的 userkey）写入；已有 `sync.toml` 的 `device_id` 和 `dom_version` 保留，
+    否则生成新的 `device_id`，`dom_version` 取 20260812。
+  - 写入前按固件解析器的限制检查；默认从电脑向同步服务的 `/users/auth` 验证账户，被拒绝时不写任何文件，
+    `--offline` 跳过验证。目标目录没有 `PicoPage` 时拒绝写入。
+  - 没有改固件源码。
+- 实际执行（仓库根目录）：`cmake --build build/host --parallel 8` 后 `ctest --test-dir build/host`：**10/10**；
+  `build/sanitized` 同样 **10/10**；`python3 tools/check_handoff.py` 通过。
+  新增 `setup_network` 测试；`sync` 测试改为用固件的 `load_config` 读取该脚本写出的 `sync.toml`
+  （账户名含引号、反斜杠和中文），字段逐项相同。脚本用临时目录实际运行过一次（开放网络、跳过同步）。
+- 未验证：
+  - `/users/auth` 验证没有对任何真实服务运行过。
+  - `network.toml` 的解析只在固件中编译，host 测试只能核对脚本的输出是合法 TOML 且符合同样的长度规则。
+  - 真机上的 Wi-Fi 连接、对时、HTTPS 和 KOSync 读写一次都没有运行过；联网时的内部 RAM 最低值未知。
+- 后续：用户要求先全部实现再统一测试，设备热点配置页已在上一条记录中实现；本脚本保留为电脑端的填写方式。
 
 ## 2026-10-06 · 版本 E 真机验证（已安装）
 
@@ -191,8 +271,11 @@ Read Pico 开书崩溃已修复；离线开书、翻页、排版取消/应用、
 
 ## 当前产物
 
-- **当前已安装**：`.local/pages-settings-20261006/pico_page-e.bin`，2,122,880 字节，
-  SHA-256 `3bc0bb218ae28c20626da8f31309fd586ce71d302977590ce7f4bb536f8bcf1d`，详见上方记录。
+- **当前已安装**：`.local/provisioning-20261006/pico_page.bin`，2,225,888 字节，
+  SHA-256 `08a722f8122f7af09f6f5a8ac27772570836da5fb14345d9bd40769271d62479`，详见上方记录。
+
+- 上一个已安装版本（版本 E）：`.local/pages-settings-20261006/pico_page-e.bin`，2,122,880 字节，
+  SHA-256 `3bc0bb218ae28c20626da8f31309fd586ce71d302977590ce7f4bb536f8bcf1d`。
 
 - 上一个已安装版本：`.local/perf-20261006/pico_page-perf-g.bin`，2,088,640 字节；
   SHA-256：`3b2a65383e2af00617955b23cdb6302bf362c2a89621c2a72d0b764d8488ec68`，同名 ELF 一并归档。

@@ -178,11 +178,24 @@ struct Host {
                 network = std::async(std::launch::async, perform, std::move(*request));
         }
     }
+    // The desktop preview has no radio. It shows the setup page with placeholder access values
+    // and never reports a saved or failed submission.
+    bool poll_portal() {
+        const auto action = app.take_portal_action();
+        if (action == PortalAction::Start) {
+            if (!app.prepare_portal())
+                app.show_portal({PortalPhase::Closed, "", "", "", "无法开启手机配置，请稍后重试。"});
+            else if (flush())
+                app.show_portal({PortalPhase::Waiting, "PicoPage-PREVIEW", "preview0", "http://192.168.4.1", ""});
+        } else if (action == PortalAction::Stop)
+            app.show_portal({PortalPhase::Closed, "", "", "", "桌面预览不提供设备热点。"});
+        return flush();
+    }
     bool gesture(Input key, bool touch = false, int x = 0, int y = 0) {
         ++sequence;
         app.input({{sequence, Phase::Begin, key}, touch, x, y});
         app.input({{sequence, Phase::End, key}, touch, x, y});
-        return flush();
+        return flush() && poll_portal();
     }
     bool capture(const std::string &path) {
         pixels();

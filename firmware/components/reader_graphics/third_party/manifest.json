@@ -40,5 +40,19 @@
     "upstream_sha256": "c2ede378097fb1fcdcd128c47880c918663f475eba53e1e2dc59d95b537c8809",
     "local_sha256": "c2ede378097fb1fcdcd128c47880c918663f475eba53e1e2dc59d95b537c8809",
     "modified": false
+  },
+  {
+    "path": "qrcodegen/qrcodegen.c",
+    "commit": "3117b1e6806738c0271bbd18df17f6d74ec66452",
+    "upstream_sha256": "2e050dfb5d86a2e22842546efb034d27b5b5f56d29651c1e2eb5c5402870fb9c",
+    "local_sha256": "2e050dfb5d86a2e22842546efb034d27b5b5f56d29651c1e2eb5c5402870fb9c",
+    "modified": false
+  },
+  {
+    "path": "qrcodegen/qrcodegen.h",
+    "commit": "3117b1e6806738c0271bbd18df17f6d74ec66452",
+    "upstream_sha256": "d21849bb5509aa515cf3a61907dcc2e5f00245eb284a228dbab88043df8da743",
+    "local_sha256": "d21849bb5509aa515cf3a61907dcc2e5f00245eb284a228dbab88043df8da743",
+    "modified": false
   }
 ]

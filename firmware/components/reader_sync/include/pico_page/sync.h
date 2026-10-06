@@ -19,6 +19,8 @@ struct Config {
 
 /** Read only PicoPage/sync.toml. Diagnostics never contain credentials or source lines. */
 bool load_config(const std::string& card_root, Config& config, std::string& error);
+/** True when every field satisfies the limits load_config enforces. */
+bool valid_config(const Config& config);
 std::string account_scope(const Config& config);
 
 struct HttpRequest {
@@ -36,6 +38,12 @@ bool get_request(const Config& config, const std::string& partial_md5,
 bool put_request(const Config& config, const std::string& partial_md5,
                  const std::string& xpointer, double percentage, const ReadingRecord& saved_record,
                  HttpRequest& request, std::string& error);
+
+/**
+ * Asks the server whether the account is accepted. 200 confirms it and 401 rejects it;
+ * no record is read or written.
+ */
+bool auth_request(const Config& config, HttpRequest& request, std::string& error);
 
 enum class RemoteStatus { Found, NoRecord, Unauthorized, Error };
 struct RemoteResult {

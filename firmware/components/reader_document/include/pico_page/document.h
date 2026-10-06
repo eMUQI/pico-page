@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace pico_page {
@@ -92,6 +93,9 @@ struct Chapter {
     bool offset_for(const Anchor& anchor, std::uint32_t& offset) const;
     bool fragment_offset(const std::string& id, std::uint32_t& offset) const;
 };
+
+/** Lowercase hexadecimal MD5 of bytes; empty when the digest backend fails. */
+std::string md5_hex(std::string_view bytes);
 
 /** Frees all memory held by a chapter; assigning an empty chapter may keep string capacity. */
 void release(Chapter& chapter);

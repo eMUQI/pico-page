@@ -123,6 +123,13 @@ bool render_page(Canvas& canvas, Font& font, const Page& page, std::uint8_t gray
 bool render_image(Canvas& canvas, const std::vector<std::uint8_t>& encoded,
                   int x, int y, int width, int height, std::string& error, bool crop = false);
 
+/**
+ * Draws text as a QR code centred in a size x size box at (x, y), black on white with a
+ * four-module quiet zone and error correction level M. Returns false and leaves the canvas
+ * unchanged when the text does not fit version 10 or a module would be under 3 pixels.
+ */
+bool draw_qr(Canvas& canvas, std::string_view text, int x, int y, int size);
+
 /** Invalid UTF-8 sequences become U+FFFD; valid non-BMP characters remain one scalar. */
 std::u32string decode_utf8(std::string_view text);
 

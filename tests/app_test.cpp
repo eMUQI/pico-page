@@ -820,6 +820,63 @@ int main(int argc, char** argv) {
             assert(app.view() == View::Reading && app.book_pages()->page + 1 >= late_page);
         }
     }
+    {
+        // Phone setup: both entry points only request a session, the page keeps K2 and ignores
+        // every control but its own, and a closed session returns to the settings list.
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        driver.tap(600, 50); driver.present(); assert(app.view() == View::Settings);
+        driver.tap(300, 180); driver.present(); assert(app.view() == View::Import);
+        driver.tap(342, 750);
+        assert(!app.pending_frame() && app.view() == View::Import);
+        assert(app.take_portal_action() == PortalAction::Start && app.take_portal_action() == PortalAction::None);
+        app.show_portal({PortalPhase::Closed, "", "", "", "无法开启手机配置，请稍后重试。"}); driver.present();
+        assert(app.view() == View::Settings && app.status() == "无法开启手机配置，请稍后重试。");
+        driver.tap(300, 310); driver.present(); assert(app.view() == View::SyncSettings);
+        driver.tap(342, 800);
+        assert(app.take_portal_action() == PortalAction::Start);
+        assert(app.prepare_portal()); driver.present(); assert(app.view() == View::Portal);
+        const auto starting = app.canvas().pixels();
+        PortalStatus status{PortalPhase::Waiting, "PicoPage-TEST", "abcd2345", "http://192.168.4.1", ""};
+        app.show_portal(status);
+        assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean);
+        driver.present();
+        // Top-left finder modules of the access point code (version 3 at 7 px) and the address
+        // code (version 2 at 8 px), each inside its white quiet zone.
+        assert(app.canvas().pixels() != starting);
+        assert(app.canvas().pixel(66, 206) == 0 && app.canvas().pixel(41, 181) == 15);
+        assert(app.canvas().pixel(68, 552) == 0 && app.canvas().pixel(41, 525) == 15);
+        driver.refresh();
+        driver.key(Input::K1); driver.key(Input::K3); driver.tap(60, 50); driver.tap(342, 500);
+        assert(!app.pending_frame() && app.view() == View::Portal);
+        assert(app.take_portal_action() == PortalAction::None && !app.prepare_sleep());
+        status.phase = PortalPhase::JoiningWifi; status.detail = "home";
+        app.show_portal(status);
+        assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::Content);
+        driver.present();
+        status.phase = PortalPhase::Failed; status.detail = "无法连接“home”（驱动原因 8）。设备没有保存这次的设置。";
+        app.show_portal(status); driver.present();
+        const auto failed = app.canvas().pixels();
+        status.phase = PortalPhase::Saved; status.detail = "已保存 Wi-Fi “home”。";
+        app.show_portal(status); driver.present();
+        assert(app.canvas().pixels() != failed && app.view() == View::Portal); driver.refresh();
+        driver.tap(342, 1120);
+        assert(app.take_portal_action() == PortalAction::Stop); driver.present();
+        driver.tap(342, 1120);
+        assert(app.take_portal_action() == PortalAction::None && !app.pending_frame());
+        app.show_portal({PortalPhase::Closed, "", "", "", ""}); driver.present();
+        assert(app.view() == View::Settings && app.status().empty());
+        app.show_portal(status);
+        assert(!app.pending_frame() && app.view() == View::Settings);
+        // With a book open the session starts from saved progress and leaves it unchanged.
+        opened(app, "Books/book.epub"); driver.present();
+        driver.key(Input::K3); driver.present();
+        assert(app.prepare_portal()); driver.present();
+        assert(app.view() == View::Portal && !app.save_due());
+        const auto saved = *app.saved_record();
+        app.show_portal({PortalPhase::Closed, "", "", "", ""}); driver.present();
+        assert(app.view() == View::Settings && *app.saved_record() == saved);
+    }
     fs::remove_all(card);
     std::cout << "reader app display, progress protection, typography, cover and stale network checks: passed\n";
 }

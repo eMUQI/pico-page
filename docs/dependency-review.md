@@ -96,6 +96,19 @@ ASan/UBSan 检查无运行时错误，不能据此代替上游安全维护或最
 
 实现结果：封面缓存、状态行和页起点记录均为本项目自行实现，没有复制上述项目的代码。许可证义务没有变化。
 
+## 2026-10-06 · 配网与同步配置的来源核对
+
+| 来源 | 版本 | 许可证 | 查看范围与取舍 |
+|---|---|---|---|
+| ESP-IDF 示例 `examples/protocols/http_server/captive_portal` | `fff9895c82d744c7237be8847347bdd1b07c6643`（v6.1） | Unlicense OR CC0-1.0 | 采用其做法：DNS 把所有主机名指向热点地址，未知路径 303 跳转并带正文（iOS 需要正文）。没有复制 `dns_server.c`：它的停止路径直接删除任务，不关闭套接字，每次会话泄漏一个；本项目每次配置都要启停，因此按同一协议另写了约 40 行的应答任务。DHCP 114 选项未采用 |
+| ESP-IDF `esp_http_server`、`esp_wifi`（APSTA、扫描）、`esp_netif` | 同上 | Apache-2.0 | 作为 SDK 组件使用 |
+| `espressif/idf-extra-components` `qrcode/qrcodegen.c`、`qrcodegen.h` | `3117b1e6806738c0271bbd18df17f6d74ec66452`（组件 `espressif/qrcode` 0.2.0） | MIT（Project Nayuki，文件头） | 复制到 `reader_graphics/third_party/qrcodegen/`，未修改，host 与固件共用；组件的 Apache-2.0 封装文件未复制。哈希见该目录的 `manifest.json` |
+| CrossMux（本机检出） `src/activities/network/WifiSelectionActivity.cpp`、`CrossPointWebServerActivity.cpp`、`src/activities/settings/KOReaderSettingsActivity.cpp`、`lib/KOReaderSync/KOReaderCredentialStore.cpp` | `3fb809f6ceeb753a7c40fef86dee7c9d40eabdf3` | MIT（顶层） | 只读。它用屏幕键盘输入 Wi-Fi 密码和 KOReader 账户，热点模式下同样运行 DNS 重定向；凭据存 TF 卡。未复制代码；屏幕键盘留作以后的后备 |
+| KOReader `plugins/kosync.koplugin/api.json`、`KOSyncClient.lua` | `2ce49e115fc1bcc47b473078c549e59b3922105b` | AGPL-3.0 | 只读协议：`GET /users/auth` 返回 200 表示账户有效、401 表示拒绝；userkey 为密码的 MD5。未复制代码 |
+
+- SmartConfig（ESPTouch/AirKiss）未采用：只能传 SSID 和密码，需要专用 App 或微信，且要求手机连在 2.4 GHz 上。
+- 乐鑫统一配网（BLE 或 SoftAP 加专用 App）未采用：同样需要专用 App，BLE 还要加入蓝牙协议栈。
+
 ## 2026-10-06 · 全书页数与设置页的来源核对
 
 本轮只读源码和文档，没有复制代码或新增第三方依赖。

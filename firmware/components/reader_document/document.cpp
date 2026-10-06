@@ -845,6 +845,13 @@ void set_chapter_memory_probe(bool (*probe)(std::size_t bytes)) {
     memory_room = probe ? probe : platform_memory_room;
 }
 
+std::string md5_hex(std::string_view bytes) {
+    Hash md5(true);
+    std::string digest;
+    md5.update(reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size());
+    return md5.finish(digest) ? digest : std::string();
+}
+
 void release(Chapter& chapter) {
     // Assigning an empty value may keep the capacity of the strings; swapping hands the buffers
     // to a temporary that frees them.

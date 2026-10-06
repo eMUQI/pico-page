@@ -1,8 +1,5 @@
 #include "pico_page/platform.h"
 
-#include "store_internal.h"
-#include "tomlc17.h"
-
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -30,11 +27,13 @@ constexpr std::size_t request_limit = 16384;
 TaskHandle_t network_owner = nullptr;
 EventGroupHandle_t events = nullptr;
 esp_netif_t* interface = nullptr;
+esp_netif_t* access_interface = nullptr;
 esp_event_handler_instance_t wifi_handler = nullptr;
 esp_event_handler_instance_t ip_handler = nullptr;
 bool netif_initialized = false;
 bool wifi_initialized = false;
 bool wifi_started = false;
+bool access_point = false;
 bool connected = false;
 bool sntp_initialized = false;
 std::uint16_t disconnect_reason = 0;
@@ -58,62 +57,6 @@ void network_event(void*, esp_event_base_t base, std::int32_t id, void* data) {
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         xEventGroupSetBits(events, has_address);
     }
-}
-
-bool only_fields(toml_datum_t table, std::initializer_list<const char*> fields) {
-    if (table.type != TOML_TABLE) return false;
-    for (int index = 0; index < table.u.tab.size; ++index) {
-        bool found = false;
-        const std::string key(table.u.tab.key[index], table.u.tab.len[index]);
-        for (const auto* field : fields) found = found || key == field;
-        if (!found) return false;
-    }
-    return true;
-}
-
-bool scalar_string(toml_datum_t value, std::size_t maximum, bool empty_allowed) {
-    if (value.type != TOML_STRING || value.u.str.len < (empty_allowed ? 0 : 1) ||
-        static_cast<std::size_t>(value.u.str.len) > maximum) return false;
-    for (int index = 0; index < value.u.str.len; ++index) {
-        const auto ch = static_cast<unsigned char>(value.u.str.ptr[index]);
-        if (ch < 0x20 || ch == 0x7f) return false;
-    }
-    return true;
-}
-
-bool wifi_configuration(const std::string& root, wifi_config_t& configuration, std::string& error) {
-    std::string bytes;
-    const auto status = store_internal::read_file(root, "PicoPage/network.toml", 4096, bytes);
-    if (status != StoreStatus::Ok) {
-        error = "Cannot read local PicoPage/network.toml";
-        return false;
-    }
-    store_internal::configure_toml();
-    auto parsed = toml_parse(bytes.data(), static_cast<int>(bytes.size()));
-    const auto table = toml_get(parsed.toptab, "wifi");
-    const auto schema = toml_get(parsed.toptab, "schema_version");
-    const auto ssid = toml_get(table, "ssid");
-    const auto password = toml_get(table, "password");
-    bool valid = parsed.ok && only_fields(parsed.toptab, {"schema_version", "wifi"}) &&
-        only_fields(table, {"ssid", "password"}) && schema.type == TOML_INT64 && schema.u.int64 == 1 &&
-        scalar_string(ssid, sizeof(configuration.sta.ssid), false) &&
-        scalar_string(password, sizeof(configuration.sta.password), true);
-    if (valid && password.u.str.len != 0 && password.u.str.len < 8) valid = false;
-    if (valid && password.u.str.len == 64) {
-        for (int index = 0; index < password.u.str.len; ++index) {
-            if (!std::isxdigit(static_cast<unsigned char>(password.u.str.ptr[index]))) valid = false;
-        }
-    }
-    if (valid) {
-        std::memcpy(configuration.sta.ssid, ssid.u.str.ptr, ssid.u.str.len);
-        std::memcpy(configuration.sta.password, password.u.str.ptr, password.u.str.len);
-        configuration.sta.threshold.authmode = password.u.str.len ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
-        configuration.sta.pmf_cfg.capable = true;
-    }
-    toml_free(parsed);
-    erase_bytes(bytes.data(), bytes.size());
-    if (!valid) error = "Invalid network.toml; expected schema_version=1 and wifi.ssid/password";
-    return valid;
 }
 
 bool valid_header(const std::pair<std::string, std::string>& header) {
@@ -140,15 +83,60 @@ bool valid_url(const std::string& url) {
     }
     return url.find('#') == std::string::npos;
 }
+
+void stop_clock() {
+    if (sntp_initialized) esp_netif_sntp_deinit();
+    sntp_initialized = false;
+}
+
+/** Creates the interfaces and starts the driver; access selects access point plus station. */
+esp_err_t start_wifi(wifi_config_t* access) {
+    if (!netif_initialized) {
+        const auto result = esp_netif_init();
+        if (result != ESP_OK) return result;
+        netif_initialized = true;
+    }
+    auto result = esp_event_loop_create_default();
+    if (result != ESP_OK && result != ESP_ERR_INVALID_STATE) return result;
+    events = xEventGroupCreate();
+    if (!events) return ESP_ERR_NO_MEM;
+    interface = esp_netif_create_default_wifi_sta();
+    if (!interface) return ESP_ERR_NO_MEM;
+    if (access && !(access_interface = esp_netif_create_default_wifi_ap())) return ESP_ERR_NO_MEM;
+    wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
+    init.nvs_enable = false;
+    result = esp_wifi_init(&init);
+    if (result != ESP_OK) return result;
+    wifi_initialized = true;
+    if ((result = esp_wifi_set_storage(WIFI_STORAGE_RAM)) != ESP_OK ||
+        (result = esp_wifi_set_mode(access ? WIFI_MODE_APSTA : WIFI_MODE_STA)) != ESP_OK ||
+        (access && (result = esp_wifi_set_config(WIFI_IF_AP, access)) != ESP_OK)) return result;
+    if ((result = esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, network_event, nullptr, &wifi_handler)) != ESP_OK ||
+        (result = esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, network_event, nullptr, &ip_handler)) != ESP_OK) return result;
+    esp_log_level_set("wifi", ESP_LOG_WARN);
+    esp_log_level_set("HTTP_CLIENT", ESP_LOG_WARN);
+    result = esp_wifi_start();
+    if (result == ESP_OK) wifi_started = true;
+    return result;
+}
+
+/** Ends a station attempt; without an access point the whole session is released. */
+void abandon_station() {
+    connected = false;
+    if (!access_point) {
+        disconnect_network();
+        return;
+    }
+    stop_clock();
+    esp_wifi_disconnect();
+}
 } // namespace
 
 void disconnect_network() {
     if (network_owner && network_owner != xTaskGetCurrentTaskHandle()) return;
     connected = false;
-    if (sntp_initialized) {
-        esp_netif_sntp_deinit();
-        sntp_initialized = false;
-    }
+    access_point = false;
+    stop_clock();
     if (wifi_handler) esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_handler);
     if (ip_handler) esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, ip_handler);
     wifi_handler = nullptr;
@@ -159,62 +147,115 @@ void disconnect_network() {
     wifi_initialized = false;
     if (interface) esp_netif_destroy_default_wifi(interface);
     interface = nullptr;
+    if (access_interface) esp_netif_destroy_default_wifi(access_interface);
+    access_interface = nullptr;
     if (events) vEventGroupDelete(events);
     events = nullptr;
     network_owner = nullptr;
 }
 
-bool connect_network(const std::string& card_root, std::string& error) {
+bool start_access_point(const std::string& ssid, const std::string& password,
+                        std::vector<std::string>& networks, std::string& error) {
     error.clear();
+    networks.clear();
     if (network_owner && network_owner != xTaskGetCurrentTaskHandle()) {
         error = "Network must be used by its owning worker task";
         return false;
     }
+    wifi_config_t access{};
+    if (ssid.empty() || ssid.size() > sizeof(access.ap.ssid) || password.size() < 8 ||
+        password.size() >= sizeof(access.ap.password)) {
+        error = "Invalid access point name or password";
+        return false;
+    }
     disconnect_network();
     network_owner = xTaskGetCurrentTaskHandle();
-    wifi_config_t configuration{};
-    if (!wifi_configuration(card_root, configuration, error)) return false;
-    auto initialize = [&]() -> esp_err_t {
-        if (!netif_initialized) {
-            const auto result = esp_netif_init();
-            if (result != ESP_OK) return result;
-            netif_initialized = true;
-        }
-        auto result = esp_event_loop_create_default();
-        if (result != ESP_OK && result != ESP_ERR_INVALID_STATE) return result;
-        events = xEventGroupCreate();
-        if (!events) return ESP_ERR_NO_MEM;
-        interface = esp_netif_create_default_wifi_sta();
-        if (!interface) return ESP_ERR_NO_MEM;
-        wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
-        init.nvs_enable = false;
-        result = esp_wifi_init(&init);
-        if (result != ESP_OK) return result;
-        wifi_initialized = true;
-        if ((result = esp_wifi_set_storage(WIFI_STORAGE_RAM)) != ESP_OK ||
-            (result = esp_wifi_set_mode(WIFI_MODE_STA)) != ESP_OK ||
-            (result = esp_wifi_set_config(WIFI_IF_STA, &configuration)) != ESP_OK) return result;
-        if ((result = esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, network_event, nullptr, &wifi_handler)) != ESP_OK ||
-            (result = esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, network_event, nullptr, &ip_handler)) != ESP_OK) return result;
-        result = esp_wifi_start();
-        if (result != ESP_OK) return result;
-        wifi_started = true;
-        return esp_wifi_connect();
-    };
-    esp_log_level_set("wifi", ESP_LOG_WARN);
-    esp_log_level_set("HTTP_CLIENT", ESP_LOG_WARN);
-    disconnect_reason = 0;
-    const auto result = initialize();
-    erase_bytes(&configuration, sizeof(configuration));
+    std::memcpy(access.ap.ssid, ssid.data(), ssid.size());
+    access.ap.ssid_len = static_cast<std::uint8_t>(ssid.size());
+    std::memcpy(access.ap.password, password.data(), password.size());
+    access.ap.channel = 1;
+    access.ap.authmode = WIFI_AUTH_WPA2_PSK;
+    access.ap.max_connection = 2;
+    const auto result = start_wifi(&access);
+    erase_bytes(&access, sizeof(access));
     if (result != ESP_OK) {
         disconnect_network();
+        return fail(error, "Access point initialization", result);
+    }
+    access_point = true;
+    // Scanning leaves the access point channel for a moment, so it runs once, before a phone joins.
+    wifi_scan_config_t scan{};
+    if (esp_wifi_scan_start(&scan, true) == ESP_OK) {
+        std::uint16_t count = 20;
+        std::vector<wifi_ap_record_t> records(count);
+        if (esp_wifi_scan_get_ap_records(&count, records.data()) != ESP_OK) {
+            esp_wifi_clear_ap_list();
+            count = 0;
+        }
+        for (std::uint16_t index = 0; index < count; ++index) {
+            const auto* raw = reinterpret_cast<const char*>(records[index].ssid);
+            std::string name(raw, strnlen(raw, sizeof(records[index].ssid)));
+            if (!name.empty() && std::find(networks.begin(), networks.end(), name) == networks.end())
+                networks.push_back(std::move(name));
+        }
+    }
+    return true;
+}
+
+bool connect_network(const std::string& ssid, const std::string& password, std::string& error,
+                     ConnectFailure* failure) {
+    error.clear();
+    ConnectFailure ignored;
+    auto& outcome = failure ? *failure : ignored;
+    outcome = {ConnectFailure::Stage::Setup, 0};
+    if (network_owner && network_owner != xTaskGetCurrentTaskHandle()) {
+        error = "Network must be used by its owning worker task";
+        return false;
+    }
+    wifi_config_t configuration{};
+    if (ssid.empty() || ssid.size() > sizeof(configuration.sta.ssid) ||
+        password.size() > sizeof(configuration.sta.password)) {
+        error = "Invalid Wi-Fi name or password";
+        return false;
+    }
+    std::memcpy(configuration.sta.ssid, ssid.data(), ssid.size());
+    std::memcpy(configuration.sta.password, password.data(), password.size());
+    configuration.sta.threshold.authmode = password.empty() ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
+    configuration.sta.pmf_cfg.capable = true;
+    esp_err_t result = ESP_OK;
+    if (access_point) {
+        connected = false;
+        stop_clock();
+        // Leaving an established link reports a disconnect; it must arrive before this attempt
+        // starts, or it would be taken for the attempt's own failure.
+        const bool linked = xEventGroupGetBits(events) & has_address;
+        xEventGroupClearBits(events, connection_failed);
+        esp_wifi_disconnect();
+        if (linked) xEventGroupWaitBits(events, connection_failed, pdFALSE, pdFALSE, pdMS_TO_TICKS(2000));
+        xEventGroupClearBits(events, has_address | connection_failed);
+    } else {
+        disconnect_network();
+        network_owner = xTaskGetCurrentTaskHandle();
+        result = start_wifi(nullptr);
+    }
+    disconnect_reason = 0;
+    if (result == ESP_OK) result = esp_wifi_set_config(WIFI_IF_STA, &configuration);
+    if (result == ESP_OK) result = esp_wifi_connect();
+    erase_bytes(&configuration, sizeof(configuration));
+    if (result != ESP_OK) {
+        abandon_station();
         return fail(error, "Wi-Fi initialization", result);
     }
     const auto bits = xEventGroupWaitBits(events, has_address | connection_failed, pdFALSE, pdFALSE, pdMS_TO_TICKS(20000));
     if (!(bits & has_address) || (bits & connection_failed)) {
-        error = bits & connection_failed ? "Wi-Fi disconnected (driver reason " + std::to_string(disconnect_reason) + ")" :
-            "Wi-Fi address acquisition timed out";
-        disconnect_network();
+        if (bits & connection_failed) {
+            outcome = {ConnectFailure::Stage::Link, disconnect_reason};
+            error = "Wi-Fi disconnected (driver reason " + std::to_string(disconnect_reason) + ")";
+        } else {
+            outcome.stage = ConnectFailure::Stage::Address;
+            error = "Wi-Fi address acquisition timed out";
+        }
+        abandon_station();
         return false;
     }
     esp_sntp_config_t time_configuration = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
@@ -224,10 +265,12 @@ bool connect_network(const std::string& card_root, std::string& error) {
         esp_netif_sntp_sync_wait(pdMS_TO_TICKS(10000));
     }
     if (std::time(nullptr) < 1704067200) {
+        outcome.stage = ConnectFailure::Stage::Clock;
         error = "A valid clock is required for TLS; time synchronization failed";
-        disconnect_network();
+        abandon_station();
         return false;
     }
+    outcome.stage = ConnectFailure::Stage::None;
     connected = true;
     return true;
 }

@@ -28,9 +28,20 @@ enum class View {
     StorageSettings,
     InputSettings,
     BookManagement,
-    SyncSettings
+    SyncSettings,
+    Portal
 };
 enum class UsbTransferAction { None, Start, Exit };
+enum class PortalAction { None, Start, Stop };
+enum class PortalPhase { Starting, Waiting, JoiningWifi, CheckingAccount, Saved, Failed, Closed };
+/** One state of a phone setup session, reported by the task that owns the radio. */
+struct PortalStatus {
+    PortalPhase phase = PortalPhase::Starting;
+    /** The device's own access point and setup page address; empty until the access point is up. */
+    std::string access_ssid, access_password, url;
+    /** JoiningWifi: the network name. Saved, Failed and Closed: a sentence for the user, or empty. */
+    std::string detail;
+};
 struct BookPages {
     std::uint32_t page;   // 1-based, counted from the first linear chapter.
     std::uint32_t total;
@@ -81,6 +92,18 @@ class ReaderApp {
     bool prepare_usb_transfer();
     /** Draws a transfer/error page from internal fonts, without accessing the card. */
     void show_usb_transfer(bool active, const std::string& error);
+    /** Consumes one explicit UI request; the main loop owns the radio and the setup page server. */
+    PortalAction take_portal_action();
+    /**
+     * Saves confirmed progress, ends sync work and shows the starting state of a phone setup
+     * session. false when the display or network is busy, the card is absent or the save fails.
+     */
+    bool prepare_portal();
+    /**
+     * Draws a session state while the setup page is shown. Closed leaves that page, or the page
+     * that requested the session, for the settings list with detail as its message.
+     */
+    void show_portal(const PortalStatus &status);
     bool prepare_sleep();
     void wake();
     void card_removed();

@@ -17,6 +17,13 @@ device_id = "pico-page-personal-device"
 dom_version = 20260812
 ```
 
+在设备上，可从“设置 › KOReader 同步 › 用手机配置”填写：设备验证账户后写入本文件，`device_id` 沿用已有值，
+没有时使用 `pico-page-<MAC>`；整个文件被重写，手写的注释不保留。
+
+也可以在电脑上运行 `python3 tools/setup_network.py [存储卡挂载路径]` 生成本文件和 `network.toml`：
+脚本询问账户密码并只写入其 MD5，保留已有的 `device_id` 和 `dom_version`，默认先向同步服务验证账户
+（`--offline` 跳过）。手工编辑仍然有效。
+
 `userkey` 是 KOReader 使用的账户密钥，即账户密码的 MD5 十六进制值；它不是显示用标识。
 本项目不记录密钥、不将其放入请求正文或诊断信息。配置属于私密文件，不应加入仓库或公开截图。
 必须使用 HTTPS。`device_id` 是此设备的稳定标识，不能复制其他设备的 ID。
