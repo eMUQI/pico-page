@@ -12,6 +12,17 @@ Read Pico 开书崩溃已修复；离线开书、翻页、排版取消/应用、
 已完成字体 PSRAM 分配器及全局排版反馈。当前 host 与 ASan/UBSan 各 9/9 通过，
 字宽缓存改前/改后的 2,060 页边界与像素摘要一致。最新事实以本轮记录和设备验证页为准。
 
+## 2026-10-06 · GitHub 私有仓库
+
+- 按用户要求创建私有仓库 `https://github.com/eMUQI/pico-page`，配置 `origin`，推送 `main` 并建立跟踪关系。
+- 实际执行：`gh repo create --private --source=. --remote=origin --push`；`gh repo view` 确认 `PRIVATE`，
+  `git ls-remote origin refs/heads/main` 与本地提交 `5ffbb59b1765097adaf1c1868dbb59786dff5f70` 一致。
+- 上传前检查完整 Git 历史中的常见凭据模式、敏感文件名和超过 50 MiB 的文件，均未发现匹配项；
+  本地个人媒体、设备日志和构建产物继续由 `.gitignore` 排除。
+- ChatGPT GitHub 连接账号为 `eMUQI`，安装采用仅选定仓库授权；读取新仓库的 `README.md` 返回 404。
+  GitHub 授权设置要求用户重新验证身份；仓库读取权限尚未验证成功。
+- 本批未修改固件或运行产品测试。下一步：将新仓库纳入 ChatGPT Connector 授权范围，再实际读取文件验证。
+
 ## 2026-10-06 · 版本 E 真机验证（已安装）
 
 - 用户确认（“烧录吧”）后写入 `.local/pages-settings-20261006/pico_page-e.bin`，仅 `0x10000`，`Hash of data verified`
