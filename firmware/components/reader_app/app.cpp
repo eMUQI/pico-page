@@ -19,6 +19,7 @@
 #ifdef ESP_PLATFORM
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 #endif
 
 namespace pico_page {
@@ -636,6 +637,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         image_prepared = true;
         prepared_image = std::move(job->result.image);
         prepared_image_error = job->result.error;
+#ifdef ESP_PLATFORM
+        if (!prepared_image_error.empty())
+            ESP_LOGW("reader_app", "Image unavailable: resource=%s error=%s", request.image_resource.c_str(), prepared_image_error.c_str());
+#endif
         if (request.preview) { draw_typography(); overlay(); }
         else show_page(request.offset);
         image_prepared = false;
@@ -3194,6 +3199,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         overlay();
     }
     void error(const std::string &detail) {
+#ifdef ESP_PLATFORM
+        ESP_LOGW("reader_app", "Error shown: %s", detail.c_str());
+#endif
         abandon_content();
         if (drawing_error) return;
         drawing_error = true;
