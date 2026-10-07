@@ -220,6 +220,15 @@ int main(int argc, char** argv) {
         assert(!images.read_image("https://example.invalid/cover.png", encoded, error) && encoded.empty());
         assert(!images.read_image("EPUB/large.png", encoded, error) && encoded.empty());
         assert(!images.read_image("EPUB/chapter1.xhtml", encoded, error) && encoded.empty());
+        assert(images.open(fixture_dir + "calibre-svg-cover.epub", error) && images.load_chapter(0, first, error));
+        assert(first.images.size() == 1 && first.images[0].resource == "EPUB/cover.png");
+        assert(images.open(fixture_dir + "background-page.epub", error) && images.load_chapter(0, first, error));
+        assert(first.images.size() == 1 && first.images[0].resource == "EPUB/cover.png" && first.images[0].source.node == "/html[1]/body[1]");
+        assert(images.open(fixture_dir + "background-text.epub", error) && images.load_chapter(0, first, error) && first.images.empty());
+        assert(images.open(fixture_dir + "named-entities.epub", error) && images.load_chapter(0, first, error));
+        assert(first.text.rfind(U"甲\u00a0乙\u2014丙\u00e9", 0) == 0 && first.runs.size() == 1 && first.runs[0].end - first.runs[0].begin == 6);
+        assert(images.open(fixture_dir + "unknown-entity.epub", error) && !images.load_chapter(0, first, error));
+        assert(error.find("Unsupported XML entity: unknown") != std::string::npos);
         assert(images.open(fixture_dir + "complex-svg-cover.epub", error) && images.load_chapter(0, first, error));
         assert(first.images.size() == 1 && first.images[0].resource.empty());
         const auto identity = book.metadata().book_id;

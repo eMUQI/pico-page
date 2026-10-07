@@ -967,7 +967,7 @@ int main(int argc, char** argv) {
         assert(doc.open((fixtures / "multi-part.epub").string(), error));
         Chapter original, cached;
         assert(load_content(store, doc, 0, original, error, ChapterLoad::Reading, 2));
-        const auto cache = card / "PicoPage/cache/content/content-reading-v1" / doc.metadata().book_id / "0/2";
+        const auto cache = card / "PicoPage/cache/content/content-reading-v2" / doc.metadata().book_id / "0/2";
         assert(fs::exists(cache));
         const auto data = read(cache);
         for (std::uint32_t part = 0; part < 2; ++part) {

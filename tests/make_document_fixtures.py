@@ -55,6 +55,20 @@ def generate(directory: Path) -> None:
         write_fixture(directory / (kind + "-cover.epub"), declared)
     entries["EPUB/chapter1.xhtml"] = '<html xmlns="http://www.w3.org/1999/xhtml"><body><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 2 2"><image width="2" height="2" xlink:href="cover.png"/></svg></body></html>'
     write_fixture(directory / "svg-cover.epub", entries)
+    plain_svg = entries["EPUB/chapter1.xhtml"]
+    entries["EPUB/chapter1.xhtml"] = plain_svg.replace('viewBox=', 'version="1.1" width="100%" height="100%" preserveAspectRatio="none" viewBox=')
+    write_fixture(directory / "calibre-svg-cover.epub", entries)
+    background = '<html xmlns="http://www.w3.org/1999/xhtml"><body style="background-image:url(\'cover.png\');background-size: contain;">\n%s</body></html>'
+    entries["EPUB/chapter1.xhtml"] = background % ""
+    write_fixture(directory / "background-page.epub", entries)
+    entries["EPUB/chapter1.xhtml"] = background % "<p>有正文的页面。</p>"
+    write_fixture(directory / "background-text.epub", entries)
+    xhtml11 = '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml"><body><p>%s</p></body></html>'
+    entries["EPUB/chapter1.xhtml"] = xhtml11 % "甲&nbsp;乙&mdash;丙&eacute;"
+    write_fixture(directory / "named-entities.epub", entries)
+    entries["EPUB/chapter1.xhtml"] = xhtml11 % "甲&unknown;乙"
+    write_fixture(directory / "unknown-entity.epub", entries)
+    entries["EPUB/chapter1.xhtml"] = plain_svg
     entries["EPUB/chapter1.xhtml"] = entries["EPUB/chapter1.xhtml"].replace('<image width=', '<image transform="rotate(30)" width=')
     write_fixture(directory / "complex-svg-cover.epub", entries)
     entries["EPUB/chapter1.xhtml"] = '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>图片前的正文。</p><img src="cover.png" alt="真实图片"/><p>图片后的正文。</p><img src="missing.png" alt="缺失图片"/><p>末尾正文。</p></body></html>'

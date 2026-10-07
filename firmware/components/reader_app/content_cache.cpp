@@ -26,7 +26,7 @@ std::size_t chapter_cache_bytes(const Chapter& c) {
 }
 namespace {
 constexpr std::size_t limit = 2U * 1024 * 1024;
-constexpr char version[] = "content-reading-v1";
+constexpr char version[] = "content-reading-v2";
 bool room() {
     if (!chapter_memory_available(limit)) return false;
 #ifdef ESP_PLATFORM

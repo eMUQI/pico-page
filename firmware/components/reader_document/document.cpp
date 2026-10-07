@@ -232,7 +232,36 @@ struct Xml {
             auto& x = *static_cast<Xml*>(opaque);
             if (has_internal_subset) x.stop("Internal DTD subsets are unsupported");
         });
-        XML_SetSkippedEntityHandler(parser, [](void* opaque, const char*, int) { static_cast<Xml*>(opaque)->stop("Unresolved XML entities are unsupported"); });
+        // The XHTML 1.x DTD is never loaded, so its named character entities arrive here. Each is
+        // delivered as one scalar of the surrounding text node.
+        XML_SetSkippedEntityHandler(parser, [](void* opaque, const char* name, int parameter) {
+            auto& x = *static_cast<Xml*>(opaque);
+            // U+00A0 through U+00FF in order.
+            static const char* const latin1[] = {
+                "nbsp", "iexcl", "cent", "pound", "curren", "yen", "brvbar", "sect", "uml", "copy", "ordf", "laquo", "not", "shy", "reg", "macr",
+                "deg", "plusmn", "sup2", "sup3", "acute", "micro", "para", "middot", "cedil", "sup1", "ordm", "raquo", "frac14", "frac12", "frac34", "iquest",
+                "Agrave", "Aacute", "Acirc", "Atilde", "Auml", "Aring", "AElig", "Ccedil", "Egrave", "Eacute", "Ecirc", "Euml", "Igrave", "Iacute", "Icirc", "Iuml",
+                "ETH", "Ntilde", "Ograve", "Oacute", "Ocirc", "Otilde", "Ouml", "times", "Oslash", "Ugrave", "Uacute", "Ucirc", "Uuml", "Yacute", "THORN", "szlig",
+                "agrave", "aacute", "acirc", "atilde", "auml", "aring", "aelig", "ccedil", "egrave", "eacute", "ecirc", "euml", "igrave", "iacute", "icirc", "iuml",
+                "eth", "ntilde", "ograve", "oacute", "ocirc", "otilde", "ouml", "divide", "oslash", "ugrave", "uacute", "ucirc", "uuml", "yacute", "thorn", "yuml"};
+            static const std::pair<const char*, char32_t> other[] = {
+                {"OElig", 0x152}, {"oelig", 0x153}, {"Scaron", 0x160}, {"scaron", 0x161}, {"Yuml", 0x178}, {"circ", 0x2c6}, {"tilde", 0x2dc},
+                {"ensp", 0x2002}, {"emsp", 0x2003}, {"thinsp", 0x2009}, {"zwnj", 0x200c}, {"zwj", 0x200d}, {"lrm", 0x200e}, {"rlm", 0x200f},
+                {"ndash", 0x2013}, {"mdash", 0x2014}, {"lsquo", 0x2018}, {"rsquo", 0x2019}, {"sbquo", 0x201a}, {"ldquo", 0x201c}, {"rdquo", 0x201d}, {"bdquo", 0x201e},
+                {"dagger", 0x2020}, {"Dagger", 0x2021}, {"bull", 0x2022}, {"hellip", 0x2026}, {"permil", 0x2030}, {"prime", 0x2032}, {"Prime", 0x2033},
+                {"lsaquo", 0x2039}, {"rsaquo", 0x203a}, {"oline", 0x203e}, {"frasl", 0x2044}, {"euro", 0x20ac}, {"trade", 0x2122},
+                {"larr", 0x2190}, {"uarr", 0x2191}, {"rarr", 0x2192}, {"darr", 0x2193}, {"harr", 0x2194}, {"minus", 0x2212}, {"infin", 0x221e}, {"ne", 0x2260}, {"le", 0x2264}, {"ge", 0x2265}};
+            char32_t scalar = 0;
+            if (!parameter) {
+                for (std::size_t i = 0; i < std::size(latin1) && !scalar; ++i) if (!std::strcmp(name, latin1[i])) scalar = static_cast<char32_t>(0xa0 + i);
+                for (const auto& entity : other) if (!scalar && !std::strcmp(name, entity.first)) scalar = entity.second;
+            }
+            if (!scalar) { x.stop(std::string("Unsupported XML entity: ") + name); return; }
+            // Every listed scalar lies in U+00A0 through U+FFFF: two or three UTF-8 bytes.
+            const char utf8[] = {static_cast<char>(0xe0 | scalar >> 12), static_cast<char>(scalar < 0x800 ? 0xc0 | scalar >> 6 : 0x80 | (scalar >> 6 & 0x3f)),
+                                 static_cast<char>(0x80 | (scalar & 0x3f))};
+            if (x.text) scalar < 0x800 ? x.text(utf8 + 1, 2) : x.text(utf8, 3);
+        });
         XML_SetExternalEntityRefHandler(parser, [](XML_Parser, const char*, const char*, const char*, const char*) -> int { return XML_STATUS_ERROR; });
         XML_SetStartCdataSectionHandler(parser, [](void* opaque) { auto& x = *static_cast<Xml*>(opaque); if (x.complex_markup) x.complex_markup(); });
         XML_SetCommentHandler(parser, [](void* opaque, const char*) { auto& x = *static_cast<Xml*>(opaque); if (x.boundary) x.boundary(); });
@@ -305,6 +334,7 @@ struct ChapterParser {
         std::size_t image = std::numeric_limits<std::size_t>::max();
         bool simple_svg = true;
         unsigned svg_images = 0, svg_width = 0, svg_height = 0;
+        std::string background;  // body only: image resource named by its inline style.
     };
     // chapter is the part being collected; the wanted part is moved to result when it closes.
     Chapter chapter;
@@ -473,12 +503,27 @@ struct ChapterParser {
         if (keep_anchors) chapter.runs.push_back({begin, begin + 1, *source});
         else { chapter.runs.push_back({begin, begin + 1, {{}, {}, source->offset}}); last_run_node = source->node; }
     }
+    /** Appends a media placeholder as a block of its own, mapped to the node at path. Returns false after stopping the parser. */
+    bool place_media(const std::string& label, const std::string& path, std::uint32_t& begin) {
+        finish_block(); block_kind = BlockKind::Image;
+        std::u32string scalar; decode(label.data(), label.size(), scalar);
+        begin = static_cast<std::uint32_t>(chapter.text.size());
+        if (scalar.size() > 256) { scalar.resize(255); scalar.push_back(U'…'); }
+        for (auto c : scalar) append(c, nullptr);
+        retained_metadata_bytes += path.size() + chapter.resource.size();
+        if (chapter.runs.size() >= 8192 || retained_metadata_bytes > 512 * 1024) { xml.stop("Chapter source mapping limit exceeded"); return false; }
+        if (keep_anchors) chapter.runs.push_back({begin, static_cast<std::uint32_t>(chapter.text.size()), {chapter.resource, path, 0}, true});
+        else { chapter.runs.push_back({begin, static_cast<std::uint32_t>(chapter.text.size()), {}, true}); last_run_node = path; }
+        return true;
+    }
     void start(const std::string& name, const char** attrs) {
         const auto simple_image_style = [](const char** attributes) {
             for (const auto* property : {"transform", "style", "opacity", "filter", "mask", "clip-path"})
                 if (!attr(attributes, property).empty()) return false;
+            // calibre writes "none" on its cover page; the image then covers the whole viewBox and
+            // is drawn fitted with its own aspect ratio, as for "xMidYMid meet".
             const auto aspect = attr(attributes, "preserveAspectRatio");
-            return aspect.empty() || aspect == "xMidYMid meet";
+            return aspect.empty() || aspect == "xMidYMid meet" || aspect == "none";
         };
         if (!room(0)) return;
         static const std::set<std::string> plain_elements = {"html", "head", "title", "meta", "link", "style", "body", "h1", "h2", "h3", "h4", "h5", "h6", "p", "div", "section", "article", "aside", "header", "footer", "nav", "blockquote", "span", "em", "strong", "b", "i", "u", "s", "a", "ul", "ol", "li", "br", "code", "small", "sub", "sup", "mark", "abbr", "cite", "q", "del", "ins"};
@@ -508,6 +553,19 @@ struct ChapterParser {
         if (name == "head" || name == "script" || name == "style") frame.hidden = true;
         const auto inline_css = attr(attrs, "style");
         if (!inline_css.empty()) retain_css("_ {" + inline_css + "}");
+        if (name == "body") {
+            // Only the inline style is read; a background set by a stylesheet rule is not found.
+            auto at = inline_css.find("background");
+            if (at != std::string::npos) at = inline_css.find("url(", at);
+            const auto close = at == std::string::npos ? at : inline_css.find(')', at);
+            if (close != std::string::npos) {
+                auto url = inline_css.substr(at + 4, close - at - 4);
+                const auto first = url.find_first_not_of(" \t'\""), last = url.find_last_not_of(" \t'\"");
+                std::string fragment;
+                if (first != std::string::npos && (!resolve(chapter.resource, url.substr(first, last - first + 1), frame.background, fragment) || !fragment.empty()))
+                    frame.background.clear();
+            }
+        }
         if (name == "style" && retain_css("")) frame.css = chapter.css_sources.size() - 1;
         if (name == "link" && token(attr(attrs, "rel"), "stylesheet")) {
             std::string resource, fragment;
@@ -541,16 +599,9 @@ struct ChapterParser {
                 frame.link = chapter.links.size(); chapter.links.push_back(std::move(link));
             }
             if (name == "img" || name == "image" || name == "svg" || name == "math" || name == "audio" || name == "video" || name == "object") {
-                finish_block(); block_kind = BlockKind::Image;
                 const std::string label = name == "img" || name == "image" ? "[图片：" + (attr(attrs, "alt").empty() ? "未渲染" : attr(attrs, "alt")) + "]" : "[不支持的媒体：" + name + "]";
-                std::u32string scalar; decode(label.data(), label.size(), scalar);
-                const auto begin = static_cast<std::uint32_t>(chapter.text.size());
-                if (scalar.size() > 256) { scalar.resize(255); scalar.push_back(U'…'); }
-                for (auto c : scalar) append(c, nullptr);
-                retained_metadata_bytes += frame.path.size() + chapter.resource.size();
-                if (chapter.runs.size() >= 8192 || retained_metadata_bytes > 512 * 1024) { xml.stop("Chapter source mapping limit exceeded"); return; }
-                if (keep_anchors) chapter.runs.push_back({begin, static_cast<std::uint32_t>(chapter.text.size()), {chapter.resource, frame.path, 0}, true});
-                else { chapter.runs.push_back({begin, static_cast<std::uint32_t>(chapter.text.size()), {}, true}); last_run_node = frame.path; }
+                std::uint32_t begin;
+                if (!place_media(label, frame.path, begin)) return;
                 if (name == "img" || name == "image" || name == "svg") {
                     if (chapter.images.size() >= 256) { xml.stop("Chapter image reference limit exceeded"); return; }
                     DocumentImage image{begin, static_cast<std::uint32_t>(chapter.text.size()), "", attr(attrs, "alt"), {chapter.resource, frame.path, 0}};
@@ -579,6 +630,15 @@ struct ChapterParser {
         auto frame = std::move(frames.back()); frames.pop_back();
         if (frame.name == "svg" && frame.image < chapter.images.size() && (!frame.simple_svg || frame.svg_images != 1)) chapter.images[frame.image].resource.clear();
         if (frame.link != std::numeric_limits<std::size_t>::max()) chapter.links[frame.link].end = static_cast<std::uint32_t>(chapter.text.size());
+        // A page whose only content is the body background, such as a title page, shows that image.
+        if (!frame.background.empty() && part == 0 && !captured && chapter.text.empty()) {
+            std::uint32_t begin;
+            if (!place_media("[图片：未渲染]", frame.path, begin)) return;
+            chapter.images.push_back({begin, static_cast<std::uint32_t>(chapter.text.size()), frame.background, "", {chapter.resource, frame.path, 0}});
+            retained_metadata_bytes += frame.background.size();
+            finish_block(); block_kind = BlockKind::Paragraph;
+            warn(chapter, "Images and media use explicit placeholders");
+        }
         if (frame.body && !frame.hidden && frame.block) finish_block();
         if (!frames.empty()) { frames.back().in_text = false; block_kind = frames.back().kind; }
     }
