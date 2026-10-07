@@ -1,6 +1,6 @@
 # 开发状态
 
-最后更新：2026-10-07。阅读响应性专项已完成本轮软件改造和本机验证，尚未刷入设备；
+最后更新：2026-10-07。阅读响应性专项已完成本轮软件改造和本机验证，固件已安装，第一轮实体操作数据已采集：下一页位图预取在真机上未命中；随后安装了三项 EPUB 兼容性修复，见下方记录；
 最新固件构建通过，host 与 ASan/UBSan 各 11/11 通过。各批次命令、结果、失败记录及提交见下方。
 
 ## 阅读响应性专项交接
@@ -22,9 +22,118 @@
 首次字体打开、未命中文本页的一页排版/绘制以及显式配置/存储交接仍存在同步工作；
 这些边界已记录在[架构实现说明](architecture.md)，不能将本轮改造描述为全系统硬实时保证。
 
-设备仍是此前的手机配置版本（版本 E 加 Wi-Fi 与同步账户配置，配置功能尚未真机验收）。
+设备已安装本轮固件（提交 `2b98f97`，含 VCOM 门控），见下方安装记录；手机配置功能仍未真机验收。
 已有版本 E 的长章节阅读、实体连续翻页及休眠唤醒触摸记录保留在历史条目中，
-不作为本轮新调度和缓存代码的验收结果。当前未推送远端、未刷机；BSP 的 VCOM 门控升级已单独提交，含该升级的固件未安装。
+不作为本轮新调度和缓存代码的验收结果。当前未推送远端。
+
+## 2026-10-07 · EPUB 兼容性三项修复已安装（诊断按键验证，待用户实体确认）
+
+- 范围（均在 `document.cpp`，未提交）：
+  1. calibre 封面页 `preserveAspectRatio="none"`（见下一条）。
+  2. 正文为空而 `body` 的内联样式带 `background-image:url(…)` 的页面，把该图片作为一页图片显示，源锚点为 `body` 节点；
+     正文不为空时不添加。只读取内联样式，样式表里设置的背景图不处理；真正空白的章节仍报
+     `Chapter contains no supported body content`。
+  3. XHTML 1.x DTD 的命名字符实体（`&nbsp;`、`&mdash;` 等 Latin-1 全集和常用符号）按一个字符并入所在文本节点；
+     未列出的实体报 `Unsupported XML entity: <名称>`。此前任何命名实体都会使整章失败。
+     没有外部 DTD 声明的文档（如 `<!DOCTYPE html>`）里的命名实体仍是 XML 格式错误，未处理。
+- 起因：《乡土中国》修好空书名页后，host 探针继续报 `Unresolved XML entities are unsupported`；
+  该书 22 个 spine 文件中 19 个含 `&nbsp;`，修复前除封面外基本无法阅读。
+- 新增夹具 `background-page`、`background-text`、`named-entities`、`unknown-entity` 及断言
+  （实体与相邻文字属于同一个 run，偏移连续）。
+- 实际执行：host 与 ASan/UBSan CTest 各 11/11；`sh tools/check_public_books.sh` 对《乡土中国》《素食者》《看见孩子》
+  和公开的《呐喊》三种字号全书通过，缺字 0，《乡土中国》书名页图片输出。`sh tools/build_firmware.sh` 成功，
+  产物 `.local/responsiveness-20261007/pico_page-parser.bin`，2,330,368 字节，
+  SHA-256 `bde9d67312bf819f0ba72c8ea0b9b418ad2c591d1978470c1e394f657716af20`。
+- 安装：用户确认（“同意，一起做完再刷”）后写入，仅 `0x10000`，`Hash of data verified`；写入前设备无待处理帧、进度已保存，
+  USB 序列号与芯片 MAC 均为 `…:18:B8`（`pre-status-parser.log`、`premac-parser.log`、`flash-parser.log`）。重启后进入书库。
+- 真机验证（`verify_books.py`，诊断串口 `open` 与 `key`，日志 `verify-books.log`）：三本书各自打开后 K3×3、K1×3，
+  全程 `view=reading`、`frame_ok=1`，每次 K3 画布 CRC 变化，K1 返回后 CRC 与去程逐页一致；
+  没有 `Error shown` 或 `Image unavailable` 日志；《乡土中国》书名页和《素食者》封面有解码记录。
+  这是诊断注入和画布摘要，不是面板实拍或实体输入。
+- 副作用：验证后设备停在《看见孩子》的原位置（修订号 8 未变）；《素食者》在切书时新写了一条位于首页的进度记录。
+  验证期间修订号不随翻页增加，是因为串口请求会重置 2 秒空闲保存计时（`app_main.cpp` 的 `idle_save_us`），切书时已提交。
+- 未验证：KOReader 对含 `&nbsp;` 的文本和 `body` 锚点的位置换算（未运行 CREngine 对照）；用户实体操作下的显示效果；
+  `&nbsp;` 在行首和行尾的排版观感。
+
+## 2026-10-07 · calibre 封面页图片无法显示：已修复（host 验证，未安装）
+
+- 真机日志 `.local/responsiveness-20261007/reader-run-errlog.log`：用户实际操作只有最后约 27 秒落在采集窗口内。
+  《乡土中国》封面页图片正常显示；翻到下一页记录到 `Error shown: 章节读取失败：Chapter contains no supported body content`，
+  与 host 复现一致。本次没有出现 `Image unavailable`。空闲期间有一次 `PMU event: ESP_ERR_INVALID_RESPONSE`（09:15:45），
+  随后状态查询正常，原因未查。
+- 图片失败的根因（host 复现）：按第一轮日志中的身份摘要耗时推断出两本小书，文件大小与卡上一致（233,728 和 266,940 字节），
+  用户本机副本经 `sh tools/check_public_books.sh` 均报 `Image 0:0: Invalid internal image path`。
+  两本都是 calibre 生成的 `titlepage.xhtml`：`<svg … preserveAspectRatio="none"><image … xlink:href="cover.jpeg"/></svg>`。
+  解析器只接受缺省值和 `xMidYMid meet`，其余写法会清空图片资源路径，图片页因此显示“图片无法显示”。
+  书库封面取自 OPF 声明的封面文件，不经过这条路径，所以能显示。
+- 修改（未提交）：`document.cpp` 接受 `preserveAspectRatio="none"`，图片仍按自身比例适配绘制，不拉伸；
+  解析结果变化，章节内容缓存版本升为 `content-reading-v2`，旧缓存不再读取（卡上的 v1 文件未清理，可重建）。
+  新增 `calibre-svg-cover.epub` 夹具和断言。
+- 实际执行：host CTest 11/11；两本书的探针全书通过并输出封面图。sanitizer 与固件构建未重跑，未安装。
+- 未修：《乡土中国》的空正文书名页（`body` 背景图）仍报错，处理方式待定。
+  错误页上的三次点击没有产生新画面（`prepare=0`、无帧），是否为控件之外的点击未确认。
+
+## 2026-10-07 · 错误原因写入串口日志；《乡土中国》章节失败原因（已安装，待复现）
+
+- 起因：用户报告书内图片显示“图片无法显示”，以及《乡土中国》有章节加载失败。第一轮日志没有任何错误文本：
+  图片失败只画统一提示，`error()` 显示的错误也不写串口。
+- 修改（未提交）：`app.cpp` 在 `error()` 入口记录 `Error shown: …`，图片任务失败时记录
+  `Image unavailable: resource=… error=…`，均为 `reader_app` 的警告级日志，仅固件构建生效。没有改变任何行为。
+- 第一轮日志对图片失败的限定：《瓦尔登湖》的 5 次图片请求都完成解码并显示；失败的两次都是开书后的第一页，
+  图片任务在 `epub_open` 结束后 2–3 ms 内返回，没有解码记录，当时内存准入已通过。
+  因此失败发生在查找图片或识别格式阶段，具体错误待新日志确认；不是内存不足，也不是解码超时。
+- 《乡土中国》已在 host 用生产解析器复现（`sh tools/check_public_books.sh`，用户本机的个人 EPUB，未纳入仓库）：
+  `Chapter 1: Chapter contains no supported body content`。第二个 spine 项 `Text/front001.html`（书名页）的
+  `<body>` 没有任何子节点，图片只写在 `body` 的 `style="background-image:url('../Images/imageSMY.jpg')"` 里。
+  解析器把没有正文的章节判为错误（`document.cpp` 的 `load`），应用因此显示章节读取失败。尚未修复。
+- 实际执行：host CTest 11/11；`sh tools/build_firmware.sh` 成功。产物 `.local/responsiveness-20261007/pico_page-errlog.bin`，
+  2,327,280 字节，SHA-256 `16452f061405aa980bd27933a124eab0c62ac876f85d1dc00022ccc3333f1b09`。
+  用户确认（“加错误日志，重新刷机吧”）后写入，仅 `0x10000`，`Hash of data verified`；写入前设备在书库、进度已保存，
+  USB 序列号与芯片 MAC 均为 `…:18:B8`（`pre-status-errlog.log`、`premac-errlog.log`、`flash-errlog.log`）。
+  重启后进入书库，TF 已挂载，首帧成功，内部 RAM 137,643 字节（`post-status-errlog.log`）。
+- 未验证：新日志尚未在真机上捕获到任何错误；sanitizer 未重跑。
+- 下一步：用户复现图片失败后读取 `reader-run-errlog.log`；决定空正文章节的处理方式后再修。
+
+## 2026-10-07 · 响应性专项第一轮真机数据（实体操作，约 4 分钟）
+
+- 采集：用户在设备上实际操作（开三本书、连续翻页、改字号、目录、图片页、返回书库），串口日志
+  `.local/responsiveness-20261007/reader-run.log`，每 10 秒附带一次 `status`；
+  `python3 tools/summarize_reader_perf.py` 汇总。没有注入输入。以下为单次小样本，尾分位数仅供排查。
+- 位图预取未生效：`body_prepare_hit` 0 条，`bitmap_hits=0`，`body_prepare_miss` 101 条
+  （P50 247 ms，P95 557 ms，最长 1021 ms）。“命中页 P95 ≤ 50 ms”没有样本，不能验收。
+  - `ContentJob::raster_page()` 要求 PSRAM 空闲 ≥ 3 MiB。正文字形缓存到约 1 MiB 后，阅读时空闲稳定在
+    2.7–3.05 MB，任务立即返回内存不足并关闭本页位图预取。8 次完成的位图全部在开书后 40 秒内（空闲 > 3.1 MB）。
+  - 位图任务每次新开字体，不共享主任务字形缓存，耗时 200–978 ms（P50 408 ms），慢于主任务直接绘制
+    （`page_draw` P50 195 ms）。预取还要等面板刷新（约 560 ms）和进度提交（P50 239 ms）结束后才开始。
+  - 本轮 101 次翻页中 61 次在上一帧完成后 300 ms 内到达，89 次在 1 秒内；这种节奏下即使准入通过也来不及命中。
+- 达标项：`input_wait/unqueued` 108 条，P95 3 ms，P99 14 ms，最长 22 ms（目标 P95 ≤ 30、P99 ≤ 100）。
+  输入队列溢出 0，没有警告或错误日志，没有重启。
+- 取消检查间隔 `zip/checkpoint_max` 68 条：P50 13.7 ms，P95 39.3 ms，最长 52.7 ms，尾部超过 10–20 ms 的目标。
+- 图片页：每次图片任务重新打开 EPUB（`epub_open` 约 520–565 ms），再解码 190–625 ms。
+  冷开大书的身份摘要 3.79 s、`epub_open` 4.29 s 各一次，在内容任务中执行。
+- 资源最小观测值：内部 RAM 95,967 字节（最大连续块 49,152，一个内容任务运行时）；PSRAM 2,706,052 字节
+  （最大连续块 1,638,400）；内容任务最低剩余栈 9,732 字节，主任务 11,136，触摸任务 2,288。
+  `cache_total` 最高约 1.78 MB，`cache_evictions=0`，4 MiB 回收目标未触发。
+- 面板：局部刷新绘制 P50 483 ms，清理全刷约 1522 ms，复制 75 ms；与安装前的 482–483 ms 相比看不出 VCOM 门控带来的耗时变化。
+- 整个采集期间 `pages=0`，整书页数没有算完；频繁输入时统计反复被取消。
+- 未验证：第一本书打开后 `revision` 从 0 开始，安装前设备停在修订号 10 的那本书是否恢复到原页，
+  需要用户确认是否为同一本；VCOM 门控的显示效果；慢速阅读下的命中率；功耗；KOReader 双向接续。
+- 下一步：先修正位图预取的内存准入与字形复用，再重测；修正前不继续增加缓存或预取种类。
+
+## 2026-10-07 · 响应性专项固件已安装（仅启动确认，未采集时延）
+
+- 用户确认（“可以，你刷吧”）后，在提交 `2b98f97` 上运行 `sh tools/build_firmware.sh`，构建成功，
+  脚本输出 `Read Pico BSP: 5f3406d…`。产物 `.local/responsiveness-20261007/pico_page.bin`，2,327,184 字节，
+  SHA-256 `77fe4836e25c238d314badc28e991b5617198cfcd41e9af2ca08d673d82de99c`，ELF 同目录保存。
+- 写入前核对：只连接一台设备，USB 序列号与 esptool `read-mac` 均为 `…:18:B8`；设备在正文，无待处理帧，
+  进度已保存（修订号 10，第 4 / 409 页，`pre-status.log`）。
+- 写入命令与此前相同，仅 `0x10000`，`Hash of data verified`（`premac.log`、`flash.log`）。
+  没有写 bootloader、分区表、NVS 或 otadata，没有擦除 Flash 或 TF。
+- 重启约 12 秒后读取状态（`post-status.log`）：书库，TF 已挂载，首帧成功且为清理全刷，`draw_ms=1520`；
+  内部 RAM 可用 137,643 字节，最大连续块 90,112 字节，与安装前相同；PSRAM 可用 4,993,912 字节；
+  主任务最低剩余栈 11,408 字节，触摸任务最低剩余栈 2,288 字节，输入溢出 0，`cache_evictions=0`。
+- 没有注入任何输入，没有打开书籍。未验证：验收矩阵中的全部时延分位数、内容任务栈与并发时的内部 RAM、
+  取消最长等待、缓存回收、VCOM 门控的显示效果，以及打开书后进度是否恢复到修订号 10。
 
 ## 2026-10-07 · 阅读响应性专项：图片预览与面板绘制边界
 
