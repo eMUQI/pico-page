@@ -5,7 +5,7 @@
 
 | 候选/用途 | 路径/来源 | commit | 许可证/依赖审查 | 本地修改 | 当前处置 |
 |---|---|---|---|---|---|
-| Read Pico 官方 BSP/PMU/驱动 | MindReset/read_pico_firmware | `28cde682a4468a581c278761922724f57d976418` | 八个 Apache-2.0 组件；epdiy 为 LGPL-3.0-or-later；详见下方审查 | 新增 checked SD release；补丁应用到构建副本 | 下载到忽略目录 `.local/`，编译引用九个组件 |
+| Read Pico 官方 BSP/PMU/驱动 | MindReset/read_pico_firmware | `5f3406deec33304de8801046db583dec7c49e55b` | 八个 Apache-2.0 组件；epdiy 为 LGPL-3.0-or-later；详见下方审查 | 新增 checked SD release；补丁应用到构建副本 | 下载到忽略目录 `.local/`，编译引用九个组件 |
 | Expat / miniz | CrossPoint 的独立第三方目录 | `50823ffa125b437b4c9fe5882f326458780198da` | 各源文件 MIT；siphash CC0；保留全部声明 | Expat 配置及 entropy 守卫移植 | 纳入 reader_document；未复制 CrossPoint 应用 |
 | PapyriX cache/content | bigbag/papyrix-reader | 待查 | 查分支关系与依赖 | 无 | 按需参考 |
 | EPub-InkPlate | turgu1/EPub-InkPlate | 待查 | 查字体/IDF/显示依赖 | 无 | 调度和 IDF 实现参考 |

@@ -3,7 +3,7 @@ set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 bsp_source="$repo_root/.local/read_pico_firmware"
-bsp_revision=28cde682a4468a581c278761922724f57d976418
+bsp_revision=5f3406deec33304de8801046db583dec7c49e55b
 
 if [ ! -d "$bsp_source" ]; then
     mkdir -p "$repo_root/.local"
@@ -11,9 +11,10 @@ if [ ! -d "$bsp_source" ]; then
     git -C "$bsp_source" remote add origin https://github.com/MindReset/read_pico_firmware.git
 fi
 
-if ! git -C "$bsp_source" rev-parse --verify HEAD >/dev/null 2>&1; then
+# A new checkout, or one left at an earlier pin, is moved to the pinned revision.
+if [ "$(git -C "$bsp_source" rev-parse --verify HEAD 2>/dev/null || true)" != "$bsp_revision" ]; then
     if [ "$(git -C "$bsp_source" remote get-url origin)" != "https://github.com/MindReset/read_pico_firmware.git" ]; then
-        printf '%s\n' "Cannot retry an incomplete BSP checkout with an unexpected origin." >&2
+        printf '%s\n' "Cannot update a BSP checkout with an unexpected origin." >&2
         exit 1
     fi
     git -C "$bsp_source" fetch --depth 1 origin "$bsp_revision"

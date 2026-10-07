@@ -22,7 +22,7 @@
 | Python | `/Users/wulu/.espressif/tools/python/v6.1/venv/bin/python`，3.14.7 |
 | CMake / Ninja | 4.4.3 / 1.12.1 |
 | 交叉编译器 | `xtensa-esp-elf-g++`，GCC 15.2.0，`esp-15.2.0_20251204` |
-| 官方 BSP commit | `28cde682a4468a581c278761922724f57d976418`，组件与许可见 [BSP 审查](bsp-review.md) |
+| 官方 BSP commit | `5f3406deec33304de8801046db583dec7c49e55b`，组件与许可见 [BSP 审查](bsp-review.md) |
 | 构建目标 | ESP32-S3；实测 16 MiB Flash、8 MiB PSRAM；Octal PSRAM 80 MHz 为编译配置 |
 
 本机另有 EIM 管理的 v5.5.4、v5.5.5、v6.0.3。本轮未切换全局选择。

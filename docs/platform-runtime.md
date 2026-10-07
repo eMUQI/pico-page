@@ -152,7 +152,7 @@ HTTP 只接受 HTTPS GET/PUT/POST，使用 ESP-IDF 系统证书包和主机名�
 
 ## 来源、许可与验证
 
-来源：[MindReset/read_pico_firmware](https://github.com/MindReset/read_pico_firmware/tree/28cde682a4468a581c278761922724f57d976418)。
+来源：[MindReset/read_pico_firmware](https://github.com/MindReset/read_pico_firmware/tree/5f3406deec33304de8801046db583dec7c49e55b)。
 初始化、按键区域和浅睡流程参考该 commit 的 `read_pico_init.c`、`read_pico_board.c`、
 `main/display.c`、`main/sleep.c` 及 `main/ui/ui_menu.h`。适配源文件保留上游 Apache-2.0
 版权与许可标识，组件目录附完整 `LICENSE`，文件头标明本项目变更。

@@ -5,7 +5,7 @@
 ## 来源与复用范围
 
 官方仓库：[MindReset/read_pico_firmware](https://github.com/MindReset/read_pico_firmware)。
-锁定 commit：`28cde682a4468a581c278761922724f57d976418`。
+锁定 commit：`5f3406deec33304de8801046db583dec7c49e55b`（2026-10-06 由 `28cde682a4468a581c278761922724f57d976418` 升级，见下方“VCOM 门控”）。
 `tools/setup_bsp.sh` 下载完整源码到忽略目录，固件只引用下面九个组件。
 本项目没有修改这些组件；没有纳入上游 `main/`、工厂校准、字体、图片、书库、网络传书和搜索代码。
 
@@ -14,7 +14,7 @@
 
 | 组件 | 直接用途与依赖 | 组件许可 | Git tree SHA |
 |---|---|---|---|
-| `read_pico` | 板级装配；下列八组件、FatFs、GPIO/I2C/LEDC/RMT/SDMMC、bootloader/spi_flash/FreeRTOS | Apache-2.0 | `beb4a781efefef3907751c6e11f4dbc95d9b92bb` |
+| `read_pico` | 板级装配；下列八组件、FatFs、GPIO/I2C/LEDC/RMT/SDMMC、bootloader/spi_flash/FreeRTOS | Apache-2.0 | `670835c4b03a0e9d7abe4d924ce5a3fea0f9e154` |
 | `read_pico_pmu` | CW32L010 协议；I2C、FreeRTOS、esp_rom | Apache-2.0 | `82d8de1f7f02d3fe6a3fe8d4fcdaf2e9484cb43c` |
 | `epdiy` | 显示渲染；LCD、ADC、timer、GPIO/RMT/DMA/I2C、HAL/SoC/ROM | LGPL-3.0-or-later | `f9253919fc1d99d0307cc880c4f3710094c7f76c` |
 | `e0470_epaper_waveform` | 面板波形与裁剪；epdiy | Apache-2.0 | `0bb7bc191e5b10423833b334409222366ef775d9` |
@@ -57,6 +57,24 @@ Apache-2.0；同时核对了 `docs/en/COPYRIGHT.rst` 与以下非统一许可路
 
 编译配置采用上游 `sdkconfig.ci` 的 ESP32-S3、16 MB Flash、Octal PSRAM 80 MHz、USB Serial/JTAG
 等构建基线，不把它作为当前硬件的测量结果。上游产品配置中的 120 MHz 时序、波形和 VCOM 未移植为本项目运行策略。
+
+## VCOM 门控（上游 `5f3406d`，2026-10-06）
+
+上游提交“feat: enhance VCOM control during scanning”只修改 `components/read_pico/read_pico_board.c`（18 行），
+其余八个组件的 tree SHA 不变。内容：
+
+- 面板电源轨上电后，IO 扩展器上的 `VCOM_EN` 跟随扫描模式位 `ep_mode`：开始扫描时拉高，扫描结束后拉低；
+  断电前恢复原来的控制方式。上游说明：电源轨保持上电而 VCOM 长开，会把画面慢慢压黑，在阳光下表现为发灰。
+- `VCOM_EN` 由低变高后等待 2 毫秒再开始扫描。
+
+对本项目的影响：
+
+- 本项目每次刷新后保持电源轨 8 秒（`platform.cpp` 的 `rails_idle_us`），此前这 8 秒内 VCOM 一直开启，正是上游修正的情况。
+- epdiy 的 `lcd_do_update()` 每次刷新只进入一次扫描模式，全刷时每个清屏脉冲再各进入一次，因此每次刷新只多等几个 2 毫秒。
+- 不涉及 VCOM 电压值：本项目仍从 PMU 读取工厂值交给显示驱动，不调用 `read_pico_pmu_vcom_set()`。
+- `firmware/patches/read-pico-sd-release.patch` 修改的是 `read_pico_sd.c`，与本次改动无关，仍可直接应用。
+
+显示效果和刷新耗时的变化只能在真机上确认。
 
 ## 分区与发布待办
 
