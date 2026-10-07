@@ -220,6 +220,23 @@ int main(int argc, char** argv) {
             }
         }
     }
+    {
+        const auto root = card / "CoverWorker";
+        ReaderApp app(root.string(), "details-worker", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); driver.tap(240, 482); driver.present();
+        driver.tap(610, 384); driver.present();
+        driver.tap(100, 680); driver.present();
+        assert(app.view() == View::Loading); driver.refresh();
+        app.poll_background(); driver.tap(580, 1170); driver.present(); driver.complete_content();
+        assert(app.view() == View::Library && !app.saved_record());
+        driver.tap(100, 680); driver.present(); driver.complete_content();
+        assert(app.view() == View::BookDetails && !app.saved_record());
+        assert(app.canvas().pixel(50, 180) == 0);
+        const auto hashes = identity_hash_count();
+        driver.tap(300, 660); driver.present(); driver.complete_content();
+        assert(app.view() == View::Reading && app.saved_record());
+        assert(identity_hash_count() == hashes);
+    }
     fs::create_directories(card / "PicoPage/fonts");
     fs::copy_file(argv[2], card / "PicoPage/fonts/LXGWWenKai-Regular.ttf");
     {
@@ -1263,6 +1280,12 @@ int main(int argc, char** argv) {
         app.save_progress(); drain();
         assert(app.saved_record()->anchor == second && app.view() == View::Error);
         assert(app.status().find("进度未保存") != std::string::npos);
+        if (app.pending_frame()) app.complete_frame(true);
+        const auto hashes = identity_hash_count();
+        assert(app.open_book("Books/cover.epub"));
+        driver.present(); driver.complete_content();
+        assert(app.view() == View::Error && app.saved_record()->anchor == second);
+        assert(identity_hash_count() == hashes);
         fs::remove(sidecar); fs::rename(sidecar.string() + ".held", sidecar);
     }
     fs::remove_all(card);

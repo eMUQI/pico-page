@@ -414,6 +414,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     BookSnapshot management_snapshot;
     bool delete_original = false, drawing_error = false;
     DocumentMetadata detail_metadata;
+    std::unique_ptr<graphics::Canvas> detail_cover;
     ProgressResult detail_progress;
     std::optional<std::uint64_t> detail_size;
     std::optional<int> battery_percent;
@@ -484,10 +485,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         overlay();
         return true;
     }
-    bool begin_open(const std::string& path) {
+    bool begin_open(const std::string& path, ContentJob::Kind kind = ContentJob::Kind::Open) {
         cancel_sync();
         ContentJob::Request request;
-        request.kind = ContentJob::Kind::Open;
+        request.kind = kind;
         request.root = root; request.relative_path = path; request.path = root + "/" + path;
         request.content_revision = content_revision; request.generation = foreground_generation;
         struct stat info{};
@@ -495,10 +496,16 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (controlled_storage && found != identities.end() && stat(request.path.c_str(), &info) == 0 &&
             found->second.size == info.st_size && found->second.modified == info.st_mtime && found->second.inode == info.st_ino)
             request.identity = found->second.identity;
+        if (kind == ContentJob::Kind::Inspect && stat(request.path.c_str(), &info) == 0) {
+            const auto cover = cover_entry(path, info, 120, 160, false);
+            request.cache_name = cover.name; request.cache_header = cover.header;
+            request.layout.width = 120; request.layout.height = 160;
+        }
         pending_content = std::move(request);
         content_loading = true;
         view = View::Loading;
-        clear_body_cache(); clear_prefetch(); covers.clear(); release(chapter); page = {};
+        clear_prefetch(); covers.clear();
+        if (kind == ContentJob::Kind::Open) { clear_body_cache(); release(chapter); page = {}; }
         canvas.fill_rect(0, footer_top, 684, 88, 15);
         text("正在准备书籍…", 36, 1156, 24, 400, 3);
         button(Dismiss, "取消", 488, 1140, 160, 64, false, 24);
@@ -554,6 +561,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!foreground_job->started()) {
             if (!content_loading) { foreground_job.reset(); return; }
             if (display.busy() || counting_job || raster_job || save_job || cover_job) return;
+            if (foreground_job->request.kind == ContentJob::Kind::Open && session.needs_save()) {
+                if (save_failed) { foreground_job.reset(); content_loading = false; error(message); }
+                else schedule_save();
+                return;
+            }
             if (!foreground_job->start()) {
                 foreground_job.reset(); content_loading = false;
                 error("内容任务无法启动，请返回后重试。");
@@ -564,15 +576,31 @@ struct ReaderApp::Impl final : DisplayBackend {
         auto job = std::move(foreground_job);
         const auto& request = job->request;
         if (!content_loading || request.generation != foreground_generation) return;
-        if (request.kind == ContentJob::Kind::Open) {
+        if (request.kind == ContentJob::Kind::Open || request.kind == ContentJob::Kind::Inspect) {
             content_loading = false;
-            if (!job->result.error.empty()) { error("无法打开 EPUB：" + job->result.error); return; }
-            document = std::move(*job->result.document);
+            if (!job->result.error.empty()) {
+                if (request.kind == ContentJob::Kind::Inspect) {
+                    detail_error = job->result.error; draw_details(); overlay();
+                } else error("无法打开 EPUB：" + job->result.error);
+                return;
+            }
+            const auto& loaded = *job->result.document;
             if (controlled_storage) {
                 if (identities.size() >= 8 && !identities.count(request.relative_path)) identities.erase(identities.begin());
                 identities[request.relative_path] = {job->result.file_size, job->result.file_modified,
-                    job->result.file_inode, document.metadata()};
+                    job->result.file_inode, loaded.metadata()};
             }
+            if (request.kind == ContentJob::Kind::Inspect) {
+                detail_metadata = loaded.metadata(); detail_progress = job->result.progress;
+                detail_size = job->result.file_size; detail_cover = std::move(job->result.image);
+                if (detail_progress.record) {
+                    for (const auto& entry : loaded.toc())
+                        if (entry.resource == detail_progress.record->anchor.resource) { detail_position = entry.label; break; }
+                    if (detail_position.empty()) detail_position = "已保存阅读位置";
+                }
+                draw_details(); overlay(); return;
+            }
+            document = std::move(*job->result.document);
             finish_open(request.relative_path, &job->result);
             return;
         }
@@ -1331,9 +1359,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             error("书籍路径无效或包含符号链接");
             return false;
         }
-        if (has_book() && !persist()) {
-            error(message);
-            return false;
+        if (has_book()) {
+            if (async_content) schedule_save();
+            else if (!persist()) { error(message); return false; }
         }
         save_pages();
         if (async_content) return begin_open(path);
@@ -1628,6 +1656,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         usage.next_content = next_chapter ? chapter_cache_bytes(*next_chapter) : 0;
         usage.page_index = page_index_bytes();
         for (const auto& cover : covers) usage.cover_pixels += cover.pixels.capacity();
+        if (detail_cover) usage.cover_pixels += detail_cover->pixels().capacity();
         usage.ui_glyph_bytes = ui.cached_glyph_bytes(); usage.body_glyph_bytes = body.cached_glyph_bytes();
         usage.ui_glyphs = ui.cached_glyphs(); usage.body_glyphs = body.cached_glyphs();
         usage.ui_advances = ui.cached_advances(); usage.body_advances = body.cached_advances();
@@ -2572,8 +2601,12 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void inspect_book(const std::string &path, bool keep_message = false) {
         if (!keep_message) message.clear();
-        detail_path = path; detail_metadata = {}; detail_progress = {};
+        detail_path = path; detail_metadata = {}; detail_progress = {}; detail_cover.reset();
         detail_position.clear(); detail_error.clear(); detail_size.reset();
+        if (async_content && safe_existing(root, path)) {
+            abandon_content(); ++counting_generation; release_counting();
+            begin_open(path, ContentJob::Kind::Inspect); return;
+        }
         struct stat st{};
         if (!safe_existing(root, path) || stat((root + "/" + path).c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
             detail_error = "原文件不可用，请检查 TF 卡。";
@@ -2600,7 +2633,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto title = detail_metadata.title.empty() ? basename(detail_path) : detail_metadata.title;
         struct stat info{};
         std::vector<std::uint8_t> cover;
-        if (detail_error.empty() && stat((root + "/" + detail_path).c_str(), &info) == 0)
+        if (async_content) { if (detail_cover) cover = detail_cover->pixels(); }
+        else if (detail_error.empty() && stat((root + "/" + detail_path).c_str(), &info) == 0)
             cover = cover_pixels(detail_path, info, 120, 160, false);
         const bool covered = !cover.empty();
         if (covered) blit(cover, 36, 140, 120, 160);
@@ -3214,7 +3248,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (id >= DetailBase) {
             const auto index = static_cast<std::size_t>(id - DetailBase);
             if (index < entries.size() && !entries[index].directory) {
-                inspect_book(entries[index].path); overlay();
+                inspect_book(entries[index].path); if (!display.busy()) overlay();
             }
             return;
         }
@@ -3989,7 +4023,7 @@ bool ReaderApp::background_due() const {
 const char *ReaderApp::background_state() const {
     if (impl_->content_loading) {
         const auto kind = impl_->pending_content ? impl_->pending_content->kind : impl_->foreground_job->request.kind;
-        return kind == ContentJob::Kind::Open ? "opening" : kind == ContentJob::Kind::Chapter ? "chapter" : "image";
+        return kind == ContentJob::Kind::Open ? "opening" : kind == ContentJob::Kind::Inspect ? "details" : kind == ContentJob::Kind::Chapter ? "chapter" : "image";
     }
     if (impl_->cover_job || impl_->pending_covers) return "covers";
     if (impl_->raster_job || impl_->prefetch_due()) return "prefetch";

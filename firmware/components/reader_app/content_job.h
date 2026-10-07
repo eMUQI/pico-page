@@ -24,7 +24,7 @@ std::string image_cache_key(const std::string& book_id, const std::string& resou
 /** A single job owns its parser and font. Only done() permits access to its result. */
 class ContentJob {
 public:
-    enum class Kind { Pagination, FontIdentity, Image, Open, Chapter, RasterPage, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite };
+    enum class Kind { Pagination, FontIdentity, Image, Open, Chapter, RasterPage, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect };
     enum class Target { Start, End, Before, Anchor, Fragment };
     struct CoverSource {
         std::string path, cache_name, cache_header;
@@ -88,6 +88,7 @@ private:
     void render_image(const std::string& resource, const std::string& cache_name);
     void prepare_chapter_page();
     void open_book();
+    void prepare_cover();
     void load_chapter();
     void raster_page();
     void library_covers();

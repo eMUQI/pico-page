@@ -101,7 +101,7 @@ void ContentJob::run() {
         if (request.prefetch && !stop() && result.error.empty()) prepare_chapter_page();
         return;
     }
-    if (request.kind == Kind::Open) { open_book(); return; }
+    if (request.kind == Kind::Open || request.kind == Kind::Inspect) { open_book(); return; }
     if (request.kind == Kind::Image) { render_image(request.image_resource, request.cache_name); return; }
     EpubDocument document;
     graphics::Font font;
@@ -174,6 +174,36 @@ void ContentJob::render_image(const std::string& resource, const std::string& ca
     pixels += md5_hex(pixels);
     store.save_cache(cache_name, pixels);
 }
+void ContentJob::prepare_cover() {
+    const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
+    FileStore store(request.root);
+    const auto width = request.layout.width, height = request.layout.height;
+    const auto count = static_cast<std::size_t>((width + 1) / 2) * height;
+    std::string cached;
+    if (store.load_cache(request.cache_name, request.cache_header.size() + count, cached) == StoreStatus::Ok &&
+        cached.compare(0, request.cache_header.size(), request.cache_header) == 0) {
+        if (cached.size() == request.cache_header.size()) return;
+        if (cached.size() == request.cache_header.size() + count) {
+            result.image = std::make_unique<graphics::Canvas>(width, height);
+            std::memcpy(result.image->data(), cached.data() + request.cache_header.size(), count); return;
+        }
+    }
+    if (stop()) return;
+#ifdef ESP_PLATFORM
+    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 3U * 1024 * 1024 ||
+        heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 2U * 1024 * 1024) return;
+#endif
+    std::vector<std::uint8_t> encoded;
+    std::string error;
+    auto image = std::make_unique<graphics::Canvas>(width, height);
+    const bool loaded = EpubDocument::read_cover(request.path, encoded, error, stop) &&
+        graphics::render_image(*image, encoded, 0, 0, width, height, error, false, stop);
+    if (stop()) return;
+    if (loaded) {
+        store.save_cache(request.cache_name, request.cache_header + std::string(image->pixels().begin(), image->pixels().end()));
+        result.image = std::move(image);
+    } else if (error.find("allocation") == std::string::npos) store.save_cache(request.cache_name, request.cache_header);
+}
 void ContentJob::open_book() {
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
     struct stat before{}, after{};
@@ -185,11 +215,12 @@ void ContentJob::open_book() {
     FileStore store(request.root);
     result.configuration = store.load_settings(request.relative_path);
     result.progress = store.load_progress(request.relative_path, document.metadata().book_id, request.content_revision);
-    if (result.progress.status != StoreStatus::Ok && result.progress.status != StoreStatus::Missing &&
+    if (request.kind != Kind::Inspect && result.progress.status != StoreStatus::Ok && result.progress.status != StoreStatus::Missing &&
         result.progress.status != StoreStatus::Cleared) {
         result.error = "Reading progress cannot be read; original record preserved"; return;
     }
-    if (result.progress.record) {
+    if (request.kind == Kind::Inspect) prepare_cover();
+    else if (result.progress.record) {
         const auto& anchor = result.progress.record->anchor;
         std::uint32_t offset = 0;
         const auto match = [&](const Chapter& part) { return part.offset_for(anchor, offset); };
