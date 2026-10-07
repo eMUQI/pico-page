@@ -213,7 +213,8 @@ int main(int argc, char** argv) {
             driver.tap(610, 384); driver.present();
             return app.canvas().pixel(x, y);
         };
-        assert(grid_pixel(300, 560) == 15);
+        // A white thumbnail counts as no cover: the card shows the title placeholder with its rule.
+        assert(grid_pixel(300, 560) == 15 && grid_pixel(270, 682) == 1);
         write(cached, "stale");
         assert(grid_pixel(300, 560) == 0 && grid_pixel(270, 610) == 5);
         assert(read(cached).size() > thumbnail_bytes);

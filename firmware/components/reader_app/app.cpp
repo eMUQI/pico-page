@@ -1541,7 +1541,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             covers.push_back({entry.path, info.st_size, info.st_mtime, std::move(pixels)});
             found = covers.end() - 1;
         }
-        if (found->pixels.empty()) return Cover::None;
+        // An entirely white thumbnail identifies nothing; the title is drawn in its place.
+        if (std::all_of(found->pixels.begin(), found->pixels.end(), [](std::uint8_t packed) { return packed == 0xff; }))
+            return Cover::None;
         if (row) blit_reduced(found->pixels, kLibraryCoverWidth, kLibraryCoverHeight, x, y, kRowCoverWidth, kRowCoverHeight);
         else blit(found->pixels, x, y, kLibraryCoverWidth, kLibraryCoverHeight);
         return Cover::Drawn;
