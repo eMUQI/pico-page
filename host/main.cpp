@@ -15,7 +15,7 @@ using namespace pico_page;
 namespace {
 void usage() {
     std::cout
-        << "Pico Page --card DIRECTORY [--book Books/file.epub] [--script FILE] [--headless]\n"
+        << "Pico Page --card DIRECTORY [--book Books/file.epub|Books/file.txt] [--script FILE] [--headless]\n"
            "Keys: Left/1=K1, R/2=K2 full refresh, Right/3=K3, Escape=K2, Space=sleep/wake.\n"
            "Script: k1 | k2 | k3 | tap X Y | capture FILE.bmp | sleep | wake | open PATH | count\n";
 }

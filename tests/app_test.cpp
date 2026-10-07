@@ -131,9 +131,32 @@ int main(int argc, char** argv) {
     fs::copy_file(fixtures / "nested-toc.epub", card / "Books/nested.epub");
     fs::copy_file(fixtures / "image-cover.epub", card / "Books/cover.epub");
     fs::copy_file(fixtures / "image-flow.epub", card / "Books/images.epub");
+    fs::create_directories(card / "Txt");
+    fs::copy_file(fixtures / "sample.txt", card / "Txt/sample.txt");
     const auto progress = card / "Books/book.epub.picopage/progress.json";
     const auto settings = card / "Books/book.epub.picopage/settings.toml";
     ReadingRecord confirmed;
+    ReadingRecord txt_saved;
+    {
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        opened(app, "Txt/sample.txt"); driver.present();
+        assert(app.saved_record() && app.saved_record()->content_revision == "txt-utf8-v1");
+        driver.key(Input::K3); driver.complete_content(); driver.present();
+        txt_saved = *app.saved_record();
+        driver.sync_view();
+        assert(!app.take_network_request());
+        assert(app.prepare_sleep()); driver.present();
+        const auto progress = FileStore(card.string()).load_progress("Txt/sample.txt", txt_saved.book_id, txt_saved.content_revision);
+        assert(progress.record && progress.record->anchor == txt_saved.anchor);
+    }
+    {
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        opened(app, "Txt/sample.txt");
+        assert(app.pending_frame()->anchor == txt_saved.anchor);
+        driver.present();
+    }
     {
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present();

@@ -1,7 +1,21 @@
 # 开发状态
 
-最后更新：2026-10-07。USB 卷名固件已安装，macOS 已显示 `PICO PAGE`；安全弹出后设备退出重启，串口、TF 卡和阅读界面已恢复。
-此前阅读响应性专项的数据与旧批次状态见下方；本次 USB 卷名的实际命令、结果及未测项单独记录。
+最后更新：2026-10-07。GB18030 TXT 直读固件已安装，用户已确认原先无法打开的书在设备上正常显示中文并可翻页；重启后进度恢复仍待确认。USB 卷名固件已安装，macOS 已显示 `PICO PAGE`；安全弹出后设备退出重启，串口、TF 卡和阅读界面已恢复。
+此前阅读响应性专项的设备数据、EPUB 兼容性修复与传书记录见下方；各批次命令、结果及未测项分别记录，不将本轮 host 结果写成设备结果。
+
+## 2026-10-07 · GB18030 TXT 设备端直读（已安装，已目视确认）
+
+- 只读检查用户提供的原始 1,579,496 字节 TXT：不是有效 UTF-8、GBK 或 Big5，GB18030 可完整解码，且无 NUL；设备端直接读取原文件，不生成转换副本。原书字节和私人路径不纳入仓库。
+- UTF-8 优先；无效时尝试 GB18030。使用 Python 标准库编码器生成双字节映射及四字节区间表，固件按流验证原文件，并将 GB18030 段边界对齐到字符起点；在已核实的受控存储会话中复用边界。UTF-8 继续使用 `txt-utf8-v1`，GB18030 使用独立 `txt-gb18030-v1` 阅读与分页修订，不复用另一种编码的记录。其他编码、手动指定编码和 TXT 的 KOReader 接续仍未实现；无标记的旧编码可能误判。
+- 实际执行 `cmake --build build/host -j 8` 和 `ctest --test-dir build/host --output-on-failure`（11/11）；修订进度选择后再次运行 document/app 两项（2/2）。合成样本覆盖四字节字符跨 48 KiB 分段及 GBK 不收录的双字节字符。对用户原书逐段读取，共 33 段、794,268 个 Unicode 标量，逐字 FNV 摘要与 Python `gb18030` 解码一致。该原书验证脚本只放在 `/tmp`。
+- `sh tools/build_firmware.sh` 首次因沙箱 `sysctl()` 权限失败；获准重试后完整构建通过。安装镜像 3,221,616 字节，SHA-256 `28dfdd4455b2fec72c2091cfaafa82bb127bfe29d633fef46bfa38f698b15b4a`，4 MiB 应用槽剩余约 23%。
+- 烧录前设备报告 `view=library pending=0 card=1 importing=0`；串口芯片 MAC 为 `14:C1:9F:D0:18:B8`。重新读取分区表和 OTA 元数据，确认有效的 `ota_0=0x10000/4 MiB`、sequence 1、state 2、CRC 正确。只向 `0x10000` 写入应用镜像，esptool 报告 `Hash of data verified`；未写其他 Flash 分区或 TF 卡。重启后书库首帧成功且 `card=1`。
+- 设备 TF 卡上的目标文件与电脑原书长度均为 1,579,496 字节、CRC32 均为 `f136e06f`。设备打开后，诊断从 `view=loading` 进入 `view=reading frame_ok=1`；一次 K3 翻页后画面 CRC 变化，阅读修订号为 1，`saved=1`。抓取完整正文画面时帧发生变化，命令返回 `frame_not_confirmed_or_changed`，因此没有留存完整屏幕截图；用户随后确认中文正常显示并可翻页。重启后进度恢复、其他编码误判和传书入口仍待验证。未提交或推送。
+
+## 2026-10-07 · 一份 TXT 无法打开（已定位）
+
+- 设备诊断 `status` 返回 `card=1`、`frame_ok=1`；使用 `tools/device_console.py open` 复现目标 TXT 打开流程，最终 `view=error`。抓取设备错误画面，提示“TXT 不是有效的 UTF-8 文件，请先转换编码”。文件夹列表显示该文件仍在，大小约 1.58 MB；未读取、修改或删除原文件。
+- 当时只定位到 UTF-8 格式边界，尚未取得原文件或确认编码。后续取得原文件并完成 GB18030 设备端直读，见上节；本次故障画面仅存忽略目录 `.local/txt-support/install/`。
 
 ## 2026-10-07 · USB 卷名
 
@@ -10,6 +24,17 @@
 - 用户授权“烧录看看”。烧录前诊断 `view=reading pending=0 card=1 saved=1 importing=0`；USB 序列号与 esptool MAC 均为 `14:C1:9F:D0:18:B8`。重新读取设备分区表和 OTA 元数据，确认当前有效 `ota_0=0x10000/4 MiB`、sequence 1、state 2 且 CRC 正确。仅向 `0x10000` 写入上述应用镜像；esptool 报告 `Hash of data verified`。未写 bootloader、分区表、NVS、otadata、OTA1 或工厂校准。
 - 看门狗复位后诊断为 `view=library pending=0 card=1 frame_ok=1 clean=1`。诊断触摸进入 USB 传输，macOS `diskutil` 识别 31.3 GB FAT32 分区，卷名为 `PICO PAGE`；`diskutil eject /dev/disk4` 成功，外置磁盘从挂载列表消失。证据见 `.local/usb-label-install/`。
 - 用户在设备屏幕退出并重启后，同一 USB 序列号的串口恢复；只读诊断为 `view=tools pending=0 card=1 saved=1 frame_ok=1 importing=0`，说明 TF 卡和阅读界面恢复。未对比重启前后的同一本书位置锚点；证据 `.local/usb-label-install/after-exit-status.log`。本批未推送。
+
+## 2026-10-07 · UTF-8 TXT 阅读支持（已安装，待阅读验收）
+
+- `Books/`、`Articles/` 的文件夹书库现在识别 `.txt`，USB/串口导入与 Wi-Fi 传书接受最大 64 MiB 的 TXT；文件名、同名保护、CRC、同步写入和回读沿用既有存储事务。Wi-Fi 仅检验扩展名和传输完整性，内容编码在开书时验证。
+- 文档层按约 48 KiB 的 UTF-8 安全边界读取，支持 BOM、长文本跨段翻页、本地锚点、进度保存与重开恢复。无内嵌目录或封面时使用单个“正文”入口和文字卡片。KOReader 位置接续仍限 EPUB；TXT 同步页明确显示仅本地，不发网络请求。
+- 当前只接受有效 UTF-8；GBK/GB18030、UTF-16 与 TXT 章节自动识别未实现。无效 UTF-8 或 NUL 字节在开书时拒绝，保留原文件。未更改已有 EPUB 进度修订格式，TXT 使用独立的 `txt-utf8-v1` 修订。
+- 实际执行：`cmake --build build/host -j 8`、`ctest --test-dir build/host --output-on-failure`（**11/11**）、`node tests/wifi_upload_page_test.mjs`、`sh tools/build_firmware.sh`、`python3 tools/check_handoff.py`（328 项）和 `git diff --check` 均通过。首次固件配置在沙箱内被 `sysctl()` 权限拦截，获准重试完成；最终固件 3,164,848 字节，SHA-256 `6d0719de83732a9913a09666cd6357ba887e1730d4a4de5d4a09668a855279e9`。
+- 用合成 TXT 的桌面画布检查书库文件名、正文和“仅本地”同步提示；书库原有 EPUB 扩展名截取曾把 `sample.txt` 显示为 `sampl`，已修正并复查。截图在忽略的 `artifacts/txt-support-20261007/`，为 host 画布，字体使用回退路径，不是真机照片。
+- 用户授权“烧录”后，仅连接一台 Read Pico；USB 序列号与 esptool 芯片 MAC 均为 `14:C1:9F:D0:18:B8`。烧录前诊断为 `view=library`、`pending=0`、`card=1`、`importing=0`。从设备重新读取分区表和 OTA 元数据，确认当前有效启动槽 `ota_0=0x10000/4 MiB`、sequence 1、state 2 且 CRC 正确。将上述摘要的镜像复制至忽略目录 `.local/txt-support/install/` 后，仅向 `0x10000` 写入 3,164,848 字节；esptool 报告 `Hash of data verified`。未写 bootloader、分区表、NVS、otadata、OTA1 或工厂校准，未擦除 TF 卡。
+- esptool 硬复位后串口诊断无应答；按既有设备流程使用 `--after watchdog-reset read-mac` 后成功启动。诊断返回 `view=library`、`card=1`、`frame_ok=1`、`clean=1`，首帧全刷成功。只读分页列出设备 `Books/` 共 52 项，其中 4 个普通 `.txt` 文件仍在。书库根画面可见 Books 文件夹；进入后画面持续变化，抓图返回 `frame_not_confirmed_or_changed`，因此尚未确认 TXT 书目在屏幕上显示。私有证据为 `.local/txt-support/install/` 的分区、OTA、镜像、烧录日志和根画面。
+- 未执行：真机 TXT 开书、翻页/回翻、屏幕排版目视、TF 卡读写性能、USB 和手机 Wi-Fi TXT 传输、休眠恢复。未提交或推送。下一步先在设备上用 UTF-8 中文 TXT 验证书目显示、阅读与重启恢复，再评估是否需要 GBK/GB18030 或章节识别。
 
 ## 2026-10-07 · 同名重传自动清理未完成临时文件
 

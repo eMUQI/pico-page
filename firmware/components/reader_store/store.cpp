@@ -239,7 +239,7 @@ bool asset_path(const std::string& path) {
     auto extension = path.substr(dot);
     for (auto& ch : extension) if (ch >= 'A' && ch <= 'Z') ch += 'a' - 'A';
     if (path.compare(0, 6, "Books/") == 0 || path.compare(0, 9, "Articles/") == 0)
-        return extension == ".epub";
+        return extension == ".epub" || extension == ".txt";
     if (path.compare(0, 15, "PicoPage/fonts/") == 0)
         return extension == ".ttf" || extension == ".otf" || extension == ".txt";
     if (path.compare(0, 16, "PicoPage/images/") == 0)
@@ -660,7 +660,8 @@ StoreStatus FileStore::book_snapshot(const std::string& path, BookSnapshot& snap
     snapshot = {};
     auto lower = path;
     for (auto& c : lower) if (c >= 'A' && c <= 'Z') c += 32;
-    if (lower.size() < 6 || lower.substr(lower.size() - 5) != ".epub" ||
+    if (!((lower.size() > 5 && lower.substr(lower.size() - 5) == ".epub") ||
+          (lower.size() > 4 && lower.substr(lower.size() - 4) == ".txt")) ||
         lower.rfind("picopage/", 0) == 0 || lower.find(".picopage/") != std::string::npos)
         return StoreStatus::UnsafePath;
     auto status = asset_digest(root_, path, snapshot.size, snapshot.crc32);

@@ -15,8 +15,10 @@ struct DocumentMetadata {
     std::string title;
     std::string author;
     std::string language;
-    std::string book_id;  // SHA-256 of the unchanged original EPUB.
+    std::string book_id;  // SHA-256 of the unchanged original file.
     std::string partial_md5;
+    bool txt_gb18030 = false;  // Selected decoder for a TXT source; false for EPUB and UTF-8 TXT.
+    std::vector<std::uint32_t> txt_offsets;  // GB18030 part starts and EOF in original file bytes.
 };
 struct SpineItem {
     std::string resource;
@@ -52,6 +54,8 @@ struct DocumentImage {
  * shorter than this is a single part.
  */
 inline constexpr std::uint32_t kChapterPartScalars = 60000;
+/** TXT parts use fixed byte targets adjusted to complete code points or CRLF. */
+inline constexpr std::uint32_t kTxtPartBytes = 48 * 1024;
 /** Selects the last part of a spine item in load_chapter. */
 inline constexpr std::uint32_t kLastChapterPart = 0xffffffffU;
 
@@ -141,7 +145,7 @@ void set_chapter_memory_probe(bool (*probe)(std::size_t bytes));
 /** Applies the same allocation reserve to cached and parsed chapter loads. */
 bool chapter_memory_available(std::size_t bytes);
 
-/** Bounded, read-only EPUB access. XML text source paths are not KOReader XPointer values. */
+/** Bounded, read-only EPUB and UTF-8/GB18030 TXT access. XML source paths are not KOReader XPointer values. */
 class EpubDocument {
 public:
     EpubDocument();
@@ -154,7 +158,7 @@ public:
     bool open(const std::string& path, std::string& error, const std::function<bool()>& stop = {});
     /** Reuses a previously verified digest only under exclusive, unchanged storage ownership.
      * The caller must invalidate that trust after import, removal, sleep or external access.
-     * ZIP structure and metadata are still read. File attributes alone do not establish trust.
+     * The document structure is still read. File attributes alone do not establish trust.
      */
     bool open_verified(const std::string& path, const DocumentMetadata& identity, std::string& error, const std::function<bool()>& stop = {});
     void close();

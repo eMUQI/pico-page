@@ -314,6 +314,10 @@ int main() {
     std::uint32_t asset_crc = 0;
     assert(store.inspect_asset("Books/Imported/check.epub", asset_size, asset_crc, error) == StoreStatus::Ok);
     assert(asset_size == 9 && asset_crc == import_crc);
+    auto txt_import = store.begin_import("Books/Imported/note.txt", 9, import_crc, error);
+    assert(txt_import && txt_import->append(0, "123456789", 9, error) == StoreStatus::Ok);
+    assert(txt_import->finish(error) == StoreStatus::Ok);
+    txt_import.reset();
     assert(!store.begin_import("Books/Imported/check.epub", 9, import_crc, error));
     assert(get(root / "Books/Imported/check.epub") == "123456789");
     assert(!store.begin_import("../outside.epub", 9, import_crc, error));

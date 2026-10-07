@@ -265,7 +265,8 @@ void ContentJob::open_book() {
           document.open_verified(request.path, request.identity, result.error, stop)) || stop()) return;
     FileStore store(request.root);
     result.configuration = store.load_settings(request.relative_path);
-    result.progress = store.load_progress(request.relative_path, document.metadata().book_id, request.content_revision);
+    result.progress = store.load_progress(request.relative_path, document.metadata().book_id,
+        document.metadata().txt_gb18030 ? kTxtGb18030Revision : request.content_revision);
     if (request.kind != Kind::Inspect && result.progress.status != StoreStatus::Ok && result.progress.status != StoreStatus::Missing &&
         result.progress.status != StoreStatus::Cleared) {
         result.error = "Reading progress cannot be read; original record preserved"; return;

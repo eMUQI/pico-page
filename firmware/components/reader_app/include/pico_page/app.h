@@ -111,7 +111,7 @@ class ReaderApp {
     PortalAction take_portal_action();
     /**
      * Saves confirmed progress, ends sync work and shows the starting state of a phone setup
-     * session (or EPUB upload when upload is true). Stops background card jobs before returning.
+     * session (or book upload when upload is true). Stops background card jobs before returning.
      * false when the display or network is busy, the card is absent or the save fails.
      */
     bool prepare_portal(bool upload = false);

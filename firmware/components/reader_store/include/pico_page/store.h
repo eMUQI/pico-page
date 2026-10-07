@@ -143,7 +143,7 @@ public:
 
     /**
      * Starts a new resource import of 1 byte through 64 MiB. Allowed destinations
-     * are EPUBs in Books/Articles, fonts or license text in PicoPage/fonts, and
+     * are EPUB or TXT books in Books/Articles, fonts or license text in PicoPage/fonts, and
      * images in PicoPage/images. Existing destinations are preserved. An abandoned regular
      * staging file for this destination is removed before starting; unsafe paths are refused.
      * No settings, credentials or reading records are importable.
@@ -156,11 +156,11 @@ public:
     StoreStatus inspect_asset(const std::string& path, std::uint64_t& size,
                               std::uint32_t& crc32, std::string& error) const;
 
-    /** Captures the EPUB digest and exact progress slots before a management confirmation. */
+    /** Captures the original book digest and exact progress slots before a management confirmation. */
     StoreStatus book_snapshot(const std::string& path, BookSnapshot& snapshot) const;
 
     /**
-     * Revalidates the snapshot, then deletes only the original EPUB or commits a
+     * Revalidates the snapshot, then deletes only the original book or commits a
      * cleared marker to both progress slots. The caller must first stop the book
      * session and its asynchronous work. Remote records and book settings remain.
      * Failure may leave a published slot; reload before retrying.

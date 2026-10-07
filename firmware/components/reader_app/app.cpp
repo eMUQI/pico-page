@@ -27,6 +27,7 @@ namespace {
 using graphics::decode_utf8;
 constexpr int footer_top = 1128, toolbar_top = 1080;
 constexpr const char *content_revision = "epub-native-v1";
+constexpr const char *txt_revision = "txt-utf8-v1";
 struct Entry {
     std::string path, name;
     bool directory;
@@ -150,11 +151,20 @@ bool safe_existing(const std::string &root, const std::string &relative) {
     } while (end != std::string::npos);
     return true;
 }
-bool epub_name(std::string name) {
+bool txt_name(std::string name) {
+    for (auto &c : name)
+        if (c >= 'A' && c <= 'Z') c += 32;
+    return name.size() > 4 && name.substr(name.size() - 4) == ".txt";
+}
+bool book_name(std::string name) {
     for (auto &c : name)
         if (c >= 'A' && c <= 'Z')
             c += 32;
-    return name.size() > 5 && name.substr(name.size() - 5) == ".epub";
+    return (name.size() > 5 && name.substr(name.size() - 5) == ".epub") ||
+           (name.size() > 4 && name.substr(name.size() - 4) == ".txt");
+}
+const char* revision_for(const std::string& path, const DocumentMetadata& metadata) {
+    return txt_name(path) ? (metadata.txt_gb18030 ? kTxtGb18030Revision : txt_revision) : content_revision;
 }
 } // namespace
 
@@ -526,12 +536,13 @@ struct ReaderApp::Impl final : DisplayBackend {
         ContentJob::Request request;
         request.kind = kind;
         request.root = root; request.relative_path = path; request.path = root + "/" + path;
-        request.content_revision = content_revision; request.generation = foreground_generation;
+        request.generation = foreground_generation;
         struct stat info{};
         const auto found = identities.find(path);
         if (controlled_storage && found != identities.end() && stat(request.path.c_str(), &info) == 0 &&
             found->second.size == info.st_size && found->second.modified == info.st_mtime && found->second.inode == info.st_ino)
             request.identity = found->second.identity;
+        request.content_revision = revision_for(path, request.identity);
         if (kind == ContentJob::Kind::Inspect && stat(request.path.c_str(), &info) == 0) {
             const auto cover = cover_entry(path, info, 120, 160, false);
             request.cache_name = cover.name; request.cache_header = cover.header;
@@ -633,7 +644,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (!job->result.error.empty()) {
                 if (request.kind == ContentJob::Kind::Inspect) {
                     detail_error = job->result.error; draw_details(); overlay();
-                } else error("无法打开 EPUB：" + job->result.error);
+                } else error("无法打开书籍：" + job->result.error);
                 return;
             }
             const auto& loaded = *job->result.document;
@@ -1005,6 +1016,12 @@ struct ReaderApp::Impl final : DisplayBackend {
             total += spine[i].bytes;
             if (i < chapter_index) read += spine[i].bytes;
             else if (i == chapter_index && !chapter.text.empty()) {
+                if (txt_name(book_path)) {
+                    const auto part_begin = static_cast<std::uint64_t>(chapter.part) * kTxtPartBytes;
+                    const auto approximate = part_begin + kTxtPartBytes * std::min(end, chapter.text.size()) / chapter.text.size();
+                    read += std::min<std::uint64_t>(spine[i].bytes, approximate);
+                    continue;
+                }
                 // The number of parts is unknown before the item is counted; one more is assumed.
                 const std::uint64_t parts = chapter.part + (chapter.last_part ? 1 : 2);
                 const std::uint64_t within = chapter.part * chapter.text.size() + std::min(end, chapter.text.size());
@@ -1035,6 +1052,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         return position + (counting_blocked == chapter_index ? " · 等待统计页数" : " · 正在统计页数");
     }
     std::string sync_badge() const {
+        if (txt_name(book_path)) return "仅本地";
         if (session.needs_save()) return "尚未保存";
         if (active_network) return "同步中";
         if (remote_anchor) return "位置不同 ›";
@@ -1220,7 +1238,7 @@ struct ReaderApp::Impl final : DisplayBackend {
 #endif
                 if (result != 0)
                     continue;
-                if (S_ISDIR(st.st_mode) || (S_ISREG(st.st_mode) && epub_name(name)))
+                if (S_ISDIR(st.st_mode) || (S_ISREG(st.st_mode) && book_name(name)))
                     entries.push_back({path, name, S_ISDIR(st.st_mode)});
                 if (entries.size() >= 512) {
                     message = "当前目录仅显示前 512 项，请分目录存放";
@@ -1239,7 +1257,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     std::size_t library_page_size() const { return library_grid ? 6 : 5; }
     static std::string entry_title(const Entry &entry) {
-        return entry.directory ? entry.name : entry.name.substr(0, entry.name.size() - 5);
+        return entry.directory ? entry.name : entry.name.substr(0, entry.name.size() - (txt_name(entry.name) ? 4 : 5));
     }
     /** FNV-1a of a card-relative path; names the cache entries of one book. */
     static unsigned long long path_hash(const std::string &relative) {
@@ -1363,7 +1381,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             text("继续 ›", 550, 240, 26, 98);
             hits.push_back({24, 172, 636, 174, Tools});
         } else {
-            text("从书库打开一本 EPUB", 48, 202, 30, 570, 1, true);
+            text("从书库打开一本 EPUB 或 TXT", 48, 202, 30, 570, 1, true);
             text("阅读位置自动保存在存储卡", 48, 282, 22, 570, 3);
         }
         text("本机书籍 · " + std::to_string(entries.size()) + " 项", 36, 378, 22, 280, 3);
@@ -1376,7 +1394,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         for (std::size_t i = begin; i < std::min(begin + size, entries.size()); ++i) {
             const auto &entry = entries[i];
             const auto label = entry_title(entry);
-            const auto status = entry.directory ? "文件夹 ›" : entry.path == last_book ? "最近阅读" : "EPUB";
+            const auto status = entry.directory ? "文件夹 ›" : entry.path == last_book ? "最近阅读" : txt_name(entry.name) ? "TXT" : "EPUB";
             if (library_grid) {
                 const int x = 24 + static_cast<int>((i - begin) % 3) * 216;
                 const int y = 454 + static_cast<int>((i - begin) / 3) * 300;
@@ -1392,7 +1410,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             } else {
                 const int y = 432 + static_cast<int>(i - begin) * 126;
                 title_lines(label, 36, y + 12, 486, 28);
-                text(entry.directory ? entry.path : "本地 EPUB", 36, y + 88, 22, 470, 3);
+                text(entry.directory ? entry.path : txt_name(entry.name) ? "本地 TXT" : "本地 EPUB", 36, y + 88, 22, 470, 3);
                 text(entry.directory ? status : "详情 ›", 552, y + 44, 22, 108, 3);
                 canvas.line(24, y + 125, 660, y + 125, 12, 2);
                 if (!entry.directory) hits.push_back({548, y, 112, 126, DetailBase + static_cast<int>(i)});
@@ -1401,7 +1419,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         if (entries.empty()) {
             text(card_available ? "书库里还没有书" : "存储卡不可用", 36, 500, 32, 612, 1, true);
-            note(card_available ? "可通过导入，将 EPUB 复制到存储卡。" : "这不代表书籍已被删除。", 570);
+            note(card_available ? "可通过导入，将 EPUB 或 TXT 复制到存储卡。" : "这不代表书籍已被删除。", 570);
         }
         if (undecoded || !message.empty()) {
             canvas.fill_rect(24, 1040, 636, 48, 15);
@@ -1442,7 +1460,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!open_document(path, detail)) {
             book_path.clear();
             session.open("", "", writer);
-            error("无法打开 EPUB：" + detail);
+            error("无法打开书籍：" + detail);
             return false;
         }
         return finish_open(path);
@@ -1461,8 +1479,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         clear_page_history();
         reset_pages();
         const auto restored =
-            loaded ? loaded->progress : store.load_progress(path, document.metadata().book_id, content_revision);
-        session.open(document.metadata().book_id, content_revision, writer, restored.record);
+            loaded ? loaded->progress : store.load_progress(path, document.metadata().book_id, revision_for(path, document.metadata()));
+        session.open(document.metadata().book_id, revision_for(path, document.metadata()), writer, restored.record);
         if (restored.status != StoreStatus::Ok && restored.status != StoreStatus::Missing && restored.status != StoreStatus::Cleared) {
             error("原进度读取失败，已停止开书以保护记录");
             return false;
@@ -1488,7 +1506,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (!document.chapter_index_for(restored.record->anchor.resource, chapter_index) ||
                 !find_content(store, document, chapter_index, chapter, detail, ChapterLoad::Reading, holds) ||
                 !chapter.offset_for(restored.record->anchor, restored_offset)) {
-                error(memory_error(detail) ? chapter_error(detail) : "保存的位置无法映射，请保留进度文件并检查 EPUB");
+                error(memory_error(detail) ? chapter_error(detail) : "保存的位置无法映射，请保留进度文件并检查原书");
                 return false;
             }
             offset = restored_offset;
@@ -1666,7 +1684,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                       spec.left, spec.top, spec.width, spec.height, spec.font_px, spec.line_height,
                       spec.indent_chars, spec.paragraph_gap, spine.size());
         pages_name = name;
-        pages_header = std::string("PPPAGES3\n") + content_revision + ":pagination-v1\n" + book_path + "\n" + font_file + "\n" + geometry +
+        pages_header = std::string("PPPAGES3\n") + revision_for(book_path, document.metadata()) + ":pagination-v1\n" + book_path + "\n" + font_file + "\n" + geometry +
             document.metadata().book_id + "\n" + font_identity + "\n";
         if (async_content) { pages_cache_pending = true; return; }
         if (auto cached = read_page_cache(store, pages_name, pages_header, spine)) adopt_pages(std::move(*cached));
@@ -2621,11 +2639,11 @@ struct ReaderApp::Impl final : DisplayBackend {
 #endif
     }
     /**
-     * Sums regular files below a card-relative directory; epub_only keeps EPUB names only.
+     * Sums regular files below a card-relative directory; books_only keeps EPUB and TXT names.
      * The walk blocks the application task, so it stops after 2000 entries. nullopt when a
      * directory cannot be read or that limit is exceeded.
      */
-    std::optional<std::uint64_t> tree_bytes(const std::string &relative, bool epub_only) {
+    std::optional<std::uint64_t> tree_bytes(const std::string &relative, bool books_only) {
         unsigned remaining = 2000;
         std::uint64_t total = 0;
         std::vector<std::string> pending{relative};
@@ -2648,7 +2666,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                     return std::nullopt;
                 }
                 if (S_ISDIR(st.st_mode)) pending.push_back(directory + "/" + name);
-                else if (S_ISREG(st.st_mode) && (!epub_only || epub_name(name))) total += static_cast<std::uint64_t>(st.st_size);
+                else if (S_ISREG(st.st_mode) && (!books_only || book_name(name))) total += static_cast<std::uint64_t>(st.st_size);
             }
             closedir(dir);
         }
@@ -2724,7 +2742,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         value_row(0, "检查与上传", "在正文工具的“同步”中手动执行", "手动", 488);
         value_row(0, "书籍匹配方式", "按原书内容识别，与文件名无关", "按内容", 592);
         button(PortalStart, "用手机配置", 24, 760, 636, 96);
-        if (has_book() && configured) button(Sync, "检查当前书籍的同步", 24, 1056, 636, 96);
+        if (has_book() && configured && !txt_name(book_path)) button(Sync, "检查当前书籍的同步", 24, 1056, 636, 96);
+        else if (has_book() && txt_name(book_path)) note("TXT 仅保存本机进度；KOReader 接续仅支持 EPUB。", 1090);
         else note(configured ? "打开一本书后，可在工具中检查同步。" : "配置完成前不会联网。", 1090);
     }
     static std::string file_size(std::uint64_t bytes) {
@@ -2752,7 +2771,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (inspected.open(root + "/" + path, detail_error)) {
                 const auto *source = &inspected;
                 detail_metadata = source->metadata();
-                detail_progress = store.load_progress(path, detail_metadata.book_id, content_revision);
+                detail_progress = store.load_progress(path, detail_metadata.book_id, revision_for(path, detail_metadata));
                 if (detail_progress.record) {
                     const auto &anchor = detail_progress.record->anchor;
                     for (const auto &item : source->toc())
@@ -2783,7 +2802,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         text("进度", 36, 408, 24, 130, 3);
         text(detail_progress.record ? detail_position : (detail_progress.status == StoreStatus::Missing || detail_progress.status == StoreStatus::Cleared) ? "尚无本地阅读记录" : "阅读记录无法验证", 186, 408, 24, 462);
         text("同步", 36, 478, 24, 130, 3);
-        text(detail_path == book_path && detail_metadata.book_id == document.metadata().book_id ? sync_badge() : "打开书籍后检查", 186, 478, 24, 462);
+        text(txt_name(detail_path) ? "仅本地" : detail_path == book_path && detail_metadata.book_id == document.metadata().book_id ? sync_badge() : "打开书籍后检查", 186, 478, 24, 462);
         text("原书占用", 36, 548, 24, 150, 3);
         text(detail_size ? file_size(*detail_size) : "未知", 210, 548, 24, 438);
         if (detail_error.empty()) button(DetailOpen, detail_progress.record ? "继续阅读" : "打开书籍", 36, 630, 612, 96, true);
@@ -2831,7 +2850,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         stop_counting_job();
         identities.clear();
         font_identity.clear(); font_scan.reset(); effective_font.clear();
-        const auto result = store.manage_book(management_snapshot, delete_original, detail_metadata.book_id, content_revision);
+        const auto result = store.manage_book(management_snapshot, delete_original, detail_metadata.book_id, revision_for(detail_path, detail_metadata));
         if (result != StoreStatus::Ok) {
             error(result == StoreStatus::ExternalChange ? "文件已被外部修改，操作未执行。请重新打开书籍详情。" :
                   "操作未完成，请检查 TF 卡并重新打开详情核实文件状态。");
@@ -2959,7 +2978,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             text("或在浏览器输入", 324, 540, 22, 324, 3);
             const auto scheme = portal.url.find("://");
             text(scheme == std::string::npos ? portal.url : portal.url.substr(scheme + 3), 324, 574, 28, 324);
-            text(portal_upload ? "EPUB · 最大 64 MiB" : "只支持 2.4 GHz 网络", 324, 660, 22, 324, 3);
+            text(portal_upload ? "EPUB/TXT · 最大 64 MiB" : "只支持 2.4 GHz 网络", 324, 660, 22, 324, 3);
             canvas.line(0, 816, 683, 816, 1, 3);
             std::string title, body = portal.detail;
             switch (portal.phase) {
@@ -3037,6 +3056,12 @@ struct ReaderApp::Impl final : DisplayBackend {
             hits.clear(); canvas.clear(); header("阅读同步", Back, "书库");
             note("请先打开一本 EPUB。", 246); return;
         }
+        if (txt_name(book_path)) {
+            hits.clear(); canvas.clear(); header("阅读同步", Back, "阅读");
+            wrapped("TXT 阅读位置保存在本机 TF 卡。KOReader 双向位置接续仅支持 EPUB。", 36, 266, 612, 28);
+            button(Back, "继续阅读", 24, 1080, 636, 96);
+            return;
+        }
         refresh_from_settings = false;
         if (!panel_background(508)) return;
         // All controls above the panel are disabled while choosing a remote candidate.
@@ -3096,6 +3121,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
     }
     void check_sync() {
+        if (txt_name(book_path)) { draw_sync(); return; }
         cancel_sync();
         server_state = "检查中"; remote_state = "检查中";
         std::string detail;

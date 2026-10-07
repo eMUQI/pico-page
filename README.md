@@ -9,10 +9,13 @@ Read Pico 上的个人阅读固件，使用 ESP-IDF。当前已有可运行的�
 当前优先离线阅读，Wi-Fi 和 KOSync 配置暂缓；用户已取消完整备份。
 操作范围和证据见 [设备检查记录](docs/device-validation.md)。
 
-当前版本支持文字及 PNG/JPEG 图片 EPUB 阅读，损坏或不支持的图片有明确占位提示。
+当前工作区支持文字及 PNG/JPEG 图片 EPUB 阅读，也支持 UTF-8、GB18030 TXT 离线阅读。
+TXT 可带 UTF-8 BOM，使用本地进度；UTF-16 和 TXT 的 KOReader 位置接续暂不支持。无 BOM 的 TXT 优先按 UTF-8 读取，失败后尝试 GB18030；其他编码可能误判或无法打开。
+本次 TXT 固件已写入 Read Pico；用户已确认 GB18030 原书正常显示中文并可翻页，重启后进度恢复仍待确认。
+损坏或不支持的 EPUB 图片有明确占位提示。
 KOReader 精确位置映射仅支持已验证的 XHTML 范围；不支持的内容不会用百分比猜测跳转。
 官方完整 KOReader 客户端已通过本地测试服务的六组双向接续与重启恢复检查，
-这不等于 Read Pico 与外部服务的实际同步验收。所有改动仍未提交、推送或发布。
+这不等于 Read Pico 与外部服务的实际同步验收。本次 TXT 改动尚未提交、推送或发布。
 
 ## 直接运行桌面版
 
@@ -23,7 +26,7 @@ sh tools/run_host.sh
 ```
 
 这会准备 `.local/card` 演示卡、下载并核验固定字体、构建并启动窗口。已有书籍和配置不会被覆盖。
-将自己的 EPUB 放入 `.local/card/Books`，在书库打开；也可直接指定：
+将自己的 EPUB、UTF-8 或 GB18030 TXT 放入 `.local/card/Books`，在书库打开；也可直接指定：
 
 ```sh
 sh tools/run_host.sh --book 'Books/Pico Page 演示.epub'
@@ -63,6 +66,7 @@ python3 tools/check_handoff.py
 完整镜像摘要和验证边界见 [开发状态](docs/development-status.md)。
 
 - [开发状态与实际结果](docs/development-status.md)
+- [Wi-Fi 传书](docs/wifi-transfer.md)
 - [公开 EPUB 样本与验证](docs/public-books.md) · [设备诊断接口](docs/console-runtime.md)
 - [环境记录](docs/environment.md)
 - [产品决定](docs/decisions.md) · [架构](docs/architecture.md) · [数据存储](docs/storage.md)

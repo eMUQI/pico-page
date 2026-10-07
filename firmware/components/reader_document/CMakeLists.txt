@@ -1,4 +1,4 @@
-set(document_sources document.cpp third_party/miniz/miniz.c
+set(document_sources document.cpp gb18030.cpp third_party/miniz/miniz.c
     third_party/expat/xmlparse.c third_party/expat/xmlrole.c third_party/expat/xmltok.c)
 set(document_private_includes third_party/miniz third_party/expat)
 set(document_definitions MINIZ_NO_DEFLATE_APIS
