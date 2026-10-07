@@ -48,7 +48,7 @@ public:
         std::optional<PageCache> page_cache;
         std::vector<SpineItem> spine;
         std::optional<ReadingRecord> record;
-        bool save_last_book = false, prefetch = false, cover_crop = false;
+        bool save_last_book = false, prefetch = false, cover_crop = false, preview = false;
         std::uint64_t generation = 0;
         std::size_t chapter = 0, offset = 0;
         std::uint32_t part = 0;

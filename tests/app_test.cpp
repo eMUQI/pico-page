@@ -1117,6 +1117,25 @@ int main(int argc, char** argv) {
         assert(app.canvas().pixel(100, 400) == 0 && app.canvas().pixel(100, 800) == 5);
     }
     {
+        ReaderApp app(card.string(), "preview-worker", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/cover.epub"); driver.present();
+        const auto saved = *app.saved_record();
+        driver.tap(342, 500); driver.present();
+        const auto before = graphics::image_decode_count();
+        driver.tap(205, 1140);
+        assert(app.view() == View::Loading && graphics::image_decode_count() == before);
+        driver.present(); driver.refresh(); driver.tap(560, 1170); driver.present();
+        driver.complete_content();
+        assert(app.view() == View::Tools && *app.saved_record() == saved);
+        driver.tap(205, 1140); driver.present(); driver.complete_content();
+        assert(app.view() == View::Typography && *app.saved_record() == saved);
+        const auto prepared = graphics::image_decode_count();
+        driver.tap(580, 948); driver.present(); driver.complete_content();
+        assert(app.view() == View::Typography && graphics::image_decode_count() == prepared);
+        driver.close(); driver.present();
+        assert(app.view() == View::Reading && *app.saved_record() == saved);
+    }
+    {
         fs::remove_all(card / "PicoPage/cache/images");
         ReaderApp app(card.string(), "image-worker", true, true); Driver driver{app};
         assert(app.initialize()); driver.present();

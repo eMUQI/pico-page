@@ -114,7 +114,7 @@ void ContentJob::run() {
         result.error = font.error(); return;
     }
     if (stop()) return;
-    if (!document.load_chapter(request.chapter, source, result.error, ChapterLoad::Layout, request.part, stop)) {
+    if (!load_content(FileStore(request.root), document, request.chapter, source, result.error, ChapterLoad::Layout, request.part, stop)) {
         if (result.error == kChapterCancelled) result.error.clear();
         return;
     }

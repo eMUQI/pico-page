@@ -78,30 +78,32 @@ std::string key(const EpubDocument& doc, std::size_t index, std::uint32_t part) 
     return std::string("content/") + version + "/" + doc.metadata().book_id + "/" +
            std::to_string(index) + "/" + std::to_string(part);
 }
-void save(const FileStore& store, const EpubDocument& doc, std::size_t index, const Chapter& c) {
-    if (!room()) return;
+void save(const FileStore& store, const EpubDocument& doc, std::size_t index, const Chapter& c, const std::function<bool()>& stop) {
+    if (!room() || (stop && stop())) return;
     const StageTimer timer{"content_cache_write"};
     Writer w;
     w.str(version); w.str(doc.metadata().book_id); w.str(c.resource);
     w.word(c.part); w.word(c.last_part); w.word(c.split_node); w.word(c.plain_dom);
     w.word(static_cast<std::uint32_t>(c.text.size()));
-    for (auto cp : c.text) w.word(cp);
+    for (auto cp : c.text) { if (stop && stop()) return; w.word(cp); }
     w.word(static_cast<std::uint32_t>(c.blocks.size()));
-    for (const auto& b : c.blocks) { w.word(b.begin); w.word(b.end); w.word(static_cast<unsigned>(b.kind)); }
+    for (const auto& b : c.blocks) { if (stop && stop()) return; w.word(b.begin); w.word(b.end); w.word(static_cast<unsigned>(b.kind)); }
     w.word(static_cast<std::uint32_t>(c.runs.size()));
-    for (const auto& r : c.runs) { w.word(r.begin); w.word(r.end); w.anchor(r.source); w.word(r.element_reference); }
+    for (const auto& r : c.runs) { if (stop && stop()) return; w.word(r.begin); w.word(r.end); w.anchor(r.source); w.word(r.element_reference); }
     w.word(static_cast<std::uint32_t>(c.fragments.size()));
-    for (const auto& f : c.fragments) { w.str(f.id); w.word(f.offset); }
+    for (const auto& f : c.fragments) { if (stop && stop()) return; w.str(f.id); w.word(f.offset); }
     w.word(static_cast<std::uint32_t>(c.links.size()));
-    for (const auto& l : c.links) { w.word(l.begin); w.word(l.end); w.str(l.resource); w.str(l.fragment); w.word(l.external); }
+    for (const auto& l : c.links) { if (stop && stop()) return; w.word(l.begin); w.word(l.end); w.str(l.resource); w.str(l.fragment); w.word(l.external); }
     w.word(static_cast<std::uint32_t>(c.images.size()));
-    for (const auto& i : c.images) { w.word(i.begin); w.word(i.end); w.str(i.resource); w.str(i.alt); w.anchor(i.source); }
+    for (const auto& i : c.images) { if (stop && stop()) return; w.word(i.begin); w.word(i.end); w.str(i.resource); w.str(i.alt); w.anchor(i.source); }
     w.word(static_cast<std::uint32_t>(c.warnings.size()));
-    for (const auto& warning : c.warnings) w.str(warning);
+    for (const auto& warning : c.warnings) { if (stop && stop()) return; w.str(warning); }
+    if (stop && stop()) return;
     if (!w.okay || w.bytes.size() > limit - 32) return;
     w.bytes += md5_hex(w.bytes);
+    if (stop && stop()) return;
     if (store.save_cache(key(doc, index, c.part), w.bytes) != StoreStatus::Ok) return;
-    if (c.last_part) store.save_cache(key(doc, index, kLastChapterPart), w.bytes);
+    if (c.last_part && !(stop && stop())) store.save_cache(key(doc, index, kLastChapterPart), w.bytes);
 }
 bool load(const FileStore& store, const EpubDocument& doc, std::size_t index, std::uint32_t part, Chapter& c) {
     if (!room() || index >= doc.spine().size()) return false;
@@ -171,7 +173,7 @@ bool load_content(const FileStore& store, EpubDocument& doc, std::size_t index, 
         return true;
     }
     return doc.load_chapter(index, chapter, error, detail, part, stop, [&](const Chapter& completed) {
-        if (!(stop && stop())) save(store, doc, index, completed);
+        if (!(stop && stop())) save(store, doc, index, completed, stop);
     });
 }
 bool find_content(const FileStore& store, EpubDocument& doc, std::size_t index, Chapter& chapter,
@@ -187,7 +189,7 @@ bool find_content(const FileStore& store, EpubDocument& doc, std::size_t index, 
         }
     }
     return doc.find_chapter_part(index, chapter, error, detail, match, stop, [&](const Chapter& completed) {
-        if (!(stop && stop())) save(store, doc, index, completed);
+        if (!(stop && stop())) save(store, doc, index, completed, stop);
     });
 }
 } // namespace pico_page

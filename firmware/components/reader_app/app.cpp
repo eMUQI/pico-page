@@ -464,13 +464,14 @@ struct ReaderApp::Impl final : DisplayBackend {
         content_loading = image_prepared = false;
         prepared_image.reset();
     }
-    bool begin_image(std::size_t start, const DocumentImage& image) {
+    bool begin_image(std::size_t start, const DocumentImage& image, bool preview = false) {
         abandon_content();
         release_counting();
         ContentJob::Request request;
         request.kind = ContentJob::Kind::Image;
         request.root = root; request.path = root + "/" + book_path; request.identity = document.metadata();
-        request.layout = layout(settings, link_return ? 144 : 64);
+        request.preview = preview;
+        request.layout = preview ? layout(draft, 64, 656) : layout(settings, link_return ? 144 : 64);
         request.image_resource = image.resource;
         request.cache_name = image_cache_key(request.identity.book_id, image.resource, request.layout);
         request.generation = foreground_generation; request.chapter = chapter_index;
@@ -478,11 +479,12 @@ struct ReaderApp::Impl final : DisplayBackend {
         pending_content = std::move(request);
         content_loading = true;
         view = View::Loading;
-        clear_body_cache(); clear_prefetch(); covers.clear();
+        if (!preview) clear_body_cache();
+        clear_prefetch(); covers.clear();
         canvas.fill_rect(0, footer_top, 684, 88, 15);
         text("正在准备图片…", 36, 1156, 24, 400, 3);
         button(Dismiss, "取消", 488, 1140, 160, 64, false, 24);
-        overlay();
+        if (!preview) overlay();
         return true;
     }
     bool begin_open(const std::string& path, ContentJob::Kind kind = ContentJob::Kind::Open) {
@@ -634,7 +636,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         image_prepared = true;
         prepared_image = std::move(job->result.image);
         prepared_image_error = job->result.error;
-        show_page(request.offset);
+        if (request.preview) { draw_typography(); overlay(); }
+        else show_page(request.offset);
         image_prepared = false;
         prepared_image.reset();
     }
@@ -1825,7 +1828,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (counting_job) return;
             if (!counting_memory(spine[counting_index].bytes)) { counting_blocked = chapter_index; return; }
             ContentJob::Request request;
-            request.path = root + "/" + book_path;
+            request.root = root; request.path = root + "/" + book_path;
             request.font = body_font_path();
             request.identity = document.metadata(); request.layout = layout(settings);
             request.generation = counting_generation; request.chapter = counting_index;
@@ -1915,6 +1918,8 @@ struct ReaderApp::Impl final : DisplayBackend {
                     }
                 }
             }
+            // Foreground images are prepared by a worker; overlays must not start a decoder.
+            if (async_content) { draw_image_error(spec); return true; }
             std::vector<std::uint8_t> encoded;
             std::string detail;
             if (document.read_image(image->resource, encoded, detail) &&
@@ -2273,6 +2278,12 @@ struct ReaderApp::Impl final : DisplayBackend {
         pager(Prev, Next, toc_page, toc_starts.size());
     }
     void draw_typography() {
+        if (async_content && !image_prepared) {
+            if (const auto* image = image_at(readable_offset(offset))) {
+                begin_image(offset, *image, true);
+                return;
+            }
+        }
         view = View::Typography;
         hits.clear();
         canvas.clear();
@@ -2957,9 +2968,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             return;
         }
         tabs(508, Sync);
-        std::string detail;
-        sync::Config configured;
-        const bool ready = sync::load_config(root, configured, detail);
+        const auto& configured = badge_config;
+        const bool ready = badge_configured;
         if (!ready && !active_network) { server_state = "未配置"; remote_state = "未检查"; }
         for (int x : {228, 456}) canvas.line(x, 610, x, 795, 1, 2);
         canvas.line(0, 795, 683, 795, 1, 2);
@@ -3579,6 +3589,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             draw_import();
             break;
         case Sync:
+            refresh_badge_config();
             cancel_sync();
             sync_status.clear();
             server_state = "未检查"; remote_state = "未检查";
@@ -3747,11 +3758,14 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (content_loading) {
             if (!input.touch && input.event.input == Input::K2) force_refresh();
             else if (!input.queued && input.touch && input.x >= 488 && input.y >= 1140) {
-                const auto kind = pending_content ? pending_content->kind : foreground_job->request.kind;
+                const auto& request = pending_content ? *pending_content : foreground_job->request;
+                const auto kind = request.kind;
+                const bool preview = request.preview;
                 const bool mapping = kind == ContentJob::Kind::MapUpload || kind == ContentJob::Kind::MapDownload;
                 abandon_content();
                 link_return = confirmed_link_return;
                 if (mapping) { cancel_sync(); sync_status = "同步已取消"; draw_sync(); }
+                else if (preview) draw_tools();
                 else draw_library();
                 overlay();
             }
