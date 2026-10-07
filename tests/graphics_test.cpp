@@ -100,6 +100,9 @@ int main(int argc, char** argv) {
     assert(font.advance(U'中') == previous_advance);
     assert(font.size(64));
     for (char32_t cp = 0x4e00; cp < 0x4e00 + 1024; ++cp) assert(font.warm(cp));
+    const auto retained_glyphs = font.cached_glyphs();
+    font.trim_glyph_cache(0, 32);
+    assert(retained_glyphs - font.cached_glyphs() <= 32 && font.cached_glyphs() < retained_glyphs);
     assert(font.size(28));
     canvas.clear();
     assert(font.draw(canvas, U'中', 40, 80));

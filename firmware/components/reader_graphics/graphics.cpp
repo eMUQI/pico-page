@@ -168,6 +168,14 @@ bool Font::size(int pixels) {
     return true;
 }
 
+void Font::trim_glyph_cache(std::size_t target_bytes, std::size_t max_entries) {
+    while (max_entries-- && glyph_bytes_ > target_bytes && !glyph_order_.empty()) {
+        const auto oldest = glyph_order_.front();
+        glyph_bytes_ -= glyphs_.at(oldest).coverage.size();
+        glyphs_.erase(oldest); glyph_order_.pop_front();
+    }
+}
+
 bool Font::contains(char32_t scalar) const {
     return face_ && FT_Get_Char_Index(static_cast<FT_Face>(face_), scalar) != 0;
 }

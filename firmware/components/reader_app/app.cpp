@@ -1616,6 +1616,66 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (async_content || !pages_dirty || pages_name.empty()) return;
         if (write_page_cache(store, pages_name, pages_header, chapter_pages, counted)) pages_dirty = false;
     }
+    static constexpr std::size_t cache_target = 4U * 1024 * 1024;
+    std::uint64_t cache_evictions = 0;
+    CacheUsage cache_usage() const {
+        CacheUsage usage;
+        usage.body_bitmap = body_canvas ? body_canvas->pixels().capacity() : 0;
+        if (next_page) usage.next_layout = next_page->glyphs.capacity() * sizeof(graphics::PositionedGlyph) +
+            next_page->lines.capacity() * sizeof(graphics::TextLine);
+        usage.next_bitmap = next_bitmap ? next_bitmap->pixels().capacity() : 0;
+        usage.bitmap_hits = bitmap_hits;
+        usage.next_content = next_chapter ? chapter_cache_bytes(*next_chapter) : 0;
+        usage.page_index = page_index_bytes();
+        for (const auto& cover : covers) usage.cover_pixels += cover.pixels.capacity();
+        usage.ui_glyph_bytes = ui.cached_glyph_bytes(); usage.body_glyph_bytes = body.cached_glyph_bytes();
+        usage.ui_glyphs = ui.cached_glyphs(); usage.body_glyphs = body.cached_glyphs();
+        usage.ui_advances = ui.cached_advances(); usage.body_advances = body.cached_advances();
+        usage.evictions = cache_evictions; usage.target = cache_target;
+        usage.retained = usage.body_bitmap + usage.next_layout + usage.next_bitmap + usage.next_content +
+            usage.page_index + usage.cover_pixels + usage.ui_glyph_bytes + usage.body_glyph_bytes +
+            (usage.ui_advances + usage.body_advances) * (sizeof(std::uint64_t) + sizeof(int));
+        return usage;
+    }
+    void reclaim_caches() {
+        if (view != View::Reading || display.busy() || content_loading) return;
+        const auto pressure = [&] {
+            if (cache_usage().retained > cache_target) return true;
+#ifdef ESP_PLATFORM
+            return heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 1536U * 1024 ||
+                   heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 512U * 1024;
+#else
+            return false;
+#endif
+        };
+        if (!pressure()) return;
+        const StageTimer timer{"cache_reclaim"};
+        if (!covers.empty()) { covers.clear(); ++cache_evictions; }
+        bool dropped = false;
+        for (std::size_t i = chapter_pages.size(); i-- > 0 && pressure();) {
+            if (i == chapter_index || chapter_pages[i].empty()) continue;
+            decltype(chapter_pages)::value_type().swap(chapter_pages[i]);
+            counted[i] = !document.spine()[i].linear; counted_live[i] = false;
+            dropped = true; ++cache_evictions;
+        }
+        if (dropped) {
+            ++counting_generation; release_counting(); counting_index = not_counting;
+            counting_blocked = chapter_index; pages_cache_pending = pages_dirty = false;
+            pages_complete = std::find(counted.begin(), counted.end(), false) == counted.end();
+        }
+        if (pressure() && (next_page || next_chapter || next_bitmap || (raster_job && raster_job->request.generation == prefetch_generation))) {
+            clear_prefetch(); prefetch_done = true; ++cache_evictions;
+        }
+        if (pressure()) {
+            if (counting_job && counting_job->request.generation == counting_generation) {
+                ++counting_generation; release_counting(); counting_index = not_counting;
+            }
+            const auto before = ui.cached_glyph_bytes() + body.cached_glyph_bytes();
+            ui.trim_glyph_cache(128U * 1024); body.trim_glyph_cache(256U * 1024);
+            if (ui.cached_glyph_bytes() + body.cached_glyph_bytes() < before) ++cache_evictions;
+            counting_blocked = chapter_index;
+        }
+    }
     bool counting_due() const {
         return view == View::Reading && has_book() && card_available && !usb_prepared &&
                !display.busy() && !deferred && !save_job && !foreground_job && !pending_content && !raster_job && (!pages_complete || pages_cache_pending || pages_dirty) && !pages_failed &&
@@ -3914,21 +3974,8 @@ std::optional<BookPages> ReaderApp::book_pages() const {
     const auto page = impl_->has_book() ? impl_->current_page() : 0;
     return page ? std::optional<BookPages>{{page, impl_->total_pages()}} : std::nullopt;
 }
-CacheUsage ReaderApp::cache_usage() const {
-    CacheUsage usage;
-    usage.body_bitmap = impl_->body_canvas ? impl_->body_canvas->pixels().capacity() : 0;
-    if (impl_->next_page) usage.next_layout = impl_->next_page->glyphs.capacity() * sizeof(graphics::PositionedGlyph) +
-        impl_->next_page->lines.capacity() * sizeof(graphics::TextLine);
-    usage.next_bitmap = impl_->next_bitmap ? impl_->next_bitmap->pixels().capacity() : 0;
-    usage.bitmap_hits = impl_->bitmap_hits;
-    usage.next_content = impl_->next_chapter ? chapter_cache_bytes(*impl_->next_chapter) : 0;
-    usage.page_index = impl_->page_index_bytes();
-    for (const auto& cover : impl_->covers) usage.cover_pixels += cover.pixels.capacity();
-    usage.ui_glyph_bytes = impl_->ui.cached_glyph_bytes(); usage.body_glyph_bytes = impl_->body.cached_glyph_bytes();
-    usage.ui_glyphs = impl_->ui.cached_glyphs(); usage.body_glyphs = impl_->body.cached_glyphs();
-    usage.ui_advances = impl_->ui.cached_advances(); usage.body_advances = impl_->body.cached_advances();
-    return usage;
-}
+CacheUsage ReaderApp::cache_usage() const { return impl_->cache_usage(); }
+
 bool ReaderApp::content_busy() const { return !!impl_->foreground_job || impl_->pending_content.has_value(); }
 bool ReaderApp::background_due() const {
     return !!impl_->cover_job || impl_->pending_covers.has_value() || !!impl_->raster_job || impl_->prefetch_due() || impl_->counting_due();
@@ -3951,6 +3998,7 @@ void ReaderApp::poll_background(bool cancel) {
     impl_->poll_counting_job();
     impl_->poll_covers();
     impl_->poll_save();
+    if (!cancel) impl_->reclaim_caches();
     if (impl_->save_error_pending && !impl_->display.busy() && !impl_->content_loading) {
         impl_->save_error_pending = false; impl_->error(impl_->message);
     }

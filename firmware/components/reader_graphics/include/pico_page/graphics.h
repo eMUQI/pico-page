@@ -60,6 +60,8 @@ public:
     std::size_t cached_glyph_bytes() const { return glyph_bytes_; }
     std::size_t cached_glyphs() const { return glyphs_.size(); }
     std::size_t cached_advances() const { return advances_.size(); }
+    /** Evicts at most max_entries least-recent glyphs toward target_bytes; existing canvas pixels are unchanged. */
+    void trim_glyph_cache(std::size_t target_bytes, std::size_t max_entries = 32);
     bool contains(char32_t scalar) const;
     int advance(char32_t scalar);
     FontMetrics metrics() const;
