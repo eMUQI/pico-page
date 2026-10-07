@@ -1485,6 +1485,24 @@ int main(int argc, char** argv) {
         assert(identity_hash_count() == hashes);
         fs::remove(sidecar); fs::rename(sidecar.string() + ".held", sidecar);
     }
+    {
+        // The library position follows the saved record: a page whose commit fails is not cached.
+        ReaderApp app(card.string(), "position-worker", true, true);
+        Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "SaveWorker/book.epub");
+        app.complete_frame(true);
+        driver.key(Input::K3); assert(app.pending_frame()); app.complete_frame(true);
+        const auto sidecar = card / "SaveWorker/book.epub.picopage";
+        fs::rename(sidecar, sidecar.string() + ".held");
+        write(sidecar, "not a directory");
+        assert(app.open_book("Books/cover.epub"));
+        driver.present(); driver.complete_content();
+        assert(app.view() == View::Error);
+        if (fs::exists(card / "PicoPage/cache/positions"))
+            for (const auto& item : fs::directory_iterator(card / "PicoPage/cache/positions"))
+                assert(read(item.path()).find("\nSaveWorker/book.epub\n") == std::string::npos);
+        fs::remove(sidecar); fs::rename(sidecar.string() + ".held", sidecar);
+    }
     fs::remove_all(card);
     std::cout << "reader app display, progress protection, typography, cover and stale network checks: passed\n";
 }

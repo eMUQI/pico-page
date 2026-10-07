@@ -5,7 +5,7 @@ namespace pico_page::platform {
 inline constexpr char upload_page[] = R"HTML(<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Pico Page 传书</title>
 <style>body{font:18px system-ui;max-width:36em;margin:2em auto;padding:0 1em}button,input{font:inherit;margin:1em 0;padding:.5em}progress{width:100%}</style>
-<h1>Wi-Fi 传书</h1><p>选择 EPUB 或 UTF-8 TXT，上传到 Books 文件夹。每个文件最大 64 MiB，同名文件不会被覆盖。</p>
+<h1>Wi-Fi 传书</h1><p>选择 EPUB 或 TXT（UTF-8、GB18030），上传到 Books 文件夹。每个文件最大 64 MiB，同名文件不会被覆盖。</p>
 <p>请保持连接设备热点。上传成功后，在设备上选择“结束传书”返回书库。传输期间暂停阅读和同步。</p>
 <input id="files" aria-label="选择 EPUB 或 TXT" type="file" accept=".epub,.txt" multiple><br>
 <button id="send">上传</button><button id="cancel" disabled>取消</button>
@@ -20,7 +20,7 @@ send.onclick=async()=>{
  send.disabled=files.disabled=true;cancel.disabled=false;stopped=false;
  try{for(const file of files.files){
   if(stopped)throw Error('已取消。已成功上传的文件保留；本次结果请在书库核对。');
-  if(!/\.(epub|txt)$/i.test(file.name)||!file.size||file.size>64*1024*1024)throw Error(file.name+'：请选择 1 字节至 64 MiB 的 EPUB 或 UTF-8 TXT。');
+  if(!/\.(epub|txt)$/i.test(file.name)||!file.size||file.size>64*1024*1024)throw Error(file.name+'：请选择 1 字节至 64 MiB 的 EPUB 或 TXT。');
   status.textContent='正在校验：'+file.name;progress.value=0;let crc=0xffffffff;
   for(let offset=0;offset<file.size;offset+=65536){
    if(stopped)throw Error('已取消。');

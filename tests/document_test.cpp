@@ -1,4 +1,5 @@
 #include "pico_page/document.h"
+#include <fstream>
 #include <cassert>
 #include <iostream>
 
@@ -288,6 +289,19 @@ int main(int argc, char** argv) {
         assert(verified.find_chapter_part(0, restored, error, ChapterLoad::Reading,
                                           [&](const Chapter& part) { std::uint32_t offset = 0; return part.offset_for(saved, offset); }));
         assert(restored.part == 1);
+        {
+            // A character that crosses the last 48 KiB boundary belongs to the preceding part,
+            // which is then the final one; no empty part follows it.
+            const auto path = directory + "boundary.txt";
+            std::ofstream(path, std::ios::binary) << std::string(kTxtPartBytes - 2, 'a') << "\xf0\x9f\x98\x80";
+            EpubDocument crossing;
+            Chapter piece;
+            assert(crossing.open(path, error));
+            assert(crossing.load_chapter(0, piece, error, ChapterLoad::Reading, 0));
+            assert(piece.last_part && piece.text.size() == kTxtPartBytes - 1);
+            assert(!crossing.load_chapter(0, piece, error, ChapterLoad::Reading, 1));
+            assert(crossing.load_chapter(0, piece, error, ChapterLoad::Reading, kLastChapterPart) && piece.part == 0);
+        }
         assert(!txt.open(directory + "invalid.txt", error) && error.find("编码不受支持") != std::string::npos);
         assert(txt.open(directory + "gb18030.txt", error) && txt.metadata().txt_gb18030);
         assert(txt.metadata().txt_offsets.size() == 3 && txt.metadata().txt_offsets[1] == 49154);

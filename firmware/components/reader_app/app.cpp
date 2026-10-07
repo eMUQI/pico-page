@@ -798,6 +798,12 @@ struct ReaderApp::Impl final : DisplayBackend {
         const bool okay = job->result.progress.status == StoreStatus::Ok &&
             job->result.progress.record && *job->result.progress.record == *job->request.record;
         if (request) session.saved(*request, okay);
+        if (pending_position) {
+            const auto &saved = *job->request.record;
+            if (okay && saved.book_id == pending_position->book_id && saved.anchor == pending_position->anchor)
+                store.save_cache(pending_position->name, pending_position->bytes);
+            pending_position.reset();
+        }
         save_failed = !okay;
         save_error_pending = !okay;
         if (!okay) message = kSaveFailed;
@@ -1358,6 +1364,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         for (const unsigned char c : relative) hash = (hash ^ c) * 1099511628211ULL;
         return hash;
     }
+    struct PendingPosition {
+        std::string name, bytes, book_id;
+        Anchor anchor;
+    };
+    std::optional<PendingPosition> pending_position;
     static std::string position_name(const std::string &relative) {
         char name[40];
         std::snprintf(name, sizeof(name), "positions/%016llx", path_hash(relative));
@@ -1373,9 +1384,18 @@ struct ReaderApp::Impl final : DisplayBackend {
      */
     void remember_position() {
         struct stat info{};
-        if (!has_book() || !card_available || save_failed || !session.visible_record() || page.end <= page.start ||
+        if (!has_book() || !card_available || !session.visible_record() || page.end <= page.start ||
             stat((root + "/" + book_path).c_str(), &info) != 0) return;
-        store.save_cache(position_name(book_path), position_header(book_path, info) + chapter_label() + "\n" + book_percent());
+        const auto name = position_name(book_path);
+        auto bytes = position_header(book_path, info) + chapter_label() + "\n" + book_percent();
+        // The library must not show a position that reopening cannot restore: an unsaved page is
+        // recorded by poll_save once its commit is acknowledged.
+        if (session.needs_save()) {
+            pending_position = PendingPosition{name, std::move(bytes), document.metadata().book_id, session.visible_record()->anchor};
+            return;
+        }
+        pending_position.reset();
+        store.save_cache(name, bytes);
     }
     /** Chapter and percentage last recorded for a book file; both empty when there is no entry. */
     std::pair<std::string, std::string> recalled_position(const std::string &relative) {
@@ -1623,9 +1643,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             return false;
         }
         if (has_book()) {
-            remember_position();
-            if (async_content) schedule_save();
+            if (async_content) { remember_position(); schedule_save(); }
             else if (!persist()) { error(message); return false; }
+            else remember_position();
         }
         save_pages();
         if (async_content) return begin_open(path);
@@ -3538,8 +3558,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     /**
      * Chinese wording for a failure detail produced by the document, store or sync layers. Their
      * details are English diagnostic text for the log; text that is already Chinese passes through.
-     * ponytail: keyword match on the detail text; replace with error codes from those layers if a
-     * category turns out wrong.
+     * The category is chosen by keywords in the detail text, because those layers report no error
+     * codes; a detail without a known keyword is described as invalid content.
      */
     static std::string reason(const std::string &detail) {
         if (std::any_of(detail.begin(), detail.end(), [](unsigned char c) { return c >= 0x80; })) {

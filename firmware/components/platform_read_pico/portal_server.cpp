@@ -74,10 +74,10 @@ esp_err_t upload(httpd_req_t* request) {
     if (name.size() < 5 || name.size() > 240 || name.front() == '.' || name.back() == ' ')
         return fail("文件名无效或过长。");
     const auto dot = name.rfind('.');
-    if (dot == std::string::npos) return fail("仅支持 EPUB 或 UTF-8 TXT 文件。");
+    if (dot == std::string::npos) return fail("仅支持 EPUB 或 TXT 文件。");
     auto extension = name.substr(dot);
     for (auto& c : extension) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
-    if (extension != ".epub" && extension != ".txt") return fail("仅支持 EPUB 或 UTF-8 TXT 文件。");
+    if (extension != ".epub" && extension != ".txt") return fail("仅支持 EPUB 或 TXT 文件。");
     const auto checksum = header(request, "X-Pico-CRC", 8);
     if (checksum.empty()) return fail("缺少文件校验值。");
     std::uint32_t crc = 0;

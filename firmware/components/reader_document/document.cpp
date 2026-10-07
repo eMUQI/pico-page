@@ -1261,10 +1261,8 @@ bool EpubDocument::Impl::load_txt(Chapter& chapter, std::string& error, ChapterL
                                   std::uint32_t wanted, const std::function<bool(const Chapter&)>* match,
                                   const std::function<bool()>& stop, const std::function<void(const Chapter&)>& visit) {
     const bool gb = metadata.txt_gb18030;
-    const auto last = gb ? static_cast<std::uint32_t>(metadata.txt_offsets.size() - 2) :
+    auto last = gb ? static_cast<std::uint32_t>(metadata.txt_offsets.size() - 2) :
         (txt_bytes - 1) / kTxtPartBytes;
-    if (!match && wanted != kLastChapterPart && wanted > last)
-        return fail(error, "TXT 内容段不可用");
     const auto aligned = [this](std::uint32_t boundary, std::uint32_t& result) {
         result = std::min(boundary, txt_bytes);
         unsigned char byte = 0, previous = 0;
@@ -1279,6 +1277,15 @@ bool EpubDocument::Impl::load_txt(Chapter& chapter, std::string& error, ChapterL
         }
         return true;
     };
+    // A character or line ending that crosses the final boundary moves the aligned start of the
+    // last part to the end of the file; the preceding part then holds the rest of the text.
+    if (!gb && last > 0) {
+        std::uint32_t start = 0;
+        if (!aligned(last * kTxtPartBytes, start)) return fail(error, "无法读取 TXT 文件");
+        if (start >= txt_bytes) --last;
+    }
+    if (!match && wanted != kLastChapterPart && wanted > last)
+        return fail(error, "TXT 内容段不可用");
     for (std::uint32_t part = match ? 0 : wanted == kLastChapterPart ? last : wanted; part <= last; ++part) {
         if (stop && stop()) { pico_page::release(chapter); return fail(error, kChapterCancelled); }
         std::uint32_t begin = 0, end = 0;
