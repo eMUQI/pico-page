@@ -81,6 +81,9 @@ def generate(directory: Path) -> None:
     write_fixture(directory / "complex-svg-cover.epub", entries)
     entries["EPUB/chapter1.xhtml"] = '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>图片前的正文。</p><img src="cover.png" alt="真实图片"/><p>图片后的正文。</p><img src="missing.png" alt="缺失图片"/><p>末尾正文。</p></body></html>'
     write_fixture(directory / "image-flow.epub", entries)
+    entries["EPUB/chapter1.xhtml"] = '<html><body><p>第一章正文。</p></body></html>'
+    entries["EPUB/chapter2.xhtml"] = '<html><body><img src="cover.png" alt="章节图片"/><p>第二章正文。</p></body></html>'
+    write_fixture(directory / "next-chapter-image.epub", entries)
     entries = fixture_entries()
     entries["EPUB/chapter1.xhtml"] = ('<html xmlns="http://www.w3.org/1999/xhtml"><body>' +
                                       "<p>这一章用于检查长章节的回翻与页起点。</p>" * 2000 + "</body></html>")

@@ -348,7 +348,7 @@ Page layout_page(Font& font, std::u32string_view text, std::size_t start, const 
         int x = spec.left + indent;
         for (std::size_t i = cursor; collect && i < end; ++i) {
             if (text[i] == U'\n' || text[i] == U'\r') continue;
-            page.glyphs.push_back({text[i], i, x, baseline});
+            page.glyphs.push_back({text[i], i, x, baseline, spec.font_px});
             x += font.advance(text[i]);
         }
         if (collect) page.lines.push_back({line_start, end, top, baseline, top + spec.line_height});
@@ -356,16 +356,22 @@ Page layout_page(Font& font, std::u32string_view text, std::size_t start, const 
         top += spec.line_height + (newline ? spec.paragraph_gap : 0);
     }
     page.end = cursor;
+    page.next_top = top;
     return page;
 }
 
 bool render_page(Canvas& canvas, Font& font, const Page& page, std::uint8_t gray, const std::function<bool()>& stop) {
     if (!page.error.empty() || !font.size(page.font_px)) return false;
+    int current_size = page.font_px;
     for (const auto& glyph : page.glyphs) {
         if (stop && stop()) return false;
-        if (!font.draw(canvas, glyph.scalar, glyph.x, glyph.baseline, gray)) return false;
+        if (glyph.font_px != current_size) {
+            if (!font.size(glyph.font_px)) return false;
+            current_size = glyph.font_px;
+        }
+        if (!font.draw(canvas, glyph.scalar, glyph.x, glyph.baseline, gray, glyph.bold)) return false;
     }
-    return true;
+    return current_size == page.font_px || font.size(page.font_px);
 }
 
 std::u32string decode_utf8(std::string_view text) {

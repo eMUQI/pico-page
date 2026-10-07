@@ -433,6 +433,25 @@ extern "C" void app_main() {
             last_activity = esp_timer_get_time();
             pico_page::platform::set_performance(true);
         }
+        const auto dispatch_tap = [&](const pico_page::platform::Event& tap,
+                                      const pico_page::platform::Event& end) {
+            pico_page::AppInput input{
+                {physical_sequence, pico_page::Phase::Begin, pico_page::Input::TouchCenter},
+                tap.kind == EventKind::Touch, tap.x, tap.y, tap.time_us < settled_us,
+                pico_page::platform::long_press(tap, end)};
+            if (tap.kind == EventKind::K1) input.event.input = pico_page::Input::K1;
+            if (tap.kind == EventKind::K2) input.event.input = pico_page::Input::K2;
+            if (tap.kind == EventKind::K3) input.event.input = pico_page::Input::K3;
+            const auto dispatched = esp_timer_get_time();
+            app->input(input);
+            input.event.phase = pico_page::Phase::End;
+            app->input(input);
+            ESP_LOGI(tag, "Input dispatch: seq=%llu queued=%d waited=%lld prepare=%lld ms pending=%d",
+                     static_cast<unsigned long long>(end.sequence), input.queued,
+                     static_cast<long long>((dispatched - end.time_us) / 1000),
+                     static_cast<long long>((esp_timer_get_time() - dispatched) / 1000),
+                     app->pending_frame().has_value());
+        };
         if (event.kind == EventKind::InputReset) {
             released_tap.accept(event, presentation_sequence);
             physical_source = physical_sequence = 0;
@@ -478,26 +497,25 @@ extern "C" void app_main() {
                 pico_page::platform::input_waiting_before(settled_us)) {
                 ESP_LOGI(tag, "Input superseded: seq=%llu",
                          static_cast<unsigned long long>(tap->sequence));
-            } else if (tap) {
-                pico_page::AppInput input{
-                    {physical_sequence, pico_page::Phase::Begin, pico_page::Input::TouchCenter},
-                    tap->kind == EventKind::Touch, tap->x, tap->y, tap->time_us < settled_us,
-                    pico_page::platform::long_press(*tap, event)};
-                if (tap->kind == EventKind::K1) input.event.input = pico_page::Input::K1;
-                if (tap->kind == EventKind::K2) input.event.input = pico_page::Input::K2;
-                if (tap->kind == EventKind::K3) input.event.input = pico_page::Input::K3;
-                const auto dispatched = esp_timer_get_time();
-                app->input(input);
-                input.event.phase = pico_page::Phase::End;
-                app->input(input);
-                ESP_LOGI(tag, "Input dispatch: seq=%llu queued=%d waited=%lld prepare=%lld ms pending=%d",
-                         static_cast<unsigned long long>(event.sequence), input.queued,
-                         static_cast<long long>((dispatched - event.time_us) / 1000),
-                         static_cast<long long>((esp_timer_get_time() - dispatched) / 1000),
-                         app->pending_frame().has_value());
-            }
+            } else if (tap) dispatch_tap(*tap, event);
             if (!physical_source) physical_sequence = 0;
             present(*app);
+        }
+        if (event.kind == EventKind::None && physical_source && physical_sequence &&
+            !physical_suppressed && !usb_mode && !sleep_requested &&
+            !pico_page::console::transfer_active() &&
+            !pico_page::platform::input_waiting_before(std::numeric_limits<std::int64_t>::max())) {
+            const auto now = esp_timer_get_time();
+            const auto held = released_tap.due(now, presentation_sequence);
+            if (held && held->sequence == physical_source && held->time_us >= settled_us &&
+                app->can_open_image_at(held->x, held->y)) {
+                const pico_page::platform::Event end{EventKind::Touch, pico_page::platform::EventPhase::End,
+                                                      held->sequence, held->x, held->y, now};
+                released_tap.accept(end, presentation_sequence);
+                dispatch_tap(*held, end);
+                last_activity = now;
+                present(*app);
+            }
         }
         if (!usb_mode && pico_page::console::poll(*app, pico_page::platform::card_root(), input_sequence,
                                      !network_busy && !sleep_requested && !physical_source)) {

@@ -31,7 +31,7 @@ CFF、SFNT、PS 辅助模块和灰阶/单色栅格化模块；关闭压缩字体
 
 每个字体对象另缓存已栅格化的字形位图，键相同，上限 1 MiB，超限时淘汰最久未绘制的一半，重新打开字体时清空；
 缓存命中与首次栅格化的像素相同。UI 强调字重使用同一固定 FreeType 源码的
-`base/ftsynth.c` 与 `FT_GlyphSlot_Embolden`，缓存键区分常规/加粗，正文仍使用常规字重。
+`base/ftsynth.c` 与 `FT_GlyphSlot_Embolden`，缓存键区分常规/加粗；正文标题也使用加粗字重。
 未修改第三方源码，也未新增字体下载；FreeType 原许可与署名义务继续适用。
 2026-10-06 的改前/改后探针对两本鲁迅 EPUB、28/38/56 px 的 2,060 页逐页比较边界和像素摘要，
 输出完全相同；证据 `.local/font-psram-check/pages-before.log` 与 `pages-after.log`。
@@ -48,6 +48,9 @@ CFF、SFNT、PS 辅助模块和灰阶/单色栅格化模块；关闭压缩字体
 - 本页最多消耗一个视口的完整行；不整书预排。每行超过 65536 标量的异常输入会被拒绝。
   基础中日韩禁则优先避免常见闭合标点置于行首；不宣称完整实现 Unicode 换行算法。
 - 改字号后可将同一源标量作为新页起点；源偏移到书籍锚点的映射由文档与 session 管理。
+- EPUB `h1`–`h6` 目前统一按标题处理：无首行缩进，字号约为正文的 1.15 倍并加粗；
+  标题上下留白，页末尽量与下一行正文同页。原 EPUB 的不同标题级别尚未分别设定字号。
+  正文仍使用原有字号、行高、两字缩进和零段间距。
 
 设计默认正文 38 px、行高 57 px、左右边距 36 px。实际 WenKai 度量为 ascender 36、
 descender 10 px；Noto UI 28 px 的对应值是 33 和 9 px。绘制调用使用 baseline，不能将 top
@@ -114,4 +117,4 @@ FreeType 采用 FTL，见组件内 `FreeType-FTL.txt`；`fthash` 的 MIT 风格�
 三档字号的连续分页和边界检查通过，实际截图在 `artifacts/runtime/lu-xun-reading.png`。
 
 2026-10-06 增加共享 PNG/JPEG 图片解码与灰阶缩放；接口、内存限额、许可和实际验证见
-[图片实现](image-runtime.md)。正文仍由 FreeType 排版，图片路径独立处理。
+[图片实现](image-runtime.md)。正文仍由 FreeType 排版，图片按内容块与文字共同分页。

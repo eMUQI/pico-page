@@ -63,7 +63,7 @@ struct AppInput {
      * screen. Only a page turn that follows a page turn is honoured; anything else is ignored.
      */
     bool queued = false;
-    /** The touch was held before release. It opens book details in the library and is a tap elsewhere. */
+    /** The touch was held before release. Book rows and reading images have long-press actions. */
     bool long_press = false;
 };
 
@@ -92,6 +92,8 @@ class ReaderApp {
     /** Updates the latest battery reading for the next render; nullopt means unknown. */
     void set_battery(std::optional<int> percent);
     void input(const AppInput &event);
+    /** True when the current reading page can open the image at the given screen point. */
+    bool can_open_image_at(int x, int y) const;
     /** The canvas must remain immutable until complete_frame is called. */
     const graphics::Canvas &canvas() const;
     const std::optional<Frame> &pending_frame() const;

@@ -1,7 +1,108 @@
 # 开发状态
 
-最后更新：2026-10-07。基于 `d8ed960` 的固件已写入设备 OTA0，`esptool` 已验证写入摘要；本次复位后的书库画面、触摸与 TF 卡状态尚未确认。书库首页显示 `Books/` 内容、书库锁屏后返回书库及 PR #2 的路径提示修正均包含在本次固件中，真机交互和观感待验证。此前的设备诊断、TF 卡迁移、界面调整、GB18030 TXT 阅读及 USB 卷名验证记录见下文。
+最后更新：2026-10-07。PR #3 的标题与图文同页排版、图片查看和三档对比度已通过 host 与固件构建，当前修正版尚未安装。最近一次设备烧录为基于 `d8ed960` 的固件，`esptool` 已验证写入摘要；本次复位后的书库画面、触摸和 TF 卡状态尚未确认。该镜像包含书库首页、锁屏返回书库及 PR #2 路径提示修正，不包含 PR #3 的图片查看改动。此前的设备诊断、TF 卡迁移、界面调整、GB18030 TXT 阅读及 USB 卷名验证记录见下文。
 此前阅读响应性专项的设备数据、EPUB 兼容性修复与传书记录见下方；各批次命令、结果及未测项分别记录，不将本轮 host 结果写成设备结果。
+
+## 2026-10-07 · PR #3 跨章节图片预取评审修复（host 与构建已验证）
+
+- Codex review 指出：下一章首屏含图片时，预取任务已加载章节并排版，但没有生成图片位图；应用因此丢弃预取结果，翻页时重新加载章节和图片。现在预取任务使用已打开的 EPUB 文档绘制首屏图片，结果同时携带章节、页面、位图和图片失败位置。翻页只在这些结果齐备且会话匹配时采用预取画面。
+- 新增合成 EPUB 的跨章节首屏图片回归检查。修复前该检查等待预取位图超时；修复后跨章翻页直接产生正文帧，没有前台内容任务，图片解码次数在翻页时不增加。
+- 实际执行：`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host -j 8` 通过；`ctest --test-dir build/host --output-on-failure` **11/11** 通过；`python3 tools/check_handoff.py` 通过 349 项；`git diff --check` 通过。首次 `sh tools/build_firmware.sh` 受沙箱限制，ESP-IDF 组件管理器读取 macOS 进程信息时失败；允许该读取后重新构建通过，应用镜像 3,226,256 字节，4 MiB 应用槽剩余 23%。
+- PR #4 合并后，将本 PR 变基到 `main=406c117`，保留两份开发状态记录并修正当前设备说明。再次执行 host 构建、CTest **11/11**、交接检查 **349 项**和 `git diff --check` 均通过；固件构建首次仍受沙箱 `sysctl()` 权限限制，允许读取后通过，应用镜像仍为 3,226,256 字节。
+- 这版固件未安装到设备。实体跨章节翻页时延、图片灰阶、图片读取失败提示及低内存降级仍待真机验证。
+
+## 2026-10-07 · 图片对比度逐级调节（构建通过，待安装）
+
+- 图片查看页右侧显示当前档位，点按按原图 0/3、增强 1/3、2/3、3/3、原图 0/3 循环。2/3 沿用前一版调强映射；1/3 较轻，3/3 更强。每档都从保留的原始画布重新映射，不重新解码 EPUB 图片、不累计损失；切换时全刷，关闭或重开图片时回到原图。
+- 在 host 实际画布导出并目视检查 [原图](../artifacts/image-contrast-steps-20261007/original.png)、[1/3](../artifacts/image-contrast-steps-20261007/level-1.png)、[2/3](../artifacts/image-contrast-steps-20261007/level-2.png)、[3/3](../artifacts/image-contrast-steps-20261007/level-3.png)。该合成插图只验证按钮、灰块与档位顺序，不代表用户照片的真机可读性。
+- 实际执行 `cmake --build build/host -j 8` 与 `ctest --test-dir build/host --output-on-failure`，11/11 通过；现有应用测试验证逐档灰阶、全刷、原图像素恢复、无重复解码和进度不变。`sh tools/build_firmware.sh` 构建通过；应用镜像 3,225,600 字节，SHA-256 `b91bbce7163caccec56fc4b34db441649be22df3e1356987ce8ce1b3ed9f55a1`，4 MiB 应用槽剩余约 23%。
+- 当时 USB 设备从串口模式变为 `PICO-PAGE-TF` 传书盘，`/dev/cu.usbmodem1101` 消失，因此暂停了这版镜像的烧录；固定副本位于 `.local/image-contrast-steps-install-20261007/`。设备后来恢复并写入基于 `d8ed960` 的固件，这版逐级调节镜像仍未安装。安装后仍需用同一张实体图片核对各档效果和文字可读性。
+
+## 2026-10-07 · 增强对比度幅度调整（已安装，实体效果待确认）
+
+- 用户反馈先前增强几乎看不出差别。旧映射把示例中灰 5 级仅降至 4 级；本批改为 3 级，并对称拉开其他中间灰阶，黑白端点保持不变。纯黑白图片不会因该映射改变。
+- 在同一张合成插图上导出并目视比较 [原图画布](../artifacts/image-contrast-strong-20261007/original.png) 与 [增强画布](../artifacts/image-contrast-strong-20261007/enhanced.png)，中灰差异比上一批明显。示例只含黑色和中灰色块，不能替代照片、线稿或真机灰阶验收。
+- 实际执行 `cmake --build build/host -j 8`、`ctest --test-dir build/host --output-on-failure`，11/11 通过；`sh tools/build_firmware.sh` 构建通过。应用镜像 3,225,216 字节，SHA-256 `9df07ffdbfe9e8d59ec421db03219a255f3a9c18b99da144f3905acef3f919d1`，4 MiB 槽剩余约 23%。
+- 烧录前重新核对 USB 序列号及芯片 MAC 均为 `14:C1:9F:D0:18:B8`；读回设备实际分区表与 OTA 元数据，确认有效 sequence 1、state 2，CRC 正确，指向 `ota_0=0x10000/4 MiB`。固定镜像、读回文件及启动日志保存在 `.local/image-contrast-strong-install-20261007/`。
+- 仅执行 `esptool write-flash 0x10000 .local/image-contrast-strong-install-20261007/pico_page.bin`；写入 3,225,216 字节后报告 `Hash of data verified`。未写 bootloader、分区表、NVS、otadata、OTA1、校准或 TF 卡。
+- 复位日志确认从 `0x10000` 加载新应用，ELF SHA-256 前缀 `dec9db1a3` 与镜像信息一致；PSRAM 检查通过、TF 卡挂载成功、首帧 `ok=1`。用户提供的两张设备照片拍于 21:26，早于本次 21:34 的烧录；照片中按钮从“增强对比度”变为“显示原图”，确认上一版的触摸切换已生效。照片里问卷图片的上下留白较多、文字较小，旧版两档的目视差别很弱；这组照片不能证明新版增强效果。仍需对同一张图片在新版固件下做实体对照。
+
+## 2026-10-07 · 图片查看对比度切换（已安装，启动通过）
+
+- 查看页顶部右侧在“增强对比度”和“显示原图”之间切换。每次打开图片默认原图；增强只映射当前查看画布中的图片灰阶，切换时全刷，关闭后丢弃增强状态。K2 继续全刷当前画面，不改变阅读位置。
+- 保留一次解码所得的 4 位灰阶原图，切换时复制画布并使用固定的轻度 16 级映射；恢复原图不重新读取 EPUB 或解码图片。额外保留约 406 KiB 画布，实际 PSRAM 峰值仍需真机测量。
+- 现有应用测试覆盖增强后的灰阶变化、全刷、原图像素恢复、无重复解码及进度不变。实际执行 `cmake --build build/host -j 8`、`ctest --test-dir build/host --output-on-failure`，11/11 通过；`sh tools/build_firmware.sh` 构建通过。应用镜像 3,225,216 字节，SHA-256 `80f1bc202c8e2992a1258933ff669962c73e2e7edf08b784c48de666939ea14c`，4 MiB 应用槽剩余约 23%。`python3 tools/check_handoff.py` 通过 344 项，`git diff --check` 通过。
+- 使用合成插图导出并目视检查 [原图查看页](../artifacts/image-contrast-20261007/original.png) 与 [增强查看页](../artifacts/image-contrast-20261007/enhanced.png)。该插图只有黑色和中灰色块，能检查按钮与切换结果，不能代表照片渐变或真实墨水屏观感。
+- 烧录前确认 USB 序列号与芯片 MAC 均为 `14:C1:9F:D0:18:B8`。重新读回实际分区表和 OTA 元数据：有效 sequence 1、state 2，CRC 正确，指向 `ota_0=0x10000/4 MiB`。固定镜像、读回证据及启动日志位于 `.local/image-contrast-install-20261007/`。
+- 仅执行 `esptool write-flash 0x10000 .local/image-contrast-install-20261007/pico_page.bin`；写入 3,225,216 字节后报告 `Hash of data verified`。未写 bootloader、分区表、NVS、otadata、OTA1、工厂校准或 TF 卡。
+- 复位日志确认从 `0x10000` 加载新应用，ELF SHA-256 前缀 `f50f7b120` 与镜像信息一致；PSRAM 检查通过、TF 卡挂载成功、首帧 `ok=1`。实体点击切换、对照片与线稿的增强效果、灰阶断层和内存峰值尚未在设备上验证。下一步用含照片及线稿的 EPUB 在设备上比较两档，并观察切换延迟与可用内存。
+
+## 2026-10-07 · 图片长按达到阈值即查看（已安装，启动通过）
+
+- 正文图片区域持续按住达到 600 ms 时，即提交一次图片查看动作；随后松手不再点击正文。短按图片仍使用原触摸区域动作，书库条目长按仍在松手时判定。链接、底栏和非图片区域不提前触发。
+- `ReleasedTap` 增加仅查询已到阈值触摸的入口；主循环先排空待处理输入，再按当前页面的图片热区提交一次动作。图片热区检查与应用输入共用同一规则，避免显示切换后再次点击。
+- 实际执行 `cmake --build build/host -j 8`、`ctest --test-dir build/host --output-on-failure`，11/11 通过；`sh tools/build_firmware.sh` 构建通过。新应用镜像 3,224,704 字节，SHA-256 `80d6680cfc902efb0909a7b77c773f2dc4829dfef5c7c8a1c431ab6a44b67fd1`，4 MiB 应用槽剩余约 23%。
+- `python3 tools/check_handoff.py` 通过 342 项交接检查，`git diff --check` 通过；这些检查不替代真机触摸验收。
+- 烧录前确认 USB 序列号和芯片 MAC 均为 `14:C1:9F:D0:18:B8`；重新读回实际分区表与 OTA 元数据，确认有效 sequence 1、state 2 指向 `ota_0=0x10000/4 MiB`。固定镜像和读回证据保存在 `.local/image-hold-threshold-install-20261007/`。
+- 仅执行 `esptool write-flash 0x10000 .local/image-hold-threshold-install-20261007/pico_page.bin`；写入 3,224,704 字节后报告 `Hash of data verified`。没有写 bootloader、分区表、NVS、otadata、OTA1、工厂校准或 TF 卡。
+- 复位后串口日志确认从 `0x10000` 加载新应用，ELF SHA-256 前缀 `f9a891df6` 与镜像信息一致，PSRAM 检查通过，TF 卡挂载成功，首帧 `ok=1`。实体图片长按触发时机、松手抑制和墨水屏放大观感仍需在设备上操作确认。
+
+## 2026-10-07 · 正文图片长按查看（已安装，启动通过）
+
+- 长按当前页的图片区域，在独立内容任务中解码该图片并等比放入接近全屏的查看区域；顶部触摸返回正文。短按图片继续按原有区域翻页或打开工具，查看中 K2 全刷当前画面。取消准备或关闭查看均恢复原页，不请求新正文位置或修改进度。
+- 更新输入规则和验收项。现有应用测试增加查看、K2、关闭和取消路径，验证原页像素及保存记录保持一致。
+- 在本工作目录执行 `cmake --build build/host -j 8` 与 `ctest --test-dir build/host --output-on-failure`，11/11 通过；烧录记录补齐后 `python3 tools/check_handoff.py` 通过 342 项，`git diff --check` 通过。
+- `sh tools/build_firmware.sh` 首次因沙箱限制 ESP-IDF 的 `sysctl` 进程查询而失败；允许该只读查询后重新构建成功。应用镜像 3,223,952 字节，SHA-256 `e2551d502521f9b1629b395ce462746009b0c3c23c1a101b20d5d49dd0e00fbe`，4 MiB 应用槽剩余约 23%。
+- 使用合成插图导出并目视检查 [桌面查看页](../artifacts/image-viewer-20261007/host-preview.png)；该画布只证明页面布局和图片解码，不代表墨水屏实体观感。
+- 用户明确要求烧录后，确认 USB 序列号与 esptool 读取的芯片 MAC 均为 `14:C1:9F:D0:18:B8`。读回实际分区表得 `ota_0=0x10000/4 MiB`，OTA 元数据有效记录为 sequence 1、state 2，CRC 与 ESP-IDF 算法一致，指向 OTA0。固定镜像副本、分区表和 OTA 元数据位于 `.local/image-viewer-install-20261007/`。
+- 仅执行 `esptool write-flash 0x10000 .local/image-viewer-install-20261007/pico_page.bin` 写入应用槽；esptool 报告写入 3,223,952 字节且 `Hash of data verified`，未写 bootloader、分区表、NVS、otadata、OTA1、工厂校准或 TF 卡。
+- 再次复位采集的启动日志 `.local/image-viewer-install-20261007/boot.log` 确认从 `0x10000` 加载 `v0.1.0-mvp-54-g37d1332-dirty`；8 MiB PSRAM 检查通过，TF 卡挂载成功，首帧 `ok=1`。这是启动与显示事务证据，不是屏幕目视或实体输入验收。
+- 图片长按热区、600 ms 阈值、放大后的墨水屏观感及内存不足时的提示仍需真机验证；下一步是在设备上用带文字与插图的 EPUB 检查上述流程。
+
+## 2026-10-07 · 排版改动变基 main 并重新烧录（已安装）
+
+- 从 `afd633e` 上的排版改动建立本地分支 `epub-heading-image-flow`，基于已核实的 `main=d8ed960` 变基；
+  仅合并了开发状态文档冲突，排版提交为 `8295f3c`。没有推送远端。
+- 适配 `main` 的 `Fonts/` 字体路径后执行 `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、
+  `cmake --build build/host -j 8` 和 `ctest --test-dir build/host --output-on-failure`，11/11 通过。
+  `sh tools/build_firmware.sh` 完整构建通过；关闭开发诊断接口的普通版镜像为 3,221,680 字节，
+  SHA-256 `90b80a42b5c969032bf8b39c7cff58972c779f183207a9df21b8d49be75e6e7d`。
+- 重新核对唯一连接设备的 USB 序列号与芯片 MAC 均为 `14:C1:9F:D0:18:B8`；读回的分区表和
+  OTA 元数据与上次转储一致：`ota_0=0x10000/4 MiB`，有效 sequence 1、state 2，CRC 正确。
+  只向 `0x10000` 写入上述镜像，esptool 报告 `Hash of data verified`。未写 bootloader、分区表、
+  NVS、otadata、OTA1、校准或 TF 卡。
+- 烧录后启动日志确认从 `0x10000` 加载版本 `v0.1.0-mvp-53-g8295f3c`，TF 卡挂载成功，
+  首帧刷新成功。普通版不提供诊断口画布抓取；本批尚未核对实体屏幕上的标题、图文布局、
+  锁屏恢复和原书进度。证据和固定镜像在忽略目录 `.local/reading-layout-main-install-20261007/`。
+
+## 2026-10-07 · EPUB 标题与图文同页排版（普通版已安装，画面待确认）
+
+- `h1`–`h6` 现在统一使用无缩进、约正文 1.15 倍字号和加粗的标题样式，并留出上下间距；
+  当本页已有内容时，页末标题尽量与下一行正文同页。不同标题级别暂未分别设定字号。
+- 普通正文中的图片作为独立内容块与前后文字共同分页；按比例放入最多 480 px、约半页高的图片区，
+  不环绕文字。单图章节仍使用整个正文区域。缺图或损坏只在对应图片区提示，不遮住后续正文。
+  正文位置继续在显示成功后保存；旧页数缓存升级为 `pagination-v2`，已有进度的内容修订号未改。
+- 更新现有应用测试，覆盖标题样式、图文同页、计数与绘制页边界一致、缺图预取、回翻和重开恢复。
+  没有新增测试框架。桌面画布见 `artifacts/reading-layout-20261007/`：标题页、图文第一页、缺图第二页，
+  来自合成 EPUB 和本机字体。与此前图片独立分页相比，第一张图片前后的短段落现在在同一页。
+- 实际执行：`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host -j 8`、
+  `ctest --test-dir build/host --output-on-failure`（11/11）、`python3 tools/check_handoff.py`（334 项）和
+  `git diff --check` 均通过。`sh tools/build_firmware.sh` 首次因沙箱不允许组件管理器调用 macOS
+  `sysctl()` 中断；获准在沙箱外重试后完整构建通过，镜像 3,220,864 字节，4 MiB 应用槽剩余 23%。
+- 用户授权“烧录看看”后，核对唯一 Read Pico 的 USB 序列号和芯片 MAC 均为 `14:C1:9F:D0:18:B8`；
+  烧录前诊断为书库、无待处理帧、未传书，进入书库前的阅读位置已保存。重新读回分区表和 OTA 元数据，
+  确认启动槽为 `ota_0=0x10000/4 MiB`，有效 OTA 条目为 sequence 1、state 2，CRC 正确。
+  仅向 `0x10000` 写入普通版应用 3,220,864 字节，SHA-256
+  `6a387dbaca517fb36bd0a530fa04030f59220e5aa2c160279a46889060c40e72`，esptool 报告
+  `Hash of data verified`。未写 bootloader、分区表、NVS、otadata、OTA1、工厂校准或 TF 卡。
+- 复位后串口启动日志确认从 `0x10000` 加载新应用，PSRAM 测试通过、TF 卡挂载成功、首帧刷新成功。
+  本检出的本地 `sdkconfig` 关闭了开发诊断接口，因此诊断口不回复 `status`；这不是启动失败。
+  为核对画面曾另编译启用该接口的候选镜像，但自动审批因其开放无认证 USB 命令而拒绝烧录。
+  该候选镜像**未安装**，本地构建配置已恢复关闭诊断接口。安装证据和镜像副本位于忽略目录
+  `.local/reading-layout-install-20261007/`；后续普通版重编译的时间戳不同，设备上已安装镜像以上述副本摘要为准。
+- 未在实体屏幕确认标题和图文观感，也未测量设备上的图片解码耗时与内存峰值。
+  复杂 CSS、图片浮动环绕、不同标题级别样式和完整中文排版规则仍未实现。下一步在设备上查看
+  一页带标题和图片的 EPUB，复核图片高度、标题留白及缺图提示。
 
 ## 2026-10-07 · KOReader 联测固件构建与安装（待设备画面确认）
 

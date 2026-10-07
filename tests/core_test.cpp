@@ -53,6 +53,15 @@ int main() {
         CHECK(long_press({EventKind::Touch, EventPhase::Begin, 1, 0, 0, 1000}, {EventKind::Touch, EventPhase::End, 1, 0, 0, 1000 + kLongPressUs}));
         CHECK(!long_press({EventKind::Touch, EventPhase::Begin, 1, 0, 0, 1000}, {EventKind::Touch, EventPhase::End, 1, 0, 0, 999 + kLongPressUs}));
         CHECK(!long_press({EventKind::K2, EventPhase::Begin, 1, 0, 0, 0}, {EventKind::K2, EventPhase::End, 1, 0, 0, 2 * kLongPressUs}));
+        ReleasedTap taps;
+        CHECK(!taps.accept({EventKind::Touch, EventPhase::Begin, 7, 300, 400, 1000}, 2));
+        CHECK(!taps.due(999 + kLongPressUs, 2));
+        CHECK(!taps.due(1000 + kLongPressUs, 3));
+        const auto held = taps.due(1000 + kLongPressUs, 2);
+        CHECK(held && held->sequence == 7 && held->x == 300);
+        CHECK(taps.accept({EventKind::Touch, EventPhase::End, 7, 300, 400, 1000 + kLongPressUs}, 2));
+        CHECK(!taps.due(1001 + kLongPressUs, 2));
+        CHECK(!taps.accept({EventKind::Touch, EventPhase::End, 7, 300, 400, 1002 + kLongPressUs}, 2));
     }
     {
         using namespace pico_page::platform;

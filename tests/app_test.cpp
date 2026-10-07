@@ -1,4 +1,5 @@
 #include "../firmware/components/reader_app/content_cache.h"
+#include "../firmware/components/reader_app/content_job.h"
 #include "pico_page/app.h"
 #include "pico_page/document.h"
 #include "pico_page/store.h"
@@ -527,38 +528,86 @@ int main(int argc, char** argv) {
         driver.queued(Input::K3);
         assert(!app.pending_frame() && app.view() == View::Tools);
     }
+    {
+        EpubDocument source;
+        Chapter content;
+        graphics::Font font;
+        graphics::LayoutSpec spec;
+        std::string error;
+        assert(font.open(argv[2]));
+        assert(source.open((fixtures / "valid.epub").string(), error));
+        assert(source.load_chapter(0, content, error));
+        auto heading = plan_content(font, content, 0, spec, true);
+        assert(heading.error.empty() && heading.glyphs.size() > 10);
+        assert(heading.glyphs.front().bold && heading.glyphs.front().font_px > spec.font_px);
+        assert(heading.glyphs.front().x == spec.left);
+        assert(std::any_of(heading.glyphs.begin(), heading.glyphs.end(),
+                           [&spec](const auto& glyph) { return !glyph.bold && glyph.font_px == spec.font_px; }));
+        assert(source.open((fixtures / "image-flow.epub").string(), error));
+        assert(source.load_chapter(0, content, error));
+        auto first = plan_content(font, content, 0, spec, true);
+        assert(first.error.empty() && first.images.size() == 1 && !first.glyphs.empty());
+        assert(first.glyphs.front().index < first.images.front().begin);
+        assert(first.glyphs.back().index > first.images.front().begin);
+        assert(plan_content(font, content, 0, spec, false).end == first.end);
+        auto second = plan_content(font, content, first.end, spec, true);
+        assert(second.error.empty() && second.images.size() == 1 && !second.glyphs.empty());
+        assert(second.glyphs.back().index > second.images.front().begin);
+        assert(plan_content(font, content, first.end, spec, false).end == second.end);
+    }
     ReadingRecord image_record, after_image;
     {
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present(); opened(app, "Books/images.epub"); driver.present();
-        const auto before_image = *app.saved_record();
-        assert(before_image.anchor.node.find("/p[1]/") != std::string::npos);
-        driver.key(Input::K3);
-        assert(app.pending_frame()->anchor.node == "/html[1]/body[1]/img[1]");
-        assert(app.canvas().pixel(100, 400) == 0 && app.canvas().pixel(100, 800) == 5);
-        assert(*app.saved_record() == before_image);
-        driver.present(); image_record = *app.saved_record();
+        image_record = *app.saved_record();
+        assert(image_record.anchor.node.find("/p[1]/") != std::string::npos);
+        assert(app.canvas().pixel(120, 200) == 0 && app.canvas().pixel(120, 500) == 5);
         const auto image_pixels = app.canvas().pixels();
         driver.key(Input::K2);
         assert(app.pending_frame()->purpose == FramePurpose::ManualRefresh && app.pending_frame()->refresh == RefreshIntent::FullClean);
         driver.present(); assert(*app.saved_record() == image_record && app.canvas().pixels() == image_pixels);
+        const auto image_decodes = graphics::image_decode_count();
+        driver.hold(120, 500);
+        assert(app.view() == View::Loading && *app.saved_record() == image_record);
+        driver.present(); driver.complete_content();
+        assert(app.view() == View::Reading && app.canvas().pixels() != image_pixels);
+        assert(graphics::image_decode_count() > image_decodes && app.canvas().pixel(400, 95) == 1);
+        const auto viewer_pixels = app.canvas().pixels();
+        const auto viewer_decodes = graphics::image_decode_count();
+        int gray_x = -1, gray_y = -1;
+        for (int y = 104; y < 1192 && gray_x < 0; ++y)
+            for (int x = 24; x < 660; ++x)
+                if (app.canvas().pixel(x, y) == 5) { gray_x = x; gray_y = y; break; }
+        assert(gray_x >= 0);
+        for (const int gray : {4, 3, 2}) {
+            driver.tap(560, 50);
+            assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean);
+            assert(app.canvas().pixel(gray_x, gray_y) == gray &&
+                   graphics::image_decode_count() == viewer_decodes && *app.saved_record() == image_record);
+            driver.present(); driver.refresh();
+        }
+        driver.tap(560, 50);
+        assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean);
+        assert(app.canvas().pixels() == viewer_pixels &&
+               graphics::image_decode_count() == viewer_decodes && *app.saved_record() == image_record);
+        driver.present();
+        driver.refresh();
+        driver.key(Input::K3);
+        assert(!app.pending_frame() && *app.saved_record() == image_record);
+        driver.tap(100, 50); driver.present();
+        assert(app.canvas().pixels() == image_pixels && *app.saved_record() == image_record);
+        driver.hold(120, 500); driver.present();
+        driver.tap(580, 1170); driver.present();
+        assert(app.view() == View::Reading && app.canvas().pixels() == image_pixels);
         driver.typography();
-        assert(app.canvas().pixel(100, 100) == 0);
         driver.tap(580, 948); driver.present();
-        assert(app.canvas().pixel(100, 100) == 0 && *app.saved_record() == image_record);
+        assert(*app.saved_record() == image_record);
         driver.close(); driver.present(); assert(*app.saved_record() == image_record);
         driver.key(Input::K3); driver.present(); after_image = *app.saved_record();
-        assert(after_image.anchor.node.find("/p[2]/") != std::string::npos);
-        driver.key(Input::K3);
-        assert(app.pending_frame()->anchor.node == "/html[1]/body[1]/img[2]");
+        assert(after_image.anchor.node == "/html[1]/body[1]/img[2]");
         assert(app.canvas().pixel(36, 76) == 1);
-        driver.present(); const auto missing_image = *app.saved_record();
-        driver.key(Input::K3); driver.present(); const auto trailing_text = *app.saved_record();
-        assert(trailing_text.anchor.node.find("/p[3]/") != std::string::npos);
         driver.key(Input::K3); driver.present();
-        assert(app.saved_record()->anchor.resource != trailing_text.anchor.resource);
-        driver.key(Input::K1); driver.present(); assert(app.saved_record()->anchor == trailing_text.anchor);
-        driver.key(Input::K1); driver.present(); assert(app.saved_record()->anchor == missing_image.anchor);
+        assert(app.saved_record()->anchor.resource != after_image.anchor.resource);
         driver.key(Input::K1); driver.present(); assert(app.saved_record()->anchor == after_image.anchor);
     }
     {
@@ -566,15 +615,13 @@ int main(int argc, char** argv) {
         assert(app.initialize()); driver.present(); opened(app, "Books/images.epub"); driver.present();
         assert(app.saved_record()->anchor == after_image.anchor);
         driver.key(Input::K1); driver.present();
-        assert(app.saved_record()->anchor == image_record.anchor && app.canvas().pixel(100, 400) == 0);
+        assert(app.saved_record()->anchor == image_record.anchor && app.canvas().pixel(120, 200) == 0);
         image_record = *app.saved_record();
     }
     {
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present(); opened(app, "Books/images.epub"); driver.present();
-        assert(*app.saved_record() == image_record && app.canvas().pixel(100, 800) == 5);
-        driver.key(Input::K1); driver.present();
-        assert(app.saved_record()->anchor.node.find("/p[1]/") != std::string::npos);
+        assert(*app.saved_record() == image_record && app.canvas().pixel(120, 500) == 5);
     }
     const std::string sync_config = "schema_version = 1\ndom_version = 20260812\nendpoint = \"https://example.invalid\"\nusername = \"test-user\"\nuserkey = \"test-only-placeholder\"\ndevice_id = \"app-test\"\n";
     write(card / "PicoPage/sync.toml", sync_config);
@@ -1279,7 +1326,24 @@ int main(int argc, char** argv) {
         assert(app.pending_frame()->purpose == FramePurpose::Body && !app.content_busy());
         driver.present();
         assert(app.cache_usage().bitmap_hits == 1 && graphics::image_decode_count() == decodes);
-        assert(app.canvas().pixel(100, 400) == 0 && app.canvas().pixel(100, 800) == 5);
+        assert(app.canvas().pixel(36, 76) == 1);
+    }
+    {
+        fs::copy_file(fixtures / "next-chapter-image.epub", card / "Books/next-chapter-image.epub");
+        ReaderApp app(card.string(), "next-chapter-image", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/next-chapter-image.epub"); driver.present();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (!app.cache_usage().next_content || !app.cache_usage().next_bitmap) {
+            app.background_step(); app.poll_background();
+            assert(!app.pending_frame() && std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        const auto decodes = graphics::image_decode_count();
+        driver.key(Input::K3);
+        assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Body && !app.content_busy());
+        driver.present();
+        assert(app.saved_record()->anchor.resource.find("chapter2") != std::string::npos);
+        assert(app.cache_usage().bitmap_hits == 1 && graphics::image_decode_count() == decodes);
     }
     {
         ReaderApp app(card.string(), "preview-worker", true, true); Driver driver{app};

@@ -43,7 +43,7 @@ struct PaginationSession {
 /** A single job owns its parser and font, or borrows them from a PaginationSession. Only done() permits access to its result. */
 class ContentJob {
 public:
-    enum class Kind { Pagination, FontIdentity, Image, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload };
+    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload };
     enum class Target { Start, End, Before, Anchor, Fragment };
     struct CoverSource {
         std::string path, cache_name, cache_header;
@@ -61,6 +61,7 @@ public:
         std::string root, image_resource, cache_name, relative_path, content_revision;
         DocumentMetadata identity;
         graphics::LayoutSpec layout;
+        graphics::Page page;
         std::vector<CoverSource> covers;
         std::string cache_header;
         std::optional<PageCache> page_cache;
@@ -82,6 +83,7 @@ public:
         Anchor mapped_anchor;
         double percentage = 0;
         std::unique_ptr<graphics::Canvas> image;
+        std::vector<std::size_t> failed_images;
         std::vector<std::vector<std::uint8_t>> covers;
         std::unique_ptr<EpubDocument> document;
         Chapter chapter;
@@ -109,8 +111,8 @@ public:
     Result result;
 private:
     void run();
-    void render_image(const std::string& resource, const std::string& cache_name);
-    void prepare_chapter_page();
+    void render_image();
+    void prepare_chapter_page(EpubDocument& document);
     void open_book();
     void prepare_cover();
     void map_position();

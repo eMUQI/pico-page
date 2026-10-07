@@ -104,6 +104,14 @@ struct PositionedGlyph {
     std::size_t index;
     int x;
     int baseline;
+    int font_px;
+    bool bold = false;
+};
+
+struct ImageBox {
+    std::size_t begin;
+    int x, y, width, height;
+    std::string resource;
 };
 
 struct TextLine {
@@ -118,8 +126,10 @@ struct Page {
     std::size_t start = 0;
     std::size_t end = 0;
     int font_px = 0;
+    int next_top = 0;
     std::vector<TextLine> lines;
     std::vector<PositionedGlyph> glyphs;
+    std::vector<ImageBox> images;
     std::string error;
 };
 

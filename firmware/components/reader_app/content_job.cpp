@@ -29,16 +29,69 @@ const DocumentImage* image_at(const Chapter& source, std::size_t start) {
 graphics::Page plan_content(graphics::Font& font, const Chapter& source, std::size_t start,
                             const graphics::LayoutSpec& spec, bool collect, const std::function<bool()>& stop) {
     start = readable_offset(source, start);
-    if (const auto* image = image_at(source, start)) {
-        graphics::Page page;
-        page.start = image->begin; page.end = image->end; page.font_px = spec.font_px;
-        return page;
+    const bool styled = !source.images.empty() || std::any_of(source.blocks.begin(), source.blocks.end(),
+        [](const TextBlock& block) { return block.kind == BlockKind::Heading; });
+    if (!styled) return graphics::layout_page(font, source.text, start, spec, collect, stop);
+    graphics::Page page;
+    page.start = page.end = start;
+    page.font_px = spec.font_px;
+    int top = spec.top;
+    const int bottom = spec.top + spec.height;
+    std::size_t cursor = start;
+    while (cursor < source.text.size() && top < bottom) {
+        if (stop && stop()) { page.error = "Layout cancelled"; break; }
+        const auto block = std::lower_bound(source.blocks.begin(), source.blocks.end(), cursor,
+            [](const TextBlock& item, std::size_t offset) { return item.end <= offset; });
+        if (block == source.blocks.end()) break;
+        cursor = std::max<std::size_t>(cursor, block->begin);
+        if (const auto* image = image_at(source, cursor)) {
+            const bool image_only = source.blocks.size() == 1 && source.images.size() == 1;
+            const int height = image_only ? spec.height : std::min(spec.height / 2, 480);
+            const int gap = image_only ? 0 : std::min(16, spec.font_px / 3);
+            if (top + height + (top > spec.top ? gap : 0) > bottom && page.end > page.start) break;
+            if (top > spec.top) top += gap;
+            if (collect) page.images.push_back({image->begin, spec.left, top, spec.width,
+                                                 std::min(height, bottom - top), image->resource});
+            top += std::min(height, bottom - top) + gap;
+            page.end = image->end;
+            cursor = readable_offset(source, image->end);
+            continue;
+        }
+        const bool heading = block->kind == BlockKind::Heading;
+        graphics::LayoutSpec part = spec;
+        if (heading) {
+            part.font_px = std::min(96, std::max(spec.font_px + 2, (spec.font_px * 23 + 10) / 20));
+            part.line_height = (spec.line_height * part.font_px + spec.font_px - 1) / spec.font_px;
+            part.indent_chars = 0;
+            part.paragraph_gap = 0;
+        }
+        const int before = heading && top > spec.top ? spec.font_px / 2 : 0;
+        if (top + before + part.line_height > bottom && page.end > page.start) break;
+        part.top = top + before;
+        part.height = bottom - part.top;
+        auto section = graphics::layout_page(font, std::u32string_view(source.text).substr(0, block->end),
+                                             cursor, part, collect, stop);
+        if (!section.error.empty()) { page.error = section.error; break; }
+        if (section.end <= cursor) {
+            if (page.end == page.start) page.error = "A text line does not fit the page";
+            break;
+        }
+        const bool complete = section.end == block->end;
+        const int after = heading ? spec.font_px / 3 : spec.paragraph_gap;
+        if (heading && page.end > page.start &&
+            (!complete || (std::next(block) != source.blocks.end() &&
+                           section.next_top + after + spec.line_height > bottom))) break;
+        if (heading) for (auto& glyph : section.glyphs) glyph.bold = true;
+        page.lines.insert(page.lines.end(), section.lines.begin(), section.lines.end());
+        page.glyphs.insert(page.glyphs.end(), section.glyphs.begin(), section.glyphs.end());
+        page.end = section.end;
+        top = section.next_top;
+        if (!complete) break;
+        top += after;
+        cursor = readable_offset(source, section.end);
     }
-    auto end = source.text.size();
-    for (const auto& image : source.images)
-        if (image.begin > start && image.begin < image.end && image.end <= source.text.size())
-            end = std::min<std::size_t>(end, image.begin);
-    return graphics::layout_page(font, std::u32string_view(source.text).substr(0, end), start, spec, collect, stop);
+    page.next_top = top;
+    return page;
 }
 ContentJob::ContentJob(Request value) : request(std::move(value)) {}
 ContentJob::~ContentJob() { cancel(); wait(); }
@@ -104,11 +157,10 @@ void ContentJob::run() {
     if (request.kind == Kind::LibraryCovers) { library_covers(); return; }
     if (request.kind == Kind::Chapter) {
         load_chapter();
-        if (request.prefetch && !stop() && result.error.empty()) prepare_chapter_page();
         return;
     }
     if (request.kind == Kind::Open || request.kind == Kind::Inspect) { open_book(); return; }
-    if (request.kind == Kind::Image) { render_image(request.image_resource, request.cache_name); return; }
+    if (request.kind == Kind::Image || request.kind == Kind::ImageViewer) { render_image(); return; }
     const auto session = request.session ? request.session : std::make_shared<PaginationSession>();
     auto& document = session->document;
     auto& font = session->font;
@@ -164,7 +216,7 @@ std::string image_cache_key(const std::string& book_id, const std::string& resou
     return "images/gray-v1/" + book_id + "/" + md5_hex(resource + ":" + std::to_string(spec.left) + ":" +
         std::to_string(spec.top) + ":" + std::to_string(spec.width) + ":" + std::to_string(spec.height));
 }
-void ContentJob::render_image(const std::string& resource, const std::string& cache_name) {
+void ContentJob::render_image() {
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
 #ifdef ESP_PLATFORM
     if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < (request.prefetch ? 5U : 3U) * 1024 * 1024 ||
@@ -175,10 +227,12 @@ void ContentJob::render_image(const std::string& resource, const std::string& ca
     if (stop()) return;
     result.image = std::make_unique<graphics::Canvas>();
     FileStore store(request.root);
-    {
+    const bool cacheable = request.page.images.size() == 1 && request.page.glyphs.empty() &&
+                           request.page.images.front().height == request.layout.height && !request.cache_name.empty();
+    if (cacheable) {
         std::string cached;
         const auto size = result.image->pixels().size();
-        if (store.load_cache(cache_name, size + 32, cached) == StoreStatus::Ok && cached.size() == size + 32) {
+        if (store.load_cache(request.cache_name, size + 32, cached) == StoreStatus::Ok && cached.size() == size + 32) {
             const auto checksum = cached.substr(size);
             cached.resize(size);
             if (md5_hex(cached) == checksum) {
@@ -191,14 +245,22 @@ void ContentJob::render_image(const std::string& resource, const std::string& ca
     EpubDocument document;
     std::vector<std::uint8_t> bytes;
     if (!document.open_verified(request.path, request.identity, result.error, stop) || stop()) return;
-    if (!document.read_image(resource, bytes, result.error, stop)) return;
-    const auto& spec = request.layout;
-    if (!graphics::render_image(*result.image, bytes, spec.left, spec.top, spec.width, spec.height, result.error, false, stop)) return;
+    for (const auto& box : request.page.images) {
+        std::string detail;
+        bytes.clear();
+        if (box.resource.empty() || !document.read_image(box.resource, bytes, detail, stop) ||
+            !graphics::render_image(*result.image, bytes, box.x, box.y, box.width, box.height, detail, false, stop)) {
+            if (stop()) { result.error = graphics::kImageCancelled; return; }
+            result.failed_images.push_back(box.begin);
+        }
+    }
     std::vector<std::uint8_t>().swap(bytes);
     if (stop()) return;
-    std::string pixels(reinterpret_cast<const char*>(result.image->data()), result.image->pixels().size());
-    pixels += md5_hex(pixels);
-    store.save_cache(cache_name, pixels);
+    if (cacheable && result.failed_images.empty()) {
+        std::string pixels(reinterpret_cast<const char*>(result.image->data()), result.image->pixels().size());
+        pixels += md5_hex(pixels);
+        store.save_cache(request.cache_name, pixels);
+    }
 }
 void ContentJob::map_position() {
     const StageTimer timer{"position_mapping"};
@@ -319,7 +381,10 @@ void ContentJob::load_chapter() {
         return;
     }
     if (!load_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading, request.part, stop)) return;
-    if (request.target == Target::Start) return;
+    if (request.target == Target::Start) {
+        if (request.prefetch && !stop()) prepare_chapter_page(document);
+        return;
+    }
     if (request.known_start && *request.known_start < result.chapter.text.size()) { result.offset = *request.known_start; return; }
     graphics::Font font;
     if (!(request.font.empty() ? font.open_fallback() : font.open(request.font))) { result.error = font.error(); return; }
@@ -339,11 +404,10 @@ void ContentJob::load_chapter() {
         result.history.emplace_back(static_cast<std::uint32_t>(page.start), static_cast<std::uint32_t>(start));
     }
 }
-void ContentJob::prepare_chapter_page() {
+void ContentJob::prepare_chapter_page(EpubDocument& document) {
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
     graphics::Font font;
-    const auto* image = image_at(result.chapter, readable_offset(result.chapter, result.offset));
-    if (!image && !(request.font.empty() ? font.open_fallback() : font.open(request.font))) {
+    if (!(request.font.empty() ? font.open_fallback() : font.open(request.font))) {
         result.error = font.error(); return;
     }
     result.page = plan_content(font, result.chapter, result.offset, request.layout, true, stop);
@@ -353,11 +417,28 @@ void ContentJob::prepare_chapter_page() {
         chapter_cache_bytes(result.chapter) > 2U * 1024 * 1024) {
         result.error = "Prefetched page layout failed"; return;
     }
-    if (image) render_image(image->resource, image_cache_key(request.identity.book_id, image->resource, request.layout));
-    else {
+    if (result.page.images.empty()) {
         result.image = std::make_unique<graphics::Canvas>();
         if (!graphics::render_page(*result.image, font, result.page, 1, stop)) {
             result.error = "Prefetched page rasterization failed"; result.image.reset();
+        }
+        return;
+    }
+#ifdef ESP_PLATFORM
+    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 3U * 1024 * 1024 ||
+        heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 2U * 1024 * 1024) {
+        result.error = "Image preparation memory unavailable"; return;
+    }
+#endif
+    result.image = std::make_unique<graphics::Canvas>();
+    std::vector<std::uint8_t> encoded;
+    for (const auto& box : result.page.images) {
+        std::string detail;
+        encoded.clear();
+        if (box.resource.empty() || !document.read_image(box.resource, encoded, detail, stop) ||
+            !graphics::render_image(*result.image, encoded, box.x, box.y, box.width, box.height, detail, false, stop)) {
+            if (stop()) { result.error = graphics::kImageCancelled; result.image.reset(); return; }
+            result.failed_images.push_back(box.begin);
         }
     }
 }
