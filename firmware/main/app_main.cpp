@@ -233,6 +233,7 @@ void network_worker(void *) {
             }
             pico_page::platform::disconnect_network();
         }
+        ESP_LOGI("network_worker", "stack_free=%u", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
         xQueueSend(responses, &job, portMAX_DELAY);
     }
 }
@@ -250,7 +251,7 @@ bool present(pico_page::ReaderApp &app) {
         const auto completed = esp_timer_get_time();
         app.complete_frame(okay);
         const auto timing = pico_page::platform::present_timing();
-        ESP_LOGI(tag, "Frame complete: copy=%lld power=%lld draw=%lld save=%lld ms ok=%d",
+        ESP_LOGI(tag, "Frame complete: copy=%lld power=%lld draw=%lld complete=%lld ms ok=%d",
                  static_cast<long long>(timing.copy_us / 1000),
                  static_cast<long long>(timing.power_us / 1000),
                  static_cast<long long>(timing.draw_us / 1000),

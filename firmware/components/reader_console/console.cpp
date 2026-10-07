@@ -152,11 +152,12 @@ void status(std::uint32_t id, const ReaderApp &app, bool card_available) {
     const auto revision = app.saved_record() ? app.saved_record()->local_revision : 0;
     const auto pages = app.book_pages();
     const auto caches = app.cache_usage();
+    const auto input = platform::input_diagnostics();
     reply("PP %lu OK view=%s pending=%d card=%d saved=%d revision=%llu page=%lu pages=%lu count=%s "
           "largest_psram=%u frame=%llu frame_ok=%d "
           "purpose=%d clean=%d bytes=%u crc32=%08lx heap=%u min_heap=%u internal=%u "
           "largest_internal=%u "
-          "psram=%u stack_bytes=%u battery_valid=%d battery_pct=%d importing=%d received=%llu "
+          "psram=%u stack_bytes=%u input_stack_bytes=%u input_overflows=%u battery_valid=%d battery_pct=%d importing=%d received=%llu "
           "tx_failures=%lu uptime_ms=%llu copy_ms=%u power_ms=%u draw_ms=%u "
           "cache_total=%u cache_target=%u cache_evictions=%llu cache_body=%u cache_next=%u cache_bitmap=%u bitmap_hits=%llu cache_content=%u cache_pages=%u cache_covers=%u "
           "glyph_ui_bytes=%u glyph_body_bytes=%u glyph_ui=%u glyph_body=%u advances_ui=%u advances_body=%u\n",
@@ -174,7 +175,8 @@ void status(std::uint32_t id, const ReaderApp &app, bool card_available) {
           static_cast<unsigned>(
               heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
           static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
-          static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)), battery.valid,
+          static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)),
+          static_cast<unsigned>(input.stack_free_bytes), static_cast<unsigned>(input.overflows), battery.valid,
           battery.percent, !!transfer,
           static_cast<unsigned long long>(transfer ? transfer->received() : 0),
           static_cast<unsigned long>(reply_failures),

@@ -69,6 +69,7 @@ constexpr TickType_t sample_period = pdMS_TO_TICKS(5);
 constexpr TickType_t idle_sample_period = pdMS_TO_TICKS(50);
 constexpr int settle_samples = 40;
 TaskHandle_t sampler = nullptr;
+std::atomic<std::uint32_t> input_overflows{0};
 
 void IRAM_ATTR touch_interrupt(void*) {
     BaseType_t woken = pdFALSE;
@@ -186,7 +187,6 @@ void sample_touch(void*) {
     bool failing = false;
     bool interrupt_seen = false;
     int fast = settle_samples;
-    std::uint32_t overflows = 0;
     const auto emit = [&](EventPhase phase, std::int64_t now) {
         Event event = active;
         event.phase = phase;
@@ -201,7 +201,7 @@ void sample_touch(void*) {
         active = {};
         suppressed = true;
         ESP_LOGW(tag, "Input queue overflow: count=%lu; contacts cancelled",
-                 static_cast<unsigned long>(++overflows));
+                 static_cast<unsigned long>(input_overflows.fetch_add(1, std::memory_order_relaxed) + 1));
     };
     const auto cancel = [&](std::int64_t now) {
         if (active.kind != EventKind::None) emit(EventPhase::Cancel, now);
@@ -462,6 +462,11 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
     baseline_valid = true;
     rails_deadline = esp_timer_get_time() + rails_idle_us;
     return true;
+}
+
+InputDiagnostics input_diagnostics() {
+    return {input_overflows.load(std::memory_order_relaxed),
+            sampler ? static_cast<std::uint32_t>(uxTaskGetStackHighWaterMark(sampler)) : 0};
 }
 
 bool poll(Event& event, std::string& error) {

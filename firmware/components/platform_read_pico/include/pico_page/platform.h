@@ -76,6 +76,10 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
  */
 bool poll(Event& event, std::string& error);
 
+struct InputDiagnostics { std::uint32_t overflows = 0, stack_free_bytes = 0; };
+/** Sampler overflow count and minimum remaining stack since task creation. */
+InputDiagnostics input_diagnostics();
+
 /** Blocks the application task until a sampled event is waiting or the timeout expires. */
 void wait_for_input(std::uint32_t timeout_ms);
 

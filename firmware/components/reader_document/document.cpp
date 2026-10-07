@@ -634,6 +634,30 @@ struct ChapterParser {
 };
 }  // namespace
 
+namespace {
+struct ZipTiming {
+    using Clock = std::chrono::steady_clock;
+    Clock::time_point started = Clock::now(), checked = started;
+    std::int64_t read_us = 0, read_max_us = 0, xml_us = 0, xml_max_us = 0, checkpoint_max_us = 0;
+    static std::int64_t elapsed(Clock::time_point start) {
+        return std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - start).count();
+    }
+    void checkpoint() {
+        checkpoint_max_us = std::max(checkpoint_max_us, elapsed(checked)); checked = Clock::now();
+    }
+    ~ZipTiming() {
+#ifdef ESP_PLATFORM
+        checkpoint();
+        const auto total = elapsed(started);
+        ESP_LOGI("reader_perf", "zip_stage total_us=%lld read_us=%lld read_max_us=%lld xml_us=%lld xml_max_us=%lld other_us=%lld checkpoint_max_us=%lld",
+            static_cast<long long>(total), static_cast<long long>(read_us), static_cast<long long>(read_max_us),
+            static_cast<long long>(xml_us), static_cast<long long>(xml_max_us),
+            static_cast<long long>(std::max<std::int64_t>(0, total - read_us - xml_us)), static_cast<long long>(checkpoint_max_us));
+#endif
+    }
+};
+}
+
 struct EpubDocument::Impl {
     FILE* file = nullptr;
     mz_zip_archive zip{};
@@ -664,10 +688,18 @@ struct EpubDocument::Impl {
     std::vector<TocEntry> toc;
     std::string cover, cover_page;
     ~Impl() { if (zip.m_pState) mz_zip_reader_end(&zip); if (file) std::fclose(file); }
+    ZipTiming* read_timing = nullptr;
     static std::size_t read(void* opaque, mz_uint64 offset, void* buffer, std::size_t size) {
         auto* self = static_cast<Impl*>(opaque);
-        if (offset > kMaxBook || std::fseek(self->file, static_cast<long>(offset), SEEK_SET) != 0) return 0;
-        return std::fread(buffer, 1, size, self->file);
+        const auto started = ZipTiming::Clock::now();
+        const auto count = offset <= kMaxBook && std::fseek(self->file, static_cast<long>(offset), SEEK_SET) == 0
+            ? std::fread(buffer, 1, size, self->file) : 0;
+        if (self->read_timing) {
+            const auto us = ZipTiming::elapsed(started);
+            self->read_timing->read_us += us;
+            self->read_timing->read_max_us = std::max(self->read_timing->read_max_us, us);
+        }
+        return count;
     }
     bool load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
               std::uint32_t wanted, const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop,
@@ -678,29 +710,47 @@ struct EpubDocument::Impl {
         mz_zip_archive_file_stat stat{};
         if (index < 0 || !mz_zip_reader_file_stat(&zip, index, &stat)) return fail(error, "Missing EPUB resource: " + path);
         if (stat.m_uncomp_size > max_bytes) return fail(error, "EPUB XML resource exceeds limit: " + path);
+        ZipTiming timing;
+        struct ActiveRead {
+            Impl& owner;
+            ActiveRead(Impl& owner, ZipTiming& timing) : owner(owner) { owner.read_timing = &timing; }
+            ~ActiveRead() { owner.read_timing = nullptr; }
+        } active(*this, timing);
         struct Feed {
             Xml& xml;
+            ZipTiming& timing;
             const std::function<bool()>& stop;
             bool cancelled = false;
-        } feed{xml, stop};
+        } feed{xml, timing, stop};
         const bool extracted = mz_zip_reader_extract_to_callback(&zip, index, [](void* opaque, mz_uint64, const void* data, std::size_t count) -> std::size_t {
             auto& feed = *static_cast<Feed*>(opaque);
             for (std::size_t offset = 0; offset < count;) {
+                feed.timing.checkpoint();
                 if (feed.stop && feed.stop()) {
                     feed.cancelled = true;
                     return 0;
                 }
                 const auto size = std::min<std::size_t>(4096, count - offset);
-                if (!feed.xml.feed(static_cast<const char*>(data) + offset, size, false)) return 0;
+                const auto started = ZipTiming::Clock::now();
+                const bool parsed = feed.xml.feed(static_cast<const char*>(data) + offset, size, false);
+                const auto us = ZipTiming::elapsed(started);
+                feed.timing.xml_us += us; feed.timing.xml_max_us = std::max(feed.timing.xml_max_us, us);
+                if (!parsed) return 0;
                 offset += size;
             }
             return count;
         }, &feed, 0);
+        timing.checkpoint();
         if (feed.cancelled || (stop && stop())) {
             xml.error = kChapterCancelled;
             return fail(error, kChapterCancelled);
         }
-        if (!extracted || !xml.feed("", 0, true)) return fail(error, xml.error.empty() ? "Invalid compressed EPUB resource: " + path : xml.error + ": " + path);
+        if (!extracted) return fail(error, xml.error.empty() ? "Invalid compressed EPUB resource: " + path : xml.error + ": " + path);
+        const auto started = ZipTiming::Clock::now();
+        const bool finished = xml.feed("", 0, true);
+        const auto us = ZipTiming::elapsed(started);
+        timing.xml_us += us; timing.xml_max_us = std::max(timing.xml_max_us, us);
+        if (!finished) return fail(error, xml.error + ": " + path);
         return true;
     }
 };

@@ -1869,7 +1869,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         return graphics::render_page(canvas, body, planned);
     }
     bool render_body(std::size_t start) {
-        const StageTimer timer{"body_prepare"};
+        const StageTimer timer{"body_draw"};
         const auto spec = layout(settings, link_return ? 144 : 64);
         if (body_canvas && start == page.start && same_layout(body_spec, spec)) {
             canvas = *body_canvas;
@@ -1936,6 +1936,12 @@ struct ReaderApp::Impl final : DisplayBackend {
         return true;
     }
     bool show_page(std::size_t start) {
+        poll_raster();
+        const auto spec = layout(settings, link_return ? 144 : 64);
+        const bool reused = body_canvas && start == page.start && same_layout(body_spec, spec);
+        const bool hit = !next_chapter && next_page && next_bitmap && next_page->start == readable_offset(start) && same_layout(next_spec, spec);
+        const bool loading = async_content && !image_prepared && !reused && !hit && image_at(readable_offset(start));
+        const StageTimer timer{loading ? "body_request_loading" : hit ? "body_prepare_hit" : reused ? "body_prepare_reuse" : "body_prepare_miss", 0};
         if (display.busy())
             return false;
         load_fonts();
