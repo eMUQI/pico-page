@@ -10,7 +10,7 @@
 远端 CI 尚未执行。字体及 FreeType 由 `tools/setup_fonts.py` 下载固定版本并核对 SHA-256，
 不会安装或替换全局工具链。
 
-1. 启动后，点击 Books 文件夹。
+1. 启动后，书库直接显示 `Books/` 内的书和文件夹；如需阅读子文件夹中的书，先进入对应文件夹。
 2. 点击一本 EPUB，等待正文显示。成功显示后才写入进度。
 3. 点击左侧或按 K1 上一页，点击右侧或按 K3 下一页。
 4. 点击中部打开工具。K2 在所有可交互页面全刷当前画面，不移动阅读位置。
@@ -30,16 +30,15 @@
 本地演示卡位于 `.local/card`。实际卡需 FAT 文件系统，推荐按以下结构准备：
 
 ```text
-Books/                         EPUB
-Articles/                      可选 EPUB
+Books/                         EPUB、TXT；文章可放 Books/Articles/
+Fonts/                         用户字体和各自许可证
 PicoPage/settings.toml          普通阅读配置
-PicoPage/fonts/                 字体和各自 OFL 许可证
 PicoPage/network.toml           私密 Wi-Fi 配置，可选
 PicoPage/sync.toml              私密 KOSync 配置，可选
 ```
 
 将演示卡中的字体和许可证复制到实际卡对应目录；按需复制 EPUB 和配置，不能覆盖已有个人数据。
-正文默认字体可写 `fonts/LXGWWenKai-Regular.ttf`。内置字库只保障 UI 和错误提示，不能代替完整中文字库；
+正文默认字体可写 `Fonts/LXGWWenKai-Regular.ttf`。内置字库只保障 UI 和错误提示，不能代替完整中文字库；
 TF 卡上没有可用正文字体时，正文使用内置字体（3,500 个常用字，见[字体说明](graphics-runtime.md)）。
 页面包含内置字体未覆盖的字符时照常显示，缺少的字符显示为方框，状态栏提示复制完整字体。
 偏好字体缺失而备用完整字体存在时会明确提示回退。

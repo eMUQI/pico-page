@@ -355,6 +355,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     ReaderSettings settings, draft;
     SettingsSnapshot edit_snapshot;
     View view = View::Library;
+    bool resume_to_library = false;
     bool usb_prepared = false, usb_active = false, usb_confirm = false;
     UsbTransferAction usb_action = UsbTransferAction::None;
     PortalAction portal_action = PortalAction::None;
@@ -441,8 +442,11 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::vector<std::size_t> toc_starts, toc_visible;
     std::set<std::size_t> toc_collapsed;
     bool toc_locate_current = false, library_grid = false, library_descending = false;
+    // A single configured root is presented as the library home instead of as a folder entry.
+    std::string library_home_root;
     // The open folder is one of the configured library roots; its parent is the library.
     bool folder_root = false;
+    bool library_directory_unavailable = false;
     bool footer_chapters = false, refresh_from_settings = false, import_from_settings = false;
     std::string detail_path, detail_position, detail_error;
     BookSnapshot management_snapshot;
@@ -482,8 +486,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::shared_ptr<FileDigest> font_scan;
     bool font_scan_turn = true, pages_cache_disabled = false;
     std::string body_font_path() const {
-        return builtin_body ? "" : root + "/PicoPage/" +
-            (font_fallback ? "fonts/LXGWWenKai-Regular.ttf" : settings.font);
+        return builtin_body ? "" : root + "/" +
+            (font_fallback ? "Fonts/LXGWWenKai-Regular.ttf" : settings.font);
     }
     // The synchronous fallback releases its extra chapter on input. The worker owns a separate
     // chapter until it observes cancellation; both paths retain accepted pagination offsets.
@@ -1270,9 +1274,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         font_scan.reset();
         font_fallback = false;
         builtin_body = false;
-        const std::string path = root + "/PicoPage/" + selected.font;
+        const std::string path = root + "/" + selected.font;
         if (!body.open(path)) {
-            if (!body.open(root + "/PicoPage/fonts/LXGWWenKai-Regular.ttf")) {
+            if (!body.open(root + "/Fonts/LXGWWenKai-Regular.ttf")) {
                 body.open_fallback();
                 builtin_body = true;
             }
@@ -1282,7 +1286,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     bool initialize() {
         refresh_badge_config();
-        if (!ui.open(root + "/PicoPage/fonts/NotoSansSC-Regular.otf") && !ui.open_fallback())
+        if (!ui.open(root + "/Fonts/NotoSansSC-Regular.otf") && !ui.open_fallback())
             return false;
         settings = store.load_settings().settings;
         library_grid = settings.library_view == "grid";
@@ -1293,13 +1297,13 @@ struct ReaderApp::Impl final : DisplayBackend {
             last_book = *recent;
             last_recorded = *recent;
         }
-        DIR *dir = opendir((root + "/PicoPage/fonts").c_str());
+        DIR *dir = opendir((root + "/Fonts").c_str());
         if (dir) {
             while (const auto *item = readdir(dir)) {
                 const std::string name = item->d_name;
                 if (name.size() > 4 && (name.substr(name.size() - 4) == ".ttf" ||
                                         name.substr(name.size() - 4) == ".otf"))
-                    fonts.push_back("fonts/" + name);
+                    fonts.push_back("Fonts/" + name);
             }
             closedir(dir);
             std::sort(fonts.begin(), fonts.end());
@@ -1314,21 +1318,26 @@ struct ReaderApp::Impl final : DisplayBackend {
     void scan_library() {
         entries.clear();
         folder_root = false;
+        library_home_root = settings.library_roots.size() == 1 ? settings.library_roots.front() : "";
+        library_directory_unavailable = false;
         if (!card_available)
             return;
         const auto cfg = store.load_settings();
         const auto &roots = cfg.settings.library_roots;
+        library_home_root = roots.size() == 1 ? roots.front() : "";
         folder_root = std::find(roots.begin(), roots.end(), folder) != roots.end();
-        if (folder.empty()) {
-            for (const auto &path : cfg.settings.library_roots) {
+        const auto listing = folder.empty() ? library_home_root : folder;
+        if (listing.empty()) {
+            for (const auto &path : roots) {
                 struct stat st{};
                 if (safe_existing(root, path) && stat((root + "/" + path).c_str(), &st) == 0 &&
                     S_ISDIR(st.st_mode))
                     entries.push_back({path, basename(path), true});
             }
         } else {
-            DIR *dir = opendir((root + "/" + folder).c_str());
+            DIR *dir = safe_existing(root, listing) ? opendir((root + "/" + listing).c_str()) : nullptr;
             if (!dir) {
+                library_directory_unavailable = true;
                 message = "无法读取目录，请检查 TF 卡";
                 return;
             }
@@ -1337,7 +1346,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 if (name.empty() || name[0] == '.' || name.size() > 240 ||
                     name.find(".picopage") != std::string::npos)
                     continue;
-                const auto path = folder + "/" + name;
+                const auto path = listing + "/" + name;
                 struct stat st{};
 #ifdef ESP_PLATFORM
                 const int result = stat((root + "/" + path).c_str(), &st);
@@ -1497,8 +1506,9 @@ struct ReaderApp::Impl final : DisplayBackend {
                 canvas.pixel(x + column, y + row, column % 2 ? packed >> 4 : packed & 15);
             }
     }
-    // List rows show the card thumbnail reduced to this size, so both views share one cache entry.
+    // Smaller library covers use the card thumbnail, so these views share one cache entry.
     static constexpr int kRowCoverWidth = 59, kRowCoverHeight = 80;
+    static constexpr int kContinueCoverWidth = 96, kContinueCoverHeight = 128;
     /** Copies packed cover pixels reduced to width x height by averaging the covered source pixels. */
     void blit_reduced(const std::vector<std::uint8_t> &pixels, int source_width, int source_height,
                       int x, int y, int width, int height) {
@@ -1519,10 +1529,11 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     enum class Cover { Drawn, None, Undecoded };
     /**
-     * Draws a library thumbnail, reduced for a list row when row is true. Without decode, a cover
-     * absent from both caches is left Undecoded.
+     * Draws a library thumbnail at the requested size. Without decode, a cover absent from both
+     * caches is left Undecoded.
      */
-    Cover draw_cover(const Entry &entry, int x, int y, bool decode, bool row = false) {
+    Cover draw_cover(const Entry &entry, int x, int y, bool decode,
+                     int width = kLibraryCoverWidth, int height = kLibraryCoverHeight) {
         struct stat info{};
         const auto path = root + "/" + entry.path;
         if (entry.directory || !safe_existing(root, entry.path) || stat(path.c_str(), &info) != 0)
@@ -1540,7 +1551,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             std::vector<std::uint8_t> pixels;
             if (!cached_cover(cached, pixels)) {
                 if (!decode || async_content) {
-                    if (async_content) missing_covers.push_back({entry.path, cached.name, cached.header, info.st_size, info.st_mtime});
+                    if (async_content && std::none_of(missing_covers.begin(), missing_covers.end(),
+                        [&](const auto &source) { return source.path == entry.path; }))
+                        missing_covers.push_back({entry.path, cached.name, cached.header, info.st_size, info.st_mtime});
                     return Cover::Undecoded;
                 }
                 pixels = decode_cover(entry.path, cached, kLibraryCoverWidth, kLibraryCoverHeight, true);
@@ -1552,8 +1565,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         // An entirely white thumbnail identifies nothing; the title is drawn in its place.
         if (std::all_of(found->pixels.begin(), found->pixels.end(), [](std::uint8_t packed) { return packed == 0xff; }))
             return Cover::None;
-        if (row) blit_reduced(found->pixels, kLibraryCoverWidth, kLibraryCoverHeight, x, y, kRowCoverWidth, kRowCoverHeight);
-        else blit(found->pixels, x, y, kLibraryCoverWidth, kLibraryCoverHeight);
+        if (width == kLibraryCoverWidth && height == kLibraryCoverHeight)
+            blit(found->pixels, x, y, width, height);
+        else blit_reduced(found->pixels, kLibraryCoverWidth, kLibraryCoverHeight, x, y, width, height);
         return Cover::Drawn;
     }
     /**
@@ -1570,7 +1584,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (folder.empty()) header("书库", 0, "", 388);
         else {
             const auto slash = folder.find_last_of('/');
-            header(basename(folder), Back, folder_root || slash == std::string::npos ? "书库" : basename(folder.substr(0, slash)), 388);
+            const auto parent = slash == std::string::npos ? "" : folder.substr(0, slash);
+            header(basename(folder), Back, folder_root || parent.empty() || parent == library_home_root ? "书库" : basename(parent), 388);
             hits.back() = {0, 0, 396, 104, Back};
         }
         for (int x : {396, 540}) canvas.line(x, 0, x, 102, 1, 2);
@@ -1589,18 +1604,28 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
             outline(24, 128, 636, 206, 3);
             text("继续阅读", 48, 146, 22, 520, 3);
-            title_lines(has_book() ? document.metadata().title : basename(last_book), 48, 182, 540, 30, true);
-            text(position.empty() ? "打开后恢复已保存的位置" : position, 48, 288, 22, 540, 3);
+            const auto recent = has_book() ? book_path : last_book;
+            const auto cover = draw_cover(Entry{recent, basename(recent), false}, 48, 184, decode,
+                                          kContinueCoverWidth, kContinueCoverHeight);
+            undecoded = undecoded || cover == Cover::Undecoded;
+            if (cover == Cover::Drawn) outline(47, 183, kContinueCoverWidth + 2, kContinueCoverHeight + 2);
+            const int left = cover == Cover::Drawn ? 168 : 48;
+            const int width = cover == Cover::Drawn ? 420 : 540;
+            title_lines(has_book() ? document.metadata().title : basename(last_book), left, 182, width, 30, true);
+            text(position.empty() ? "打开后恢复已保存的位置" : position, left, 288, 22, width, 3);
             text("›", 620, 214, 28, 30);
             hits.push_back({24, 128, 636, 206, Tools});
             top = 354;
         }
         if (entries.empty()) {
             const int y = top + 120;
-            text(!card_available ? "存储卡不可用" : folder.empty() ? "书库里还没有书" : "这个文件夹是空的", 36, y, 40, 612, 1, true);
-            if (!card_available) wrapped("这不代表书籍已被删除。", 36, y + 76, 612, 28);
+            text(!card_available ? "存储卡不可用" : library_directory_unavailable ? "无法读取书库目录" :
+                 folder.empty() ? "书库里还没有书" : "这个文件夹是空的", 36, y, 40, 612, 1, true);
+            if (!card_available || library_directory_unavailable)
+                wrapped(!card_available ? "这不代表书籍已被删除。" : "请检查书库目录和 TF 卡。", 36, y + 76, 612, 28);
             else {
-                const int height = wrapped(folder.empty() ? "用“导入”把 EPUB 或 TXT 复制到存储卡。"
+                const auto library_location = library_home_root.empty() ? "已设置的书库目录" : library_home_root + "/";
+                const int height = wrapped(folder.empty() ? "把 EPUB 或 TXT 放入" + library_location + "，或使用“导入”。"
                                                           : "用“导入”把 EPUB 或 TXT 复制到存储卡，或返回上一级。", 36, y + 76, 612, 28);
                 button(Import, "导入", 24, y + 104 + height, 636, 96);
             }
@@ -1645,7 +1670,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             } else {
                 const int y = top + 78 + static_cast<int>(i - begin) * 126;
                 // A book without a cover leaves no empty slot; its title starts at the margin.
-                const auto cover = entry.directory ? Cover::None : draw_cover(entry, 37, y + 22, decode, true);
+                const auto cover = entry.directory ? Cover::None : draw_cover(entry, 37, y + 22, decode,
+                                                                                kRowCoverWidth, kRowCoverHeight);
                 undecoded = undecoded || cover == Cover::Undecoded;
                 if (cover == Cover::Drawn) outline(36, y + 21, kRowCoverWidth + 2, kRowCoverHeight + 2);
                 const int left = cover == Cover::Drawn ? 118 : 36;
@@ -1903,9 +1929,9 @@ struct ReaderApp::Impl final : DisplayBackend {
     void load_pages_cache() {
         const auto& spine = document.spine();
         struct stat book {}, font {};
-        const std::string font_file = builtin_body ? "" : font_fallback ? "fonts/LXGWWenKai-Regular.ttf" : settings.font;
+        const std::string font_file = builtin_body ? "" : font_fallback ? "Fonts/LXGWWenKai-Regular.ttf" : settings.font;
         if (stat((root + "/" + book_path).c_str(), &book) != 0 ||
-            (!font_file.empty() && stat((root + "/PicoPage/" + font_file).c_str(), &font) != 0)) {
+            (!font_file.empty() && stat((root + "/" + font_file).c_str(), &font) != 0)) {
             pages_cache_disabled = true;
             return;
         }
@@ -2938,7 +2964,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         view = View::StorageSettings;
         hits.clear(); canvas.clear(); header("存储与设备", Back, "设置");
         std::optional<std::uint64_t> books = 0;
-        for (const auto &path : store.load_settings().settings.library_roots) {
+        const auto roots = store.load_settings().settings.library_roots;
+        for (const auto &path : roots) {
             struct stat st{};
             if (!safe_existing(root, path) || stat((root + "/" + path).c_str(), &st) != 0) continue;
             const auto bytes = tree_bytes(path, true);
@@ -2962,9 +2989,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         value_row(0, "硬件", "", "桌面预览", 508, 70);
 #endif
         text("文件位置", 36, 606, 22, 612, 3);
-        value_row(0, "设置", "", "PicoPage/settings.toml", 642, 70);
-        value_row(0, "阅读进度", "", "原书旁的 .picopage 目录", 712, 70);
-        if (!notice().empty()) note(message, 830);
+        value_row(0, "书籍与文章", "", roots.size() == 1 ? roots.front() + "/" : "多个目录（见设置文件）", 642, 70);
+        value_row(0, "自行添加的字体", "", "Fonts/", 712, 70);
+        value_row(0, "设备设置", "", "PicoPage/settings.toml", 782, 70);
+        value_row(0, "阅读进度", "", "原书旁的 .picopage/", 852, 70);
+        note(notice().empty() ? "文章可放扫描目录下的 Articles/；保留 PicoPage/。" : message, 950);
         note("清理缓存不会删除书和阅读进度，下次打开会稍慢。", 1020);
         button(ClearCache, "清理全部缓存", 24, 1080, 636, 96);
     }
@@ -3164,10 +3193,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         load_fonts();
         if (has_book() && !restore_confirmed_position()) return;
         const auto position = has_book() ? book_position(offset, offset) : std::string("位置已保存");
+        const char *resume_hint = resume_to_library ? "按电源键返回书库" : "按电源键继续阅读";
         if (settings.sleep_screen == "simple") {
             canvas.clear();
             text("已休眠", 72, 440, 40, 540, 1, true);
-            text("按电源键继续阅读", 72, 512, 26, 540);
+            text(resume_hint, 72, 512, 26, 540);
             canvas.line(72, 594, 612, 594, 1, 2);
             cover_title(has_book() ? document.metadata().title : "Pico Page", 72, 626, 540, 140, 32);
             text(has_book() ? chapter_label() + " · " + position : "尚未打开书籍", 72, 806, 22, 540, 3);
@@ -3205,7 +3235,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         const int top = reading ? 1088 : 1040;
         canvas.fill_rect(0, top, 684, 1216 - top, 1);
         text("已休眠", 36, top + 24, 30, 290, 15, true);
-        text("按电源键继续阅读", 36, top + 72, 22, 290, 15);
+        text(resume_hint, 36, top + 72, 22, 290, 15);
         text(has_book() ? "已保存" : "尚未打开书籍", 364, top + 24, 22, 284, 15);
         text(has_book() ? sync_state : "", 364, top + 60, 22, 284, 15);
         if (!reading && has_book()) text(position, 364, top + 106, 22, 284, 15);
@@ -3710,7 +3740,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (view == View::Library) {
             if (!folder.empty()) {
                 auto p = folder.find_last_of('/');
-                folder = folder_root || p == std::string::npos ? "" : folder.substr(0, p);
+                const auto parent = p == std::string::npos ? "" : folder.substr(0, p);
+                folder = folder_root || parent == library_home_root ? "" : parent;
                 library_page = 0;
                 scan_library();
                 draw_library();
@@ -4527,6 +4558,7 @@ bool ReaderApp::prepare_sleep() {
     impl_->release_counting();
     const auto sync_state = impl_->sync_badge();
     impl_->cancel_sync();
+    impl_->resume_to_library = impl_->view == View::Library || !impl_->has_book();
     impl_->draw_sleep(sync_state);
     if (impl_->view != View::Sleeping) return false;
     impl_->overlay(true);
@@ -4535,7 +4567,7 @@ bool ReaderApp::prepare_sleep() {
 void ReaderApp::wake() {
     if (impl_->display.busy())
         return;
-    if (impl_->has_book()) {
+    if (!impl_->resume_to_library && impl_->has_book()) {
         if (impl_->async_content) impl_->open(impl_->book_path);
         else impl_->recover_body();
     } else {

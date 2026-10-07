@@ -26,7 +26,7 @@ struct BookSnapshot {
 };
 
 struct ReaderSettings {
-    std::string font = "fonts/LXGWWenKai-Regular.ttf";
+    std::string font = "Fonts/LXGWWenKai-Regular.ttf";
     int font_size_px = 38;
     double line_height = 1.5;
     int margin_x_px = 36;
@@ -35,7 +35,7 @@ struct ReaderSettings {
     std::string refresh_preset = "balanced";
     int balanced_full_refresh_pages = 8;
     int fast_full_refresh_pages = 5;
-    std::vector<std::string> library_roots = {"Books", "Articles"};
+    std::vector<std::string> library_roots = {"Books"};
     std::string library_view = "list";
     int auto_sleep_minutes = 10;  // Global only; 0 disables idle sleep.
     std::string sleep_screen = "cover";  // Global only: cover, reading or simple.
@@ -143,9 +143,9 @@ public:
 
     /**
      * Starts a new resource import of 1 byte through 64 MiB. Allowed destinations
-     * are EPUB or TXT books in Books/Articles, fonts or license text in PicoPage/fonts, and
-     * images in PicoPage/images. Existing destinations are preserved. An abandoned regular
-     * staging file for this destination is removed before starting; unsafe paths are refused.
+     * are EPUB or TXT books in Books/ and fonts or license text in Fonts/.
+     * Existing destinations are preserved. An abandoned regular staging file for this
+     * destination is removed before starting; unsafe paths are refused.
      * No settings, credentials or reading records are importable.
      * The caller serializes card access until the returned transaction is released.
      */

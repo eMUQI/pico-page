@@ -108,14 +108,14 @@ int main() {
     assert(store.save_progress("../outside.epub", first).status == StoreStatus::UnsafePath);
 
     const fs::path global = root / "PicoPage/settings.toml";
-    const std::string global_text = "# retain this comment\nschema_version=1\n[reader]\nfont='fonts/custom.ttf'\nfont_size_px=38\nline_height=1.6\n[library]\nroots=['/Books']\n";
+    const std::string global_text = "# retain this comment\nschema_version=1\n[reader]\nfont='Fonts/custom.ttf'\nfont_size_px=38\nline_height=1.6\n[library]\nroots=['/Books']\n";
     put(global, global_text);
     const auto book_settings = sidecar / "settings.toml";
     const std::string book_settings_text = "schema_version=1\n# book preferences\n[reader]\nfont_size_px=42 # preferred size\n";
     put(book_settings, book_settings_text);
     auto config = store.load_settings(book);
     assert(config.diagnostics.empty());
-    assert(config.settings.font == "fonts/custom.ttf" && config.settings.font_size_px == 42);
+    assert(config.settings.font == "Fonts/custom.ttf" && config.settings.font_size_px == 42);
     assert(config.settings.library_roots == std::vector<std::string>{"Books"});
     assert(config.settings.paragraph_gap_lines == 0 && config.settings.indent_chars == 2);
     std::string error;
@@ -161,17 +161,17 @@ int main() {
     assert(get(book_settings) == inline_settings);
     for (const std::string quote : {"'", "\""}) {
         const std::string original = "schema_version=1\n[reader]\nfont=" + quote +
-            "fonts/old.ttf" + quote + " # font note\n[display]\nrefresh_preset=" + quote +
+            "Fonts/old.ttf" + quote + " # font note\n[display]\nrefresh_preset=" + quote +
             "clear" + quote + " # refresh note\n";
         put(book_settings, original);
         snapshot = store.settings_snapshot(book);
         assert(snapshot.config.diagnostics.empty());
         preview = snapshot.config.settings;
-        preview.font = "fonts/new.ttf";
+        preview.font = "Fonts/new.ttf";
         preview.refresh_preset = "fast";
         assert(store.apply_settings(snapshot, preview, true, error) == StoreStatus::Ok);
         config = store.load_settings(book);
-        assert(config.settings.font == "fonts/new.ttf" && config.settings.refresh_preset == "fast");
+        assert(config.settings.font == "Fonts/new.ttf" && config.settings.refresh_preset == "fast");
         assert(get(book_settings).find(" # font note\n") != std::string::npos);
         assert(get(book_settings).find(" # refresh note\n") != std::string::npos);
         assert(get(global) == global_text);
@@ -224,9 +224,9 @@ int main() {
     fs::create_directory(root / "PicoPage/data/last-book.txt.tmp");
     assert(store.save_last_book(book, error) == StoreStatus::IoError);
     fs::remove(root / "PicoPage/data/last-book.txt.tmp");
-    put(global, "schema_version=1\n[reader]\nfont='fonts/new.ttf'\n");
+    put(global, "schema_version=1\n[reader]\nfont='Fonts/new.ttf'\n");
     config = store.load_settings(book);
-    assert(config.settings.font == "fonts/new.ttf" && config.settings.font_size_px == 42);
+    assert(config.settings.font == "Fonts/new.ttf" && config.settings.font_size_px == 42);
     const std::string malformed = "schema_version=1\n[reader\nfont_size_px=48\n";
     put(global, malformed);
     config = store.load_settings();
@@ -280,9 +280,10 @@ int main() {
     put(global, "schema_version=2\n[reader]\nfont_size_px=52\n");
     config = store.load_settings();
     assert(config.settings.font_size_px == 38 && config.diagnostics[0].status == StoreStatus::UnsupportedVersion);
-    put(global, std::string("schema_version=1\n[reader]\nfont='fonts/") + char(0xff) + ".ttf'\n");
+    put(global, std::string("schema_version=1\n[reader]\nfont='Fonts/") + char(0xff) + ".ttf'\n");
     config = store.load_settings();
-    assert(!config.diagnostics.empty() && config.settings.font == "fonts/LXGWWenKai-Regular.ttf");
+    assert(!config.diagnostics.empty() && config.settings.font == "Fonts/LXGWWenKai-Regular.ttf" &&
+           config.settings.library_roots == std::vector<std::string>{"Books"});
 
     put(sidecar / "prepared/map", "required");
     put(sidecar / "cover.png", "manual");
@@ -328,16 +329,19 @@ int main() {
     fs::create_directory_symlink(root / "outside", root / "Books/linked");
     assert(!store.begin_import("Books/linked/book.epub", 9, import_crc, error));
     assert(store.inspect_asset("PicoPage/network.toml", asset_size, asset_crc, error) == StoreStatus::UnsafePath);
-    importing = store.begin_import("PicoPage/fonts/reader.ttf", 9, import_crc, error);
+    importing = store.begin_import("Fonts/reader.ttf", 9, import_crc, error);
     assert(importing && importing->append(0, "123456789", 9, error) == StoreStatus::Ok);
     assert(importing->finish(error) == StoreStatus::Ok);
     importing.reset();
-    importing = store.begin_import("PicoPage/images/cover.png", 9, import_crc, error);
+    assert(!store.begin_import("Articles/old.epub", 9, import_crc, error));
+    assert(!store.begin_import("PicoPage/fonts/reader.ttf", 9, import_crc, error));
+    assert(!store.begin_import("PicoPage/images/cover.png", 9, import_crc, error));
+    importing = store.begin_import("Books/Imported/bad.epub", 9, import_crc, error);
     assert(importing && importing->append(0, "123456788", 9, error) == StoreStatus::Ok);
     assert(importing->finish(error) == StoreStatus::Invalid);
     assert(importing->append(9, "9", 1, error) == StoreStatus::Invalid);
     importing.reset();
-    assert(!fs::exists(root / "PicoPage/images/cover.png") && !fs::exists(root / "PicoPage/images/cover.png.import.tmp"));
+    assert(!fs::exists(root / "Books/Imported/bad.epub") && !fs::exists(root / "Books/Imported/bad.epub.import.tmp"));
     importing = store.begin_import("Books/interrupted.epub", 9, import_crc, error);
     assert(importing && importing->append(1, "1", 1, error) == StoreStatus::Invalid);
     assert(importing->finish(error) == StoreStatus::Invalid);

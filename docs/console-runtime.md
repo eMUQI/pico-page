@@ -42,7 +42,7 @@
 | `PP 5 hold 128 560` | 发送一次长按；参数与 `tap` 相同。只验证应用对长按的处理，不经过触摸采样和时长判定 |
 | `PP 6 open Books/example.epub` | 经正常 App API 开书；路径必须存在于卡内 |
 | `PP 7 screen 12 0 256` | 导出第 12 个已确认帧从字节 0 开始的 256 字节 packed 数据 |
-| `PP 8 file PicoPage/fonts/reader.ttf` | 只返回白名单资源的长度与 CRC32 |
+| `PP 8 file Fonts/reader.ttf` | 只返回白名单资源的长度与 CRC32 |
 | `PP 9 begin 9 cbf43926 Books/check.epub` | 开始一个 9 字节、指定 CRC32 的新资源导入 |
 | `PP 10 data 0 313233343536373839` | 写入从偏移 0 开始的十六进制数据，每块最多 2048 字节 |
 | `PP 11 commit` | 校验、同步、读回并发布；无论成功或失败都结束事务 |
@@ -93,9 +93,8 @@ commit 成功后再次执行 file，确认正式文件摘要一致。主机请�
 
 所有写入由 `FileStore::begin_import()` / `FileImport` 管理，允许 1 字节至 64 MiB：
 
-- `Books/`、`Articles/` 下的 `.epub`。
-- `PicoPage/fonts/` 下的 `.ttf`、`.otf`、许可证 `.txt`。
-- `PicoPage/images/` 下的 `.png`、`.jpg`、`.jpeg`、`.webp`、`.bmp`、`.pgm`。
+- `Books/` 下的 `.epub`、`.txt`，包括 `Books/Articles/` 中的文件。
+- `Fonts/` 下的 `.ttf`、`.otf`、许可证 `.txt`。
 
 目标和父目录使用既有安全路径检查，受控创建缺失父目录；拒绝绝对路径、上级路径、
 符号链接及非白名单类型。不会导入配置、凭据或进度，也不会覆盖已有文件。

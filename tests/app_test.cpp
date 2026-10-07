@@ -13,6 +13,7 @@
 #include <iostream>
 #include <iterator>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -140,6 +141,37 @@ int main(int argc, char** argv) {
     fs::copy_file(fixtures / "image-flow.epub", card / "Books/images.epub");
     fs::create_directories(card / "Txt");
     fs::copy_file(fixtures / "sample.txt", card / "Txt/sample.txt");
+    {
+        const auto home = card / "LibraryHome";
+        fs::create_directories(home / "Books/Articles");
+        fs::copy_file(fixtures / "valid.epub", home / "Books/book.epub");
+        fs::copy_file(fixtures / "nested-toc.epub", home / "Books/Articles/article.epub");
+        ReaderApp app(home.string()); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        driver.tap(100, 230); driver.present();
+        driver.tap(60, 50); driver.present();
+        driver.tap(100, 355); driver.present();
+        assert(app.view() == View::Reading && app.saved_record());
+    }
+    {
+        const auto home = card / "CustomLibraryRoot";
+        fs::create_directories(home / "PicoPage");
+        fs::create_directories(home / "Manage");
+        fs::create_directories(home / "Books");
+        const auto screens = [&](const char *root) {
+            write(home / "PicoPage/settings.toml", std::string("schema_version = 1\n[library]\nroots = ['/") + root + "']\n");
+            ReaderApp app(home.string()); Driver driver{app};
+            assert(app.initialize()); driver.present();
+            const auto library = app.canvas().pixels();
+            driver.tap(600, 50); driver.present();
+            driver.tap(300, 840); driver.present();
+            assert(app.view() == View::StorageSettings);
+            return std::pair{library, app.canvas().pixels()};
+        };
+        const auto custom = screens("Manage");
+        const auto defaults = screens("Books");
+        assert(custom.first != defaults.first && custom.second != defaults.second);
+    }
     const auto progress = card / "Books/book.epub.picopage/progress.json";
     const auto settings = card / "Books/book.epub.picopage/settings.toml";
     ReadingRecord confirmed;
@@ -167,13 +199,6 @@ int main(int argc, char** argv) {
     {
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present();
-        // Undecoded covers first appear as titles; the cover joins its list row in a second frame.
-        driver.tap(240, 482);
-        assert(app.canvas().pixel(50, 640) == 15);
-        app.complete_frame(true);
-        assert(app.pending_frame() && app.view() == View::Library);
-        assert(app.canvas().pixel(50, 640) == 5);
-        driver.present();
         // The card view shows the same cached thumbnail at full size.
         driver.tap(610, 384); driver.present();
         assert(app.canvas().pixel(300, 560) == 0 && app.canvas().pixel(270, 610) == 5);
@@ -195,6 +220,13 @@ int main(int argc, char** argv) {
         assert(app.view() == View::Reading && app.pending_frame() && *app.saved_record() == cover);
     }
     {
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/cover.epub"); driver.present();
+        driver.tap(342, 500); driver.present(); driver.tap(60, 50); driver.present();
+        assert(app.view() == View::Library && app.canvas().pixel(47, 183) == 1);
+        assert(app.canvas().pixel(60, 200) < 15);
+    }
+    {
         // A cached thumbnail survives a restart; an entry that fails validation is rebuilt from the EPUB.
         constexpr std::size_t thumbnail_bytes = 92 * 250;
         fs::path cached;
@@ -209,7 +241,6 @@ int main(int argc, char** argv) {
         const auto grid_pixel = [&](int x, int y) {
             ReaderApp app(card.string()); Driver driver{app};
             assert(app.initialize()); driver.present();
-            driver.tap(240, 482); driver.present();
             driver.tap(610, 384); driver.present();
             return app.canvas().pixel(x, y);
         };
@@ -220,6 +251,17 @@ int main(int argc, char** argv) {
         assert(read(cached).size() > thumbnail_bytes);
     }
     {
+        ReaderApp app(card.string(), "sleep-library", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/cover.epub"); driver.present();
+        driver.tap(342, 500); driver.present(); driver.tap(60, 50); driver.present();
+        assert(app.view() == View::Library);
+        const auto saved = *app.saved_record();
+        assert(app.prepare_sleep()); driver.present();
+        assert(app.view() == View::Sleeping);
+        app.wake(); driver.present();
+        assert(app.view() == View::Library && *app.saved_record() == saved);
+    }
+    {
         const auto root = card / "CoverWorker";
         fs::create_directories(root / "Books");
         fs::create_directories(root / "PicoPage");
@@ -228,7 +270,6 @@ int main(int argc, char** argv) {
             fs::remove_all(root / "PicoPage/cache/covers");
             ReaderApp app(root.string(), "cover-worker", true, true); Driver driver{app};
             assert(app.initialize()); driver.present();
-            driver.tap(240, 232); driver.present();
             driver.tap(610, 134); driver.present();
             assert(app.background_due() && !app.pending_frame());
             app.poll_background(); driver.refresh();
@@ -252,7 +293,7 @@ int main(int argc, char** argv) {
     {
         const auto root = card / "CoverWorker";
         ReaderApp app(root.string(), "details-worker", true, true); Driver driver{app};
-        assert(app.initialize()); driver.present(); driver.tap(240, 232); driver.present();
+        assert(app.initialize()); driver.present();
         driver.tap(610, 134); driver.present();
         driver.hold(100, 300); driver.present();
         assert(app.view() == View::Loading); driver.refresh();
@@ -308,8 +349,8 @@ int main(int argc, char** argv) {
         assert(app.view() == View::Reading && app.background_state() == std::string("idle"));
         assert(app.book_pages() && app.book_pages()->total > 1);
     }
-    fs::create_directories(card / "PicoPage/fonts");
-    fs::copy_file(argv[2], card / "PicoPage/fonts/LXGWWenKai-Regular.ttf");
+    fs::create_directories(card / "Fonts");
+    fs::copy_file(argv[2], card / "Fonts/LXGWWenKai-Regular.ttf");
     {
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present(); driver.refresh();
@@ -409,7 +450,6 @@ int main(int argc, char** argv) {
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present();
         // Books sorts book, cover, images, long: the fourth list row opens after a status frame.
-        driver.tap(240, 482); driver.present();
         driver.tap(240, 432 + 3 * 126 + 40);
         assert(app.view() == View::Library && app.pending_frame()->purpose == FramePurpose::Overlay && !app.saved_record());
         app.complete_frame(true);
@@ -777,7 +817,6 @@ int main(int argc, char** argv) {
         assert(*app.saved_record() == saved);
         driver.close(); driver.present();
         driver.tap(340, 500); driver.present(); driver.tap(50, 50); driver.present();
-        driver.tap(100, 480); driver.present();
         driver.hold(300, 480); driver.present();
         assert(app.view() == View::BookDetails && *app.saved_record() == saved);
         driver.refresh(); driver.close(); driver.present();
@@ -839,7 +878,6 @@ int main(int argc, char** argv) {
         const auto saved = *app.saved_record();
         const auto sidecar = card / "Manage/only.epub.picopage/progress.json";
         driver.tap(342, 500); driver.present(); driver.tap(60, 50); driver.present();
-        driver.tap(240, 480); driver.present();
         driver.hold(300, 480); driver.present();
         assert(app.view() == View::BookDetails);
         driver.tap(342, 918); driver.present();
@@ -1084,9 +1122,9 @@ int main(int argc, char** argv) {
         const auto root = card / "CountWithoutCache";
         fs::create_directories(root / "Books");
         fs::copy_file(fixtures / "long-chapter.epub", root / "Books/book.epub");
-        const auto font = read(card / "PicoPage/fonts/LXGWWenKai-Regular.ttf");
+        const auto font = read(card / "Fonts/LXGWWenKai-Regular.ttf");
         // Trailing padding preserves the font while making its identity scan span many slices.
-        write(root / "PicoPage/fonts/LXGWWenKai-Regular.ttf", font + std::string(8U * 1024 * 1024, '\0'));
+        write(root / "Fonts/LXGWWenKai-Regular.ttf", font + std::string(8U * 1024 * 1024, '\0'));
         write(root / "PicoPage/cache/pages", "Blocks only the optional pagination cache directory.");
         ReaderApp app(root.string(), "count-without-cache", true, true); Driver driver{app};
         assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
@@ -1191,7 +1229,7 @@ int main(int argc, char** argv) {
             write(entry.path(), original);
         }
         assert(rejected_oversized_index);
-        const auto font_path = card / "PicoPage/fonts/LXGWWenKai-Regular.ttf";
+        const auto font_path = card / "Fonts/LXGWWenKai-Regular.ttf";
         const auto original_font = read(font_path);
         const auto font_time = fs::last_write_time(font_path);
         auto replaced_font = original_font;

@@ -1,7 +1,58 @@
 # 开发状态
 
-最后更新：2026-10-07。界面已按《实现评审 · 修改稿》在分支 `ui-review-20261007` 上调整，已安装到设备，书库页面经诊断口确认，手指长按等仍待真机验证。GB18030 TXT 直读固件已安装，用户已确认原先无法打开的书在设备上正常显示中文并可翻页；重启后进度恢复仍待确认。USB 卷名固件已安装，macOS 已显示 `PICO PAGE`；安全弹出后设备退出重启，串口、TF 卡和阅读界面已恢复。
+最后更新：2026-10-07。书库首页直接显示 `Books/` 内容的固件已安装，设备启动和书库首帧经诊断确认；主页实际观感仍待目视确认。书库锁屏后唤醒误入阅读页的修复已通过 host 验证，尚未安装到设备。TF 卡目录已迁移，设备诊断确认新书籍与字体路径可读，原有文章进度可加载。此前界面已按《实现评审 · 修改稿》在分支 `ui-review-20261007` 上调整并安装到设备，手指长按等仍待真机验证。GB18030 TXT 直读固件已安装，用户已确认原先无法打开的书在设备上正常显示中文并可翻页；重启后进度恢复仍待确认。USB 卷名固件已安装，macOS 已显示 `PICO PAGE`；安全弹出后设备退出重启，串口、TF 卡和阅读界面已恢复。
 此前阅读响应性专项的设备数据、EPUB 兼容性修复与传书记录见下方；各批次命令、结果及未测项分别记录，不将本轮 host 结果写成设备结果。
+
+## 2026-10-07 · PR #2 评审修正（已验证，待安装）
+
+- 根据 PR #2 的两条评审意见，空书库提示和“存储与设备”页改用实际配置的单一书库扫描根目录。配置多个扫描根时，空书库提示指向已设置的目录，存储页提示在设置文件中查看；文章目录说明不再固定写成 `Books/Articles/`。
+- TF 卡迁移说明补充单书 `<原书完整文件名>.picopage/settings.toml` 中的字体覆盖项：旧路径须改为 `Fonts/`，或删除覆盖项以继承全局字体；自定义书库根目录应按实际迁移后的路径填写。
+- 新增自定义扫描根的书库首页和存储页画布回归检查。实际执行 `cmake --build build/host -j 8` 通过；`ctest --test-dir build/host --output-on-failure` **11/11** 通过；`python3 tools/check_handoff.py` 通过 338 项，`git diff --check` 通过。`sh tools/build_firmware.sh` 通过，镜像 3,236,224 字节，4 MiB 应用槽剩余 23%。
+- 这版固件尚未安装；自定义根目录提示在实体屏幕上的观感待验证。
+
+## 2026-10-07 · 书库锁屏后返回书库（本地实现）
+
+- 设备使用轻睡眠，唤醒后沿用同一个阅读会话。此前 `wake()` 只根据是否打开过书来恢复页面：返回书库后会话仍保留书籍，因此锁屏再唤醒会误入正文。现在锁屏时记录是否应返回书库，唤醒后恢复书库；从正文锁屏仍恢复正文。锁屏提示随返回目标显示“返回书库”或“继续阅读”。
+- 使用设备所用的异步内容模式，新增“打开书籍 → 返回书库 → 锁屏 → 唤醒”的回归检查，并确认保存的进度不变。修复前该检查在唤醒后的页面断言失败；修复后 `cmake --build build/host -j 8` 通过，`ctest --test-dir build/host --output-on-failure` **11/11** 通过。
+- `sh tools/build_firmware.sh` 首次受沙箱限制，ESP-IDF 组件管理器读取 macOS 进程信息时失败；允许该读取后重新构建通过，应用镜像 3,235,888 字节，4 MiB 应用槽剩余 23%。`python3 tools/check_handoff.py` 通过 338 项，`git diff --check` 通过。尚未安装这版镜像；锁屏画面及唤醒后的真实设备行为待验证。
+
+## 2026-10-07 · 书库首页显示单一根目录内容（已安装，启动诊断通过）
+
+- 单一书库扫描根直接作为“书库”首页，默认情况下直接列出 `Books/` 内的文件夹和 EPUB/TXT，不再单列 `Books` 入口。进入 `Books/Articles/` 等子文件夹后，顶栏返回“书库”；配置多个扫描根时仍列出各根入口。继续阅读、排序、列表/卡片样式保持原结构；目录读取失败显示错误，不当作空书库。
+- 684×1216 桌面画布预览：[书库首页](../artifacts/library-home-20261007/home.png)、[Articles 文件夹](../artifacts/library-home-20261007/articles.png)。预览使用合成 EPUB 和本地字体，来自实际 C++ 阅读程序的 `--headless --script` 输出，不是设备照片，也不代表墨水屏效果。
+- 调整了依赖旧 `Books` 入口的应用交互测试，并以独立演示卡验证从首页进入子文件夹、返回首页、直接打开根目录书籍。实际执行 `cmake --build build/host -j 8` 通过，`ctest --test-dir build/host --output-on-failure` **11/11** 通过；最后补充目录安全检查后重新构建，`ctest --test-dir build/host -R '^app$' --output-on-failure` **1/1** 通过。最终代码执行 `sh tools/build_firmware.sh` 通过，镜像 3,235,808 字节，4 MiB 应用槽剩余 23%。
+- 用户明确授权烧录。镜像固定副本位于 Git 忽略的 `.local/library-home-install-20261007/`，SHA-256 `f1a962a63d487039df8c8187a9673701111607d216b09ee48bfc24f6ce0473ac`。设备 USB 序列号与 `esptool read-mac` 均为 `14:C1:9F:D0:18:B8`。烧录前诊断为 `view=library pending=0 card=1 saved=1`；只读分区表与 OTA 元数据转储和前次安装逐字节一致：`ota_0=0x10000/4 MiB`，sequence 1、state 2 指向 OTA0。只执行 `esptool write-flash 0x10000` 写入应用镜像，报告 `Hash of data verified`，未写 bootloader、分区表、NVS、otadata、OTA1 或 TF 卡。
+- 硬件复位后诊断为 `view=library pending=0 card=1 frame_ok=1 clean=1`，首帧已呈现。诊断画布采集返回 `frame_not_confirmed_or_changed`，当时画面正在变化；后续状态为 `view=reading saved=1 frame_ok=1`。尚未由设备画布或目视确认首页的具体书目层级、物理屏幕效果及触摸返回路径。
+
+## 2026-10-07 · TF 卡目录迁移与固件安装（已安装，诊断验证）
+
+- 用户授权烧录。USB 序列号与 `esptool read-mac` 均为 `14:C1:9F:D0:18:B8`；设备复位后诊断为 `view=library pending=0 card=1 importing=0`。经设备 USB 传输页交出 TF 卡，电脑确认 `disk4s1` 为 31.3 GB FAT32 卷 `PICO PAGE`。
+- 将根目录 `Articles/` 移至 `Books/Articles/`，将 `PicoPage/fonts/` 移至根目录 `Fonts/`。移动前复制并逐项核对 87 个文件、67,371,639 字节的本地备份；移动后从新路径回读，87 个 SHA-256 均与备份一致。书籍伴随目录随文章目录整体移动；`PicoPage/settings.toml` 未指定旧扫描根或旧字体路径，无须改写。未触碰 `Books/` 现有书籍、阅读进度文件内容、网络/同步凭据或其他 TF 文件。
+- 私人备份、逐文件摘要清单和固定镜像保存在 Git 忽略的 `.local/tf-layout-migration-20261007/`。`sh tools/build_firmware.sh` 通过；镜像 3,234,704 字节，SHA-256 `25a59493f6995323b4a7310a73c2b2ac98316f296ce3d14aef2f079e8a964207`，`esptool image-info` 校验镜像类型与内部哈希。`diskutil eject disk4` 成功，电脑已安全弹出 TF 卡。
+- 用户在设备上点“退出并重启”后，串口恢复，诊断显示 `view=library pending=0 card=1 importing=0`。烧录前读取并核对分区表及 OTA 元数据：`ota_0=0x10000/4 MiB`，当前有效记录为 sequence 1、state 2，指向 OTA0。使用 `esptool write-flash 0x10000` 只写 3,234,704 字节的应用镜像，报告 `Hash of data verified`，并完成硬件复位；未写 bootloader、分区表、NVS、otadata、OTA1 或校准数据。烧录前的分区表与 OTA 元数据转储保存在上述 Git 忽略目录。
+- 重启后诊断显示 `view=library pending=0 card=1 frame_ok=1`。新固件列出 `Books/Articles/` 的 55 个目录项及 `Fonts/` 的 25 个文件，能读取默认字体 `Fonts/LXGWWenKai-Regular.ttf`（24,744,500 字节，CRC32 `e8b2c11f`）。打开迁移前已有进度的一篇文章后进入 `view=reading saved=1 revision=5 frame_ok=1`；修订号与备份进度记录一致。“存储与设备”页进入 `view=storage_settings frame_ok=1 card=1`。这些是设备诊断结果，屏幕实际观感及后续翻页、重启恢复尚未目视确认。
+
+## 2026-10-07 · TF 卡目录与存储页面调整（本地实现）
+
+- 默认书库根目录改为 `Books/`，文章建议放入 `Books/Articles/`；正文与界面字体从卡根 `Fonts/` 读取，配置中的字体路径相对卡根目录。诊断导入只接收 `Books/` 下的 EPUB/TXT 和 `Fonts/` 下的字体/许可文本，不再接收卡根 `Articles/` 或 `PicoPage/images/`。`PicoPage/` 继续管理配置、最近书籍与可重建缓存；单书设置和进度仍在原书旁的 `.picopage/`。
+- “存储与设备”页增加书籍、字体、设置和进度的实际路径；空书库提示改为将文件放入 `Books/`。桌面预览截图：[存储与设备](../artifacts/storage-layout-20261007/storage.png)，使用空演示卡，684×1216；相对原稿 S10-3 增加“文件位置”说明，保持原页面结构和操作。`LockScreens/` 只作为未来自定义锁屏图片的目录约定，固件尚不读取，也未增加无效的锁屏选择项。
+- 示例配置、字体准备脚本、host 测试字体路径及当前使用说明已更新。完成本地实现时，真实设备的 TF 卡仍有卡根 `Articles/` 与 `PicoPage/fonts/`；本批没有改动该卡或刷写设备。后续迁移与安装结果记录在上方。
+- 实际执行：`cmake --build build/host -j 8` 通过；`ctest --test-dir build/host --output-on-failure` **11/11** 通过；最后一处测试夹具路径改动后，`ctest --test-dir build/host -R '^store$' --output-on-failure` **1/1** 通过。`sh tools/build_firmware.sh` 通过，镜像 3,234,704 字节，4 MiB 应用槽剩余 23%；`python3 tools/check_handoff.py` 通过 336 项；`git diff --check` 通过。截图由 host 脚本实际画布导出并核对。首次 host 测试因一条旧字体路径断言失败，修正测试夹具后全套通过。
+- 本批尚未做真实 TF 卡迁移和设备验证；后续迁移、烧录与诊断结果记录在上方。字体和存储页面的物理屏幕效果仍待目视确认。
+
+## 2026-10-07 · 继续阅读卡片显示封面（本地实现）
+
+- 对照原始书库设计稿 S01-1，为继续阅读卡片增加 96 × 128 封面；复用书库卡片的缩略图缓存并缩小绘制，不额外生成一套缓存。无有效封面时沿用文字布局；封面生成请求按书籍路径去重。封面出现后，书名与位置移到封面右侧。
+- 实现截图：[书库继续阅读](../artifacts/continue-cover-20261007/library.png)。这是合成 EPUB 的桌面预览，原始设计稿没有修改；本次只补封面与对应文字间距，未调整卡片外框、交互或其他页面。
+- 实际执行：`cmake --build build/host -j 8` 通过；`ctest --test-dir build/host --output-on-failure` **11/11** 通过，包括新增的继续阅读封面像素检查；桌面脚本从阅读页返回书库后截屏核对；`git diff --check` 通过。`sh tools/build_firmware.sh` 首次在沙箱中因 ESP-IDF 组件管理器调用 `sysctl()` 被拒绝，获准在沙箱外重试后构建通过，应用镜像 3,234,784 字节。
+- 本次没有烧录设备；真机封面显示、全刷效果和耗时仍待验证。下一步在设备上用有封面的书打开并返回书库，检查卡片排版与刷新。
+
+## 2026-10-07 · 保存设备书籍与字体作为本地测试样本
+
+- 从已挂载的 `PICO PAGE` 卷只读复制 `Books/` 中的 EPUB、TXT，以及 `PicoPage/fonts/` 中的 TTF、OTF 和两份字体许可文本，到 Git 忽略的 `private/device-test-library/`。后续本机和设备兼容性测试优先使用这批真实样本；公开或可重复的自动化测试仍使用合成或已获许可的样本，不提交私人书籍与字体副本。
+- `Articles/` 中 52 个网页导出 EPUB、阅读进度、单书设置、缓存、AppleDouble 文件及未完成的导入临时文件均未复制。按 SHA-256 去重后保留 21 本 EPUB、4 本 TXT、23 个字体；唯一重复的 EPUB 仅删除本地副本，设备原件未改动。`manifest.json` 记录源路径、保留路径、文件大小、摘要和重复对应关系。
+- 实际执行：Python 3 逐文件复制时计算 SHA-256，并回读本地副本核对摘要；21 本 EPUB 的 ZIP 成员 CRC 与 OPF 元数据读取通过，4 本 TXT 可用 UTF-8 或 GB18030 解码且不含 NUL，`fc-scan` 成功解析 23 个字体。`git check-ignore -v private/device-test-library/manifest.json` 确认目录被忽略；`python3 tools/check_handoff.py` 通过 332 项，仅覆盖交接资料；`git diff --check` 通过。
+- 这是文件可读性检查，不代表每本书或每种字体已在固件、真机屏幕上完成排版与翻页验收。下一步在相关兼容性问题中优先选用这批样本复现，并记录具体测试范围。
 
 ## 2026-10-07 · 按《实现评审 · 修改稿》调整界面（已安装，书库页面经诊断口确认）
 

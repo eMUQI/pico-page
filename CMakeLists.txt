@@ -73,7 +73,7 @@ add_dependencies(app_test document_fixtures_target)
 target_link_libraries(app_test PRIVATE reader_app)
 target_compile_options(app_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME app COMMAND app_test ${document_fixtures}
-    ${CMAKE_CURRENT_SOURCE_DIR}/.local/card/PicoPage/fonts/LXGWWenKai-Regular.ttf)
+    ${CMAKE_CURRENT_SOURCE_DIR}/.local/card/Fonts/LXGWWenKai-Regular.ttf)
 
 add_executable(provision_test tests/provision_test.cpp)
 target_link_libraries(provision_test PRIVATE reader_sync)

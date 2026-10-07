@@ -79,7 +79,7 @@ target_link_libraries(koreader_mapping_probe PRIVATE reader_sync reference_creng
     for book in [fixture, *args.book]:
         print(f"Reference comparison: {book}", flush=True)
         run(str(probe / "build/koreader_mapping_probe"), str(book.resolve()),
-            str(LOCAL / "card/PicoPage/fonts/LXGWWenKai-Regular.ttf"), str(args.sample_step))
+            str(LOCAL / "card/Fonts/LXGWWenKai-Regular.ttf"), str(args.sample_step))
 
 
 if __name__ == "__main__":

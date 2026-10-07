@@ -7,7 +7,7 @@ from fontTools.ttLib import TTFont
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TEXT = (
-    "Pico Page TF EPUB K1 K2 K3 .local/PicoPage/fonts/0123456789"
+    "Pico Page TF EPUB K1 K2 K3 .local/Fonts/0123456789"
     "未检测到存储卡请插入后重新启动初始化失败无法读取挂载书库为空"
     "返回关闭取消确定重试继续打开选择上一页下一页全刷工具目录排版字号行距边距"
     "字体默认应用阅读书架设置清晰均衡快速保存尚未成功进度已记录损坏不支持"
@@ -29,7 +29,7 @@ SYMBOL_RANGES = (
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--font", type=Path, default=ROOT / ".local/card/PicoPage/fonts/NotoSansSC-Regular.otf")
+    parser.add_argument("--font", type=Path, default=ROOT / ".local/card/Fonts/NotoSansSC-Regular.otf")
     parser.add_argument("--strings", type=Path, action="append", default=[])
     args = parser.parse_args()
     text = DEFAULT_TEXT + "".join(chr(c) for c in range(32, 127))

@@ -38,7 +38,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--card", type=Path, default=ROOT / ".local/card")
     args = parser.parse_args()
-    fonts = args.card.resolve() / "PicoPage/fonts"
+    fonts = args.card.resolve() / "Fonts"
     for name, url, digest in ASSETS:
         destination = ROOT / ".local/downloads" / name if name.endswith(".gz") else fonts / name
         fetch(destination, url, digest)

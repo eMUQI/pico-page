@@ -3,13 +3,13 @@
 schema_version = 1
 
 [library]
-roots = ["/Books", "/Articles"]
+roots = ["/Books"]
 view = "list"
 
 [reader]
 # Obtain the complete body font with tools/setup_fonts.py.
-# The font path is relative to the PicoPage directory on the card.
-font = "fonts/LXGWWenKai-Regular.ttf"
+# The font path is relative to the card root.
+font = "Fonts/LXGWWenKai-Regular.ttf"
 font_size_px = 38
 line_height = 1.5
 margin_x_px = 36

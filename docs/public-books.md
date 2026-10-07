@@ -30,7 +30,7 @@
 重跑生产解析器和渲染器的逐页检查：
 
 ```sh
-sh tools/check_public_books.sh .local/card/PicoPage/fonts/LXGWWenKai-Regular.ttf \
+sh tools/check_public_books.sh .local/card/Fonts/LXGWWenKai-Regular.ttf \
   .local/public-books/lu-xun-aq-25332.epub .local/public-books/lu-xun-nahan-27166.epub
 ```
 

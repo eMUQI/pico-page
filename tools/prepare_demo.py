@@ -11,7 +11,7 @@ from make_epub_fixture import fixture_entries, write_fixture
 def main():
     card = ROOT / '.local/card'
     (card / 'Books').mkdir(parents=True, exist_ok=True)
-    (card / 'Articles').mkdir(exist_ok=True)
+    (card / 'Fonts').mkdir(exist_ok=True)
     (card / 'PicoPage').mkdir(exist_ok=True)
     path = card / 'Books/Pico Page 演示.epub'
     if not path.exists():
@@ -32,7 +32,7 @@ def main():
     settings = card / 'PicoPage/settings.toml'
     if not settings.exists():
         settings.write_text(
-            'schema_version = 1\n[reader]\nfont = "fonts/LXGWWenKai-Regular.ttf"\n'
+            'schema_version = 1\n[reader]\nfont = "Fonts/LXGWWenKai-Regular.ttf"\n'
             'font_size_px = 38\nline_height = 1.5\nmargin_x_px = 36\n', encoding='utf-8'
         )
     print(f'Demonstration card ready: {card}')

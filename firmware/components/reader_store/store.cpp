@@ -238,13 +238,10 @@ bool asset_path(const std::string& path) {
     if (dot == std::string::npos) return false;
     auto extension = path.substr(dot);
     for (auto& ch : extension) if (ch >= 'A' && ch <= 'Z') ch += 'a' - 'A';
-    if (path.compare(0, 6, "Books/") == 0 || path.compare(0, 9, "Articles/") == 0)
+    if (path.compare(0, 6, "Books/") == 0)
         return extension == ".epub" || extension == ".txt";
-    if (path.compare(0, 15, "PicoPage/fonts/") == 0)
+    if (path.compare(0, 6, "Fonts/") == 0)
         return extension == ".ttf" || extension == ".otf" || extension == ".txt";
-    if (path.compare(0, 16, "PicoPage/images/") == 0)
-        return extension == ".png" || extension == ".jpg" || extension == ".jpeg" ||
-               extension == ".webp" || extension == ".bmp" || extension == ".pgm";
     return false;
 }
 
