@@ -576,6 +576,22 @@ struct ReaderApp::Impl final : DisplayBackend {
         auto job = std::move(foreground_job);
         const auto& request = job->request;
         if (!content_loading || request.generation != foreground_generation) return;
+        if (request.kind == ContentJob::Kind::MapUpload || request.kind == ContentJob::Kind::MapDownload) {
+            content_loading = false;
+            sync::Config current; std::string detail;
+            if (!sync::load_config(root, current, detail) || !same_account(current, sync_config)) {
+                cancel_sync(); server_state = "配置变化"; remote_state = "未检查";
+                sync_status = "同步配置已更改，本次结果已丢弃";
+            } else if (request.kind == ContentJob::Kind::MapDownload) {
+                accept_remote_mapping(job->result.mapped_anchor, job->result.error);
+            } else if (!job->result.error.empty()) {
+                sync_status = "此位置暂不支持精确同步：" + job->result.error;
+            } else if (!sync_checked || !request.record || !session.saved_record() || !(*session.saved_record() == *request.record)) {
+                sync_status = "当前已保存位置已改变，请重新检查远端位置";
+                sync_checked = false;
+            } else { send_upload(*request.record, job->result.xpointer, job->result.percentage); return; }
+            draw_sync(); overlay(); return;
+        }
         if (request.kind == ContentJob::Kind::Open || request.kind == ContentJob::Kind::Inspect) {
             content_loading = false;
             if (!job->result.error.empty()) {
@@ -3016,6 +3032,33 @@ struct ReaderApp::Impl final : DisplayBackend {
         button(Back, "取消", 24, 1080, 306, 96, true);
         button(SyncConfirm, "确认上传", 354, 1080, 306, 96);
     }
+    void begin_mapping(ContentJob::Kind kind, const std::string& xpointer = "") {
+        abandon_content(); ++counting_generation; release_counting(); clear_prefetch();
+        ContentJob::Request request;
+        request.kind = kind; request.path = root + "/" + book_path; request.identity = document.metadata();
+        request.dom_version = sync_config.dom_version; request.xpointer = xpointer;
+        if (kind == ContentJob::Kind::MapUpload) request.record = session.saved_record();
+        request.generation = foreground_generation;
+        pending_content = std::move(request); content_loading = true; view = View::Loading;
+        canvas.fill_rect(0, footer_top, 684, 88, 15);
+        text("正在准备位置…", 36, 1156, 24, 400, 3);
+        button(Dismiss, "取消", 488, 1140, 160, 64, false, 24); overlay();
+    }
+    void accept_remote_mapping(const Anchor& candidate, const std::string& detail) {
+        if (detail.empty()) {
+            remote_anchor = candidate;
+            if (session.saved_record() && session.saved_record()->anchor == candidate) {
+                remote_anchor.reset(); remote_state = "位置相同";
+                sync_status = "本机与远端位于同一源位置。";
+            } else {
+                remote_state = "位置不同"; sync_status = "发现远端位置，请选择继续位置。";
+            }
+        } else {
+            remote_anchor.reset(); remote_state = "无法映射";
+            sync_status = memory_error(detail) ? "设备内存不足，暂时无法映射远端位置，未跳转。"
+                : "远端位置无法精确映射，未跳转。可继续阅读或明确上传本机位置。";
+        }
+    }
     void upload() {
         if (!sync_checked || !persist() || !session.saved_record()) {
             sync_status = "当前进度尚未保存，无法上传";
@@ -3034,6 +3077,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             return;
         }
         const auto record = *session.saved_record();
+        if (async_content) { begin_mapping(ContentJob::Kind::MapUpload); return; }
         std::string xpointer;
         Chapter source;
         std::size_t index;
@@ -3056,6 +3100,10 @@ struct ReaderApp::Impl final : DisplayBackend {
             (static_cast<double>(index) +
              (source.text.empty() ? 0. : static_cast<double>(scalar) / source.text.size())) /
             document.spine().size();
+        send_upload(record, xpointer, percent);
+    }
+    void send_upload(const ReadingRecord& record, const std::string& xpointer, double percent) {
+        std::string detail;
         sync::HttpRequest request;
         if (!sync::put_request(sync_config, document.metadata().partial_md5, xpointer, percent,
                                record, request, detail)) {
@@ -3121,21 +3169,9 @@ struct ReaderApp::Impl final : DisplayBackend {
                 uncertain_record.reset(); acknowledged_record.reset();
                 Anchor candidate;
                 sync_checked = true;
-                if (sync::from_xpointer(document, remote.progress, sync_config.dom_version,
-                                        candidate, detail)) {
-                    remote_anchor = candidate;
-                    if (session.saved_record() && session.saved_record()->anchor == candidate) {
-                        remote_anchor.reset(); remote_state = "位置相同";
-                        sync_status = "本机与远端位于同一源位置。";
-                    } else {
-                        remote_state = "位置不同";
-                        sync_status = "发现远端位置，请选择继续位置。";
-                    }
-                } else {
-                    remote_state = "无法映射";
-                    sync_status = memory_error(detail) ? "设备内存不足，暂时无法映射远端位置，未跳转。"
-                                                       : "远端位置无法精确映射，未跳转。可继续阅读或明确上传本机位置。";
-                }
+                if (async_content) { begin_mapping(ContentJob::Kind::MapDownload, remote.progress); return; }
+                sync::from_xpointer(document, remote.progress, sync_config.dom_version, candidate, detail);
+                accept_remote_mapping(candidate, detail);
             } else {
                 sync_checked = false; remote_state = "未检查";
                 server_state = remote.status == sync::RemoteStatus::Unauthorized ? "登录失效" : "请求失败";
@@ -3711,9 +3747,13 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (content_loading) {
             if (!input.touch && input.event.input == Input::K2) force_refresh();
             else if (!input.queued && input.touch && input.x >= 488 && input.y >= 1140) {
+                const auto kind = pending_content ? pending_content->kind : foreground_job->request.kind;
+                const bool mapping = kind == ContentJob::Kind::MapUpload || kind == ContentJob::Kind::MapDownload;
                 abandon_content();
                 link_return = confirmed_link_return;
-                draw_library(); overlay();
+                if (mapping) { cancel_sync(); sync_status = "同步已取消"; draw_sync(); }
+                else draw_library();
+                overlay();
             }
             return;
         }
@@ -4044,7 +4084,9 @@ bool ReaderApp::background_due() const {
 const char *ReaderApp::background_state() const {
     if (impl_->content_loading) {
         const auto kind = impl_->pending_content ? impl_->pending_content->kind : impl_->foreground_job->request.kind;
-        return kind == ContentJob::Kind::Open ? "opening" : kind == ContentJob::Kind::Inspect ? "details" : kind == ContentJob::Kind::Chapter ? "chapter" : "image";
+        return kind == ContentJob::Kind::Open ? "opening" : kind == ContentJob::Kind::Inspect ? "details" :
+            kind == ContentJob::Kind::MapUpload || kind == ContentJob::Kind::MapDownload ? "mapping" :
+            kind == ContentJob::Kind::Chapter ? "chapter" : "image";
     }
     if (impl_->cover_job || impl_->pending_covers) return "covers";
     if (impl_->raster_job || impl_->prefetch_due()) return "prefetch";

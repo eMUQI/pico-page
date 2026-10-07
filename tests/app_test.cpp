@@ -459,6 +459,34 @@ int main(int argc, char** argv) {
     const std::string sync_config = "schema_version = 1\ndom_version = 20260812\nendpoint = \"https://example.invalid\"\nusername = \"test-user\"\nuserkey = \"test-only-placeholder\"\ndevice_id = \"app-test\"\n";
     write(card / "PicoPage/sync.toml", sync_config);
     {
+        ReaderApp app(card.string(), "mapping-worker", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+        const auto saved = *app.saved_record();
+        const std::string remote = R"({"progress":"/body[1]/DocFragment[1]/body[1]/h1[1]/text()[1].0","percentage":0.1})";
+        driver.sync_view(); auto request = driver.check_remote();
+        app.complete_network(request.id, 200, remote, "");
+        assert(app.view() == View::Loading && *app.saved_record() == saved);
+        driver.present(); driver.refresh(); driver.tap(560, 1170); driver.present();
+        driver.complete_content();
+        assert(app.view() == View::Sync && !app.take_network_request() && *app.saved_record() == saved);
+        request = driver.check_remote(); app.complete_network(request.id, 200, remote, "");
+        driver.present(); driver.complete_content();
+        assert(app.view() == View::Sync && *app.saved_record() == saved);
+        driver.close(); driver.present(); driver.sync_view();
+        request = driver.check_remote(); app.complete_network(request.id, 200, "{}", ""); driver.present();
+        driver.tap(342, 1075); driver.present(); driver.tap(500, 1120); driver.present();
+        assert(app.view() == View::Loading && !app.take_network_request());
+        driver.tap(560, 1170); driver.present(); driver.complete_content();
+        assert(!app.take_network_request() && *app.saved_record() == saved);
+        request = driver.check_remote(); app.complete_network(request.id, 200, "{}", ""); driver.present();
+        driver.tap(342, 1075); driver.present(); driver.tap(500, 1120); driver.present();
+        driver.complete_content();
+        auto upload = app.take_network_request();
+        assert(upload && upload->request.method == "PUT" && *app.saved_record() == saved);
+        app.complete_network(upload->id, 200, "{}", ""); driver.present();
+        assert(*app.saved_record() == saved);
+    }
+    {
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
         const auto before = *app.saved_record();

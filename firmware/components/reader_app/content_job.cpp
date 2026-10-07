@@ -1,5 +1,6 @@
 #include "content_job.h"
 #include "content_cache.h"
+#include "pico_page/sync.h"
 #include "pico_page/stage_timer.h"
 #include <sys/stat.h>
 #include "pico_page/store.h"
@@ -94,6 +95,7 @@ void ContentJob::run() {
         if (result.font_identity.empty() && !stop()) result.error = "Font identity read failed";
         return;
     }
+    if (request.kind == Kind::MapUpload || request.kind == Kind::MapDownload) { map_position(); return; }
     if (request.kind == Kind::SleepCover) { prepare_cover(); result.cache_finished = !stop(); return; }
     if (request.kind == Kind::LibraryCovers) { library_covers(); return; }
     if (request.kind == Kind::RasterPage) { raster_page(); return; }
@@ -174,6 +176,31 @@ void ContentJob::render_image(const std::string& resource, const std::string& ca
     std::string pixels(reinterpret_cast<const char*>(result.image->data()), result.image->pixels().size());
     pixels += md5_hex(pixels);
     store.save_cache(cache_name, pixels);
+}
+void ContentJob::map_position() {
+    const StageTimer timer{"position_mapping"};
+    const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
+    EpubDocument document;
+    if (!document.open_verified(request.path, request.identity, result.error, stop)) return;
+    if (request.kind == Kind::MapDownload) {
+        sync::from_xpointer(document, request.xpointer, request.dom_version, result.mapped_anchor, result.error, stop);
+        return;
+    }
+    if (!request.record) { result.error = "Saved record unavailable"; return; }
+    Chapter source;
+    std::size_t index;
+    std::uint32_t offset = 0;
+    const auto& anchor = request.record->anchor;
+    if (!document.chapter_index_for(anchor.resource, index) ||
+        !document.find_chapter_part(index, source, result.error, ChapterLoad::Mapping,
+            [&](const Chapter& part) { return part.offset_for(anchor, offset); }, stop) ||
+        !sync::to_xpointer(document, source, anchor, request.dom_version, result.xpointer, result.error)) {
+        if (result.error.empty()) result.error = "Saved position cannot be mapped";
+        return;
+    }
+    if (stop()) { result.error = kChapterCancelled; return; }
+    result.percentage = (static_cast<double>(index) +
+        (source.text.empty() ? 0. : static_cast<double>(offset) / source.text.size())) / document.spine().size();
 }
 void ContentJob::prepare_cover() {
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };

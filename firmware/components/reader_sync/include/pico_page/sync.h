@@ -65,6 +65,6 @@ bool upload_confirmed(int http_status, std::string& error);
 bool to_xpointer(const EpubDocument& document, const Chapter& chapter, const Anchor& anchor,
                  int dom_version, std::string& xpointer, std::string& error);
 bool from_xpointer(EpubDocument& document, const std::string& xpointer, int dom_version,
-                   Anchor& anchor, std::string& error);
+                   Anchor& anchor, std::string& error, const std::function<bool()>& stop = {});
 
 }  // namespace pico_page::sync

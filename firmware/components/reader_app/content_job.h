@@ -24,7 +24,7 @@ std::string image_cache_key(const std::string& book_id, const std::string& resou
 /** A single job owns its parser and font. Only done() permits access to its result. */
 class ContentJob {
 public:
-    enum class Kind { Pagination, FontIdentity, Image, Open, Chapter, RasterPage, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover };
+    enum class Kind { Pagination, FontIdentity, Image, Open, Chapter, RasterPage, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload };
     enum class Target { Start, End, Before, Anchor, Fragment };
     struct CoverSource {
         std::string path, cache_name, cache_header;
@@ -36,7 +36,8 @@ public:
         Kind kind = Kind::Pagination;
         Target target = Target::Start;
         Anchor anchor;
-        std::string fragment;
+        std::string fragment, xpointer;
+        int dom_version = 0;
         std::optional<std::size_t> known_start;
         std::string root, image_resource, cache_name, relative_path, content_revision;
         DocumentMetadata identity;
@@ -56,7 +57,9 @@ public:
         std::vector<std::uint32_t> starts;
         std::size_t offset = 0;
         bool part_done = false, last_part = false;
-        std::string error, font_identity;
+        std::string error, font_identity, xpointer;
+        Anchor mapped_anchor;
+        double percentage = 0;
         std::unique_ptr<graphics::Canvas> image;
         std::vector<std::vector<std::uint8_t>> covers;
         std::unique_ptr<EpubDocument> document;
@@ -89,6 +92,7 @@ private:
     void prepare_chapter_page();
     void open_book();
     void prepare_cover();
+    void map_position();
     void load_chapter();
     void raster_page();
     void library_covers();

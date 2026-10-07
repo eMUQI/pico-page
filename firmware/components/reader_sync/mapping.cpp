@@ -180,8 +180,9 @@ bool to_xpointer(const EpubDocument& document, const Chapter& chapter, const Anc
 }
 
 bool from_xpointer(EpubDocument& document, const std::string& xpointer, int dom_version,
-                   Anchor& anchor, std::string& error) {
+                   Anchor& anchor, std::string& error, const std::function<bool()>& stop) {
     anchor = {};
+    if (stop && stop()) { error = kChapterCancelled; return false; }
     error.clear();
     if (!supported_version(dom_version, error)) return false;
     if (xpointer.size() > 4096) { error = "KOReader XPointer exceeds the length limit"; return false; }
@@ -210,12 +211,13 @@ bool from_xpointer(EpubDocument& document, const std::string& xpointer, int dom_
     // The part is chosen before the stylesheets are complete; the profile check below repeats
     // the lookup with them and rejects what they make inexact.
     if (!document.find_chapter_part(index, chapter, error, ChapterLoad::Mapping,
-                                    [&](const Chapter& candidate) { return locate(candidate, CssProfile{}) != nullptr; })) {
+                                    [&](const Chapter& candidate) { return locate(candidate, CssProfile{}) != nullptr; }, stop)) {
         if (error.rfind("Chapter part is not available", 0) == 0) error = "KOReader text node cannot be mapped exactly";
         return false;
     }
     CssProfile css;
     if (!mapping_profile(chapter, css, error)) return false;
+    if (stop && stop()) { error = kChapterCancelled; return false; }
     const SourceTextNode* node = locate(chapter, css);
     if (!node) { error = "KOReader text node cannot be mapped exactly"; return false; }
     const auto offsets = normalized_offsets(*node);
