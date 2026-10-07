@@ -1,20 +1,39 @@
 # 开发状态
 
-最后更新：2026-10-07。书库首页直接显示 `Books/` 内容的固件已安装，设备启动和书库首帧经诊断确认；主页实际观感仍待目视确认。书库锁屏后唤醒误入阅读页的修复已通过 host 验证，尚未安装到设备。TF 卡目录已迁移，设备诊断确认新书籍与字体路径可读，原有文章进度可加载。此前界面已按《实现评审 · 修改稿》在分支 `ui-review-20261007` 上调整并安装到设备，手指长按等仍待真机验证。GB18030 TXT 直读固件已安装，用户已确认原先无法打开的书在设备上正常显示中文并可翻页；重启后进度恢复仍待确认。USB 卷名固件已安装，macOS 已显示 `PICO PAGE`；安全弹出后设备退出重启，串口、TF 卡和阅读界面已恢复。
+最后更新：2026-10-07。基于 `d8ed960` 的固件已写入设备 OTA0，`esptool` 已验证写入摘要；本次复位后的书库画面、触摸与 TF 卡状态尚未确认。书库首页显示 `Books/` 内容、书库锁屏后返回书库及 PR #2 的路径提示修正均包含在本次固件中，真机交互和观感待验证。此前的设备诊断、TF 卡迁移、界面调整、GB18030 TXT 阅读及 USB 卷名验证记录见下文。
 此前阅读响应性专项的设备数据、EPUB 兼容性修复与传书记录见下方；各批次命令、结果及未测项分别记录，不将本轮 host 结果写成设备结果。
 
-## 2026-10-07 · PR #2 评审修正（已验证，待安装）
+## 2026-10-07 · KOReader 联测固件构建与安装（待设备画面确认）
+
+- 用户授权烧录基于 `d8ed960` 的当前代码。复用本机已审查的 Read Pico BSP commit `5f3406deec33304de8801046db583dec7c49e55b` 和 SHA-256 与 `tools/setup_fonts.py` 锁定值一致的图形资源，放入 Git 忽略目录；未更换全局 ESP-IDF/EIM 工具链。
+- 首次构建因新目录缺少 FreeType 源码而停在配置阶段；补齐锁定资源后，组件管理器读取 macOS 进程信息遭沙箱拒绝。取得该次构建所需权限后，`sh tools/build_firmware.sh` 完整通过，日志 `.local/sync-test-build.log`。
+- 镜像 `firmware/build/pico_page.bin` 为 ESP32-S3、16 MiB Flash 配置，3,213,744 字节；4 MiB 应用槽剩余约 23%。安装固定副本 `.local/sync-test-install/pico_page-d8ed960.bin` 已逐字节摘要核对，SHA-256 为 `569547f81118293bc9a07619c41617b3c9c0b503eb7b7669d0d1b61d86a47fef`。`esptool image-info` 成功；未执行构建产物建议的整片烧录命令。
+- `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host -j 8`、`ctest --test-dir build/host --output-on-failure` 均通过，CTest **11/11**；日志在 `.local/sync-test-host-*.log`、`.local/sync-test-ctest.log`。这些结果不代表设备同步成功。
+- TF 卡已在电脑上安全弹出。退出 USB 传输后，设备一度保留主页画面但触摸与电源短按无响应，macOS 也未枚举出 Pico。用户依据板级 PMU 的强制关机与开机操作恢复设备，确认触摸再次可用；同一 USB 串口随后重新出现。
+- 烧录前 `esptool read-mac` 与 USB 序列号均为 `14:C1:9F:D0:18:B8`。从设备只读保存分区表和 OTA 元数据到 `.local/sync-test-install/`：分区表经 ESP-IDF `gen_esp32part.py` 验证，`ota_0=0x10000/4 MiB`；OTA 第一个条目 `sequence=1`、`state=2`，CRC 正确，当前有效槽为 OTA0。镜像 SHA-256 在写入前再次核对一致。
+- 自动权限审查首次超时，烧录命令未启动；按审查提示重试后，仅向 `0x10000` 写入 3,213,744 字节应用镜像。`esptool` 报告 `Hash of data verified` 并执行硬件复位；未写 bootloader、分区表、NVS、otadata、OTA1、TF 卡或工厂校准。
+- 构建配置中 `CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE` 未启用，因此烧录后的 `tools/device_console.py status` 无回应，不能使用诊断命令核对画面和 TF 卡状态。设备启动画面、触摸及后续 KOReader 双向接续仍待实际确认。
+
+## 2026-10-07 · KOReader 原账户接续准备（尚未联网）
+
+- 只读检查 Kindle 导出：现用配置及备份均保存同一组账户名和 32 位 `userkey`，未设置自定义服务地址，按书籍内容匹配。20 份带位置的 EPUB 记录均使用 `cre_dom_version = 20240114`。未输出、提交或修改导出的账户密钥和个人 EPUB。
+- Pico Page TF 卡原先没有 `PicoPage/sync.toml` 和 `PicoPage/network.toml`。使用 `tools/setup_network.py` 的配置生成函数，从导出读取已有密钥，新建独立 `device_id`，写入仅用于同步的 `PicoPage/sync.toml`，`dom_version = 20240114`。文件同步写入后从卡上回读，203 字节逐字节一致，TOML 解析通过；未触碰书籍、原有进度或固件。
+- 选择一份两端已有位置记录的 EPUB；Pico 卡与 Kindle 导出的原书 SHA-256 相同。Pico 上该书的两份进度文件已复制到本机私有临时目录并逐文件校验。执行 `diskutil eject '/Volumes/PICO PAGE'` 成功；当时尚未确认设备退出 USB 传输后的启动，后续恢复和烧录见上节。
+- 本轮使用一次性 Python 命令检查导出、TF 配置和原书摘要，未运行构建或自动测试。电脑向默认同步服务进行只读账户验证时 DNS 解析失败，不能据此判断密钥是否有效。设备尚无 Wi-Fi 配置，也未执行远端 GET、位置映射、正文呈现、阅读或上传；Kindle 回读仍待验证。
+- 下一步：先确认本次烧录后的书库画面、触摸和 TF 卡可用，再通过手机配置页只填写 Wi-Fi；随后检查远端候选并核对正文，再阅读、确认保存、明确上传，最后在 Kindle 上核对实际正文位置。
+
+## 2026-10-07 · PR #2 评审修正（已安装，真机画面待验）
 
 - 根据 PR #2 的两条评审意见，空书库提示和“存储与设备”页改用实际配置的单一书库扫描根目录。配置多个扫描根时，空书库提示指向已设置的目录，存储页提示在设置文件中查看；文章目录说明不再固定写成 `Books/Articles/`。
 - TF 卡迁移说明补充单书 `<原书完整文件名>.picopage/settings.toml` 中的字体覆盖项：旧路径须改为 `Fonts/`，或删除覆盖项以继承全局字体；自定义书库根目录应按实际迁移后的路径填写。
 - 新增自定义扫描根的书库首页和存储页画布回归检查。实际执行 `cmake --build build/host -j 8` 通过；`ctest --test-dir build/host --output-on-failure` **11/11** 通过；`python3 tools/check_handoff.py` 通过 338 项，`git diff --check` 通过。`sh tools/build_firmware.sh` 通过，镜像 3,236,224 字节，4 MiB 应用槽剩余 23%。
-- 这版固件尚未安装；自定义根目录提示在实体屏幕上的观感待验证。
+- 上述 3,236,224 字节候选镜像未单独安装；修正代码已随本次 KOReader 联测固件安装。自定义根目录提示在实体屏幕上的观感待验证。
 
-## 2026-10-07 · 书库锁屏后返回书库（本地实现）
+## 2026-10-07 · 书库锁屏后返回书库（已安装，真机行为待验）
 
 - 设备使用轻睡眠，唤醒后沿用同一个阅读会话。此前 `wake()` 只根据是否打开过书来恢复页面：返回书库后会话仍保留书籍，因此锁屏再唤醒会误入正文。现在锁屏时记录是否应返回书库，唤醒后恢复书库；从正文锁屏仍恢复正文。锁屏提示随返回目标显示“返回书库”或“继续阅读”。
 - 使用设备所用的异步内容模式，新增“打开书籍 → 返回书库 → 锁屏 → 唤醒”的回归检查，并确认保存的进度不变。修复前该检查在唤醒后的页面断言失败；修复后 `cmake --build build/host -j 8` 通过，`ctest --test-dir build/host --output-on-failure` **11/11** 通过。
-- `sh tools/build_firmware.sh` 首次受沙箱限制，ESP-IDF 组件管理器读取 macOS 进程信息时失败；允许该读取后重新构建通过，应用镜像 3,235,888 字节，4 MiB 应用槽剩余 23%。`python3 tools/check_handoff.py` 通过 338 项，`git diff --check` 通过。尚未安装这版镜像；锁屏画面及唤醒后的真实设备行为待验证。
+- `sh tools/build_firmware.sh` 首次受沙箱限制，ESP-IDF 组件管理器读取 macOS 进程信息时失败；允许该读取后重新构建通过，应用镜像 3,235,888 字节，4 MiB 应用槽剩余 23%。`python3 tools/check_handoff.py` 通过 338 项，`git diff --check` 通过。上述 3,235,888 字节候选镜像未单独安装；修复代码已随本次 KOReader 联测固件安装，锁屏画面及唤醒后的真实设备行为待验证。
 
 ## 2026-10-07 · 书库首页显示单一根目录内容（已安装，启动诊断通过）
 
