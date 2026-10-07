@@ -23,8 +23,8 @@ httpd_handle_t server = nullptr;
 PortalHandler portal_handler = nullptr;
 void* portal_context = nullptr;
 std::size_t portal_body_limit = 0;
-std::string upload_root, upload_token;
-const std::atomic_bool* upload_cancelled = nullptr;
+UploadServer upload_session;
+std::string upload_token, upload_path;
 std::atomic_bool resolver_running{false};
 SemaphoreHandle_t resolver_stopped = nullptr;
 std::uint32_t portal_address = 0;  // Network byte order.
@@ -43,46 +43,86 @@ int hex(char c) {
     if (c >= 'A' && c <= 'F') return c - 'A' + 10;
     return -1;
 }
+/** A JavaScript string literal that stays inert inside an HTML script element. */
+std::string script_string(const std::string& value) {
+    std::string out = "\"";
+    for (const char c : value) {
+        const auto byte = static_cast<unsigned char>(c);
+        if (byte < 0x20 || c == '"' || c == '\\' || c == '<' || c == '>' || c == '&' || c == '\'' || byte == 0x7f) {
+            char escaped[7];
+            std::snprintf(escaped, sizeof(escaped), "\\u%04x", byte);
+            out += escaped;
+        } else
+            out += c;
+    }
+    return out + '"';
+}
+
+/**
+ * Rejection statuses the transfer page tells apart: 400, 409, 413 and 415 concern only the
+ * file named in the request, so the page continues with the next file; any other status stops
+ * the batch.
+ */
+struct Refusal {
+    const char* status;
+    const char* message;
+};
+constexpr Refusal session_ended{"403 Forbidden", "会话无效，请重新打开传书页。"};
+constexpr Refusal bad_name{"400 Bad Request", "文件名无效或过长。"};
+constexpr Refusal bad_characters{"400 Bad Request", "文件名包含不支持的字符。"};
+constexpr Refusal bad_type{"415 Unsupported Media Type", "仅支持 EPUB 或 TXT 文件。"};
+constexpr Refusal bad_checksum{"400 Bad Request", "文件校验值无效。"};
+constexpr Refusal bad_size{"413 Payload Too Large", "文件大小必须为 1 字节至 64 MiB。"};
+constexpr Refusal exists{"409 Conflict", "书库里已有同名文件，未上传。已有书籍不会被覆盖。"};
+constexpr Refusal not_prepared{"500 Internal Server Error", "无法准备上传或清理上次的临时文件，请检查存储卡后重试。"};
+constexpr Refusal cleanup_failed{"500 Internal Server Error", "临时文件清理失败，请检查存储卡后重试。"};
+constexpr Refusal closed{"503 Service Unavailable", "传输已结束。"};
+constexpr Refusal interrupted{"500 Internal Server Error", "接收中断或超时，未完成的文件未导入。"};
+constexpr Refusal write_failed{"507 Insufficient Storage", "写入失败，请检查存储卡空间。"};
+constexpr Refusal commit_failed{"500 Internal Server Error", "保存或校验失败，请在书库核对后重试。已有同名文件不会被覆盖。"};
+
 esp_err_t upload(httpd_req_t* request) {
     std::unique_ptr<FileImport> transaction;
-    auto fail = [&](const char* message) {
+    auto fail = [&](Refusal refusal) {
         std::string cleanup_error;
         if (transaction && transaction->cancel(cleanup_error) != StoreStatus::Ok) {
             ESP_LOGW("pico_upload", "Cleanup failed: %s", cleanup_error.c_str());
-            message = "传输未完成，临时文件清理失败。请检查存储卡后重试。";
+            refusal = {"500 Internal Server Error", "传输未完成，临时文件清理失败。请检查存储卡后重试。"};
         }
-        ESP_LOGW("pico_upload", "Rejected: %s", message);
+        ESP_LOGW("pico_upload", "Rejected: %s %s", refusal.status, refusal.message);
+        httpd_resp_set_status(request, refusal.status);
+        httpd_resp_set_type(request, "text/plain; charset=utf-8");
         httpd_resp_set_hdr(request, "Connection", "close");
-        httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, message);
+        httpd_resp_send(request, refusal.message, HTTPD_RESP_USE_STRLEN);
         return ESP_FAIL; // An unread request body requires closing the connection.
     };
-    if (header(request, "X-Pico-Token", 32) != upload_token)
-        return fail("会话无效，请重新打开传书页。");
+    const auto* cancelled = upload_session.cancelled;
+    if (header(request, "X-Pico-Token", 32) != upload_token) return fail(session_ended);
     const auto encoded = header(request, "X-Pico-Name", 720);
     std::string name;
     for (std::size_t i = 0; i < encoded.size(); ++i) {
         char c = encoded[i];
         if (c == '%') {
             if (i + 2 >= encoded.size() || hex(encoded[i + 1]) < 0 || hex(encoded[i + 2]) < 0)
-                return fail("文件名无效。");
+                return fail(bad_name);
             c = static_cast<char>(hex(encoded[i + 1]) * 16 + hex(encoded[i + 2])); i += 2;
         }
         if (static_cast<unsigned char>(c) < 32 || c == 127 || std::strchr("/\\:*?\"<>|", c))
-            return fail("文件名包含不支持的字符。");
+            return fail(bad_characters);
         name += c;
     }
     if (name.size() < 5 || name.size() > 240 || name.front() == '.' || name.back() == ' ')
-        return fail("文件名无效或过长。");
+        return fail(bad_name);
     const auto dot = name.rfind('.');
-    if (dot == std::string::npos) return fail("仅支持 EPUB 或 TXT 文件。");
+    if (dot == std::string::npos) return fail(bad_type);
     auto extension = name.substr(dot);
     for (auto& c : extension) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
-    if (extension != ".epub" && extension != ".txt") return fail("仅支持 EPUB 或 TXT 文件。");
+    if (extension != ".epub" && extension != ".txt") return fail(bad_type);
     const auto checksum = header(request, "X-Pico-CRC", 8);
-    if (checksum.empty()) return fail("缺少文件校验值。");
+    if (checksum.empty()) return fail(bad_checksum);
     std::uint32_t crc = 0;
     for (const auto c : checksum) {
-        if (hex(c) < 0) return fail("文件校验值无效。");
+        if (hex(c) < 0) return fail(bad_checksum);
         crc = crc * 16 + hex(c);
     }
     const bool checking = std::strcmp(request->uri, "/check") == 0;
@@ -91,21 +131,17 @@ esp_err_t upload(httpd_req_t* request) {
         const auto value = header(request, "X-Pico-Size", 10);
         const auto parsed = std::from_chars(value.data(), value.data() + value.size(), size);
         if (request->content_len || parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size())
-            return fail("文件大小无效。");
+            return fail(bad_size);
     }
-    if (!size || size > 64U * 1024 * 1024)
-        return fail("文件大小必须为 1 字节至 64 MiB。");
+    if (!size || size > 64U * 1024 * 1024) return fail(bad_size);
     std::string error;
-    transaction = FileStore(upload_root).begin_import("Books/" + name, size, crc, error);
+    transaction = FileStore(upload_session.root).begin_import("Books/" + name, size, crc, error);
     if (!transaction) {
         ESP_LOGW("pico_upload", "Prepare failed: %s", error.c_str());
-        return fail(error == "destination_exists_or_unsafe"
-            ? "已有同名文件或目标路径不可用。已有书籍不会被覆盖。"
-            : "无法准备上传或清理上次的临时文件，请检查存储卡后重试。");
+        return fail(error == "destination_exists_or_unsafe" ? exists : not_prepared);
     }
     if (checking) {
-        if (transaction->cancel(error) != StoreStatus::Ok)
-            return fail("临时文件清理失败，请检查存储卡后重试。");
+        if (transaction->cancel(error) != StoreStatus::Ok) return fail(cleanup_failed);
         transaction.reset();
         httpd_resp_set_type(request, "text/plain; charset=utf-8");
         return httpd_resp_send(request, "可以上传", HTTPD_RESP_USE_STRLEN);
@@ -114,33 +150,51 @@ esp_err_t upload(httpd_req_t* request) {
              static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
     char block[2048];
     while (transaction->received() < request->content_len) {
-        if (upload_cancelled && upload_cancelled->load()) return fail("传输已结束。");
+        if (cancelled && cancelled->load()) return fail(closed);
         const auto count = httpd_req_recv(request, block, std::min<std::size_t>(sizeof(block), request->content_len - transaction->received()));
-        if (count <= 0) return fail("接收中断或超时，未完成的文件未导入。");
+        if (count <= 0) return fail(interrupted);
         if (transaction->append(transaction->received(), block, count, error) != StoreStatus::Ok)
-            return fail("写入失败，请检查存储卡空间。");
+            return fail(write_failed);
     }
-    if (upload_cancelled && upload_cancelled->load()) return fail("传输已结束。");
+    if (cancelled && cancelled->load()) return fail(closed);
     ESP_LOGI("pico_upload", "Verifying bytes=%u", static_cast<unsigned>(size));
     if (transaction->finish(error) != StoreStatus::Ok) {
         ESP_LOGW("pico_upload", "Commit failed: %s", error.c_str());
-        return fail("保存或校验失败，请在书库核对后重试。已有同名文件不会被覆盖。");
+        return fail(commit_failed);
     }
     ESP_LOGI("pico_upload", "Saved bytes=%u stack_free=%u", static_cast<unsigned>(size),
              static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+    if (upload_session.saved) upload_session.saved(upload_session.context, name);
     httpd_resp_set_type(request, "text/plain; charset=utf-8");
     return httpd_resp_send(request, "已保存", HTTPD_RESP_USE_STRLEN);
 }
 
+esp_err_t transfer_page(httpd_req_t* request) {
+    auto page = std::string(upload_page);
+    page.insert(page.find("<script>") + 8,
+                "const token='" + upload_token + "',route={hotspot:" + (upload_session.code.empty() ? "true" : "false") +
+                    ",network:" + script_string(upload_session.network) + "};");
+    httpd_resp_set_type(request, "text/html; charset=utf-8");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(request, "X-Frame-Options", "DENY");
+    return httpd_resp_send(request, page.data(), page.size());
+}
+
+// On a joined network the page is reachable only through the address on the device screen.
+esp_err_t address_required(httpd_req_t* request, httpd_err_code_t) {
+    static constexpr char page[] =
+        "<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Pico Page 传书</title>"
+        "<body style=\"font:16px/1.6 system-ui,sans-serif;max-width:560px;margin:0 auto;padding:20px\">"
+        "<h1 style=\"font-size:22px\">Wi-Fi 传书</h1><p>请用手机扫描设备屏幕上的二维码，"
+        "或在浏览器输入屏幕上显示的完整地址（包括斜杠后的字母和数字）。</p></body></html>";
+    httpd_resp_set_status(request, "404 Not Found");
+    httpd_resp_set_type(request, "text/html; charset=utf-8");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    return httpd_resp_send(request, page, HTTPD_RESP_USE_STRLEN);
+}
+
 esp_err_t serve(httpd_req_t* request) {
-    if (!upload_root.empty()) {
-        auto page = std::string(upload_page);
-        page.insert(page.find("<script>") + 8, "const token='" + upload_token + "';");
-        httpd_resp_set_type(request, "text/html; charset=utf-8");
-        httpd_resp_set_hdr(request, "Cache-Control", "no-store");
-        httpd_resp_set_hdr(request, "X-Frame-Options", "DENY");
-        return httpd_resp_send(request, page.data(), page.size());
-    }
     const bool submitted = request->method == HTTP_POST;
     std::string body;
     if (submitted) {
@@ -221,24 +275,10 @@ void resolver(void*) {
     xSemaphoreGive(resolver_stopped);
     vTaskDelete(nullptr);
 }
-} // namespace
 
-bool start_portal_server(PortalHandler handler, void* context, std::size_t body_limit,
-                         std::string& error, const std::string& root,
-                         const std::atomic_bool* cancelled) {
-    stop_portal_server();
-    upload_root = root;
-    upload_cancelled = cancelled;
-    upload_token.clear();
-    if (!root.empty()) {
-        for (int i = 0; i < 4; ++i) {
-            char part[9]; std::snprintf(part, sizeof(part), "%08lx", static_cast<unsigned long>(esp_random()));
-            upload_token += part;
-        }
-    }
-    portal_handler = handler;
-    portal_context = context;
-    portal_body_limit = body_limit;
+/** Starts the HTTP server with the given handlers; access_point adds the name service. */
+bool start_server(const std::vector<httpd_uri_t>& handlers, httpd_err_handler_func_t missing, bool access_point,
+                  std::string& error) {
     // Redirected probes arrive for paths the server does not have; those are expected.
     esp_log_level_set("httpd_uri", ESP_LOG_ERROR);
     esp_log_level_set("httpd_txrx", ESP_LOG_ERROR);
@@ -252,29 +292,16 @@ bool start_portal_server(PortalHandler handler, void* context, std::size_t body_
     configuration.lru_purge_enable = true;
     configuration.recv_wait_timeout = 5;
     auto result = httpd_start(&server, &configuration);
-    if (result == ESP_OK) {
-        httpd_uri_t page{}, save{}, check{};
-        page.uri = "/";
-        page.method = HTTP_GET;
-        save.uri = root.empty() ? "/save" : "/upload";
-        save.method = HTTP_POST;
-        page.handler = serve;
-        save.handler = root.empty() ? serve : upload;
-        if ((result = httpd_register_uri_handler(server, &page)) == ESP_OK &&
-            (result = httpd_register_uri_handler(server, &save)) == ESP_OK)
-            result = httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, redirect);
-        if (result == ESP_OK && !root.empty()) {
-            check.uri = "/check";
-            check.method = HTTP_POST;
-            check.handler = upload;
-            result = httpd_register_uri_handler(server, &check);
-        }
-    }
+    for (std::size_t i = 0; result == ESP_OK && i < handlers.size(); ++i)
+        result = httpd_register_uri_handler(server, &handlers[i]);
+    if (result == ESP_OK) result = httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, missing);
     if (result != ESP_OK) {
         stop_portal_server();
         error = std::string("Setup page server: ") + esp_err_to_name(result);
         return false;
     }
+    error.clear();
+    if (!access_point) return true;
     // Without the name service the page still answers at its address; only the automatic
     // sign-in prompt is lost, so a failure here does not fail the session.
     esp_netif_ip_info_t address{};
@@ -289,8 +316,46 @@ bool start_portal_server(PortalHandler handler, void* context, std::size_t body_
             resolver_stopped = nullptr;
         }
     }
-    error.clear();
     return true;
+}
+} // namespace
+
+bool start_portal_server(PortalHandler handler, void* context, std::size_t body_limit, std::string& error) {
+    stop_portal_server();
+    portal_handler = handler;
+    portal_context = context;
+    portal_body_limit = body_limit;
+    httpd_uri_t page{}, save{};
+    page.uri = "/";
+    page.method = HTTP_GET;
+    page.handler = serve;
+    save.uri = "/save";
+    save.method = HTTP_POST;
+    save.handler = serve;
+    return start_server({page, save}, redirect, true, error);
+}
+
+bool start_upload_server(const UploadServer& session, std::string& error) {
+    stop_portal_server();
+    upload_session = session;
+    upload_token.clear();
+    for (int i = 0; i < 4; ++i) {
+        char part[9]; std::snprintf(part, sizeof(part), "%08lx", static_cast<unsigned long>(esp_random()));
+        upload_token += part;
+    }
+    const bool access_point = session.code.empty();
+    upload_path = "/" + session.code;
+    httpd_uri_t page{}, save{}, check{};
+    page.uri = upload_path.c_str();
+    page.method = HTTP_GET;
+    page.handler = transfer_page;
+    save.uri = "/upload";
+    save.method = HTTP_POST;
+    save.handler = upload;
+    check.uri = "/check";
+    check.method = HTTP_POST;
+    check.handler = upload;
+    return start_server({page, save, check}, access_point ? redirect : address_required, access_point, error);
 }
 
 void stop_portal_server() {

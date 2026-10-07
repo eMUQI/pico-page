@@ -29,7 +29,7 @@ TF 根目录/
 ├── LockScreens/                      # 未来自定义锁屏图片；当前固件尚不读取
 └── PicoPage/
     ├── settings.toml                 # 全局阅读/UI/刷新配置
-    ├── network.toml                  # 可选：Wi-Fi 凭据，明文保存
+    ├── network.toml                  # 可选：最多 5 个 Wi-Fi 凭据，明文保存
     ├── sync.toml                     # 可选：KOReader 同步账户，明文保存
     ├── data/last-book.txt            # 上次打开的书
     └── cache/                       # 可重建内容

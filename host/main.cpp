@@ -178,17 +178,20 @@ struct Host {
                 network = std::async(std::launch::async, perform, std::move(*request));
         }
     }
-    // The desktop preview has no radio. It shows the setup page with placeholder access values
-    // and never reports a saved or failed submission.
+    // The desktop preview has no radio. It shows the session pages with placeholder access
+    // values and never reports a saved or failed submission or an uploaded book.
     bool poll_portal() {
         const auto action = app.take_portal_action();
-        if (action == PortalAction::Start || action == PortalAction::Upload) {
-            if (!app.prepare_portal(action == PortalAction::Upload))
-                app.show_portal({PortalPhase::Closed, "", "", "", "无法开启手机配置，请稍后重试。"});
+        if (action == PortalAction::Start || action == PortalAction::Upload || action == PortalAction::UploadStation) {
+            const bool upload = action != PortalAction::Start, station = action == PortalAction::UploadStation;
+            if (!app.prepare_portal(upload, station))
+                app.show_portal({PortalPhase::Closed, "", "", "", "无法开启手机配置，请稍后重试。", "", 0, ""});
+            else if (flush() && station)
+                app.show_portal({PortalPhase::Waiting, "", "", "http://192.168.1.23/preview", "", "home-preview", 0, ""});
             else if (flush())
-                app.show_portal({PortalPhase::Waiting, "PicoPage-PREVIEW", "preview0", "http://192.168.4.1", ""});
+                app.show_portal({PortalPhase::Waiting, "PicoPage-PREVIEW", "preview0", "http://192.168.4.1", "", "", 0, ""});
         } else if (action == PortalAction::Stop)
-            app.show_portal({PortalPhase::Closed, "", "", "", "桌面预览不提供设备热点。"});
+            app.show_portal({PortalPhase::Closed, "", "", "", "桌面预览不提供设备热点。", "", 0, ""});
         return flush();
     }
     bool gesture(Input key, bool touch = false, int x = 0, int y = 0, bool hold = false) {

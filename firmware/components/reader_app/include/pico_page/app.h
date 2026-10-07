@@ -34,7 +34,8 @@ enum class View {
     Loading
 };
 enum class UsbTransferAction { None, Start, Exit };
-enum class PortalAction { None, Start, Stop, Upload };
+/** Upload runs over the device access point; UploadStation over the best nearby saved network. */
+enum class PortalAction { None, Start, Stop, Upload, UploadStation };
 enum class PortalPhase { Starting, Waiting, JoiningWifi, CheckingAccount, Saved, Failed, Closed };
 /** One state of a phone setup session, reported by the task that owns the radio. */
 struct PortalStatus {
@@ -43,6 +44,11 @@ struct PortalStatus {
     std::string access_ssid, access_password, url;
     /** JoiningWifi: the network name. Saved, Failed and Closed: a sentence for the user, or empty. */
     std::string detail;
+    /** Upload over a saved network: its name; the access point fields are then empty. */
+    std::string network;
+    /** Upload sessions: books saved so far and the title of the latest one. */
+    int saved_books = 0;
+    std::string latest_book;
 };
 struct BookPages {
     std::uint32_t page;   // 1-based, counted from the first linear chapter.
@@ -115,13 +121,16 @@ class ReaderApp {
     PortalAction take_portal_action();
     /**
      * Saves confirmed progress, ends sync work and shows the starting state of a phone setup
-     * session (or book upload when upload is true). Stops background card jobs before returning.
+     * session, or of book upload when upload is true; station selects upload over a saved
+     * network instead of the device access point. Stops background card jobs before returning.
      * false when the display or network is busy, the card is absent or the save fails.
      */
-    bool prepare_portal(bool upload = false);
+    bool prepare_portal(bool upload = false, bool station = false);
     /**
      * Draws a session state while the setup page is shown. Closed leaves that page, or the page
-     * that requested the session, for settings or the refreshed library after upload.
+     * that requested the session, for settings or the refreshed library after upload. An upload
+     * session that closes before its first Waiting state returns to the network page with the
+     * closing sentence.
      */
     void show_portal(const PortalStatus &status);
     bool prepare_sleep();

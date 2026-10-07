@@ -110,6 +110,7 @@ enum Control {
     LibraryView,
     PortalStart,
     WifiUpload,
+    WifiUploadStation,
     PortalStop,
     SyncCancel,
     Retry,
@@ -382,6 +383,10 @@ struct ReaderApp::Impl final : DisplayBackend {
     PortalStatus portal;
     bool portal_closing = false;
     bool portal_upload = false;
+    // The upload session runs over a saved network rather than the device access point.
+    bool portal_station = false;
+    // A Waiting state arrived; a session closing before it never offered its page.
+    bool portal_started = false;
     std::optional<Frame> pending;
     std::optional<NetworkOperation> network_request;
     std::shared_ptr<std::atomic_bool> network_cancel;
@@ -3016,9 +3021,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         const bool configured = sync::load_config(root, account, detail);
         std::uint64_t card_total = 0, card_free = 0;
         const bool measured = store.card_space(card_total, card_free);
-        provision::WifiCredentials wifi;
+        std::vector<provision::SavedWifi> networks;
+        const bool readable = provision::load_networks(root, networks, detail);
+        const auto *last = provision::last_network(networks);
         settings_row(Import, "网络与传输", std::string("Wi-Fi：") +
-                     (provision::load_wifi(root, wifi, detail) ? wifi.ssid : "未配置") + " · USB 文件传输", 120);
+                     (!readable ? "文件无效" : last ? last->ssid : "未配置") + " · USB 文件传输", 120);
         settings_row(SyncSettings, "KOReader 同步", configured ? server_name(account) + " · " + account.username : "未配置", 252);
         settings_row(Refresh, "显示与刷新", refresh_name(values) + " · " +
                      (values.refresh_preset == "clear" ? "每页全刷" : "每 " + std::to_string(refresh_interval(values)) + " 页全刷"), 384);
@@ -3374,30 +3381,91 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!reading && has_book()) text(position, 364, top + 106, 22, 284, 15);
         view = View::Sleeping;
     }
+    /** A row of the network page: 30 px title, optional 24 px subtitle and a value with a chevron. */
+    void entry_row(int id, const std::string &title, const std::string &subtitle, const std::string &value,
+                   int y, int height) {
+        const auto shown = value.empty() ? std::string("›") : value + " ›";
+        const int value_width = std::min(text_width(shown, 30), 300);
+        const int title_width = 612 - value_width - 16;
+        if (subtitle.empty())
+            text(title, 36, y + (height - 30) / 2 - 6, 30, title_width);
+        else {
+            text(title, 36, y + height / 2 - 46, 30, title_width);
+            text(subtitle, 36, y + height / 2 + 6, 24, title_width, 3);
+        }
+        text(shown, 648 - value_width, y + (height - 30) / 2 - 6, 30, value_width, 3);
+        canvas.line(36, y + height - 1, 647, y + height - 1, 12, 2);
+        hits.push_back({24, y, 636, height, id});
+    }
     void draw_import() {
         view = View::Import;
         hits.clear();
         canvas.clear();
         header("网络与传输", Back, import_from_settings ? "设置" : "书库");
-        text("USB 文件传输", 36, 128, 22, 612, 3);
-        const int usb = wrapped("电脑可直接管理 TF 卡。传输期间暂停阅读和同步，退出时会重启。", 36, 168, 612, 26);
-        button(UsbStart, "开启 USB 传输", 24, 192 + usb, 636, 96);
-        canvas.line(36, 328 + usb, 647, 328 + usb, 12, 2);
-        text("Wi-Fi", 36, 356 + usb, 22, 612, 3);
-        provision::WifiCredentials wifi;
+        text("USB 文件传输", 36, 140, 24, 612, 3);
+        const int usb = wrapped("电脑可直接管理 TF 卡。传输期间暂停阅读和同步，退出时会重启。", 36, 180, 612, 30);
+        button(UsbStart, "开启 USB 传输", 24, 204 + usb, 636, 96, false, 30);
+        int y = 340 + usb;
+        canvas.line(36, y, 647, y, 12, 2);
+        text("Wi-Fi", 36, y + 36, 24, 612, 3);
+        y += 76;
+        std::vector<provision::SavedWifi> networks;
         std::string detail;
-        value_row(PortalStart, "Wi-Fi 与同步账户", "", provision::load_wifi(root, wifi, detail) ? wifi.ssid : "未配置", 388 + usb, 88);
-        value_row(WifiUpload, "Wi-Fi 传书", "", "", 476 + usb, 88);
-        wrapped("配置要在手机上填写，设备验证通过后才会保存。", 36, 588 + usb, 612, 22, true, 3);
-        footer_bar(notice());
+        const bool readable = provision::load_networks(root, networks, detail);
+        sync::Config account;
+        const bool synced = sync::load_config(root, account, detail);
+        const bool configured = readable && !networks.empty();
+        if (configured) {
+            entry_row(PortalStart, "Wi-Fi 与同步账户",
+                      "已保存 " + std::to_string(networks.size()) + " 个网络 · " +
+                          (synced ? "同步账户 " + account.username : std::string("未配置同步账户")),
+                      provision::last_network(networks)->ssid, y, 120);
+            text("Wi-Fi 传书", 36, y + 156, 24, 612, 3);
+            entry_row(WifiUploadStation, "经已保存的 Wi-Fi 传书", "手机连同一网络，传书时仍能上网", "", y + 196, 120);
+            entry_row(WifiUpload, "经设备热点传书", "不需要路由器，手机暂时不能上网", "", y + 316, 120);
+        } else {
+            const int height = readable ? 104 : 120;
+            entry_row(PortalStart, "Wi-Fi 与同步账户", readable ? "" : "PicoPage/network.toml 无效",
+                      readable ? "未配置" : "", y, height);
+            entry_row(WifiUpload, "Wi-Fi 传书", "经设备热点，不需要路由器", "", y + height, 120);
+            wrapped("配置 Wi-Fi 后，也可以经家里的网络传书，手机传书时仍能上网。", 36, y + height + 140, 612, 24, true, 3);
+        }
+        // Start failures name their cause in several clauses, so the notice wraps.
+        if (!notice().empty()) {
+            canvas.line(0, 1012, 683, 1012, 1, 3);
+            wrapped(message, 36, 1044, 612, 24);
+        }
+    }
+    /** Saved-book summary of an upload session: the count and the latest title. */
+    void upload_summary(int y, int title_size) {
+        const bool any = portal.saved_books > 0;
+        text(portal_closing ? "正在结束…" : any ? "已保存 " + std::to_string(portal.saved_books) + " 本" : "等待手机上传",
+             36, y, title_size, 612, 1, true);
+        if (!portal_closing) {
+            if (any) {
+                text("最近：" + portal.latest_book, 36, y + title_size + 22, 24, 612, 3);
+                text("逐本结果见浏览器。", 36, y + title_size + 56, 24, 612, 3);
+            } else
+                wrapped("逐本结果见浏览器。结束后书库会重新扫描。", 36, y + title_size + 22, 612, 24, true, 3);
+        }
     }
     void draw_portal() {
         view = View::Portal;
         hits.clear();
         canvas.clear();
         header(portal_upload ? "Wi-Fi 传书" : "手机配置", 0);
-        if (portal.access_ssid.empty()) {
-            note(portal_closing ? "正在结束…" : "正在开启设备热点…", 200);
+        const auto scheme = portal.url.find("://");
+        const auto address = scheme == std::string::npos ? portal.url : portal.url.substr(scheme + 3);
+        if (portal.url.empty()) {
+            note(portal_closing ? "正在结束…" : portal_station ? "正在连接已保存的 Wi-Fi…" : "正在开启设备热点…", 200);
+        } else if (!portal.network.empty()) {
+            text("用手机扫码打开传书页", 36, 140, 30, 612, 1, true);
+            wrapped("手机或电脑需连着“" + portal.network + "”。", 36, 188, 612, 24, true, 3);
+            graphics::draw_qr(canvas, portal.url, 152, 256, 380);
+            center("或在浏览器输入", 0, 660, 684, 24, 3);
+            center(address, 0, 700, 684, 34);
+            canvas.line(0, 780, 683, 780, 1, 3);
+            upload_summary(808, 30);
         } else {
             text("1  用手机连接设备热点", 36, 128, 26, 612, 1, true);
             graphics::draw_qr(canvas, provision::wifi_qr({portal.access_ssid, portal.access_password}), 36, 176, 264);
@@ -3409,35 +3477,37 @@ struct ReaderApp::Impl final : DisplayBackend {
             text(portal_upload ? "2  连接后扫码打开传书页" : "2  连接后扫码打开配置页", 36, 472, 26, 612, 1, true);
             graphics::draw_qr(canvas, portal.url, 36, 520, 264);
             text("或在浏览器输入", 324, 540, 22, 324, 3);
-            const auto scheme = portal.url.find("://");
-            text(scheme == std::string::npos ? portal.url : portal.url.substr(scheme + 3), 324, 574, 28, 324);
+            text(address, 324, 574, 28, 324);
             text(portal_upload ? "EPUB/TXT · 最大 64 MiB" : "只支持 2.4 GHz 网络", 324, 660, 22, 324, 3);
             canvas.line(0, 816, 683, 816, 1, 3);
-            std::string title, body = portal.detail;
-            switch (portal.phase) {
-            case PortalPhase::JoiningWifi:
-                title = "正在连接“" + portal.detail + "”…";
-                body = "验证期间，手机可能暂时断开设备热点。";
-                break;
-            case PortalPhase::CheckingAccount:
-                title = "正在验证同步账户…";
-                body.clear();
-                break;
-            case PortalPhase::Saved:
-                title = "已保存";
-                body += "可以结束配置，或在手机上继续修改。";
-                break;
-            case PortalPhase::Failed:
-                title = "未保存";
-                body += "请在手机上重新填写。";
-                break;
-            default:
-                title = portal_upload ? "Wi-Fi 传书已开启" : "等待手机提交";
-                body = portal_upload ? "上传结果请查看浏览器。结束后返回书库。" : "在配置页填写后，设备先验证，成功后才保存。";
+            if (portal_upload) upload_summary(844, 28);
+            else {
+                std::string title, body = portal.detail;
+                switch (portal.phase) {
+                case PortalPhase::JoiningWifi:
+                    title = "正在连接“" + portal.detail + "”…";
+                    body = "验证期间，手机可能暂时断开设备热点。";
+                    break;
+                case PortalPhase::CheckingAccount:
+                    title = "正在验证同步账户…";
+                    body.clear();
+                    break;
+                case PortalPhase::Saved:
+                    title = "已保存";
+                    body += "可以结束配置，或在手机上继续修改。";
+                    break;
+                case PortalPhase::Failed:
+                    title = "未保存";
+                    body += "请在手机上重新填写。";
+                    break;
+                default:
+                    title = "等待手机提交";
+                    body = "在配置页填写后，设备先验证，成功后才保存。";
+                }
+                if (portal_closing) { title = "正在结束…"; body.clear(); }
+                text(title, 36, 844, 28, 612, 1, true);
+                wrapped(body, 36, 904, 612, 24);
             }
-            if (portal_closing) { title = "正在结束…"; body.clear(); }
-            text(title, 36, 844, 28, 612, 1, true);
-            wrapped(body, 36, 904, 612, 24);
         }
         if (!portal_closing) button(PortalStop, portal_upload ? "结束传书" : "结束配置", 24, 1080, 636, 96);
     }
@@ -3923,8 +3993,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
             return;
         }
-        if (id == PortalStart || id == WifiUpload) {
-            portal_action = id == WifiUpload ? PortalAction::Upload : PortalAction::Start;
+        if (id == PortalStart || id == WifiUpload || id == WifiUploadStation) {
+            portal_action = id == WifiUpload ? PortalAction::Upload
+                            : id == WifiUploadStation ? PortalAction::UploadStation : PortalAction::Start;
             return;
         }
         if (id == UsbStart) {
@@ -4658,7 +4729,7 @@ void ReaderApp::show_usb_transfer(bool active, const std::string& error) {
 PortalAction ReaderApp::take_portal_action() {
     return std::exchange(impl_->portal_action, PortalAction::None);
 }
-bool ReaderApp::prepare_portal(bool upload) {
+bool ReaderApp::prepare_portal(bool upload, bool station) {
     if (impl_->content_loading || impl_->usb_prepared || impl_->display.busy() || impl_->active_network ||
         !impl_->card_available || !impl_->persist()) return false;
     impl_->cancel_sync();
@@ -4668,6 +4739,8 @@ bool ReaderApp::prepare_portal(bool upload) {
     impl_->release_counting();
     impl_->stop_counting_job();
     impl_->portal_upload = upload;
+    impl_->portal_station = upload && station;
+    impl_->portal_started = false;
     impl_->portal = {};
     impl_->portal_closing = false;
     impl_->draw_portal();
@@ -4685,8 +4758,16 @@ void ReaderApp::show_portal(const PortalStatus &status) {
         impl_->portal_closing = false;
         impl_->message = status.detail;
         const bool uploaded = impl_->portal_upload && view == View::Portal;
-        impl_->portal_upload = false;
-        if (uploaded && impl_->card_available) {
+        const bool started = impl_->portal_started;
+        const bool station_failed = uploaded && impl_->portal_station && !status.detail.empty();
+        impl_->portal_upload = impl_->portal_station = impl_->portal_started = false;
+        if (uploaded && (!started || station_failed)) {
+            if (started && impl_->card_available) {
+                invalidate_identity_cache();
+                impl_->scan_library();
+            }
+            impl_->draw_import();
+        } else if (uploaded && impl_->card_available) {
             invalidate_identity_cache();
             impl_->scan_library(); impl_->draw_library();
         } else impl_->draw_settings();
@@ -4695,7 +4776,8 @@ void ReaderApp::show_portal(const PortalStatus &status) {
     }
     if (view != View::Portal) return;
     // The codes must be scannable under every refresh preset, so their first frame clears the panel.
-    const bool codes_appear = impl_->portal.access_ssid.empty() && !status.access_ssid.empty();
+    const bool codes_appear = impl_->portal.url.empty() && !status.url.empty();
+    impl_->portal_started = impl_->portal_started || status.phase == PortalPhase::Waiting;
     impl_->portal = status;
     impl_->draw_portal();
     impl_->overlay(codes_appear);

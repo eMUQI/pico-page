@@ -1496,14 +1496,14 @@ int main(int argc, char** argv) {
         driver.tap(342, 510);
         assert(!app.pending_frame() && app.view() == View::Import);
         assert(app.take_portal_action() == PortalAction::Start && app.take_portal_action() == PortalAction::None);
-        app.show_portal({PortalPhase::Closed, "", "", "", "无法开启手机配置，请稍后重试。"}); driver.present();
+        app.show_portal({PortalPhase::Closed, "", "", "", "无法开启手机配置，请稍后重试。", "", 0, ""}); driver.present();
         assert(app.view() == View::Settings && app.status() == "无法开启手机配置，请稍后重试。");
         driver.tap(300, 310); driver.present(); assert(app.view() == View::SyncSettings && app.status().empty());
         driver.tap(342, 800);
         assert(app.take_portal_action() == PortalAction::Start);
         assert(app.prepare_portal()); driver.present(); assert(app.view() == View::Portal);
         const auto starting = app.canvas().pixels();
-        PortalStatus status{PortalPhase::Waiting, "PicoPage-TEST", "abcd2345", "http://192.168.4.1", ""};
+        PortalStatus status{PortalPhase::Waiting, "PicoPage-TEST", "abcd2345", "http://192.168.4.1", "", "", 0, ""};
         app.show_portal(status);
         assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean);
         driver.present();
@@ -1530,7 +1530,7 @@ int main(int argc, char** argv) {
         assert(app.take_portal_action() == PortalAction::Stop); driver.present();
         driver.tap(342, 1120);
         assert(app.take_portal_action() == PortalAction::None && !app.pending_frame());
-        app.show_portal({PortalPhase::Closed, "", "", "", ""}); driver.present();
+        app.show_portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); driver.present();
         assert(app.view() == View::Settings && app.status().empty());
         app.show_portal(status);
         assert(!app.pending_frame() && app.view() == View::Settings);
@@ -1540,21 +1540,62 @@ int main(int argc, char** argv) {
         assert(app.prepare_portal()); driver.present();
         assert(app.view() == View::Portal && !app.save_due());
         const auto saved = *app.saved_record();
-        app.show_portal({PortalPhase::Closed, "", "", "", ""}); driver.present();
+        app.show_portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); driver.present();
         assert(app.view() == View::Settings && *app.saved_record() == saved);
         driver.tap(300, 180); driver.present();
-        driver.tap(342, 600);
+        driver.tap(342, 660);
         assert(app.take_portal_action() == PortalAction::Upload);
         assert(app.prepare_portal(true)); driver.present();
-        app.show_portal({PortalPhase::Waiting, "PicoPage-TEST", "abcd2345", "http://192.168.4.1", ""});
+        app.show_portal({PortalPhase::Waiting, "PicoPage-TEST", "abcd2345", "http://192.168.4.1", "", "", 0, ""});
         driver.present(); driver.refresh();
         assert(app.view() == View::Portal && *app.saved_record() == saved && !app.prepare_sleep());
         fs::copy_file(card / "Books/book.epub", card / "Books/wifi-import.epub");
         driver.tap(342, 1120);
         assert(app.take_portal_action() == PortalAction::Stop); driver.present();
-        app.show_portal({PortalPhase::Closed, "", "", "", ""}); driver.present();
+        app.show_portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); driver.present();
         assert(app.view() == View::Library && *app.saved_record() == saved);
         fs::remove(card / "Books/wifi-import.epub");
+
+        // With a saved network the page offers both upload paths. A station session that never
+        // reaches its page returns to the network page with the reason.
+        fs::create_directories(card / "PicoPage");
+        { std::ofstream file(card / "PicoPage/network.toml"); file << "schema_version = 2\n[[wifi]]\nssid = \"home\"\npassword = \"preview-password\"\n"; }
+        driver.tap(600, 50); driver.present(); assert(app.view() == View::Settings);
+        driver.tap(300, 180); driver.present(); assert(app.view() == View::Import);
+        driver.tap(342, 880);
+        assert(app.take_portal_action() == PortalAction::Upload);
+        driver.tap(342, 760);
+        assert(app.take_portal_action() == PortalAction::UploadStation);
+        assert(app.prepare_portal(true, true)); driver.present();
+        assert(app.view() == View::Portal && !app.prepare_sleep());
+        const std::string refused = "无法连接“home”，密码可能不正确（驱动原因 15）。可以改用设备热点传书。";
+        app.show_portal({PortalPhase::Closed, "", "", "", refused, "", 0, ""}); driver.present();
+        assert(app.view() == View::Import && app.status() == refused && *app.saved_record() == saved);
+        // A started session shows one code for the joined network and the saved-book summary.
+        driver.tap(342, 760);
+        assert(app.take_portal_action() == PortalAction::UploadStation);
+        assert(app.prepare_portal(true, true)); driver.present();
+        const auto connecting = app.canvas().pixels();
+        PortalStatus station{PortalPhase::Waiting, "", "", "http://192.168.1.23/abc234", "", "home", 0, ""};
+        app.show_portal(station);
+        assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean);
+        driver.present();
+        // Top-left finder module of the version 2 address code at 11 px inside its quiet zone.
+        assert(app.canvas().pixels() != connecting);
+        assert(app.canvas().pixel(206, 310) == 0 && app.canvas().pixel(200, 304) == 15);
+        const auto waiting = app.canvas().pixels();
+        station.saved_books = 2; station.latest_book = "呼兰河传";
+        app.show_portal(station);
+        assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::Content);
+        driver.present();
+        assert(app.canvas().pixels() != waiting && app.view() == View::Portal);
+        driver.refresh();
+        driver.key(Input::K1); driver.key(Input::K3); driver.tap(342, 500);
+        assert(!app.pending_frame() && app.take_portal_action() == PortalAction::None);
+        const std::string lost = "与已保存的 Wi-Fi 连接已断开。可以改用设备热点传书。";
+        app.show_portal({PortalPhase::Closed, "", "", "", lost, "", 0, ""}); driver.present();
+        assert(app.view() == View::Import && app.status() == lost && *app.saved_record() == saved);
+        fs::remove(card / "PicoPage/network.toml");
     }
     {
         fs::create_directories(card / "SaveWorker");

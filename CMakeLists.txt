@@ -80,6 +80,12 @@ target_link_libraries(provision_test PRIVATE reader_sync)
 target_compile_options(provision_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME provision COMMAND provision_test)
 
+# The transfer page script runs in the phone browser; Node executes it against a DOM stand-in.
+find_program(NODE_EXECUTABLE node)
+if(NODE_EXECUTABLE)
+    add_test(NAME wifi_upload_page COMMAND ${NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/wifi_upload_page_test.mjs)
+endif()
+
 add_executable(sync_test tests/sync_test.cpp)
 add_dependencies(sync_test document_fixtures_target)
 target_link_libraries(sync_test PRIVATE reader_sync)

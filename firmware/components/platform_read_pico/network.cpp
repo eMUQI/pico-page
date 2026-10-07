@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
 
@@ -130,6 +131,35 @@ void abandon_station() {
     stop_clock();
     esp_wifi_disconnect();
 }
+
+/** Scans once on the running driver; networks receives distinct names, strongest first. */
+void scan(std::vector<NearbyNetwork>& networks) {
+    networks.clear();
+    wifi_scan_config_t configuration{};
+    if (esp_wifi_scan_start(&configuration, true) != ESP_OK) return;
+    std::uint16_t count = 20;
+    std::vector<wifi_ap_record_t> records(count);
+    if (esp_wifi_scan_get_ap_records(&count, records.data()) != ESP_OK) {
+        esp_wifi_clear_ap_list();
+        count = 0;
+    }
+    for (std::uint16_t index = 0; index < count; ++index) {
+        const auto* raw = reinterpret_cast<const char*>(records[index].ssid);
+        std::string name(raw, strnlen(raw, sizeof(records[index].ssid)));
+        if (name.empty()) continue;
+        const auto found = std::find_if(networks.begin(), networks.end(),
+                                        [&](const NearbyNetwork& item) { return item.ssid == name; });
+        if (found == networks.end()) networks.push_back({std::move(name), records[index].rssi});
+        else found->rssi = std::max<int>(found->rssi, records[index].rssi);
+    }
+    std::stable_sort(networks.begin(), networks.end(),
+                     [](const NearbyNetwork& a, const NearbyNetwork& b) { return a.rssi > b.rssi; });
+}
+
+/** True when Wi-Fi runs and belongs to the calling task. */
+bool owned_and_running() {
+    return wifi_started && network_owner == xTaskGetCurrentTaskHandle();
+}
 } // namespace
 
 void disconnect_network() {
@@ -155,7 +185,7 @@ void disconnect_network() {
 }
 
 bool start_access_point(const std::string& ssid, const std::string& password,
-                        std::vector<std::string>& networks, std::string& error) {
+                        std::vector<NearbyNetwork>& networks, std::string& error) {
     error.clear();
     networks.clear();
     if (network_owner && network_owner != xTaskGetCurrentTaskHandle()) {
@@ -184,26 +214,32 @@ bool start_access_point(const std::string& ssid, const std::string& password,
     }
     access_point = true;
     // Scanning leaves the access point channel for a moment, so it runs once, before a phone joins.
-    wifi_scan_config_t scan{};
-    if (esp_wifi_scan_start(&scan, true) == ESP_OK) {
-        std::uint16_t count = 20;
-        std::vector<wifi_ap_record_t> records(count);
-        if (esp_wifi_scan_get_ap_records(&count, records.data()) != ESP_OK) {
-            esp_wifi_clear_ap_list();
-            count = 0;
-        }
-        for (std::uint16_t index = 0; index < count; ++index) {
-            const auto* raw = reinterpret_cast<const char*>(records[index].ssid);
-            std::string name(raw, strnlen(raw, sizeof(records[index].ssid)));
-            if (!name.empty() && std::find(networks.begin(), networks.end(), name) == networks.end())
-                networks.push_back(std::move(name));
+    scan(networks);
+    return true;
+}
+
+bool scan_networks(std::vector<NearbyNetwork>& networks, std::string& error) {
+    error.clear();
+    networks.clear();
+    if (network_owner && network_owner != xTaskGetCurrentTaskHandle()) {
+        error = "Network must be used by its owning worker task";
+        return false;
+    }
+    if (!owned_and_running()) {
+        disconnect_network();
+        network_owner = xTaskGetCurrentTaskHandle();
+        const auto result = start_wifi(nullptr);
+        if (result != ESP_OK) {
+            disconnect_network();
+            return fail(error, "Wi-Fi initialization", result);
         }
     }
+    scan(networks);
     return true;
 }
 
 bool connect_network(const std::string& ssid, const std::string& password, std::string& error,
-                     ConnectFailure* failure) {
+                     ConnectFailure* failure, bool clock) {
     error.clear();
     ConnectFailure ignored;
     auto& outcome = failure ? *failure : ignored;
@@ -223,7 +259,7 @@ bool connect_network(const std::string& ssid, const std::string& password, std::
     configuration.sta.threshold.authmode = password.empty() ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
     configuration.sta.pmf_cfg.capable = true;
     esp_err_t result = ESP_OK;
-    if (access_point) {
+    if (owned_and_running()) {
         connected = false;
         stop_clock();
         // Leaving an established link reports a disconnect; it must arrive before this attempt
@@ -258,21 +294,49 @@ bool connect_network(const std::string& ssid, const std::string& password, std::
         abandon_station();
         return false;
     }
-    esp_sntp_config_t time_configuration = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
-    const auto time_result = esp_netif_sntp_init(&time_configuration);
-    if (time_result == ESP_OK) {
-        sntp_initialized = true;
-        esp_netif_sntp_sync_wait(pdMS_TO_TICKS(10000));
-    }
-    if (std::time(nullptr) < 1704067200) {
-        outcome.stage = ConnectFailure::Stage::Clock;
-        error = "A valid clock is required for TLS; time synchronization failed";
+    outcome.stage = ConnectFailure::Stage::None;
+    connected = true;
+    if (clock && !synchronize_clock(error, &outcome)) {
         abandon_station();
         return false;
     }
-    outcome.stage = ConnectFailure::Stage::None;
-    connected = true;
     return true;
+}
+
+bool synchronize_clock(std::string& error, ConnectFailure* failure) {
+    error.clear();
+    ConnectFailure ignored;
+    auto& outcome = failure ? *failure : ignored;
+    outcome = {ConnectFailure::Stage::Clock, 0};
+    if (!connected || network_owner != xTaskGetCurrentTaskHandle() || !events ||
+        !(xEventGroupGetBits(events) & has_address)) {
+        outcome.stage = ConnectFailure::Stage::Link;
+        error = "Wi-Fi is not connected";
+        return false;
+    }
+    if (!sntp_initialized) {
+        esp_sntp_config_t time_configuration = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+        if (esp_netif_sntp_init(&time_configuration) == ESP_OK) sntp_initialized = true;
+    }
+    if (sntp_initialized) esp_netif_sntp_sync_wait(pdMS_TO_TICKS(10000));
+    if (std::time(nullptr) < 1704067200) {
+        error = "A valid clock is required for TLS; time synchronization failed";
+        return false;
+    }
+    outcome.stage = ConnectFailure::Stage::None;
+    return true;
+}
+
+std::string station_address() {
+    esp_netif_ip_info_t address{};
+    if (!station_connected() || !interface || esp_netif_get_ip_info(interface, &address) != ESP_OK || !address.ip.addr) return {};
+    char text[16];
+    std::snprintf(text, sizeof(text), IPSTR, IP2STR(&address.ip));
+    return text;
+}
+
+bool station_connected() {
+    return connected && events && (xEventGroupGetBits(events) & has_address);
 }
 
 bool http_request(const std::string& method, const std::string& url,

@@ -121,23 +121,49 @@ Battery battery();
  */
 bool sleep(std::string& error);
 
-/** Where connect_network() stopped. Link carries the Wi-Fi driver's disconnect reason. */
+/** Where connect_network() or synchronize_clock() stopped. Link carries the Wi-Fi driver's disconnect reason. */
 struct ConnectFailure {
     enum class Stage { None, Setup, Link, Address, Clock } stage = Stage::None;
     int reason = 0;
 };
 
+/** A network found by a scan; rssi in dBm. ssid holds the raw broadcast bytes. */
+struct NearbyNetwork {
+    std::string ssid;
+    int rssi = 0;
+};
+
 /**
- * Joins an open or WPA2-or-later personal network and obtains a usable TLS clock. Call only
- * after an explicit user network action. The credentials remain in RAM inside the Wi-Fi
- * driver; this function never writes them to NVS or logs. It blocks its worker task for up
- * to 20 s for an address and 10 s for the time. The first call establishes a session owner
- * independent of the display/input task. While an access point from start_access_point() is
- * up, it stays up and only the station link is replaced; a failure then leaves the access
- * point running.
+ * Joins an open or WPA2-or-later personal network. With clock it also obtains a usable TLS
+ * clock, as synchronize_clock() does. Call only after an explicit user network action. The
+ * credentials remain in RAM inside the Wi-Fi driver; this function never writes them to NVS or
+ * logs. It blocks its worker task for up to 20 s for an address and 10 s for the time. The
+ * first call establishes a session owner independent of the display/input task. While Wi-Fi is
+ * already running for this owner (an access point from start_access_point() or a station from
+ * scan_networks()), only the station link is replaced; a failure then leaves an access point
+ * running and releases a station-only session.
  */
 bool connect_network(const std::string& ssid, const std::string& password, std::string& error,
-                     ConnectFailure* failure = nullptr);
+                     ConnectFailure* failure = nullptr, bool clock = true);
+
+/**
+ * Sets the system clock over SNTP after connect_network(). Blocks for up to 10 s. false when
+ * no link is up or the clock is still before 2024; the link stays up either way.
+ */
+bool synchronize_clock(std::string& error, ConnectFailure* failure = nullptr);
+
+/**
+ * Starts the station interface when Wi-Fi is not running, then scans once. networks receives up
+ * to 20 distinct names, strongest first. The calling task becomes the session owner until
+ * disconnect_network(); the station stays started so connect_network() can follow directly.
+ */
+bool scan_networks(std::vector<NearbyNetwork>& networks, std::string& error);
+
+/** Dotted IPv4 address of the joined station link, or empty without one. */
+std::string station_address();
+
+/** True while the station still has an IP address on its current link. */
+bool station_connected();
 
 /**
  * Starts a WPA2 access point at 192.168.4.1 for at most two stations, next to an idle station
@@ -147,7 +173,7 @@ bool connect_network(const std::string& ssid, const std::string& password, std::
  * and briefly drop its stations, when connect_network() joins a network on another channel.
  */
 bool start_access_point(const std::string& ssid, const std::string& password,
-                        std::vector<std::string>& networks, std::string& error);
+                        std::vector<NearbyNetwork>& networks, std::string& error);
 
 /** Stops Wi-Fi, including an access point, and releases the driver, interfaces and session. */
 void disconnect_network();
@@ -163,13 +189,36 @@ using PortalHandler = std::string (*)(void* context, bool submitted, const std::
  * body_limit bytes are refused. Requests for any other path are redirected to the page, and a
  * name service on UDP port 53 answers every host name with the access point address, so a
  * phone that has just joined presents the page as the network's sign-in page. Call after
- * start_access_point(). context and cancelled must outlive stop_portal_server().
- * A nonempty upload_root selects book upload instead of configuration; the caller must
- * suspend other card writers until stop returns. Uploads never replace existing files.
+ * start_access_point(). context must outlive stop_portal_server().
  */
-bool start_portal_server(PortalHandler handler, void* context, std::size_t body_limit,
-                         std::string& error, const std::string& upload_root = "",
-                         const std::atomic_bool* cancelled = nullptr);
+bool start_portal_server(PortalHandler handler, void* context, std::size_t body_limit, std::string& error);
+
+/** Book upload over the transfer page; see start_upload_server(). */
+struct UploadServer {
+    /** Card root; uploads go to Books/ and never replace existing files. */
+    std::string root;
+    /** Sampled while a file is received; must outlive stop_portal_server(). */
+    const std::atomic_bool* cancelled = nullptr;
+    /**
+     * Empty for the device access point: the page answers at / and unknown paths and host names
+     * lead to it. Otherwise the session runs on a joined network and the page answers only at
+     * /code; every other path, including /, gets a page that asks for the address on the screen.
+     */
+    std::string code;
+    /** Shown under the page title: the access point name, or the joined network name. */
+    std::string network;
+    /** Called on the server task after each file is committed and verified; may be null. */
+    void (*saved)(void* context, const std::string& name) = nullptr;
+    void* context = nullptr;
+};
+
+/**
+ * Serves the book transfer page on port 80 to at most three connections. Each upload carries
+ * this session's random token, which only the transfer page receives. With an empty code, call
+ * after start_access_point(); otherwise after connect_network(). The caller must suspend other
+ * card writers until stop_portal_server() returns.
+ */
+bool start_upload_server(const UploadServer& session, std::string& error);
 
 /** Stops the name service and the server, waiting for a running handler to return. */
 void stop_portal_server();
