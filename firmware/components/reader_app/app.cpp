@@ -1489,9 +1489,32 @@ struct ReaderApp::Impl final : DisplayBackend {
                 canvas.pixel(x + column, y + row, column % 2 ? packed >> 4 : packed & 15);
             }
     }
+    // List rows show the card thumbnail reduced to this size, so both views share one cache entry.
+    static constexpr int kRowCoverWidth = 59, kRowCoverHeight = 80;
+    /** Copies packed cover pixels reduced to width x height by averaging the covered source pixels. */
+    void blit_reduced(const std::vector<std::uint8_t> &pixels, int source_width, int source_height,
+                      int x, int y, int width, int height) {
+        const int stride = (source_width + 1) / 2;
+        for (int row = 0; row < height; ++row) {
+            const int top = row * source_height / height, bottom = std::max(top + 1, (row + 1) * source_height / height);
+            for (int column = 0; column < width; ++column) {
+                const int left = column * source_width / width, right = std::max(left + 1, (column + 1) * source_width / width);
+                int sum = 0;
+                for (int v = top; v < bottom; ++v)
+                    for (int u = left; u < right; ++u) {
+                        const auto packed = pixels[v * stride + u / 2];
+                        sum += u % 2 ? packed >> 4 : packed & 15;
+                    }
+                canvas.pixel(x + column, y + row, static_cast<std::uint8_t>(sum / ((bottom - top) * (right - left))));
+            }
+        }
+    }
     enum class Cover { Drawn, None, Undecoded };
-    /** Draws a library thumbnail. Without decode, a cover absent from both caches is left Undecoded. */
-    Cover draw_cover(const Entry &entry, int x, int y, bool decode) {
+    /**
+     * Draws a library thumbnail, reduced for a list row when row is true. Without decode, a cover
+     * absent from both caches is left Undecoded.
+     */
+    Cover draw_cover(const Entry &entry, int x, int y, bool decode, bool row = false) {
         struct stat info{};
         const auto path = root + "/" + entry.path;
         if (entry.directory || !safe_existing(root, entry.path) || stat(path.c_str(), &info) != 0)
@@ -1519,7 +1542,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             found = covers.end() - 1;
         }
         if (found->pixels.empty()) return Cover::None;
-        blit(found->pixels, x, y, kLibraryCoverWidth, kLibraryCoverHeight);
+        if (row) blit_reduced(found->pixels, kLibraryCoverWidth, kLibraryCoverHeight, x, y, kRowCoverWidth, kRowCoverHeight);
+        else blit(found->pixels, x, y, kLibraryCoverWidth, kLibraryCoverHeight);
         return Cover::Drawn;
     }
     /**
@@ -1610,9 +1634,16 @@ struct ReaderApp::Impl final : DisplayBackend {
                 hits.push_back({x, y, kLibraryCoverWidth, 296, EntryBase + static_cast<int>(i)});
             } else {
                 const int y = top + 78 + static_cast<int>(i - begin) * 126;
-                title_lines(label, 36, y + 12, 580, 28);
-                text(entry.status, 36, y + 88, 22, 580, 3);
-                if (entry.directory) text("›", 628, y + 44, 24, 20, 3);
+                // A book without a cover leaves no empty slot; its title starts at the margin.
+                const auto cover = entry.directory ? Cover::None : draw_cover(entry, 37, y + 22, decode, true);
+                undecoded = undecoded || cover == Cover::Undecoded;
+                if (cover == Cover::Drawn) outline(36, y + 21, kRowCoverWidth + 2, kRowCoverHeight + 2);
+                const int left = cover == Cover::Drawn ? 118 : 36;
+                const auto status = entry.directory ? entry.status + " ›" : entry.status;
+                const int status_width = std::min(text_width(status, 22), 200);
+                const int title_width = 628 - left - status_width;
+                title_lines(label, left, y + (text_width(label, 28) <= title_width ? 44 : 26), title_width, 28);
+                text(status, 648 - status_width, y + 50, 22, status_width, 3);
                 canvas.line(24, y + 125, 660, y + 125, 12, 2);
                 hits.push_back({24, y, 636, 126, EntryBase + static_cast<int>(i)});
             }

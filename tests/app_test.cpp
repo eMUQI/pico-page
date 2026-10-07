@@ -167,14 +167,16 @@ int main(int argc, char** argv) {
     {
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present();
-        driver.tap(240, 482); driver.present();
-        // Undecoded covers first appear as titles; the cover replaces the title in a second frame.
-        driver.tap(610, 384);
-        assert(app.canvas().pixel(300, 560) == 15);
+        // Undecoded covers first appear as titles; the cover joins its list row in a second frame.
+        driver.tap(240, 482);
+        assert(app.canvas().pixel(50, 640) == 15);
         app.complete_frame(true);
         assert(app.pending_frame() && app.view() == View::Library);
-        assert(app.canvas().pixel(300, 560) == 0 && app.canvas().pixel(270, 610) == 5);
+        assert(app.canvas().pixel(50, 640) == 5);
         driver.present();
+        // The card view shows the same cached thumbnail at full size.
+        driver.tap(610, 384); driver.present();
+        assert(app.canvas().pixel(300, 560) == 0 && app.canvas().pixel(270, 610) == 5);
         driver.refresh();
         const auto original_cover = read(card / "Books/cover.epub");
         write(card / "Books/cover.epub", "broken");
