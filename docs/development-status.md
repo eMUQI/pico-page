@@ -1,7 +1,15 @@
 # 开发状态
 
-最后更新：2026-10-07。阅读响应性专项已完成本轮软件改造和本机验证，固件已安装，第一轮实体操作数据已采集：下一页位图预取在真机上未命中；随后安装了三项 EPUB 兼容性修复和主任务位图预取（停留 1 秒以上的翻页已全部命中），见下方记录；
-最新固件构建通过，host 与 ASan/UBSan 各 11/11 通过。各批次命令、结果、失败记录及提交见下方。
+最后更新：2026-10-07。USB 卷名固件已安装，macOS 已显示 `PICO PAGE`；安全弹出后设备退出重启，串口、TF 卡和阅读界面已恢复。
+此前阅读响应性专项的数据与旧批次状态见下方；本次 USB 卷名的实际命令、结果及未测项单独记录。
+
+## 2026-10-07 · USB 卷名
+
+- 进入 USB 传输、卸载应用侧 FatFs 前，读取 TF 卷标。仅空卷标或 `NONAME` 改为 `PICO PAGE`；保留其他卷标。读取或写入失败时不交出卡。启用 `CONFIG_FATFS_USE_LABEL`，不修改分区或格式。
+- 实际执行 `sh tools/build_firmware.sh`：首次在沙箱内因组件管理器的 `sysctl()` 权限失败；获准重试后完整构建通过。安装前重新构建当时的源代码，镜像 3,167,552 字节，SHA-256 `02d1fb4e4c598ada08edc16e192075f78be90e9f7a3321517da06fda05b2658f`；构建日志 `.local/usb-label-build.log`。
+- 用户授权“烧录看看”。烧录前诊断 `view=reading pending=0 card=1 saved=1 importing=0`；USB 序列号与 esptool MAC 均为 `14:C1:9F:D0:18:B8`。重新读取设备分区表和 OTA 元数据，确认当前有效 `ota_0=0x10000/4 MiB`、sequence 1、state 2 且 CRC 正确。仅向 `0x10000` 写入上述应用镜像；esptool 报告 `Hash of data verified`。未写 bootloader、分区表、NVS、otadata、OTA1 或工厂校准。
+- 看门狗复位后诊断为 `view=library pending=0 card=1 frame_ok=1 clean=1`。诊断触摸进入 USB 传输，macOS `diskutil` 识别 31.3 GB FAT32 分区，卷名为 `PICO PAGE`；`diskutil eject /dev/disk4` 成功，外置磁盘从挂载列表消失。证据见 `.local/usb-label-install/`。
+- 用户在设备屏幕退出并重启后，同一 USB 序列号的串口恢复；只读诊断为 `view=tools pending=0 card=1 saved=1 frame_ok=1 importing=0`，说明 TF 卡和阅读界面恢复。未对比重启前后的同一本书位置锚点；证据 `.local/usb-label-install/after-exit-status.log`。本批未推送。
 
 ## 2026-10-07 · 同名重传自动清理未完成临时文件
 
