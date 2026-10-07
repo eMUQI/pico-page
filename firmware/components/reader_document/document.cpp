@@ -1070,6 +1070,7 @@ bool EpubDocument::read_image(const std::string& resource, std::vector<std::uint
     mz_zip_archive_file_stat stat{};
     if (index < 0 || !mz_zip_reader_file_stat(&impl_->zip, index, &stat)) return fail(error, "Missing EPUB image");
     if (!stat.m_uncomp_size || stat.m_uncomp_size > 2 * 1024 * 1024) return fail(error, "EPUB image exceeds 2 MiB limit");
+    if (!platform_memory_room(static_cast<std::size_t>(stat.m_uncomp_size))) return fail(error, "Image allocation unavailable");
     bytes.resize(static_cast<std::size_t>(stat.m_uncomp_size));
     struct Output { std::vector<std::uint8_t>& bytes; const std::function<bool()>& stop; bool cancelled = false; } output{bytes, stop};
     const bool extracted = mz_zip_reader_extract_to_callback(&impl_->zip, index,

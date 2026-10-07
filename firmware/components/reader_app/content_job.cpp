@@ -45,7 +45,7 @@ bool ContentJob::start() {
     if (started_) return false;
 #ifdef ESP_PLATFORM
     if ((request.kind == Kind::Pagination || request.kind == Kind::FontIdentity || request.kind == Kind::RasterPage || request.kind == Kind::LibraryCovers ||
-         request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite || request.prefetch) &&
+         request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite || request.kind == Kind::SleepCover || request.prefetch) &&
         heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < 64U * 1024) return false;
     started_ = xTaskCreate([](void* opaque) {
         auto* job = static_cast<ContentJob*>(opaque);
@@ -94,6 +94,7 @@ void ContentJob::run() {
         if (result.font_identity.empty() && !stop()) result.error = "Font identity read failed";
         return;
     }
+    if (request.kind == Kind::SleepCover) { prepare_cover(); result.cache_finished = !stop(); return; }
     if (request.kind == Kind::LibraryCovers) { library_covers(); return; }
     if (request.kind == Kind::RasterPage) { raster_page(); return; }
     if (request.kind == Kind::Chapter) {
@@ -141,7 +142,7 @@ std::string image_cache_key(const std::string& book_id, const std::string& resou
 void ContentJob::render_image(const std::string& resource, const std::string& cache_name) {
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
 #ifdef ESP_PLATFORM
-    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 3U * 1024 * 1024 ||
+    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < (request.prefetch ? 5U : 3U) * 1024 * 1024 ||
         heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 2U * 1024 * 1024) {
         result.error = "Image preparation memory unavailable"; return;
     }
@@ -197,7 +198,7 @@ void ContentJob::prepare_cover() {
     std::string error;
     auto image = std::make_unique<graphics::Canvas>(width, height);
     const bool loaded = EpubDocument::read_cover(request.path, encoded, error, stop) &&
-        graphics::render_image(*image, encoded, 0, 0, width, height, error, false, stop);
+        graphics::render_image(*image, encoded, 0, 0, width, height, error, request.cover_crop, stop);
     if (stop()) return;
     if (loaded) {
         store.save_cache(request.cache_name, request.cache_header + std::string(image->pixels().begin(), image->pixels().end()));

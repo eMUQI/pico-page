@@ -632,6 +632,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto& request = job->request;
         const auto& result = job->result;
         if (request.generation != counting_generation) return;
+        if (request.kind == ContentJob::Kind::SleepCover) {
+            if (result.cache_finished) sleep_cover_prepared = true;
+            return;
+        }
         if (request.kind == ContentJob::Kind::PageCacheRead) {
             if (result.cache_finished) pages_cache_pending = false;
             if (job->result.page_cache) adopt_pages(std::move(*job->result.page_cache));
@@ -670,6 +674,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     // The visible chapter during which memory was too low to load another one for counting.
     std::size_t counting_blocked = not_counting;
     bool counting_loaded = false;
+    bool sleep_cover_prepared = false;
+    bool sleep_cover_due() const { return async_content && has_book() && settings.sleep_screen == "cover" && !sleep_cover_prepared; }
     bool pages_complete = false, pages_failed = false, pages_dirty = false, pages_cache_pending = false;
 
     Impl(std::string card, std::string id)
@@ -1067,7 +1073,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void load_fonts(const ReaderSettings *preview = nullptr) {
         const auto &selected = preview ? *preview : settings;
-        if (effective_font == selected.font && !builtin_body && controlled_storage)
+        if (effective_font == selected.font && body.valid() && controlled_storage)
             return;
         clear_body_cache();
         clear_prefetch();
@@ -1380,6 +1386,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         link_return.reset();
         confirmed_link_return.reset();
         book_path = path;
+        sleep_cover_prepared = false;
         last_book = path;
         const auto configuration = loaded ? loaded->configuration : store.load_settings(path);
         settings = configuration.settings;
@@ -1707,7 +1714,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     bool counting_due() const {
         return view == View::Reading && has_book() && card_available && !usb_prepared &&
-               !display.busy() && !deferred && !save_job && !foreground_job && !pending_content && !raster_job && (!pages_complete || pages_cache_pending || pages_dirty) && !pages_failed &&
+               !display.busy() && !deferred && !save_job && !foreground_job && !pending_content && !raster_job && (!pages_complete || pages_cache_pending || pages_dirty || sleep_cover_due()) && !pages_failed &&
                counting_blocked != chapter_index;
     }
     /** Frees the chapter loaded for counting; its partial count resumes after a reload. */
@@ -1775,7 +1782,19 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (!counting_job->start()) { counting_job.reset(); counting_blocked = chapter_index; }
             return;
         }
-        if (pages_complete) return;
+        if (pages_complete) {
+            if (!sleep_cover_due() || counting_job) return;
+            struct stat info{};
+            if (stat((root + "/" + book_path).c_str(), &info) != 0) { sleep_cover_prepared = true; return; }
+            const auto cover = cover_entry(book_path, info, 684, 1040, true);
+            ContentJob::Request request;
+            request.kind = ContentJob::Kind::SleepCover; request.root = root; request.path = root + "/" + book_path;
+            request.cache_name = cover.name; request.cache_header = cover.header; request.cover_crop = true;
+            request.layout.width = 684; request.layout.height = 1040; request.generation = counting_generation;
+            counting_job = std::make_unique<ContentJob>(std::move(request));
+            if (!counting_job->start()) { counting_job.reset(); sleep_cover_prepared = true; }
+            return;
+        }
         if (counting_index == not_counting) {
             auto next = static_cast<std::size_t>(std::find(counted.begin(), counted.end(), false) - counted.begin());
             if (chapter_index < spine.size() && !counted[chapter_index] && chapter.resource == spine[chapter_index].resource)
@@ -2758,8 +2777,10 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (has_book() && settings.sleep_screen == "cover") {
                 struct stat info{};
                 std::vector<std::uint8_t> cover;
-                if (safe_existing(root, book_path) && stat((root + "/" + book_path).c_str(), &info) == 0)
-                    cover = cover_pixels(book_path, info, 684, 1040, true);
+                if (safe_existing(root, book_path) && stat((root + "/" + book_path).c_str(), &info) == 0) {
+                    if (async_content) cached_cover(cover_entry(book_path, info, 684, 1040, true), cover);
+                    else cover = cover_pixels(book_path, info, 684, 1040, true);
+                }
                 covered = !cover.empty();
                 if (covered) blit(cover, 0, 0, 684, 1040);
             }
@@ -3487,7 +3508,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             break;
         case ClearCache:
             abandon_content(); foreground_job.reset(); stop_covers(); stop_raster(); stop_counting_job();
-            covers.clear();
+            covers.clear(); sleep_cover_prepared = false;
             message = store.clear_cache() == StoreStatus::Ok ? "缓存已清理，原书与阅读记录保留" : "缓存未完全清理，请检查 TF 卡";
             draw_storage();
             break;
@@ -4028,6 +4049,7 @@ const char *ReaderApp::background_state() const {
     if (impl_->cover_job || impl_->pending_covers) return "covers";
     if (impl_->raster_job || impl_->prefetch_due()) return "prefetch";
     if (impl_->pages_cache_pending || impl_->pages_dirty) return "page-cache";
+    if (impl_->pages_complete && impl_->sleep_cover_due()) return "sleep-cover";
     if (!impl_->has_book() || impl_->pages_complete) return "idle";
     if (impl_->pages_failed) return "failed";
     return impl_->counting_blocked == impl_->chapter_index ? "waiting" : "counting";

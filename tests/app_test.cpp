@@ -1051,6 +1051,27 @@ int main(int argc, char** argv) {
         write(font_path, original_font); fs::last_write_time(font_path, font_time);
     }
     {
+        const auto root = card / "SleepWorker";
+        fs::create_directories(root / "Books"); fs::create_directories(root / "PicoPage");
+        fs::copy_file(fixtures / "image-cover.epub", root / "Books/cover.epub");
+        ReaderApp app(root.string(), "sleep-worker", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/cover.epub"); driver.present();
+        const auto cold_decodes = graphics::image_decode_count();
+        assert(app.prepare_sleep()); driver.present();
+        assert(graphics::image_decode_count() == cold_decodes && app.view() == View::Sleeping);
+        app.wake(); driver.present(); driver.complete_content();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (app.background_due()) {
+            app.background_step(); app.poll_background();
+            assert(!app.pending_frame() && std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        const auto prepared_decodes = graphics::image_decode_count();
+        assert(app.prepare_sleep()); driver.present();
+        assert(graphics::image_decode_count() == prepared_decodes && app.view() == View::Sleeping);
+        assert(app.canvas().pixel(50, 100) == 0 && app.canvas().pixel(50, 900) == 5);
+    }
+    {
         fs::copy_file(fixtures / "image-flow.epub", card / "Books/prefetch-image.epub");
         ReaderApp app(card.string(), "image-prefetch", true, true); Driver driver{app};
         assert(app.initialize()); driver.present(); opened(app, "Books/prefetch-image.epub"); driver.present();
