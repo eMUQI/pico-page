@@ -1489,6 +1489,22 @@ int main(int argc, char** argv) {
         fs::remove(sidecar); fs::rename(sidecar.string() + ".held", sidecar);
     }
     {
+        // A TXT shorter than one 48 KiB part reports its position against its own length.
+        std::string text;
+        for (int i = 0; i < 300; ++i) text += "短文测试。";
+        write(card / "Txt/short.txt", text);
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Txt/short.txt"); driver.present();
+        driver.tap(342, 500); driver.present(); driver.tap(60, 50); driver.present();
+        assert(app.view() == View::Library);
+        int percent = -1;
+        for (const auto& item : fs::directory_iterator(card / "PicoPage/cache/positions")) {
+            const auto bytes = read(item.path());
+            if (bytes.find("\nTxt/short.txt\n") != std::string::npos) percent = std::stoi(bytes.substr(bytes.rfind('\n') + 1));
+        }
+        assert(percent > 0 && percent < 60);
+    }
+    {
         // The library position follows the saved record: a page whose commit fails is not cached.
         ReaderApp app(card.string(), "position-worker", true, true);
         Driver driver{app};

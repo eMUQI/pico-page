@@ -1090,9 +1090,17 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (i < chapter_index) read += spine[i].bytes;
             else if (i == chapter_index && !chapter.text.empty()) {
                 if (txt_name(book_path)) {
-                    const auto part_begin = static_cast<std::uint64_t>(chapter.part) * kTxtPartBytes;
-                    const auto approximate = part_begin + kTxtPartBytes * std::min(end, chapter.text.size()) / chapter.text.size();
-                    read += std::min<std::uint64_t>(spine[i].bytes, approximate);
+                    // Byte span of the loaded part: recorded boundaries for GB18030, 48 KiB steps
+                    // for UTF-8, both limited by the file size so that a short part is not overstated.
+                    const auto &offsets = document.metadata().txt_offsets;
+                    std::uint64_t begin = static_cast<std::uint64_t>(chapter.part) * kTxtPartBytes, span = kTxtPartBytes;
+                    if (chapter.part + 1 < offsets.size()) {
+                        begin = offsets[chapter.part];
+                        span = offsets[chapter.part + 1] - begin;
+                    }
+                    begin = std::min<std::uint64_t>(begin, spine[i].bytes);
+                    span = std::min<std::uint64_t>(span, spine[i].bytes - begin);
+                    read += begin + span * std::min(end, chapter.text.size()) / chapter.text.size();
                     continue;
                 }
                 // The number of parts is unknown before the item is counted; one more is assumed.
@@ -3606,7 +3614,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (has("memory") || has("alloc")) return "设备内存不足";
         if (has("changed")) return "文件在读取过程中发生了变化";
         if (has("unsupported") || has("requires") || has("exactly") || has("not retained")) return "内容结构暂不支持";
-        if (has("unavailable") || has("no longer") || has("cannot be read") || has("read failed")) return "文件无法读取，请检查 TF 卡";
+        if (has("unavailable") || has("no longer") || has("cannot be read") || has("read failed") ||
+            has("cannot open") || has("cannot seek") || has("cannot hash") || has("cannot read"))
+            return "文件无法读取，请检查 TF 卡";
         return "文件内容无效或已损坏";
     }
     std::string retry_path;

@@ -9,6 +9,8 @@ namespace {
 struct Range { std::uint32_t first, last, scalar; };
 
 // Mapping values are generated from Python's GB18030 codec by tools/generate_gb18030_table.py.
+// The Python release, the reproducibility check and the license review are recorded in
+// docs/dependency-review.md.
 #include "gb18030_data.inc"
 
 }  // namespace

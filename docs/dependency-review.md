@@ -16,6 +16,7 @@
 | 文楷 / Noto Sans SC | 官方发布与官方仓库 | 固定 SHA-256，见 graphics-runtime | OFL 1.1；随附两份许可证 | Noto 子集改名 Pico Page Fallback | 全字体在 .local，内置子集纳入组件 |
 | Unihan `kTGH`（《通用规范汉字表》一级字） | unicode.org Unicode 17.0.0 `Unihan.zip` | SHA-256 `f7a48b2b…4b5e`，见 graphics-runtime | Unicode License v3；只取 3,500 个字符的清单 | 按序号提取为文本 | 清单纳入 reader_graphics，决定内置字体的字符范围 |
 | 内置中文子集的做法 | 0x1abin/crossmux（本地检出） | `3fb809f6ceeb753a7c40fef86dee7c9d40eabdf3` | 只参考做法，未复制代码、字表或字体 | 无 | CrossMux 内嵌 8/10/12pt 点阵，覆盖约 3,500 个高频字；本项目内嵌一份矢量子集 |
+| GB18030 解码表 | `tools/generate_gb18030_table.py` 查询 CPython 标准库的 `gb18030` 编解码器 | CPython 3.14.7（Homebrew 构建，构建信息不含源码 commit）；生成结果 SHA-256 `5efc9c50…8bbb` | CPython 为 PSF-2.0；只取编解码器的输出值，未复制 CPython 源码或其表格文本；详见下方 | 双字节区压缩为 23,940 项数组，四字节区合并为 207 个连续区间 | 生成结果纳入 reader_document；发布义务待项目许可证确定时一并确认 |
 | CREngine 对照工具 | koreader/crengine | `f4a8be93255a439db4777d00f0bc53316acabebd` | GPL-2.0；链接工具仅用于本地验证 | 无引擎源码修改 | 不纳入固件/host 阅读程序；映射工具与来源记录单列 |
 | SDL2 / OpenSSL / libcurl | 本机现有开发库 | 构建日志记录已解析版本 | zlib / Apache-2.0 / curl license，各自动态链接 | 无 | 仅 host；未复制库源码 |
 | esp_tinyusb / TinyUSB | Espressif Component Registry | 2.4.0 / 0.21.0~1；component hash 见 dependencies.lock | Apache-2.0 / MIT；已读组件 LICENSE；依赖 ESP-IDF | 不修改上游文件；构建排除便利存储层，接入同步 SDMMC 回调 | 仅开启 MSC；分发时保留许可证、版权和适用 NOTICE |
@@ -24,6 +25,15 @@ USB 实现对固定 Read Pico BSP 增加了带错误返回的卸载接口：
 补丁位于 `firmware/patches/read-pico-sd-release.patch`，仅应用到构建目录副本，原始检出保持不变。
 该适配属于 Apache-2.0 的 Read Pico 组件，不修改 epdiy、校准或波形组件。
 `esp_tinyusb 2.4.0` 的便利存储层采用延后写入，实际写失败仅记日志；因此本项目保留同步回调。官方 `auto_mount_off` 已可禁止自动回挂，自动回挂并非必须替换便利层的理由。官方示例、固定提交及逐项核对见 [USB 运行记录](usb-storage-runtime.md)。
+
+GB18030 解码表的来源与复核（2026-10-07）：
+`firmware/components/reader_document/gb18030_data.inc` 由 `tools/generate_gb18030_table.py` 生成。脚本逐个解码全部双字节和四字节序列，
+记录 CPython `gb18030` 编解码器返回的码位，不读取 CPython 的源码或数据文件。用 CPython 3.14.7 重新运行，输出与仓库中的文件逐字节相同，
+SHA-256 为 `5efc9c505062b83e0a80f04547e80d0c400b8d2ff6397cd86ee02f3993d68bbb`。本机的 Homebrew 构建没有记录源码 commit，只能固定到发布版本号。
+抽查的码位显示该编解码器采用 GB 18030-2000 的映射：`A8BC` 解码为 U+E7C7，`8135F437` 解码为 U+1E3F，`FE59` 解码为 U+E81E。
+GB 18030-2005 交换了前两者的映射；2005 和 2022 两次修订的其余调整没有逐项核对，受影响的字符在设备上会显示为私用区码位或不同的字。
+许可方面：CPython 采用 PSF-2.0。本项目收录的是字符编码与 Unicode 码位的对应数值，不含 CPython 的代码；
+是否需要随发布附带 PSF 许可声明，与项目总许可证一并由项目所有者确认，本表不作结论。
 
 实际版本、来源文件、传递依赖及义务分别记录在：
 
