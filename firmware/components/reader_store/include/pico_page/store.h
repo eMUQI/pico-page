@@ -71,6 +71,8 @@ public:
     StoreStatus append(std::uint64_t offset, const void* data, std::size_t size, std::string& error);
     /** Verifies size/CRC, synchronizes, reads back and publishes without replacing any destination. */
     StoreStatus finish(std::string& error);
+    /** Closes the transaction and removes only its unpublished staging file; reports cleanup errors. */
+    StoreStatus cancel(std::string& error);
     std::uint64_t received() const { return received_; }
 private:
     friend class FileStore;
@@ -142,8 +144,9 @@ public:
     /**
      * Starts a new resource import of 1 byte through 64 MiB. Allowed destinations
      * are EPUBs in Books/Articles, fonts or license text in PicoPage/fonts, and
-     * images in PicoPage/images. Existing destinations and staging files are
-     * preserved. No settings, credentials or reading records are importable.
+     * images in PicoPage/images. Existing destinations are preserved. An abandoned regular
+     * staging file for this destination is removed before starting; unsafe paths are refused.
+     * No settings, credentials or reading records are importable.
      * The caller serializes card access until the returned transaction is released.
      */
     std::unique_ptr<FileImport> begin_import(const std::string& path, std::uint64_t size,

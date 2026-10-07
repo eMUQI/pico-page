@@ -102,6 +102,7 @@ enum Control {
     SyncSettings,
     LibraryView,
     PortalStart,
+    WifiUpload,
     PortalStop,
     EntryBase = 100,
     TocBase = 1000,
@@ -344,6 +345,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     PortalAction portal_action = PortalAction::None;
     PortalStatus portal;
     bool portal_closing = false;
+    bool portal_upload = false;
     std::optional<Frame> pending;
     std::optional<NetworkOperation> network_request;
     std::shared_ptr<std::atomic_bool> network_cancel;
@@ -2933,16 +2935,17 @@ struct ReaderApp::Impl final : DisplayBackend {
         note(provision::load_wifi(root, wifi, detail) ? "Wi-Fi：" + wifi.ssid : "Wi-Fi 未配置", 592);
         note("用手机填写，设备验证后保存。", 640);
         button(PortalStart, "开启手机配置", 24, 708, 636, 96);
-        if (!message.empty()) note(message, 860);
+        button(WifiUpload, "Wi-Fi 传书", 24, 840, 636, 96);
+        if (!message.empty()) note(message, 980);
         button(Dismiss, "返回书库", 24, 1056, 636, 96);
     }
     void draw_portal() {
         view = View::Portal;
         hits.clear();
         canvas.clear();
-        header("手机配置", 0);
+        header(portal_upload ? "Wi-Fi 传书" : "手机配置", 0);
         if (portal.access_ssid.empty()) {
-            note(portal_closing ? "正在结束配置…" : "正在开启设备热点…", 200);
+            note(portal_closing ? "正在结束…" : "正在开启设备热点…", 200);
         } else {
             text("1  用手机连接设备热点", 36, 128, 26, 612, 1, true);
             graphics::draw_qr(canvas, provision::wifi_qr({portal.access_ssid, portal.access_password}), 36, 176, 264);
@@ -2951,12 +2954,12 @@ struct ReaderApp::Impl final : DisplayBackend {
             text("密码", 324, 300, 22, 324, 3);
             text(portal.access_password, 324, 334, 28, 324);
             text("扫码可直接连接", 324, 400, 22, 324, 3);
-            text("2  连接后扫码打开配置页", 36, 472, 26, 612, 1, true);
+            text(portal_upload ? "2  连接后扫码打开传书页" : "2  连接后扫码打开配置页", 36, 472, 26, 612, 1, true);
             graphics::draw_qr(canvas, portal.url, 36, 520, 264);
             text("或在浏览器输入", 324, 540, 22, 324, 3);
             const auto scheme = portal.url.find("://");
             text(scheme == std::string::npos ? portal.url : portal.url.substr(scheme + 3), 324, 574, 28, 324);
-            text("只支持 2.4 GHz 网络", 324, 660, 22, 324, 3);
+            text(portal_upload ? "EPUB · 最大 64 MiB" : "只支持 2.4 GHz 网络", 324, 660, 22, 324, 3);
             canvas.line(0, 816, 683, 816, 1, 3);
             std::string title, body = portal.detail;
             switch (portal.phase) {
@@ -2977,14 +2980,14 @@ struct ReaderApp::Impl final : DisplayBackend {
                 body += "请在手机上重新填写。";
                 break;
             default:
-                title = "等待手机提交";
-                body = "在配置页填写后，设备先验证，成功后才保存。";
+                title = portal_upload ? "Wi-Fi 传书已开启" : "等待手机提交";
+                body = portal_upload ? "上传结果请查看浏览器。结束后返回书库。" : "在配置页填写后，设备先验证，成功后才保存。";
             }
-            if (portal_closing) { title = "正在结束配置…"; body.clear(); }
+            if (portal_closing) { title = "正在结束…"; body.clear(); }
             text(title, 36, 844, 28, 612, 1, true);
             wrapped(body, 36, 904, 612, 24);
         }
-        if (!portal_closing) button(PortalStop, "结束配置", 24, 1080, 636, 96);
+        if (!portal_closing) button(PortalStop, portal_upload ? "结束传书" : "结束配置", 24, 1080, 636, 96);
     }
     void draw_usb() {
         view = View::UsbTransfer;
@@ -3387,8 +3390,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
             return;
         }
-        if (id == PortalStart) {
-            portal_action = PortalAction::Start;
+        if (id == PortalStart || id == WifiUpload) {
+            portal_action = id == WifiUpload ? PortalAction::Upload : PortalAction::Start;
             return;
         }
         if (id == UsbStart) {
@@ -4089,7 +4092,7 @@ void ReaderApp::show_usb_transfer(bool active, const std::string& error) {
 PortalAction ReaderApp::take_portal_action() {
     return std::exchange(impl_->portal_action, PortalAction::None);
 }
-bool ReaderApp::prepare_portal() {
+bool ReaderApp::prepare_portal(bool upload) {
     if (impl_->content_loading || impl_->usb_prepared || impl_->display.busy() || impl_->active_network ||
         !impl_->card_available || !impl_->persist()) return false;
     impl_->cancel_sync();
@@ -4097,6 +4100,8 @@ bool ReaderApp::prepare_portal() {
     impl_->stop_covers();
     impl_->stop_raster();
     impl_->release_counting();
+    impl_->stop_counting_job();
+    impl_->portal_upload = upload;
     impl_->portal = {};
     impl_->portal_closing = false;
     impl_->draw_portal();
@@ -4113,7 +4118,12 @@ void ReaderApp::show_portal(const PortalStatus &status) {
         impl_->portal = {};
         impl_->portal_closing = false;
         impl_->message = status.detail;
-        impl_->draw_settings();
+        const bool uploaded = impl_->portal_upload && view == View::Portal;
+        impl_->portal_upload = false;
+        if (uploaded && impl_->card_available) {
+            invalidate_identity_cache();
+            impl_->scan_library(); impl_->draw_library();
+        } else impl_->draw_settings();
         impl_->overlay();
         return;
     }

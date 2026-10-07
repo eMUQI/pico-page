@@ -1392,6 +1392,19 @@ int main(int argc, char** argv) {
         const auto saved = *app.saved_record();
         app.show_portal({PortalPhase::Closed, "", "", "", ""}); driver.present();
         assert(app.view() == View::Settings && *app.saved_record() == saved);
+        driver.tap(300, 180); driver.present();
+        driver.tap(342, 890);
+        assert(app.take_portal_action() == PortalAction::Upload);
+        assert(app.prepare_portal(true)); driver.present();
+        app.show_portal({PortalPhase::Waiting, "PicoPage-TEST", "abcd2345", "http://192.168.4.1", ""});
+        driver.present(); driver.refresh();
+        assert(app.view() == View::Portal && *app.saved_record() == saved && !app.prepare_sleep());
+        fs::copy_file(card / "Books/book.epub", card / "Books/wifi-import.epub");
+        driver.tap(342, 1120);
+        assert(app.take_portal_action() == PortalAction::Stop); driver.present();
+        app.show_portal({PortalPhase::Closed, "", "", "", ""}); driver.present();
+        assert(app.view() == View::Library && *app.saved_record() == saved);
+        fs::remove(card / "Books/wifi-import.epub");
     }
     {
         fs::create_directories(card / "SaveWorker");

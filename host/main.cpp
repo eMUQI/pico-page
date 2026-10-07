@@ -182,8 +182,8 @@ struct Host {
     // and never reports a saved or failed submission.
     bool poll_portal() {
         const auto action = app.take_portal_action();
-        if (action == PortalAction::Start) {
-            if (!app.prepare_portal())
+        if (action == PortalAction::Start || action == PortalAction::Upload) {
+            if (!app.prepare_portal(action == PortalAction::Upload))
                 app.show_portal({PortalPhase::Closed, "", "", "", "无法开启手机配置，请稍后重试。"});
             else if (flush())
                 app.show_portal({PortalPhase::Waiting, "PicoPage-PREVIEW", "preview0", "http://192.168.4.1", ""});

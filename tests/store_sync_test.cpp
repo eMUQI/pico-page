@@ -12,6 +12,12 @@ static fs::path failing_directory;
 static unsigned directory_syncs = 0;
 static unsigned fail_from_sync = 0;
 static bool fail_file_sync = false;
+static bool fail_unlink = false;
+
+static int checked_unlink(const char* path) {
+    if (fail_unlink) { errno = EIO; return -1; }
+    return unlink(path);
+}
 
 // Fault only fsync; all reads, writes, verification and publication use real files.
 static int checked_fsync(int fd) {
@@ -26,9 +32,11 @@ static int checked_fsync(int fd) {
     return fsync(fd);
 }
 
+#define unlink checked_unlink
 #define fsync checked_fsync
 #include "../firmware/components/reader_store/store.cpp"
 #undef fsync
+#undef unlink
 
 int main() {
     char temporary[] = "/tmp/pico-store-sync-XXXXXX";
@@ -120,6 +128,20 @@ int main() {
     assert(!store.begin_import("Books/published.epub", 9, crc, error));
 
     failing_directory.clear();
+    std::ofstream(root / "Books/retry.epub.import.tmp") << "partial";
+    fail_unlink = true;
+    assert(!store.begin_import("Books/retry.epub", 9, 0xcbf43926u, error));
+    assert(error == "staging_cleanup_failed" && fs::exists(root / "Books/retry.epub.import.tmp"));
+    fail_unlink = false;
+    importing = store.begin_import("Books/retry.epub", 9, 0xcbf43926u, error);
+    assert(importing);
+    fail_unlink = true;
+    assert(importing->cancel(error) == pico_page::StoreStatus::IoError);
+    assert(error == "staging_cleanup_failed");
+    fail_unlink = false;
+    assert(importing->cancel(error) == pico_page::StoreStatus::Ok);
+    importing.reset();
+    assert(!fs::exists(root / "Books/retry.epub.import.tmp"));
     pico_page::BookSnapshot snapshot;
     assert(store.book_snapshot("Books/book.epub", snapshot) == pico_page::StoreStatus::Ok);
     fail_file_sync = true;

@@ -12,6 +12,7 @@
 #include <initializer_list>
 #include <limits>
 #include <memory>
+#include <new>
 #include <sys/stat.h>
 #include <unistd.h>
 #ifdef ESP_PLATFORM
@@ -273,18 +274,38 @@ StoreStatus asset_digest(const std::string& root, const std::string& path,
         static_cast<std::uint64_t>(info.st_size) > import_limit) {
         close(fd); return StoreStatus::Invalid;
     }
-    char buffer[4096];
+    // HTTP imports retain their receive frame while verifying the staged file.
+    // Keep the readback buffer off the limited caller task stack.
+    std::unique_ptr<char[]> buffer(new (std::nothrow) char[4096]);
+    if (!buffer) { close(fd); return StoreStatus::IoError; }
     while (true) {
-        const auto count = read(fd, buffer, sizeof(buffer));
+        const auto count = read(fd, buffer.get(), 4096);
         if (count < 0 && errno == EINTR) continue;
         if (count < 0) { close(fd); return StoreStatus::IoError; }
         if (!count) break;
         size += static_cast<std::uint64_t>(count);
         if (size > import_limit) { close(fd); return StoreStatus::Invalid; }
-        crc = resource_crc(crc, buffer, static_cast<std::size_t>(count));
+        crc = resource_crc(crc, buffer.get(), static_cast<std::size_t>(count));
     }
     const bool exact_size = size == static_cast<std::uint64_t>(info.st_size);
     return close(fd) == 0 && exact_size ? StoreStatus::Ok : StoreStatus::IoError;
+}
+
+StoreStatus remove_import_staging(const std::string& root, const std::string& path,
+                                 std::string& error) {
+    const auto temporary = path + ".import.tmp";
+    const auto safe = store_internal::safe_path(root, temporary);
+    if (safe == StoreStatus::Missing) return StoreStatus::Ok;
+    struct stat info{};
+    if (safe != StoreStatus::Ok || inspect((root + "/" + temporary).c_str(), &info) != 0 ||
+        !S_ISREG(info.st_mode)) {
+        error = "staging_unsafe"; return StoreStatus::UnsafePath;
+    }
+    if (unlink((root + "/" + temporary).c_str()) != 0 ||
+        !sync_directory(root + "/" + path.substr(0, path.rfind('/')))) {
+        error = "staging_cleanup_failed"; return StoreStatus::IoError;
+    }
+    return StoreStatus::Ok;
 }
 
 bool resource_parents(const std::string& root, const std::string& path) {
@@ -466,10 +487,22 @@ FileImport::FileImport(std::string root, std::string path, std::uint64_t size, s
     : root_(std::move(root)), path_(std::move(path)), expected_size_(size), expected_crc_(crc), fd_(fd) {}
 
 FileImport::~FileImport() {
-    if (fd_ >= 0) close(fd_);
-    const auto temporary = path_ + ".import.tmp";
-    if (owns_temporary_ && store_internal::safe_path(root_, temporary) == StoreStatus::Ok)
-        unlink((root_ + "/" + temporary).c_str());
+    std::string ignored;
+    cancel(ignored);
+}
+
+StoreStatus FileImport::cancel(std::string& error) {
+    error.clear();
+    terminal_ = true;
+    const bool closed = fd_ < 0 || close(fd_) == 0;
+    fd_ = -1;
+    if (owns_temporary_) {
+        const auto status = remove_import_staging(root_, path_, error);
+        if (status != StoreStatus::Ok) return status;
+        owns_temporary_ = false;
+    }
+    if (!closed) { error = "import_close_failed"; return StoreStatus::IoError; }
+    return StoreStatus::Ok;
 }
 
 std::unique_ptr<FileImport> FileStore::begin_import(const std::string& path, std::uint64_t size,
@@ -479,7 +512,8 @@ std::unique_ptr<FileImport> FileStore::begin_import(const std::string& path, std
     if (store_internal::safe_path(root_, path) != StoreStatus::Missing) { error = "destination_exists_or_unsafe"; return {}; }
     if (!resource_parents(root_, path)) { error = "parent_creation_or_sync_failed"; return {}; }
     const auto temporary = path + ".import.tmp";
-    if (store_internal::safe_path(root_, temporary) != StoreStatus::Missing) { error = "staging_exists_or_unsafe"; return {}; }
+    // Callers serialize the entire import lifetime, so an existing staging file is abandoned.
+    if (remove_import_staging(root_, path, error) != StoreStatus::Ok) return {};
     const int fd = open_no_follow(root_ + "/" + temporary, O_WRONLY | O_CREAT | O_EXCL);
     if (fd < 0) { error = "staging_create_failed"; return {}; }
     return std::unique_ptr<FileImport>(new FileImport(root_, path, size, crc32, fd));

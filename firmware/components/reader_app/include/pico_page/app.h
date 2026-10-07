@@ -34,7 +34,7 @@ enum class View {
     Loading
 };
 enum class UsbTransferAction { None, Start, Exit };
-enum class PortalAction { None, Start, Stop };
+enum class PortalAction { None, Start, Stop, Upload };
 enum class PortalPhase { Starting, Waiting, JoiningWifi, CheckingAccount, Saved, Failed, Closed };
 /** One state of a phone setup session, reported by the task that owns the radio. */
 struct PortalStatus {
@@ -111,12 +111,13 @@ class ReaderApp {
     PortalAction take_portal_action();
     /**
      * Saves confirmed progress, ends sync work and shows the starting state of a phone setup
-     * session. false when the display or network is busy, the card is absent or the save fails.
+     * session (or EPUB upload when upload is true). Stops background card jobs before returning.
+     * false when the display or network is busy, the card is absent or the save fails.
      */
-    bool prepare_portal();
+    bool prepare_portal(bool upload = false);
     /**
      * Draws a session state while the setup page is shown. Closed leaves that page, or the page
-     * that requested the session, for the settings list with detail as its message.
+     * that requested the session, for settings or the refreshed library after upload.
      */
     void show_portal(const PortalStatus &status);
     bool prepare_sleep();

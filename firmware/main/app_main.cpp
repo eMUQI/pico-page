@@ -42,6 +42,7 @@ struct NetworkJob {
     // returns the closing message and device_id names this device in a new sync.toml.
     bool portal = false;
     std::string device_id;
+    bool upload = false;
 };
 QueueHandle_t requests = nullptr, responses = nullptr;
 // PortalStatus pointers from the network worker; the application task draws and deletes them.
@@ -170,7 +171,8 @@ void run_portal(NetworkJob &job) {
                              (sizeof(alphabet) - 1)];
     if (!session.lock ||
         !platform::start_access_point(name, password, session.page.networks, job.error) ||
-        !platform::start_portal_server(portal_page, &session, provision::form_limit, job.error)) {
+        !platform::start_portal_server(portal_page, &session, provision::form_limit, job.error,
+                                       job.upload ? job.card : "", job.operation.cancelled.get())) {
         ESP_LOGW(tag, "Setup session did not start: %s", job.error.c_str());
         job.error = "设备热点没有启动，请重试。";
     } else {
@@ -179,7 +181,7 @@ void run_portal(NetworkJob &job) {
         emit(status);
         auto idle_since = esp_timer_get_time();
         while (!job.operation.cancelled->load()) {
-            if (esp_timer_get_time() - idle_since >= portal_idle_us) {
+            if (!job.upload && esp_timer_get_time() - idle_since >= portal_idle_us) {
                 job.error = "手机配置超过 10 分钟没有提交，已自动结束。";
                 break;
             }
@@ -359,13 +361,13 @@ extern "C" void app_main() {
             present(*app);
         }
         const auto portal_action = app->take_portal_action();
-        if (portal_action == pico_page::PortalAction::Start) {
+        if (portal_action == pico_page::PortalAction::Start || portal_action == pico_page::PortalAction::Upload) {
             if (portal_stop || !worker_ready || usb_mode || network_busy || sleep_requested ||
-                pico_page::console::transfer_active() || !app->prepare_portal()) {
-                app->show_portal({pico_page::PortalPhase::Closed, "", "", "", "无法开启手机配置，请稍后重试。"});
+                pico_page::console::transfer_active() || !app->prepare_portal(portal_action == pico_page::PortalAction::Upload)) {
+                app->show_portal({pico_page::PortalPhase::Closed, "", "", "", "无法开启设备热点，请稍后重试。"});
             } else {
                 portal_stop = std::make_shared<std::atomic_bool>(false);
-                auto *job = new NetworkJob{{0, {}, portal_stop}, card ? card : "/sdcard", {}, {}, 0, true, writer};
+                auto *job = new NetworkJob{{0, {}, portal_stop}, card ? card : "/sdcard", {}, {}, 0, true, writer, portal_action == pico_page::PortalAction::Upload};
                 // The request queue is empty whenever network_busy is false.
                 xQueueSend(requests, &job, portMAX_DELAY);
                 network_busy = true;
