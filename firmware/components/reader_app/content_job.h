@@ -13,6 +13,9 @@
 #endif
 
 namespace pico_page {
+inline constexpr char kTxtGb18030Revision[] = "txt-gb18030-v1";
+// Library card thumbnails are cropped to fill this frame; the size is part of the cache entry name.
+inline constexpr int kLibraryCoverWidth = 184, kLibraryCoverHeight = 250;
 std::size_t readable_offset(const Chapter& source, std::size_t start);
 const DocumentImage* image_at(const Chapter& source, std::size_t start);
 graphics::Page plan_content(graphics::Font& font, const Chapter& source, std::size_t start,

@@ -16,7 +16,8 @@
 ## 所有权与实现
 
 `App::prepare_usb_transfer()` 拒绝未完成的显示、网络和保存事务，成功后释放 EPUB、字体与书库数据。
-主循环停止原串口，平台检查 FatFs 卸载结果，再初始化原始 SDMMC 和 TinyUSB MSC。
+主循环停止原串口；平台在卸载 FatFs 前，将空卷标或 `NONAME` 卷标设为 `PICO PAGE`，保留其他卷标。卷标写入失败时拒绝交出卡。
+平台检查 FatFs 卸载结果，再初始化原始 SDMMC 和 TinyUSB MSC。卷标存于 TF 卡，USB 设备描述符中的 `Pico Page TF Card` 是另一名称。
 卡交出后，应用卡扫描和读写路径保持关闭；USB attach、detach、SCSI eject 均不自动挂载本地 FAT。
 
 MSC 使用同步扇区读写，写操作完成后才返回成功；部分扇区写入采用读改写。
@@ -28,6 +29,8 @@ TinyUSB 和 USB Serial/JTAG 分时使用内部 PHY；传输期间无法通过原
 硬件 BOOT/复位仍作为恢复入口，常规操作使用传输页的退出重启。
 
 ## 当前验证
+
+2026-10-07：卷标候选已仅写入 `ota_0`，esptool 摘要校验通过。进入 USB 模式后，macOS 挂载 31.3 GB FAT32 分区并显示 `PICO PAGE`；Mac 已安全弹出。设备退出重启后，同一串口恢复，诊断确认 `card=1`、`frame_ok=1`、`saved=1` 和阅读工具页；未核对同一本书的位置锚点。
 
 2026-10-06：host 和 ASan/UBSan 各 9/9 通过；包含保存失败、显示/网络忙碌拒绝、卡目录移走后传输页可用、退出确认取消及扇区边界。
 固件构建成功，候选已仅烧录 `ota_0`（`0x10000`），烧录摘要校验通过。

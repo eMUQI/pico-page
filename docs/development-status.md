@@ -1,7 +1,179 @@
 # 开发状态
 
-最后更新：2026-10-07。阅读响应性专项已完成本轮软件改造和本机验证，固件已安装，第一轮实体操作数据已采集：下一页位图预取在真机上未命中；随后安装了三项 EPUB 兼容性修复和主任务位图预取（停留 1 秒以上的翻页已全部命中），见下方记录；
-最新固件构建通过，host 与 ASan/UBSan 各 11/11 通过。各批次命令、结果、失败记录及提交见下方。
+最后更新：2026-10-07。界面已按《实现评审 · 修改稿》在分支 `ui-review-20261007` 上调整，已安装到设备，书库页面经诊断口确认，手指长按等仍待真机验证。GB18030 TXT 直读固件已安装，用户已确认原先无法打开的书在设备上正常显示中文并可翻页；重启后进度恢复仍待确认。USB 卷名固件已安装，macOS 已显示 `PICO PAGE`；安全弹出后设备退出重启，串口、TF 卡和阅读界面已恢复。
+此前阅读响应性专项的设备数据、EPUB 兼容性修复与传书记录见下方；各批次命令、结果及未测项分别记录，不将本轮 host 结果写成设备结果。
+
+## 2026-10-07 · 按《实现评审 · 修改稿》调整界面（已安装，书库页面经诊断口确认）
+
+- 分支 `ui-review-20261007`，基于 `a6af6b8`。此前 main 上未提交的 TXT / GB18030 改动已先单独提交为 `a6af6b8`。没有推送。
+- 实现修改稿的 P0 第 1–4 条和 P1 的 01–08，说明、差异和决定见 [UI 注意事项](ui-implementation.md) 第 14 节与 D21–D24。
+  P0 第 5 条（正文插图整块黑色）经核实不是缺陷：测试夹具的图片是 2×2 像素的 PNG，放大后面板上方露出的是其左上角的黑色像素。
+  P2 没有实现。
+- 新增长按输入：`AppInput::long_press`，由 `released_tap.h` 的 `long_press()` 按按下到松手的时长判定，阈值 600 ms。
+  桌面预览用鼠标右键，脚本和串口诊断用 `hold X Y`。
+- 新增 `PicoPage/cache/positions/`；书库缩略图改为 184×250，旧的 164×184 缓存文件不再使用。格式见 [存储](storage.md)。
+- 资源：缩略图内存缓存由 12 张改为 8 张，184,000 字节；书库每屏为每本书多读一个不超过 1 KiB 的位置缓存文件，
+  为每个文件夹多做一次目录遍历，结果在离开该目录前保留。目录面板每次重画都要重画正文背景。这些开销都没有在真机上测量。
+- 实际执行：`cmake --build build/host -j 8`，`ctest --test-dir build/host --output-on-failure`（**11/11**）；
+  `cmake --build build/sanitized -j 8`，`ctest --test-dir build/sanitized --output-on-failure`（**11/11**，无 ASan/UBSan 报错）；
+  `sh tools/build_firmware.sh` 通过，日志 `.local/ui-review-firmware.log`，镜像 3,233,584 字节，
+  SHA-256 `6cb0c2c4a0b525616fe8c62604d57574bf06470f36c4ddfa0fb3c57a69a4e7a2`，4 MiB 应用槽剩余 23%。
+- `tests/app_test.cpp` 按新布局更新了点击坐标，并新增四项检查：长按进入详情、面板内取消同步后留在面板且丢弃迟到的回包、
+  提示在下一次输入后清除、离开书后写入位置缓存。`tests/core_test.cpp` 新增长按时长判定。
+- 截图：`artifacts/ui-review-impl-20261007/`，六张拼版，来自测试运行时的画布，使用合成 EPUB 和模拟网络回包。
+- 初次提交时未验证（当时没有烧录）：长按阈值与误触、封面裁切后的观感、目录面板重画的耗时、书库读取位置缓存的耗时、
+  页脚提示与翻屏共用时的可读性，都需要在真机上确认。编译通过和 host 截图不等于真机通过。
+- PR eMUQI/pico-page#1 的后续修正（均已推送，host 11/11 通过，未重新构建固件）：
+  - CI `host` 在 Linux GCC 下失败的两处原有问题：`image.cpp` 的有符号与无符号比较，`host/main.cpp` 已弃用的 `CURLOPT_PROTOCOLS`（改用 `CURLOPT_PROTOCOLS_STR`，仍只允许 HTTPS）。
+  - 位置缓存只在保存确认后写入；换书时尚未保存的位置等保存确认后再写，保存失败不写。新增测试。
+  - UTF-8 TXT 的最后一个字符或换行跨过 48 KiB 边界时，不再产生空的末段。新增测试。
+  - Wi-Fi 传书页和服务端提示不再写“仅 UTF-8 TXT”，与 GB18030 支持一致。
+- Codex 第二轮评审的三条已修正（host 11/11 通过；这三项不在已安装的 `a6764e6` 镜像中）：
+  短于 48 KiB 的 TXT 和末段的估算百分比按该段实际字节数计算，不再提前到 100%，新增测试；
+  EPUB 打开、定位、摘要和读目录失败归为“文件无法读取”，不再提示内容损坏；
+  GB18030 解码表的生成工具版本、可复现性核对和许可情况记入 [依赖审查](dependency-review.md)。
+- 用户提出列表视图应有封面：按原稿 S01-1 补上，列表行左侧显示由卡片缩略图缩小的 59 × 80 封面，无封面不留空位，状态移到行右侧。
+- 用户授权“可以先烧录”后安装到设备，共写入三次（评审修正版、列表封面版、白封面回退版），每次流程相同：
+  确认只连接一台设备，USB 序列号与 esptool `read-mac` 均为 `14:C1:9F:D0:18:B8`；诊断 `status` 为 `view=library pending=0 card=1 importing=0`；
+  重新读取分区表和 OTA 元数据，与此前核实过的转储逐字节相同（`ota_0=0x10000/4 MiB`，sequence 1、state 2）；
+  只向 `0x10000` 写入应用，esptool 报告 `Hash of data verified`，看门狗复位后书库首帧成功。未写 bootloader、分区表、NVS、otadata、OTA1 或校准数据，未改 TF 卡上的书和进度。
+  最终镜像来自提交 `a6764e6`，3,234,176 字节，SHA-256 `184201158ada5ace5cf0be9c80ba8a5f4bfc82333cb36ac445a05a656b7b510a`，应用槽剩余 23%。日志和转储在忽略目录 `.local/ui-review-install/`。
+- 真机经诊断口确认：书库首页、Articles 文件夹的列表和卡片视图、`hold` 进入书籍详情均显示正常；画面见 `artifacts/ui-review-impl-20261007/device-library.png`（诊断口导出的应用画布，不是面板照片）。
+  卡片视图稳定后 `psram=4859416`、`cache_covers=92000`、`draw_ms=480`。
+- 真机发现并已修正：Articles 中多本文章类 EPUB 的封面缩略图解码结果是全白，卡片上没有任何书名。现在全白缩略图按没有封面处理，在卡片上写书名。
+  这些封面为什么是全白没有查明（原图可能本来就是白底，也可能是解码结果不对），原书没有读出来检查。
+- 真机仍未验证：手指长按的时长判定和误触（`hold` 是应用层注入，不经过触摸采样）、面板实际观感与残影、目录和同步面板、
+  打开一本书后书库显示的章节与百分比、翻屏时读取位置缓存的耗时、休眠与重启后的恢复。
+- 下一步：在设备上用手指试长按进详情和书库翻屏；查明全白封面的原因。
+
+## 2026-10-07 · PR #1 第三轮评审：混合语言错误提示
+
+- `reason()` 先识别英文诊断中的已知类别；带 `: ` 分隔符的未知详情不再因为资源路径含中文就原样显示。独立的中文错误提示继续保留。
+- 新增合成 EPUB：`container.xml` 指向不存在的中文 OPF 路径。应用测试打开它时检查错误页显示中文类别，不显示英文诊断前缀。
+- 实际执行：`cmake --build build/host -j 8` 通过；`ctest --test-dir build/host --output-on-failure` 在初版修订后 **11/11** 通过；最终调整错误分类顺序后重新构建 host，并运行 app 单项测试。`sh tools/build_firmware.sh` 对最终代码构建通过，镜像 3,234,368 字节，应用槽剩余 23%。
+- 未刷写设备；真机错误页的显示效果仍待设备验证。工作区原有的本地样本记录不随本次提交纳入 PR。
+
+## 2026-10-07 · GB18030 TXT 设备端直读（已安装，已目视确认）
+
+- 只读检查用户提供的原始 1,579,496 字节 TXT：不是有效 UTF-8、GBK 或 Big5，GB18030 可完整解码，且无 NUL；设备端直接读取原文件，不生成转换副本。原书字节和私人路径不纳入仓库。
+- UTF-8 优先；无效时尝试 GB18030。使用 Python 标准库编码器生成双字节映射及四字节区间表，固件按流验证原文件，并将 GB18030 段边界对齐到字符起点；在已核实的受控存储会话中复用边界。UTF-8 继续使用 `txt-utf8-v1`，GB18030 使用独立 `txt-gb18030-v1` 阅读与分页修订，不复用另一种编码的记录。其他编码、手动指定编码和 TXT 的 KOReader 接续仍未实现；无标记的旧编码可能误判。
+- 实际执行 `cmake --build build/host -j 8` 和 `ctest --test-dir build/host --output-on-failure`（11/11）；修订进度选择后再次运行 document/app 两项（2/2）。合成样本覆盖四字节字符跨 48 KiB 分段及 GBK 不收录的双字节字符。对用户原书逐段读取，共 33 段、794,268 个 Unicode 标量，逐字 FNV 摘要与 Python `gb18030` 解码一致。该原书验证脚本只放在 `/tmp`。
+- `sh tools/build_firmware.sh` 首次因沙箱 `sysctl()` 权限失败；获准重试后完整构建通过。安装镜像 3,221,616 字节，SHA-256 `28dfdd4455b2fec72c2091cfaafa82bb127bfe29d633fef46bfa38f698b15b4a`，4 MiB 应用槽剩余约 23%。
+- 烧录前设备报告 `view=library pending=0 card=1 importing=0`；串口芯片 MAC 为 `14:C1:9F:D0:18:B8`。重新读取分区表和 OTA 元数据，确认有效的 `ota_0=0x10000/4 MiB`、sequence 1、state 2、CRC 正确。只向 `0x10000` 写入应用镜像，esptool 报告 `Hash of data verified`；未写其他 Flash 分区或 TF 卡。重启后书库首帧成功且 `card=1`。
+- 设备 TF 卡上的目标文件与电脑原书长度均为 1,579,496 字节、CRC32 均为 `f136e06f`。设备打开后，诊断从 `view=loading` 进入 `view=reading frame_ok=1`；一次 K3 翻页后画面 CRC 变化，阅读修订号为 1，`saved=1`。抓取完整正文画面时帧发生变化，命令返回 `frame_not_confirmed_or_changed`，因此没有留存完整屏幕截图；用户随后确认中文正常显示并可翻页。重启后进度恢复、其他编码误判和传书入口仍待验证。未提交或推送。
+
+## 2026-10-07 · 一份 TXT 无法打开（已定位）
+
+- 设备诊断 `status` 返回 `card=1`、`frame_ok=1`；使用 `tools/device_console.py open` 复现目标 TXT 打开流程，最终 `view=error`。抓取设备错误画面，提示“TXT 不是有效的 UTF-8 文件，请先转换编码”。文件夹列表显示该文件仍在，大小约 1.58 MB；未读取、修改或删除原文件。
+- 当时只定位到 UTF-8 格式边界，尚未取得原文件或确认编码。后续取得原文件并完成 GB18030 设备端直读，见上节；本次故障画面仅存忽略目录 `.local/txt-support/install/`。
+
+## 2026-10-07 · USB 卷名
+
+- 进入 USB 传输、卸载应用侧 FatFs 前，读取 TF 卷标。仅空卷标或 `NONAME` 改为 `PICO PAGE`；保留其他卷标。读取或写入失败时不交出卡。启用 `CONFIG_FATFS_USE_LABEL`，不修改分区或格式。
+- 实际执行 `sh tools/build_firmware.sh`：首次在沙箱内因组件管理器的 `sysctl()` 权限失败；获准重试后完整构建通过。安装前重新构建当时的源代码，镜像 3,167,552 字节，SHA-256 `02d1fb4e4c598ada08edc16e192075f78be90e9f7a3321517da06fda05b2658f`；构建日志 `.local/usb-label-build.log`。
+- 用户授权“烧录看看”。烧录前诊断 `view=reading pending=0 card=1 saved=1 importing=0`；USB 序列号与 esptool MAC 均为 `14:C1:9F:D0:18:B8`。重新读取设备分区表和 OTA 元数据，确认当前有效 `ota_0=0x10000/4 MiB`、sequence 1、state 2 且 CRC 正确。仅向 `0x10000` 写入上述应用镜像；esptool 报告 `Hash of data verified`。未写 bootloader、分区表、NVS、otadata、OTA1 或工厂校准。
+- 看门狗复位后诊断为 `view=library pending=0 card=1 frame_ok=1 clean=1`。诊断触摸进入 USB 传输，macOS `diskutil` 识别 31.3 GB FAT32 分区，卷名为 `PICO PAGE`；`diskutil eject /dev/disk4` 成功，外置磁盘从挂载列表消失。证据见 `.local/usb-label-install/`。
+- 用户在设备屏幕退出并重启后，同一 USB 序列号的串口恢复；只读诊断为 `view=tools pending=0 card=1 saved=1 frame_ok=1 importing=0`，说明 TF 卡和阅读界面恢复。未对比重启前后的同一本书位置锚点；证据 `.local/usb-label-install/after-exit-status.log`。本批未推送。
+
+## 2026-10-07 · UTF-8 TXT 阅读支持（已安装，待阅读验收）
+
+- `Books/`、`Articles/` 的文件夹书库现在识别 `.txt`，USB/串口导入与 Wi-Fi 传书接受最大 64 MiB 的 TXT；文件名、同名保护、CRC、同步写入和回读沿用既有存储事务。Wi-Fi 仅检验扩展名和传输完整性，内容编码在开书时验证。
+- 文档层按约 48 KiB 的 UTF-8 安全边界读取，支持 BOM、长文本跨段翻页、本地锚点、进度保存与重开恢复。无内嵌目录或封面时使用单个“正文”入口和文字卡片。KOReader 位置接续仍限 EPUB；TXT 同步页明确显示仅本地，不发网络请求。
+- 当前只接受有效 UTF-8；GBK/GB18030、UTF-16 与 TXT 章节自动识别未实现。无效 UTF-8 或 NUL 字节在开书时拒绝，保留原文件。未更改已有 EPUB 进度修订格式，TXT 使用独立的 `txt-utf8-v1` 修订。
+- 实际执行：`cmake --build build/host -j 8`、`ctest --test-dir build/host --output-on-failure`（**11/11**）、`node tests/wifi_upload_page_test.mjs`、`sh tools/build_firmware.sh`、`python3 tools/check_handoff.py`（328 项）和 `git diff --check` 均通过。首次固件配置在沙箱内被 `sysctl()` 权限拦截，获准重试完成；最终固件 3,164,848 字节，SHA-256 `6d0719de83732a9913a09666cd6357ba887e1730d4a4de5d4a09668a855279e9`。
+- 用合成 TXT 的桌面画布检查书库文件名、正文和“仅本地”同步提示；书库原有 EPUB 扩展名截取曾把 `sample.txt` 显示为 `sampl`，已修正并复查。截图在忽略的 `artifacts/txt-support-20261007/`，为 host 画布，字体使用回退路径，不是真机照片。
+- 用户授权“烧录”后，仅连接一台 Read Pico；USB 序列号与 esptool 芯片 MAC 均为 `14:C1:9F:D0:18:B8`。烧录前诊断为 `view=library`、`pending=0`、`card=1`、`importing=0`。从设备重新读取分区表和 OTA 元数据，确认当前有效启动槽 `ota_0=0x10000/4 MiB`、sequence 1、state 2 且 CRC 正确。将上述摘要的镜像复制至忽略目录 `.local/txt-support/install/` 后，仅向 `0x10000` 写入 3,164,848 字节；esptool 报告 `Hash of data verified`。未写 bootloader、分区表、NVS、otadata、OTA1 或工厂校准，未擦除 TF 卡。
+- esptool 硬复位后串口诊断无应答；按既有设备流程使用 `--after watchdog-reset read-mac` 后成功启动。诊断返回 `view=library`、`card=1`、`frame_ok=1`、`clean=1`，首帧全刷成功。只读分页列出设备 `Books/` 共 52 项，其中 4 个普通 `.txt` 文件仍在。书库根画面可见 Books 文件夹；进入后画面持续变化，抓图返回 `frame_not_confirmed_or_changed`，因此尚未确认 TXT 书目在屏幕上显示。私有证据为 `.local/txt-support/install/` 的分区、OTA、镜像、烧录日志和根画面。
+- 未执行：真机 TXT 开书、翻页/回翻、屏幕排版目视、TF 卡读写性能、USB 和手机 Wi-Fi TXT 传输、休眠恢复。未提交或推送。下一步先在设备上用 UTF-8 中文 TXT 验证书目显示、阅读与重启恢复，再评估是否需要 GBK/GB18030 或章节识别。
+
+## 2026-10-07 · 同名重传自动清理未完成临时文件
+
+- 用户确认不应让用户改名绕过残留文件。`FileStore::begin_import` 在正式目标不存在且入口独占卡访问时，
+  自动清理该目标的普通 `.import.tmp` 文件，再从头创建事务；不扫描或删除其他文件，不删除目录/符号链接，
+  正式 EPUB 仍拒绝覆盖。HTTP 由单服务任务串行处理，串口导入已有活动事务门控，两种入口由主循环互斥。
+- 新增显式 `FileImport::cancel`，取消和失败路径检查清理结果；HTTP 预检查只有清理完成才返回“可以上传”，
+  清理失败明确提示检查存储卡。析构仍作兜底清理。更新使用说明，不再要求为残留临时文件改名或手工清理。
+- 复用现有 `store_test` 覆盖残留后同名完整重传、正式文件拒绝覆盖、非法临时路径保护与取消；
+  `store_sync_test` 注入 unlink 失败，验证拒绝开始、错误报告和恢复后可清理。没有新增测试框架。
+- host 与 ASan/UBSan CTest 各 **11/11** 通过，网页检查通过；固件完整构建成功，3,158,704 字节，SHA-256
+  `92d2deef978f286807ee67f8490ed273ef49d4c8e41cab85d62d094e62cb167c`。
+  本批日志在 `.local/wifi-upload/cleanup-*.log`。实体断电残留后的同名上传尚待手机复测。
+- 延续安装授权，核对同一设备 USB 身份和烧录前 `saved=1`，仅写 `0x10000`；`Hash of data verified`。
+  重启后诊断确认书库首帧成功、`card=1`，证据 `.local/wifi-upload/install/cleanup-{before,flash,after}.log`。
+  未提交或推送。
+
+## 2026-10-07 · 手机 Wi-Fi 传书成功（设备日志）
+
+- 修正版 `74bcb1c0…` 的手机复测日志确认：第一次预检查返回 `staging_exists_or_unsafe`，
+  明确拒绝上次中断遗留的临时文件；没有覆盖该临时文件。
+- 后一次请求接收 **909,849 字节**，设备时间 354,687 ms 开始接收，357,520 ms 进入回读，
+  358,157 ms 输出 `Saved`：接收约 **2.833 秒**，提交及回读约 **0.637 秒**，合计 **3.470 秒**。
+  `Saved` 仅在 `FileImport::finish` 完成同步、CRC 校验、发布和正式文件回读成功后输出。
+- HTTP 任务记录最低剩余栈 **2868 字节**；这次上传和结束期间时间连续，没有出现重启或 panic。
+  随后实体触摸 `(390,1140)` 对应“结束传书”，网络任务退出，后续两帧刷新成功。
+- 证据：`.local/wifi-upload/install/fix-runtime.log`。仅证明本次手机传输与结束成功；
+  新书开读、64 MiB、多文件、满卡/掉电及原书进度恢复尚未验收。最初重启的具体 panic 原因仍未取得。
+
+## 2026-10-07 · 传书重启与上传停滞修正版（已安装，待手机复测）
+
+- 用户报告首次在浏览器“回读校验”时设备退出；诊断确认设备重新启动为书库第 1 帧，未捕获该次 panic，
+  因而没有确认具体复位原因。再次上传停在前段时，串口记录设备仍处于热点页；该次不是重启。
+- 栈风险：目标编译器 `-fstack-usage` 测得上传处理函数 2304 字节、`FileImport::finish` 208 字节、
+  `asset_digest` 4240 字节；三层合计 6752 字节，未计文件系统/驱动，HTTP 总栈仅 8192 字节。
+  将回读缓冲改为有分配失败处理的堆缓冲，`asset_digest` 静态栈降至 160 字节；保留回读校验，不增大任务栈。
+  这是已验证的栈风险修正，不把它写成已由崩溃日志证明的根因。
+- 浏览器新增 `/check` 无文件体预检查：使用同一存储导入检查创建并释放临时事务，15 秒超时。
+  无效会话、同名文件或上次中断的临时文件在传整本书前返回错误；保留原文件及残留临时文件。
+  接收与提交阶段增加不包含文件名/令牌的日志和任务剩余栈记录，以供复测。
+- host 与 ASan/UBSan CTest 各 **11/11**，`node tests/wifi_upload_page_test.mjs` 通过，
+  补充预检查拒绝后不发送文件体的断言；本地实际处理函数适配检查覆盖预检查临时文件清理，既有错误路径仍通过。
+  `sh tools/build_firmware.sh` 完整构建通过，3,157,456 字节，SHA-256
+  `74bcb1c0fbef4e98fd17bf3d41a4e0050cbc6fd21a75956af625cb155d454545`。
+- 延续用户授权，重新核对 USB 身份，仅写同一设备 `0x10000`，`Hash of data verified`；采用看门狗重启。
+  私有证据 `.local/wifi-upload/install/fix-flash.log`、`fix-runtime.log`，构建与测试日志在 `.local/wifi-upload/`。
+- 未确认手机实际完成上传；需刷新网页使用新流程，再核对接收、校验、保存及书库可读结果。未提交或推送。
+
+## 2026-10-07 · Wi-Fi 传书候选已安装（上传待联测）
+
+- 用户授权“烧录看下”。核对串口 USB 身份和 esptool MAC 为既有 Read Pico（末尾 `18:B8`）；
+  重新读取分区表及 OTA 元数据：`ota_0=0x10000/4 MiB`，有效 sequence 1、state 2、CRC 正确。
+  烧录前阅读记录修订 22，诊断报告 `saved=1`。
+- 仅写入 `0x10000` 应用，3,155,168 字节，SHA-256
+  `f1389926cca5ee16141a45f215ef205e4d5ecfae79671ed9728bff1172656ebd`，esptool 报告 `Hash of data verified`。
+  未写 bootloader、分区表、NVS、OTA 元数据或工厂校准。
+- 首次 esptool 硬复位后诊断超时，原始串口没有输出；使用 esptool 看门狗复位后正常启动。
+  启动日志确认工厂 VCOM 加载、TF 卡挂载及书库首帧清理全刷成功。
+- 经诊断输入进入“设置 → 网络与传输 → Wi-Fi 传书”。热点/HTTP 服务启动后画面完成，
+  保持 `view=portal`、`card=1`、`frame_ok=1`；内部空闲约 84 KB，最大连续块 38 KiB。
+  页面留在热点会话，供手机实测；热点密码不写入版本记录。
+- 网络会话期间诊断模拟 K2 返回 `ERROR busy`，这是诊断接口输入门控，未记为 K2 真机通过。
+  实体 K2、手机连接、实际上传、关闭热点与原书进度恢复仍需联测。
+- 命令为既有工具链的 `esptool read-flash/write-flash/read-mac` 与 `tools/device_console.py`；
+  私有原始证据在 `.local/wifi-upload/install/`。未提交或推送。
+
+## 2026-10-07 · Wi-Fi 传书（候选固件，未安装）
+
+- 新增“设置 → 网络与传输 → Wi-Fi 传书”，复用设备热点、二维码和 HTTP 服务；手机或电脑浏览器可批量选择 EPUB，
+  按顺序上传到 `Books/`，单文件最大 64 MiB。沿用既有布局，新增一个按钮；没有修改原始设计。
+- 存储使用既有 `FileImport`：每次最多 2048 字节、CRC32 校验、同步与写后回读，拒绝覆盖同名文件。
+  会话令牌随热点会话重新生成；上传请求验证令牌、文件名、扩展名和大小。正常取消或失败清理未提交临时文件；
+  断电残留不会被自动覆盖。浏览器区分接收进度与保存成功，不把断网或取消后的未知结果标为失败未写入。
+- 开启前保存进度并停止后台卡任务，传书期间暂停阅读、同步和自动休眠；结束后等待服务退出并重新扫描书库。
+  K2 保持全刷；桌面预览入口同步更新，仅展示热点占位，不提供无线服务。
+- 实际验证：`cmake --build build/host -j 8` 与 host CTest **11/11** 通过；`app_test` 补充传书入口、
+  K2、进度不变和结束返回书库。`node tests/wifi_upload_page_test.mjs` 验证浏览器 CRC32、中文文件名、
+  非 EPUB 拦截和服务端错误反馈。
+- `cmake --build build/sanitized -j 8` 与 ASan/UBSan CTest **11/11** 通过，无 sanitizer 错误。
+- `.local/wifi-upload/check_handler.py` 提取本次实际 HTTP 处理函数，以 host HTTP 适配和真实 FileStore 执行：
+  中文文件名保存、同名拒绝、路径穿越/非法字符、CRC 错误、令牌错误、超时、取消、超限与临时文件清理全部通过。
+  这是 host 适配验证，不证明 ESP HTTP 服务或真实 TF 卡行为。
+- `sh tools/build_firmware.sh` 完整构建通过，镜像 **3,155,168 字节**，SHA-256
+  `f1389926cca5ee16141a45f215ef205e4d5ecfae79671ed9728bff1172656ebd`。
+  首次配置受沙箱 `sysctl` 权限限制，经获准的构建重试完成；没有替换工具链或新增第三方依赖。
+- 桌面截图已检查，新入口及热点页无裁字；K2 前后 BMP 逐字节一致。截图与使用限制见 [Wi-Fi 传书](wifi-transfer.md)。
+  `python3 tools/check_handoff.py`、`git diff --check` 通过。
+- 未提交、推送或刷写。尚未完成真实热点连接、手机/电脑上传、满卡/断电、传输中 K2、退出后新书可读与阅读进度保持验收。
+  下一步：用户授权安装后按 [Wi-Fi 传书](wifi-transfer.md) 的真机项目联测。
 
 ## 阅读响应性专项交接
 
@@ -1669,3 +1841,12 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
 - 下一项最小工作：
 
 真实结果应来自当前运行，不能沿用交接包检查的“通过”填充固件完成率。
+
+### 2026-10-07 · 外部设计评审图片导出
+- 产物：`artifacts/ui-review-20261007/`，204 张 PNG、两张页面总览、HTML 分类索引、来源清单和说明；压缩包为 `artifacts/pico-page-ui-review-20261007.zip`。
+- 覆盖当前全部 23 类 `View`，另有手机配置与 Wi-Fi 传书网页 6 个状态。设备图为 684 × 1216 的实际 C++ 画布；正文重复页仅取代表样本，不代表穷举所有数据组合或原设计历史状态。
+- 来源：`d6a3b329` 加工作区未提交改动。导出期间发现 Wi-Fi 传书页面新增，已补入；未修改应用代码、原始设计或用户数据。
+- 实际执行：`cmake --build build/host --target app_test pico_page -j 8` 成功；`.local/ui-review-20261007/capture.py` 复用当前 `app_test.cpp` 导出画布，原有断言通过；独立临时卡通过 `pico_page --headless` 补充中文演示和三种休眠画面。生产 HTML 经隔离无头 Chrome 截图。
+- 检查：204 张图片均可解码，全部设备 PNG 尺寸核对通过，23 类页面覆盖核对通过，ZIP 校验通过；目视检查两张总览及正文、手机表单、传书引导原图。
+- 边界：合成 EPUB、模拟网络回包及设备状态；桌面容量与电量显示不能作为硬件值。不是面板实拍、联网或真机验收；未刷机、未提交、未推送。
+- 下一步：由外部设计师基于当前实现评估界面，收到评审结论后再决定修改范围。

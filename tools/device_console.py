@@ -173,9 +173,10 @@ def main():
     listing.add_argument("--offset", type=int, default=0)
     key = commands.add_parser("key")
     key.add_argument("key", choices=("K1", "K2", "K3"))
-    tap = commands.add_parser("tap")
-    tap.add_argument("x", type=int)
-    tap.add_argument("y", type=int)
+    for name in ("tap", "hold"):
+        tap = commands.add_parser(name)
+        tap.add_argument("x", type=int)
+        tap.add_argument("y", type=int)
     opening = commands.add_parser("open")
     opening.add_argument("path")
     inspection = commands.add_parser("file")
@@ -201,7 +202,7 @@ def main():
             command = args.command
             if command == "ls": command += f" {args.offset} {args.path}"
             elif command == "key": command += f" {args.key}"
-            elif command == "tap": command += f" {args.x} {args.y}"
+            elif command in ("tap", "hold"): command += f" {args.x} {args.y}"
             elif command in ("open", "file"): command += f" {args.path}"
             state, entries = console.request(command)
             for entry in entries:

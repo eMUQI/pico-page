@@ -27,9 +27,13 @@ namespace {
 using graphics::decode_utf8;
 constexpr int footer_top = 1128, toolbar_top = 1080;
 constexpr const char *content_revision = "epub-native-v1";
+constexpr const char *txt_revision = "txt-utf8-v1";
 struct Entry {
     std::string path, name;
     bool directory;
+    // Status line of the library row; filled when the row is first drawn.
+    std::string status = {};
+    bool described = false;
 };
 struct Hit {
     int x, y, w, h, id;
@@ -102,7 +106,10 @@ enum Control {
     SyncSettings,
     LibraryView,
     PortalStart,
+    WifiUpload,
     PortalStop,
+    SyncCancel,
+    Retry,
     EntryBase = 100,
     TocBase = 1000,
     TocToggleBase = 10000,
@@ -149,11 +156,20 @@ bool safe_existing(const std::string &root, const std::string &relative) {
     } while (end != std::string::npos);
     return true;
 }
-bool epub_name(std::string name) {
+bool txt_name(std::string name) {
+    for (auto &c : name)
+        if (c >= 'A' && c <= 'Z') c += 32;
+    return name.size() > 4 && name.substr(name.size() - 4) == ".txt";
+}
+bool book_name(std::string name) {
     for (auto &c : name)
         if (c >= 'A' && c <= 'Z')
             c += 32;
-    return name.size() > 5 && name.substr(name.size() - 5) == ".epub";
+    return (name.size() > 5 && name.substr(name.size() - 5) == ".epub") ||
+           (name.size() > 4 && name.substr(name.size() - 4) == ".txt");
+}
+const char* revision_for(const std::string& path, const DocumentMetadata& metadata) {
+    return txt_name(path) ? (metadata.txt_gb18030 ? kTxtGb18030Revision : txt_revision) : content_revision;
 }
 } // namespace
 
@@ -344,13 +360,14 @@ struct ReaderApp::Impl final : DisplayBackend {
     PortalAction portal_action = PortalAction::None;
     PortalStatus portal;
     bool portal_closing = false;
+    bool portal_upload = false;
     std::optional<Frame> pending;
     std::optional<NetworkOperation> network_request;
     std::shared_ptr<std::atomic_bool> network_cancel;
     std::optional<Anchor> remote_anchor;
     std::optional<ReadingRecord> upload_record, acknowledged_record, uncertain_record;
     sync::Config acknowledged_config, uncertain_config;
-    std::string server_state = "未检查", remote_state = "未检查";
+    std::string server_state = "—", remote_state = "未检查";
     sync::Config sync_config, badge_config;
     bool badge_configured = false, tools_save_pending = false;
     void refresh_badge_config() {
@@ -367,6 +384,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         time_t modified;
         std::vector<std::uint8_t> pixels;
     };
+    // One screen shows six thumbnails; eight hold 184,000 bytes of packed pixels.
+    static constexpr std::size_t kCoverSlots = 8;
     std::vector<CoverThumbnail> covers;
     std::unique_ptr<ContentJob> cover_job;
     std::optional<ContentJob::Request> pending_covers;
@@ -387,7 +406,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 if (display.busy()) { cover_job = std::move(job); return; }
                 for (std::size_t i = 0; i < job->request.covers.size(); ++i) {
                     const auto& source = job->request.covers[i];
-                    if (covers.size() == 12) covers.erase(covers.begin());
+                    if (covers.size() == kCoverSlots) covers.erase(covers.begin());
                     covers.push_back({source.path, source.size, source.modified, std::move(job->result.covers[i])});
                 }
                 draw_library(); overlay();
@@ -398,7 +417,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!cover_job->start()) {
             cover_job.reset(); message = "封面暂未生成，可继续阅读";
             for (const auto& source : missing_covers) {
-                if (covers.size() == 12) covers.erase(covers.begin());
+                if (covers.size() == kCoverSlots) covers.erase(covers.begin());
                 covers.push_back({source.path, source.size, source.modified, {}});
             }
             draw_library(); overlay();
@@ -422,6 +441,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::vector<std::size_t> toc_starts, toc_visible;
     std::set<std::size_t> toc_collapsed;
     bool toc_locate_current = false, library_grid = false, library_descending = false;
+    // The open folder is one of the configured library roots; its parent is the library.
+    bool folder_root = false;
     bool footer_chapters = false, refresh_from_settings = false, import_from_settings = false;
     std::string detail_path, detail_position, detail_error;
     BookSnapshot management_snapshot;
@@ -439,14 +460,14 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::string effective_font, last_recorded;
     std::vector<std::string> fonts;
     std::function<void()> deferred;
-    bool save_failed = false;
+    bool save_failed = false, notice_shown = false;
     // The most recent accepted input turned a page; see AppInput::queued.
     bool turned = false;
     // Reading status notices about the body font; the status line shows the position otherwise.
     static constexpr const char *kFallbackFontNotice = "所选字体不可用，已使用替代字体";
     static constexpr const char *kBuiltinFontNotice = "未找到正文字体，已使用内置字体";
-    static constexpr const char *kMissingNotice = "部分字符缺字，请更换正文阅读字体";
-    static constexpr const char *kBuiltinMissingNotice = "缺字，请复制字体到 PicoPage/fonts";
+    static constexpr const char *kMissingNotice = "部分字符无法显示，可在排版中更换字体";
+    static constexpr const char *kSaveFailed = "进度未保存，请检查 TF 卡后重试";
     // Whole-book page counting. chapter_pages[i][p] holds the page starts of part p of spine item
     // i, laid out from the beginning of the part under the applied typography; counted[i] marks
     // an item whose parts are all present. Non-linear items are outside the reading order and
@@ -496,6 +517,28 @@ struct ReaderApp::Impl final : DisplayBackend {
         content_loading = image_prepared = false;
         prepared_image.reset();
     }
+    Hit loading_cancel{};
+    /**
+     * Enters the loading state and presents its status with a cancel control. An open panel or
+     * error page is replaced first, so the status never covers other controls; a full page keeps
+     * its content and shows the status in the footer zone.
+     */
+    void loading(const std::string &status) {
+        const bool panel = view == View::Tools || view == View::Contents || view == View::Typography ||
+                           view == View::Refresh || view == View::Sync || view == View::Confirmation;
+        if (panel && body_canvas) canvas = *body_canvas;
+        else if (panel || view == View::Error) canvas.fill_rect(0, 104, 684, 1112, 15);
+        const int top = panel || view == View::Reading || view == View::Error ? footer_top : footer_zone;
+        content_loading = true;
+        view = View::Loading;
+        hits.clear();
+        canvas.fill_rect(0, top, 684, 1216 - top, 15);
+        if (top == footer_zone) canvas.line(0, top, 683, top, 1, 2);
+        text(status, 36, 1156, 24, 400, 3);
+        button(Dismiss, "取消", 488, 1140, 160, 64, false, 24);
+        loading_cancel = hits.back();
+        overlay();
+    }
     bool begin_image(std::size_t start, const DocumentImage& image, bool preview = false) {
         abandon_content();
         release_counting();
@@ -503,20 +546,17 @@ struct ReaderApp::Impl final : DisplayBackend {
         request.kind = ContentJob::Kind::Image;
         request.root = root; request.path = root + "/" + book_path; request.identity = document.metadata();
         request.preview = preview;
-        request.layout = preview ? layout(draft, 64, 656) : layout(settings, link_return ? 144 : 64);
+        request.layout = preview ? layout(draft, 64, preview_bottom) : layout(settings, link_return ? 144 : 64);
         request.image_resource = image.resource;
         request.cache_name = image_cache_key(request.identity.book_id, image.resource, request.layout);
         request.generation = foreground_generation; request.chapter = chapter_index;
         request.part = chapter.part; request.offset = start;
         pending_content = std::move(request);
-        content_loading = true;
-        view = View::Loading;
-        if (!preview) clear_body_cache();
         clear_prefetch(); covers.clear();
-        canvas.fill_rect(0, footer_top, 684, 88, 15);
-        text("正在准备图片…", 36, 1156, 24, 400, 3);
-        button(Dismiss, "取消", 488, 1140, 160, 64, false, 24);
-        if (!preview) overlay();
+        // The typography panel draws the preview status itself.
+        if (preview) { content_loading = true; view = View::Loading; return true; }
+        loading("正在准备图片…");
+        clear_body_cache();
         return true;
     }
     bool begin_open(const std::string& path, ContentJob::Kind kind = ContentJob::Kind::Open) {
@@ -524,26 +564,22 @@ struct ReaderApp::Impl final : DisplayBackend {
         ContentJob::Request request;
         request.kind = kind;
         request.root = root; request.relative_path = path; request.path = root + "/" + path;
-        request.content_revision = content_revision; request.generation = foreground_generation;
+        request.generation = foreground_generation;
         struct stat info{};
         const auto found = identities.find(path);
         if (controlled_storage && found != identities.end() && stat(request.path.c_str(), &info) == 0 &&
             found->second.size == info.st_size && found->second.modified == info.st_mtime && found->second.inode == info.st_ino)
             request.identity = found->second.identity;
+        request.content_revision = revision_for(path, request.identity);
         if (kind == ContentJob::Kind::Inspect && stat(request.path.c_str(), &info) == 0) {
             const auto cover = cover_entry(path, info, 120, 160, false);
             request.cache_name = cover.name; request.cache_header = cover.header;
             request.layout.width = 120; request.layout.height = 160;
         }
         pending_content = std::move(request);
-        content_loading = true;
-        view = View::Loading;
         clear_prefetch(); covers.clear();
+        loading("正在准备书籍…");
         if (kind == ContentJob::Kind::Open) { clear_body_cache(); release(chapter); page = {}; }
-        canvas.fill_rect(0, footer_top, 684, 88, 15);
-        text("正在准备书籍…", 36, 1156, 24, 400, 3);
-        button(Dismiss, "取消", 488, 1140, 160, 64, false, 24);
-        overlay();
         return true;
     }
     bool begin_chapter(std::size_t index, std::uint32_t part, ContentJob::Target target,
@@ -569,12 +605,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             const auto selected = part == kLastChapterPart && !parts.empty() ? parts.size() - 1 : part;
             if (selected < parts.size() && !parts[selected].empty()) request.known_start = parts[selected].back();
         }
-        pending_content = std::move(request); content_loading = true; view = View::Loading;
+        pending_content = std::move(request);
+        loading("正在准备章节…");
         clear_body_cache(); clear_prefetch(); covers.clear(); release(chapter); page = {};
-        canvas.fill_rect(0, footer_top, 684, 88, 15);
-        text("正在准备章节…", 36, 1156, 24, 400, 3);
-        button(Dismiss, "取消", 488, 1140, 160, 64, false, 24);
-        overlay();
         return true;
     }
     bool begin_seek(const Anchor& anchor) {
@@ -596,7 +629,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (!content_loading) { foreground_job.reset(); return; }
             if (display.busy() || counting_job || raster_job || save_job || cover_job) return;
             if (foreground_job->request.kind == ContentJob::Kind::Open && session.needs_save()) {
-                if (save_failed) { foreground_job.reset(); content_loading = false; error(message); }
+                if (save_failed) { foreground_job.reset(); content_loading = false; error(kSaveFailed); }
                 else schedule_save();
                 return;
             }
@@ -619,7 +652,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             } else if (request.kind == ContentJob::Kind::MapDownload) {
                 accept_remote_mapping(job->result.mapped_anchor, job->result.error);
             } else if (!job->result.error.empty()) {
-                sync_status = "此位置暂不支持精确同步：" + job->result.error;
+                sync_status = "此位置暂不支持精确同步。";
             } else if (!sync_checked || !request.record || !session.saved_record() || !(*session.saved_record() == *request.record)) {
                 sync_status = "当前已保存位置已改变，请重新检查远端位置";
                 sync_checked = false;
@@ -631,7 +664,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (!job->result.error.empty()) {
                 if (request.kind == ContentJob::Kind::Inspect) {
                     detail_error = job->result.error; draw_details(); overlay();
-                } else error("无法打开 EPUB：" + job->result.error);
+                } else error(reason(job->result.error) + "。原书没有被修改。", request.relative_path);
                 return;
             }
             const auto& loaded = *job->result.document;
@@ -765,9 +798,15 @@ struct ReaderApp::Impl final : DisplayBackend {
         const bool okay = job->result.progress.status == StoreStatus::Ok &&
             job->result.progress.record && *job->result.progress.record == *job->request.record;
         if (request) session.saved(*request, okay);
+        if (pending_position) {
+            const auto &saved = *job->request.record;
+            if (okay && saved.book_id == pending_position->book_id && saved.anchor == pending_position->anchor)
+                store.save_cache(pending_position->name, pending_position->bytes);
+            pending_position.reset();
+        }
         save_failed = !okay;
         save_error_pending = !okay;
-        if (!okay) message = "进度未保存，请检查 TF 卡后重试";
+        if (!okay) message = kSaveFailed;
         if (job->result.last_book_saved) last_recorded = job->request.relative_path;
         else if (okay && job->request.save_last_book) {
             recent_save_failed = true; message = "最近阅读记录未保存";
@@ -811,7 +850,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         session.saved(*request, okay);
         save_failed = !okay;
         if (!okay)
-            message = "进度未保存，请检查 TF 卡后重试";
+            message = kSaveFailed;
         return okay;
     }
     void text(const std::string &value, int x, int top, int size = 28, int max_width = 612,
@@ -839,20 +878,40 @@ struct ReaderApp::Impl final : DisplayBackend {
             used += widths[i];
         }
     }
+    /** ASCII letters, digits and path punctuation; a run of these is not divided between lines. */
+    static bool word_scalar(char32_t c) {
+        return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+               c == '.' || c == '_' || c == '-' || c == '/' || c == '%';
+    }
+    /** Width of the undivided run that starts at index; 0 inside a run or outside one. */
+    int run_width(const std::u32string &scalars, std::size_t index) {
+        if (!word_scalar(scalars[index]) || (index && word_scalar(scalars[index - 1]))) return 0;
+        int width = 0;
+        for (; index < scalars.size() && word_scalar(scalars[index]); ++index) width += ui.advance(scalars[index]);
+        return width;
+    }
+    /**
+     * Draws a paragraph and returns its height. Closing punctuation never starts a line; it
+     * extends past width by at most one character, which the page margin absorbs.
+     */
     int wrapped(const std::string &value, int x, int top, int width, int size = 26,
-                bool draw = true) {
+                bool draw = true, std::uint8_t gray = 1) {
         ui.size(size);
         const auto metrics = ui.metrics();
         const int line = metrics.ascender + metrics.descender + 2;
+        const auto scalars = decode_utf8(value);
         int used = 0, rows = 1;
-        for (const auto scalar : decode_utf8(value)) {
-            const int advance = ui.advance(scalar);
-            if (used + advance > width) {
+        for (std::size_t i = 0; i < scalars.size(); ++i) {
+            const int advance = ui.advance(scalars[i]), run = run_width(scalars, i);
+            const bool closing = std::u32string_view(U"，。、；：！？）」』”’》").find(scalars[i]) != std::u32string_view::npos;
+            if (used && !closing && (used + advance > width || (run <= width && used + run > width))) {
                 used = 0;
                 ++rows;
             }
+            // A space that falls at the start of a continuation line is dropped.
+            if (!used && rows > 1 && scalars[i] == U' ') continue;
             if (draw)
-                ui.draw(canvas, scalar, x + used, top + (rows - 1) * line + metrics.ascender, 1);
+                ui.draw(canvas, scalars[i], x + used, top + (rows - 1) * line + metrics.ascender, gray);
             used += advance;
         }
         return rows * line;
@@ -870,11 +929,11 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     /**
      * One list row: title, optional description and a right-aligned value. A non-zero id makes
-     * the row a control and appends a chevron to the value.
+     * the row a control; the chevron marks a control that opens another page.
      */
     void value_row(int id, const std::string &title, const std::string &description,
-                   const std::string &value, int y, int height = 104, bool bold_value = false) {
-        const auto shown = !id ? value : value.empty() ? "›" : value + " ›";
+                   const std::string &value, int y, int height = 104, bool bold_value = false, bool opens = true) {
+        const auto shown = !id || !opens ? value : value.empty() ? "›" : value + " ›";
         const int value_width = std::min(text_width(shown, 24), 400);
         const int title_width = 612 - value_width - 16;
         if (description.empty())
@@ -902,57 +961,84 @@ struct ReaderApp::Impl final : DisplayBackend {
         center(title, x, y + (h - size) / 2 - 3, w, size, selected ? 15 : 1);
         hits.push_back({x, y, w, h, id});
     }
-    /** Page header: a back cell naming the parent page, when back is non-zero, and the title. */
-    void header(const std::string &title, int back = Back, const std::string &parent = "返回") {
+    /**
+     * Page header: a back cell naming the parent page, when back is non-zero, directly followed
+     * by the title. right_edge leaves room for action cells drawn by the caller.
+     */
+    void header(const std::string &title, int back = Back, const std::string &parent = "书库", int right_edge = 660) {
         canvas.fill_rect(0, 0, 684, 104, 15);
         int left = 28;
         if (back) {
-            text("‹ " + parent, 28, 32, 28, 104);
-            canvas.line(140, 0, 140, 103, 1, 2);
-            hits.push_back({0, 0, 140, 104, back});
-            left = 168;
+            const auto label = "‹ " + parent;
+            const int width = std::min(text_width(label, 28), 240);
+            text(label, 28, 32, 28, width);
+            left = 28 + width + 28;
+            hits.push_back({0, 0, left, 104, back});
         }
-        text(title, left, 30, 32, 660 - left, 1, true);
+        text(title, left, 30, 32, right_edge - left, 1, true);
         canvas.line(0, 103, 683, 103, 1, 3);
     }
-    void dashed(int x, int y, int w, int h) {
+    void dashed(int x, int y, int w, int h, std::uint8_t gray = 5) {
         for (int i = 0; i < w; i += 12) {
-            canvas.fill_rect(x + i, y, std::min(6, w - i), 2, 5);
-            canvas.fill_rect(x + i, y + h - 2, std::min(6, w - i), 2, 5);
+            canvas.fill_rect(x + i, y, std::min(6, w - i), 2, gray);
+            canvas.fill_rect(x + i, y + h - 2, std::min(6, w - i), 2, gray);
         }
         for (int i = 0; i < h; i += 12) {
-            canvas.fill_rect(x, y + i, 2, std::min(6, h - i), 5);
-            canvas.fill_rect(x + w - 2, y + i, 2, std::min(6, h - i), 5);
+            canvas.fill_rect(x, y + i, 2, std::min(6, h - i), gray);
+            canvas.fill_rect(x + w - 2, y + i, 2, std::min(6, h - i), gray);
         }
     }
     void disabled_button(const std::string &label, int x, int y, int w, int h = 88) {
         dashed(x, y, w, h);
         center(label, x, y + (h - 26) / 2 - 3, w, 26, 5);
     }
-    void pager(int previous, int next, std::size_t index, std::size_t total) {
-        canvas.fill_rect(0, 1096, 684, 120, 15);
-        canvas.line(0, 1096, 683, 1096, 1, 2);
-        if (index > 0) button(previous, "‹ 上一屏", 24, 1112, 180, 88, false, 24);
-        else disabled_button("‹ 上一屏", 24, 1112, 180);
-        center(std::to_string(index + 1) + " / " + std::to_string(std::max<std::size_t>(1, total)),
-               216, 1138, 252, 26);
-        if (index + 1 < total) button(next, "下一屏 ›", 480, 1112, 180, 88, false, 24);
-        else disabled_button("下一屏 ›", 480, 1112, 180);
+    /** An action that cannot be undone: dashed frame, never the filled recommended style. */
+    void danger_button(int id, const std::string &label, int x, int y, int w, int h = 96) {
+        dashed(x, y, w, h, 1);
+        center(label, x, y + (h - 28) / 2 - 3, w, 28);
+        hits.push_back({x, y, w, h, id});
     }
-    void title_lines(const std::string &value, int x, int y, int width, int size, bool bold = false, int max_rows = 2) {
+    /** The page notice; drawing it marks it for removal by the next input. */
+    const std::string &notice() {
+        notice_shown = notice_shown || !message.empty();
+        return message;
+    }
+    static constexpr int footer_zone = 1120;
+    /**
+     * The 96-pixel footer shared by the screen pager and the page notice. With several screens
+     * the notice takes the place of the screen number; a single screen shows the notice alone.
+     */
+    void footer_bar(const std::string &hint, std::size_t index = 0, std::size_t total = 1) {
+        canvas.fill_rect(0, footer_zone, 684, 96, 15);
+        if (total <= 1 && hint.empty()) return;
+        canvas.line(0, footer_zone, 683, footer_zone, 1, 2);
+        if (total <= 1) {
+            text(hint, 36, footer_zone + 34, 24, 612);
+            return;
+        }
+        center("‹ 上一屏", 0, footer_zone + 34, 170, 24, index ? 1 : 9);
+        if (index) hits.push_back({0, footer_zone, 170, 96, Prev});
+        canvas.line(514, footer_zone, 514, 1215, 1, 2);
+        center("下一屏 ›", 514, footer_zone + 34, 170, 24, index + 1 < total ? 1 : 9);
+        if (index + 1 < total) hits.push_back({514, footer_zone, 170, 96, Next});
+        if (hint.empty()) center(std::to_string(index + 1) + " / " + std::to_string(total), 170, footer_zone + 34, 344, 24, 3);
+        else center(hint, 178, footer_zone + 36, 328, 22);
+    }
+    void title_lines(const std::string &value, int x, int y, int width, int size, bool bold = false, int max_rows = 2,
+                     std::uint8_t gray = 1) {
         ui.size(size);
         const auto scalars = decode_utf8(value);
         int used = 0, row = 0;
         const int baseline = y + ui.metrics().ascender;
         for (std::size_t i = 0; i < scalars.size(); ++i) {
-            const int advance = ui.advance(scalars[i]);
-            if (used + advance > width) { ++row; used = 0; }
+            const int advance = ui.advance(scalars[i]), run = run_width(scalars, i);
+            if (used + advance > width || (used && row + 1 < max_rows && run <= width && used + run > width)) { ++row; used = 0; }
             if (row == max_rows - 1 && i + 1 < scalars.size() && used + advance + ui.advance(U'…') > width) {
-                ui.draw(canvas, U'…', x + used, baseline + row * (size + 8), 1, bold);
+                ui.draw(canvas, U'…', x + used, baseline + row * (size + 8), gray, bold);
                 break;
             }
             if (row >= max_rows) break;
-            ui.draw(canvas, scalars[i], x + used, baseline + row * (size + 8), 1, bold);
+            ui.draw(canvas, scalars[i], x + used, baseline + row * (size + 8), gray, bold);
             used += advance;
         }
     }
@@ -1003,6 +1089,20 @@ struct ReaderApp::Impl final : DisplayBackend {
             total += spine[i].bytes;
             if (i < chapter_index) read += spine[i].bytes;
             else if (i == chapter_index && !chapter.text.empty()) {
+                if (txt_name(book_path)) {
+                    // Byte span of the loaded part: recorded boundaries for GB18030, 48 KiB steps
+                    // for UTF-8, both limited by the file size so that a short part is not overstated.
+                    const auto &offsets = document.metadata().txt_offsets;
+                    std::uint64_t begin = static_cast<std::uint64_t>(chapter.part) * kTxtPartBytes, span = kTxtPartBytes;
+                    if (chapter.part + 1 < offsets.size()) {
+                        begin = offsets[chapter.part];
+                        span = offsets[chapter.part + 1] - begin;
+                    }
+                    begin = std::min<std::uint64_t>(begin, spine[i].bytes);
+                    span = std::min<std::uint64_t>(span, spine[i].bytes - begin);
+                    read += begin + span * std::min(end, chapter.text.size()) / chapter.text.size();
+                    continue;
+                }
                 // The number of parts is unknown before the item is counted; one more is assumed.
                 const std::uint64_t parts = chapter.part + (chapter.last_part ? 1 : 2);
                 const std::uint64_t within = chapter.part * chapter.text.size() + std::min(end, chapter.text.size());
@@ -1015,7 +1115,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::string book_percent(std::size_t start, std::size_t end) const {
         if (const auto current = current_page(start))
             return std::to_string(static_cast<std::uint64_t>(current) * 100 / total_pages()) + "%";
-        return "约 " + std::to_string(estimated_percent(end)) + "%";
+        return std::to_string(estimated_percent(end)) + "%";
     }
     std::string book_percent() const {
         return book_percent(page.start, page.end);
@@ -1023,7 +1123,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     /** Page number, page total and percentage; the percentage alone until every chapter is counted. */
     std::string book_position(std::size_t start, std::size_t end) const {
         if (const auto current = current_page(start))
-            return "第 " + std::to_string(current) + " / " + std::to_string(total_pages()) + " 页 · " + book_percent(start, end);
+            return std::to_string(current) + " / " + std::to_string(total_pages()) + " · " + book_percent(start, end);
         if (pages_complete) return "共 " + std::to_string(total_pages()) + " 页 · " + book_percent(start, end);
         return book_percent(start, end);
     }
@@ -1033,6 +1133,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         return position + (counting_blocked == chapter_index ? " · 等待统计页数" : " · 正在统计页数");
     }
     std::string sync_badge() const {
+        if (txt_name(book_path)) return "仅本地";
         if (session.needs_save()) return "尚未保存";
         if (active_network) return "同步中";
         if (remote_anchor) return "位置不同 ›";
@@ -1044,28 +1145,52 @@ struct ReaderApp::Impl final : DisplayBackend {
             return "已上传";
         return "待上传";
     }
-    void reading_header() {
+    /**
+     * Book header. Over a tool panel the back cell closes the panel, because the panel's parent
+     * is the reading page. The badge appears only for a state the user has to act on.
+     */
+    void reading_header(bool panel = false) {
         canvas.fill_rect(0, 0, 684, 104, 15);
-        text("‹ 书库", 28, 32, 28, 100);
-        hits.push_back({0, 0, 128, 104, Library});
-        text(chapter_label(), 132, 14, 30, 380, 1, true);
-        text(document.metadata().title, 132, 60, 22, 212, 3);
-        text("· " + book_percent(), 352, 60, 22, 176, 3);
-        button(Sync, sync_badge(), 536, 26, 124, 54, session.needs_save() || remote_anchor.has_value(), 22);
+        text(panel ? "‹ 正文" : "‹ 书库", 28, 32, 28, 100);
+        hits.push_back({0, 0, 128, 104, panel ? Back : Library});
+        const bool unsaved = session.needs_save(), differs = remote_anchor.has_value();
+        const int right = unsaved || differs ? 496 : 660;
+        text(chapter_label(), 132, 14, 30, right - 132, 1, true);
+        const auto percent = " · " + book_percent();
+        const int percent_width = text_width(percent, 22);
+        const int title_width = std::min(text_width(document.metadata().title, 22), right - 132 - percent_width);
+        text(document.metadata().title, 132, 60, 22, title_width, 3);
+        text(percent, 132 + title_width, 60, 22, percent_width, 3);
+        if (unsaved || differs) {
+            button(Sync, unsaved ? "尚未保存" : "位置不同 ›", 512, 26, 148, 54, true, 22);
+            if (view == View::Sync) hits.pop_back();
+        }
         canvas.line(0, 103, 683, 103, 1, 3);
     }
+    static constexpr int panel_strip = 56;
+    // The typography preview ends above the strip of the panel at 656.
+    static constexpr int preview_bottom = 656 - panel_strip;
+    /**
+     * Panel top: a strip that closes the panel, above the four tool tabs. The strip occupies
+     * panel_strip pixels above top.
+     */
     void tabs(int top, int active) {
-        const int ids[] = {Contents, Typography, Sync, Refresh, Back};
-        const char *names[] = {"目录", "排版", "同步", "刷新", "收起"};
-        canvas.fill_rect(0, top, 684, 100, 15);
-        for (int i = 0; i < 5; ++i) {
-            const int x = i * 143, width = i == 4 ? 112 : 143;
-            if (ids[i] == active) canvas.fill_rect(x, top, width, 100, 1);
-            canvas.line(x, top, x, top + 99, 1, 2);
-            center(names[i], x, top + 32, width, 26, ids[i] == active ? 15 : 1, ids[i] == active);
-            hits.push_back({x, top, width, 100, ids[i]});
+        const int ids[] = {Contents, Typography, Sync, Refresh};
+        const char *names[] = {"目录", "排版", "同步", "刷新"};
+        canvas.fill_rect(0, top - panel_strip, 684, panel_strip + 100, 15);
+        canvas.line(0, top - panel_strip, 683, top - panel_strip, 1, 3);
+        text("收起", 574, top - panel_strip + 14, 24, 60, 3);
+        canvas.line(634, top - 32, 641, top - 25, 3, 2);
+        canvas.line(641, top - 25, 648, top - 32, 3, 2);
+        hits.push_back({0, top - panel_strip, 684, panel_strip, Back});
+        for (int i = 0; i < 4; ++i) {
+            const int x = i * 171;
+            if (ids[i] == active) canvas.fill_rect(x, top, 171, 100, 1);
+            else if (i) canvas.line(x, top, x, top + 99, 1, 2);
+            center(names[i], x, top + 32, 171, 26, ids[i] == active ? 15 : 1, ids[i] == active);
+            hits.push_back({x, top, 171, 100, ids[i]});
         }
-        canvas.line(0, top, 683, top, 1, 3);
+        canvas.line(0, top, 683, top, 1, 2);
         canvas.line(0, top + 99, 683, top + 99, 1, 2);
     }
     void tool_icon(int id, int cx, int cy) {
@@ -1086,7 +1211,11 @@ struct ReaderApp::Impl final : DisplayBackend {
                     const int radius = x*x + y*y;
                     if (radius <= 324 && (x <= 0 || radius >= 256)) canvas.pixel(cx+x, cy+y, 1);
                 }
-        } else outline(cx - 16, cy - 16, 32, 32, 2);
+        } else {
+            // A screen painted solid: the whole panel is redrawn.
+            outline(cx - 15, cy - 18, 30, 36, 3);
+            canvas.fill_rect(cx - 9, cy - 12, 18, 24, 1);
+        }
     }
     void note(const std::string &value, int y = 1020) {
         text(value, 36, y, 24, 612, 3);
@@ -1112,11 +1241,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (view == View::Reading) {
             canvas.fill_rect(0, footer_top, 684, 88, 15);
             text(status, 36, 1156, 24, 612, 3);
-        } else {
-            const int top = view == View::BookDetails ? 1056 : 1040;
-            canvas.fill_rect(24, top, 636, 48, 15);
-            note(status, top + 10);
-        }
+        } else footer_bar(status);
         deferred = std::move(work);
         overlay();
     }
@@ -1188,9 +1313,12 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void scan_library() {
         entries.clear();
+        folder_root = false;
         if (!card_available)
             return;
         const auto cfg = store.load_settings();
+        const auto &roots = cfg.settings.library_roots;
+        folder_root = std::find(roots.begin(), roots.end(), folder) != roots.end();
         if (folder.empty()) {
             for (const auto &path : cfg.settings.library_roots) {
                 struct stat st{};
@@ -1218,7 +1346,7 @@ struct ReaderApp::Impl final : DisplayBackend {
 #endif
                 if (result != 0)
                     continue;
-                if (S_ISDIR(st.st_mode) || (S_ISREG(st.st_mode) && epub_name(name)))
+                if (S_ISDIR(st.st_mode) || (S_ISREG(st.st_mode) && book_name(name)))
                     entries.push_back({path, name, S_ISDIR(st.st_mode)});
                 if (entries.size() >= 512) {
                     message = "当前目录仅显示前 512 项，请分目录存放";
@@ -1227,23 +1355,93 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
             closedir(dir);
         }
-        std::sort(entries.begin(), entries.end(), [](const Entry &a, const Entry &b) {
+        std::sort(entries.begin(), entries.end(), [this](const Entry &a, const Entry &b) {
             if (a.directory != b.directory)
                 return a.directory > b.directory;
-            return a.name < b.name;
+            return library_descending ? a.name > b.name : a.name < b.name;
         });
-        if (library_descending) std::reverse(entries.begin(), entries.end());
         library_page = std::min(library_page, entries.empty() ? 0 : (entries.size() - 1) / library_page_size());
     }
     std::size_t library_page_size() const { return library_grid ? 6 : 5; }
     static std::string entry_title(const Entry &entry) {
-        return entry.directory ? entry.name : entry.name.substr(0, entry.name.size() - 5);
+        return entry.directory ? entry.name : entry.name.substr(0, entry.name.size() - (txt_name(entry.name) ? 4 : 5));
     }
     /** FNV-1a of a card-relative path; names the cache entries of one book. */
     static unsigned long long path_hash(const std::string &relative) {
         std::uint64_t hash = 1469598103934665603ULL;
         for (const unsigned char c : relative) hash = (hash ^ c) * 1099511628211ULL;
         return hash;
+    }
+    struct PendingPosition {
+        std::string name, bytes, book_id;
+        Anchor anchor;
+    };
+    std::optional<PendingPosition> pending_position;
+    static std::string position_name(const std::string &relative) {
+        char name[40];
+        std::snprintf(name, sizeof(name), "positions/%016llx", path_hash(relative));
+        return name;
+    }
+    static std::string position_header(const std::string &relative, const struct stat &info) {
+        return "PPPOS1\n" + relative + "\n" + std::to_string(info.st_size) + " " +
+               std::to_string(static_cast<long long>(info.st_mtime)) + "\n";
+    }
+    /**
+     * Writes the visible chapter and percentage to PicoPage/cache for the library. The entry is
+     * display data bound to one file version; the progress record remains the only authority.
+     */
+    void remember_position() {
+        struct stat info{};
+        if (!has_book() || !card_available || !session.visible_record() || page.end <= page.start ||
+            stat((root + "/" + book_path).c_str(), &info) != 0) return;
+        const auto name = position_name(book_path);
+        auto bytes = position_header(book_path, info) + chapter_label() + "\n" + book_percent();
+        // The library must not show a position that reopening cannot restore: an unsaved page is
+        // recorded by poll_save once its commit is acknowledged.
+        if (session.needs_save()) {
+            pending_position = PendingPosition{name, std::move(bytes), document.metadata().book_id, session.visible_record()->anchor};
+            return;
+        }
+        pending_position.reset();
+        store.save_cache(name, bytes);
+    }
+    /** Chapter and percentage last recorded for a book file; both empty when there is no entry. */
+    std::pair<std::string, std::string> recalled_position(const std::string &relative) {
+        struct stat info{};
+        std::string cached;
+        if (stat((root + "/" + relative).c_str(), &info) != 0) return {};
+        const auto header = position_header(relative, info);
+        if (store.load_cache(position_name(relative), header.size() + 512, cached) != StoreStatus::Ok ||
+            cached.compare(0, header.size(), header) != 0) return {};
+        const auto split = cached.find('\n', header.size());
+        if (split == std::string::npos) return {};
+        return {cached.substr(header.size(), split - header.size()), cached.substr(split + 1)};
+    }
+    /** Fills the status line of a library entry: books in a folder, or the reading state of a book. */
+    void describe(Entry &entry) {
+        if (entry.described) return;
+        entry.described = true;
+        if (entry.directory) {
+            int books = 0;
+            if (DIR *dir = opendir((root + "/" + entry.path).c_str())) {
+                while (const auto *item = readdir(dir))
+                    if (item->d_name[0] != '.' && book_name(item->d_name)) ++books;
+                closedir(dir);
+            }
+            entry.status = "文件夹 · " + std::to_string(books) + " 本";
+            return;
+        }
+        entry.status = recalled_position(entry.path).second;
+        if (!entry.status.empty()) return;
+        // Without a cache entry only the existence of a position is known. A cleared record is
+        // a small file that names its state.
+        char record[512] = {};
+        std::size_t length = 0;
+        if (std::FILE *file = std::fopen((root + "/" + entry.path + ".picopage/progress.json").c_str(), "rb")) {
+            length = std::fread(record, 1, sizeof(record) - 1, file);
+            std::fclose(file);
+        }
+        entry.status = length && !std::strstr(record, "\"cleared\"") ? "在读" : "未读";
     }
     struct CoverEntry {
         std::string name, header;
@@ -1299,9 +1497,32 @@ struct ReaderApp::Impl final : DisplayBackend {
                 canvas.pixel(x + column, y + row, column % 2 ? packed >> 4 : packed & 15);
             }
     }
+    // List rows show the card thumbnail reduced to this size, so both views share one cache entry.
+    static constexpr int kRowCoverWidth = 59, kRowCoverHeight = 80;
+    /** Copies packed cover pixels reduced to width x height by averaging the covered source pixels. */
+    void blit_reduced(const std::vector<std::uint8_t> &pixels, int source_width, int source_height,
+                      int x, int y, int width, int height) {
+        const int stride = (source_width + 1) / 2;
+        for (int row = 0; row < height; ++row) {
+            const int top = row * source_height / height, bottom = std::max(top + 1, (row + 1) * source_height / height);
+            for (int column = 0; column < width; ++column) {
+                const int left = column * source_width / width, right = std::max(left + 1, (column + 1) * source_width / width);
+                int sum = 0;
+                for (int v = top; v < bottom; ++v)
+                    for (int u = left; u < right; ++u) {
+                        const auto packed = pixels[v * stride + u / 2];
+                        sum += u % 2 ? packed >> 4 : packed & 15;
+                    }
+                canvas.pixel(x + column, y + row, static_cast<std::uint8_t>(sum / ((bottom - top) * (right - left))));
+            }
+        }
+    }
     enum class Cover { Drawn, None, Undecoded };
-    /** Draws a library thumbnail. Without decode, a cover absent from both caches is left Undecoded. */
-    Cover draw_cover(const Entry &entry, int x, int y, bool decode) {
+    /**
+     * Draws a library thumbnail, reduced for a list row when row is true. Without decode, a cover
+     * absent from both caches is left Undecoded.
+     */
+    Cover draw_cover(const Entry &entry, int x, int y, bool decode, bool row = false) {
         struct stat info{};
         const auto path = root + "/" + entry.path;
         if (entry.directory || !safe_existing(root, entry.path) || stat(path.c_str(), &info) != 0)
@@ -1315,22 +1536,24 @@ struct ReaderApp::Impl final : DisplayBackend {
             found = covers.end();
         }
         if (found == covers.end()) {
-            const auto cached = cover_entry(entry.path, info, 164, 184, false);
+            const auto cached = cover_entry(entry.path, info, kLibraryCoverWidth, kLibraryCoverHeight, true);
             std::vector<std::uint8_t> pixels;
             if (!cached_cover(cached, pixels)) {
                 if (!decode || async_content) {
                     if (async_content) missing_covers.push_back({entry.path, cached.name, cached.header, info.st_size, info.st_mtime});
                     return Cover::Undecoded;
                 }
-                pixels = decode_cover(entry.path, cached, 164, 184, false);
+                pixels = decode_cover(entry.path, cached, kLibraryCoverWidth, kLibraryCoverHeight, true);
             }
-            // Two visible screens occupy at most 181,056 bytes of packed thumbnail pixels.
-            if (covers.size() == 12) covers.erase(covers.begin());
+            if (covers.size() == kCoverSlots) covers.erase(covers.begin());
             covers.push_back({entry.path, info.st_size, info.st_mtime, std::move(pixels)});
             found = covers.end() - 1;
         }
-        if (found->pixels.empty()) return Cover::None;
-        blit(found->pixels, x, y, 164, 184);
+        // An entirely white thumbnail identifies nothing; the title is drawn in its place.
+        if (std::all_of(found->pixels.begin(), found->pixels.end(), [](std::uint8_t packed) { return packed == 0xff; }))
+            return Cover::None;
+        if (row) blit_reduced(found->pixels, kLibraryCoverWidth, kLibraryCoverHeight, x, y, kRowCoverWidth, kRowCoverHeight);
+        else blit(found->pixels, x, y, kLibraryCoverWidth, kLibraryCoverHeight);
         return Cover::Drawn;
     }
     /**
@@ -1344,68 +1567,98 @@ struct ReaderApp::Impl final : DisplayBackend {
         view = View::Library;
         hits.clear();
         canvas.clear();
-        text(folder.empty() ? "书库" : "‹ " + basename(folder), 36, 28, 34, 350, 1, true);
-        if (!folder.empty()) hits.push_back({0, 0, 380, 104, Back});
-        for (int x : {396, 540}) canvas.line(x, 0, x, 104, 1, 2);
+        if (folder.empty()) header("书库", 0, "", 388);
+        else {
+            const auto slash = folder.find_last_of('/');
+            header(basename(folder), Back, folder_root || slash == std::string::npos ? "书库" : basename(folder.substr(0, slash)), 388);
+            hits.back() = {0, 0, 396, 104, Back};
+        }
+        for (int x : {396, 540}) canvas.line(x, 0, x, 102, 1, 2);
         center("导入", 396, 32, 144, 26);
         center("设置", 540, 32, 144, 26);
         hits.push_back({396, 0, 144, 104, Import});
         hits.push_back({540, 0, 144, 104, Settings});
-        canvas.line(0, 103, 683, 103, 1, 3);
-        text("继续阅读", 36, 128, 22, 612, 3);
-        outline(24, 172, 636, 174, 3);
-        if (has_book() || !last_book.empty()) {
-            const auto title = has_book() ? document.metadata().title : basename(last_book);
-            title_lines(title, 48, 192, 454, 30, true);
-            text(has_book() ? (document.metadata().author.empty() ? "" : document.metadata().author + " · ") + chapter_label() : "打开后恢复已保存的位置", 48, 292, 22, 450, 3);
-            text("继续 ›", 550, 240, 26, 98);
-            hits.push_back({24, 172, 636, 174, Tools});
-        } else {
-            text("从书库打开一本 EPUB", 48, 202, 30, 570, 1, true);
-            text("阅读位置自动保存在存储卡", 48, 282, 22, 570, 3);
-        }
-        text("本机书籍 · " + std::to_string(entries.size()) + " 项", 36, 378, 22, 280, 3);
-        text(library_descending ? "书名 ↓" : "书名 ↑", 340, 378, 22, 108);
-        hits.push_back({324, 354, 144, 64, LibrarySort});
-        button(LibraryList, "列表", 476, 358, 92, 60, !library_grid, 22);
-        button(LibraryGrid, "卡片", 568, 358, 92, 60, library_grid, 22);
-        canvas.line(0, 430, 683, 430, 1, 2);
-        const auto size = library_page_size(), begin = library_page * size;
-        for (std::size_t i = begin; i < std::min(begin + size, entries.size()); ++i) {
-            const auto &entry = entries[i];
-            const auto label = entry_title(entry);
-            const auto status = entry.directory ? "文件夹 ›" : entry.path == last_book ? "最近阅读" : "EPUB";
-            if (library_grid) {
-                const int x = 24 + static_cast<int>((i - begin) % 3) * 216;
-                const int y = 454 + static_cast<int>((i - begin) / 3) * 300;
-                outline(x + 12, y, 168, 188);
-                const auto cover = draw_cover(entry, x + 14, y + 2, decode);
-                undecoded = undecoded || cover == Cover::Undecoded;
-                if (cover != Cover::Drawn)
-                    title_lines(label, x + 28, y + 42, 136, 24, true);
-                title_lines(label, x + 4, y + 204, 194, 22);
-                text(entry.directory ? status : "详情 ›", x + 4, y + 265, 22, 194, 3);
-                if (!entry.directory) hits.push_back({x, y + 204, 204, 88, DetailBase + static_cast<int>(i)});
-                hits.push_back({x, y, 204, entry.directory ? 292 : 204, EntryBase + static_cast<int>(i)});
-            } else {
-                const int y = 432 + static_cast<int>(i - begin) * 126;
-                title_lines(label, 36, y + 12, 486, 28);
-                text(entry.directory ? entry.path : "本地 EPUB", 36, y + 88, 22, 470, 3);
-                text(entry.directory ? status : "详情 ›", 552, y + 44, 22, 108, 3);
-                canvas.line(24, y + 125, 660, y + 125, 12, 2);
-                if (!entry.directory) hits.push_back({548, y, 112, 126, DetailBase + static_cast<int>(i)});
-                hits.push_back({24, y, entry.directory ? 636 : 524, 126, EntryBase + static_cast<int>(i)});
+        // The card appears where reading normally starts and only when there is a book to resume.
+        int top = 104;
+        if ((folder.empty() || folder_root) && (has_book() || !last_book.empty())) {
+            std::string position;
+            if (has_book() && page.end > page.start) position = chapter_label() + " · " + book_percent();
+            else if (!has_book()) {
+                const auto recalled = recalled_position(last_book);
+                if (!recalled.second.empty()) position = recalled.first + " · " + recalled.second;
             }
+            outline(24, 128, 636, 206, 3);
+            text("继续阅读", 48, 146, 22, 520, 3);
+            title_lines(has_book() ? document.metadata().title : basename(last_book), 48, 182, 540, 30, true);
+            text(position.empty() ? "打开后恢复已保存的位置" : position, 48, 288, 22, 540, 3);
+            text("›", 620, 214, 28, 30);
+            hits.push_back({24, 128, 636, 206, Tools});
+            top = 354;
         }
         if (entries.empty()) {
-            text(card_available ? "书库里还没有书" : "存储卡不可用", 36, 500, 32, 612, 1, true);
-            note(card_available ? "可通过导入，将 EPUB 复制到存储卡。" : "这不代表书籍已被删除。", 570);
+            const int y = top + 120;
+            text(!card_available ? "存储卡不可用" : folder.empty() ? "书库里还没有书" : "这个文件夹是空的", 36, y, 40, 612, 1, true);
+            if (!card_available) wrapped("这不代表书籍已被删除。", 36, y + 76, 612, 28);
+            else {
+                const int height = wrapped(folder.empty() ? "用“导入”把 EPUB 或 TXT 复制到存储卡。"
+                                                          : "用“导入”把 EPUB 或 TXT 复制到存储卡，或返回上一级。", 36, y + 76, 612, 28);
+                button(Import, "导入", 24, y + 104 + height, 636, 96);
+            }
+            footer_bar(notice());
+            return;
         }
-        if (undecoded || !message.empty()) {
-            canvas.fill_rect(24, 1040, 636, 48, 15);
-            note(undecoded ? "正在生成封面…" : message, 1050);
+        const auto folders = static_cast<std::size_t>(std::count_if(entries.begin(), entries.end(), [](const Entry &entry) { return entry.directory; }));
+        std::string count = folders ? std::to_string(folders) + " 个文件夹" : "";
+        if (folders < entries.size()) count += (count.empty() ? "" : " · ") + std::to_string(entries.size() - folders) + " 本书";
+        text(count, 36, top + 24, 22, 280, 3);
+        text(library_descending ? "书名 ↓" : "书名 ↑", 340, top + 24, 22, 108);
+        hits.push_back({324, top, 144, 64, LibrarySort});
+        button(LibraryList, "列表", 476, top + 4, 92, 60, !library_grid, 22);
+        button(LibraryGrid, "卡片", 568, top + 4, 92, 60, library_grid, 22);
+        canvas.line(0, top + 76, 683, top + 76, 1, 2);
+        const auto size = library_page_size(), begin = library_page * size;
+        for (std::size_t i = begin; i < std::min(begin + size, entries.size()); ++i) {
+            auto &entry = entries[i];
+            describe(entry);
+            const auto label = entry_title(entry);
+            if (library_grid) {
+                const int x = 36 + static_cast<int>((i - begin) % 3) * 214;
+                const int y = top + 100 + static_cast<int>((i - begin) / 3) * 320;
+                if (entry.directory) {
+                    // A tabbed frame distinguishes a folder from a book without a cover.
+                    canvas.fill_rect(x, y, 84, 2, 1);
+                    canvas.fill_rect(x, y, 2, 22, 1);
+                    canvas.fill_rect(x + 82, y, 2, 22, 1);
+                    outline(x, y + 22, kLibraryCoverWidth, kLibraryCoverHeight - 22);
+                    title_lines(label, x + 18, y + 162, 148, 28, true);
+                } else {
+                    const auto cover = draw_cover(entry, x, y, decode);
+                    undecoded = undecoded || cover == Cover::Undecoded;
+                    if (cover != Cover::Drawn) {
+                        title_lines(label, x + 18, y + 20, 148, 28, true, 4);
+                        canvas.fill_rect(x + 18, y + 228, 48, 2, 1);
+                    }
+                    outline(x, y, kLibraryCoverWidth, kLibraryCoverHeight);
+                }
+                text(entry.status, x, y + 264, 22, kLibraryCoverWidth, 3);
+                hits.push_back({x, y, kLibraryCoverWidth, 296, EntryBase + static_cast<int>(i)});
+            } else {
+                const int y = top + 78 + static_cast<int>(i - begin) * 126;
+                // A book without a cover leaves no empty slot; its title starts at the margin.
+                const auto cover = entry.directory ? Cover::None : draw_cover(entry, 37, y + 22, decode, true);
+                undecoded = undecoded || cover == Cover::Undecoded;
+                if (cover == Cover::Drawn) outline(36, y + 21, kRowCoverWidth + 2, kRowCoverHeight + 2);
+                const int left = cover == Cover::Drawn ? 118 : 36;
+                const auto status = entry.directory ? entry.status + " ›" : entry.status;
+                const int status_width = std::min(text_width(status, 22), 200);
+                const int title_width = 628 - left - status_width;
+                title_lines(label, left, y + (text_width(label, 28) <= title_width ? 44 : 26), title_width, 28);
+                text(status, 648 - status_width, y + 50, 22, status_width, 3);
+                canvas.line(24, y + 125, 660, y + 125, 12, 2);
+                hits.push_back({24, y, 636, 126, EntryBase + static_cast<int>(i)});
+            }
         }
-        pager(Prev, Next, library_page, (entries.size() + size - 1) / size);
+        footer_bar(undecoded ? "正在生成封面…" : notice(), library_page, (entries.size() + size - 1) / size);
         if (undecoded && async_content) {
             ContentJob::Request request;
             request.kind = ContentJob::Kind::LibraryCovers; request.root = root;
@@ -1431,8 +1684,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             return false;
         }
         if (has_book()) {
-            if (async_content) schedule_save();
+            if (async_content) { remember_position(); schedule_save(); }
             else if (!persist()) { error(message); return false; }
+            else remember_position();
         }
         save_pages();
         if (async_content) return begin_open(path);
@@ -1440,7 +1694,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!open_document(path, detail)) {
             book_path.clear();
             session.open("", "", writer);
-            error("无法打开 EPUB：" + detail);
+            error(reason(detail) + "。原书没有被修改。", path);
             return false;
         }
         return finish_open(path);
@@ -1459,10 +1713,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         clear_page_history();
         reset_pages();
         const auto restored =
-            loaded ? loaded->progress : store.load_progress(path, document.metadata().book_id, content_revision);
-        session.open(document.metadata().book_id, content_revision, writer, restored.record);
+            loaded ? loaded->progress : store.load_progress(path, document.metadata().book_id, revision_for(path, document.metadata()));
+        session.open(document.metadata().book_id, revision_for(path, document.metadata()), writer, restored.record);
         if (restored.status != StoreStatus::Ok && restored.status != StoreStatus::Missing && restored.status != StoreStatus::Cleared) {
-            error("原进度读取失败，已停止开书以保护记录");
+            error("原进度读取失败。为保护阅读记录，已停止打开本书。原书和进度文件都没有被修改。", path);
             return false;
         }
         chapter_index = 0;
@@ -1486,7 +1740,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (!document.chapter_index_for(restored.record->anchor.resource, chapter_index) ||
                 !find_content(store, document, chapter_index, chapter, detail, ChapterLoad::Reading, holds) ||
                 !chapter.offset_for(restored.record->anchor, restored_offset)) {
-                error(memory_error(detail) ? chapter_error(detail) : "保存的位置无法映射，请保留进度文件并检查 EPUB");
+                error(memory_error(detail) ? chapter_error(detail) : "保存的位置无法映射，请保留进度文件并检查原书");
                 return false;
             }
             offset = restored_offset;
@@ -1524,7 +1778,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         return detail.rfind(kChapterMemoryError, 0) == 0;
     }
     static std::string chapter_error(const std::string &detail) {
-        return memory_error(detail) ? "本章内容过大，设备内存不足，无法显示。" : "章节读取失败：" + detail;
+        return memory_error(detail) ? "本章内容过大，设备内存不足，无法显示。" : "章节读取失败。" + reason(detail) + "。";
     }
     /**
      * Makes the part that load produces the chapter being read. The visible chapter stays in
@@ -1602,7 +1856,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         canvas.fill_rect(0, footer_top, 684, 88, 15);
         const auto position = footer_chapters ? "第 " + std::to_string(chapter_index + 1) + " 章 / 共 " +
             std::to_string(document.spine().size()) + " 章" : book_progress();
-        text(message.empty() ? position : message, 36, 1156, 24, 476, 3);
+        text(notice().empty() ? position : message, 36, 1156, 24, 476, 3);
         outline(556, 1165, 32, 17, 2);
         canvas.fill_rect(588, 1170, 3, 7, 1);
         if (battery_percent) canvas.fill_rect(560, 1169, *battery_percent * 24 / 100, 9, 3);
@@ -1664,7 +1918,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                       spec.left, spec.top, spec.width, spec.height, spec.font_px, spec.line_height,
                       spec.indent_chars, spec.paragraph_gap, spine.size());
         pages_name = name;
-        pages_header = std::string("PPPAGES3\n") + content_revision + ":pagination-v1\n" + book_path + "\n" + font_file + "\n" + geometry +
+        pages_header = std::string("PPPAGES3\n") + revision_for(book_path, document.metadata()) + ":pagination-v1\n" + book_path + "\n" + font_file + "\n" + geometry +
             document.metadata().book_id + "\n" + font_identity + "\n";
         if (async_content) { pages_cache_pending = true; return; }
         if (auto cached = read_page_cache(store, pages_name, pages_header, spine)) adopt_pages(std::move(*cached));
@@ -2042,19 +2296,19 @@ struct ReaderApp::Impl final : DisplayBackend {
         auto bitmap = prefetched ? std::move(next_bitmap) : nullptr;
         clear_prefetch();
         if (!candidate.error.empty() || candidate.end <= candidate.start) {
-            error("本页无法排版：" + candidate.error);
+            error("本页无法排版。" + reason(candidate.error) + "。");
             return false;
         }
         // The built-in subset covers common characters only; the page stays readable and the
         // missing ones draw as the font's .notdef box. The notice applies to this page alone.
         const bool missing = std::any_of(candidate.glyphs.begin(), candidate.glyphs.end(),
             [this](const auto &glyph) { return !body.contains(glyph.scalar); });
-        if (missing) message = builtin_body ? kBuiltinMissingNotice : kMissingNotice;
-        else if (message == kBuiltinMissingNotice || message == kMissingNotice) message.clear();
+        if (missing) message = kMissingNotice;
+        else if (message == kMissingNotice) message.clear();
         canvas.clear();
         if (bitmap) { canvas = std::move(*bitmap); ++bitmap_hits; }
         else if (!draw_page_content(candidate, spec)) {
-            error("正文绘制失败：" + body.error());
+            error("正文绘制失败。" + reason(body.error()) + "。");
             return false;
         }
         page = std::move(candidate);
@@ -2271,12 +2525,10 @@ struct ReaderApp::Impl final : DisplayBackend {
             const int x = i * 137;
             if (i) canvas.line(x, toolbar_top, x, 1215, 1, 2);
             tool_icon(ids[i], x + 68, 1126);
-            const bool extra = ids[i] == Refresh;
-            center(labels[i], x, extra ? 1148 : 1160, 137, 28);
-            if (extra) center(settings.refresh_preset == "fast" ? "快速" : settings.refresh_preset == "clear" ? "清晰" : "均衡", x, 1186, 137, 22, 3);
+            center(labels[i], x, 1160, 137, 28);
             hits.push_back({x, toolbar_top, 137, 136, ids[i]});
         }
-        if (!message.empty()) {
+        if (!notice().empty()) {
             canvas.fill_rect(24, 1012, 636, 56, 15);
             note(message, 1024);
         }
@@ -2298,25 +2550,52 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto &toc = document.toc();
         return index + 1 < toc.size() && toc[index+1].depth > toc[index].depth;
     }
+    /**
+     * Whole-book percentage at which a contents entry starts, from counted pages or, until then,
+     * from chapter sizes. -1 for an entry inside a chapter, whose offset is unknown until that
+     * chapter is loaded.
+     */
+    int toc_percent(std::size_t index) const {
+        const auto &toc = document.toc();
+        const auto &spine = document.spine();
+        std::size_t target;
+        if (!document.chapter_index_for(toc[index].resource, target) || target >= spine.size()) return -1;
+        if (!toc[index].fragment.empty())
+            for (std::size_t i = 0; i < index; ++i)
+                if (toc[i].resource == toc[index].resource) return -1;
+        std::uint64_t before = 0, total = 0;
+        for (std::size_t i = 0; i < spine.size(); ++i) {
+            if (!spine[i].linear) continue;
+            std::uint64_t weight = spine[i].bytes;
+            if (pages_complete) {
+                weight = 0;
+                for (const auto &starts : chapter_pages[i]) weight += starts.size();
+            }
+            total += weight;
+            if (i < target) before += weight;
+        }
+        return total ? static_cast<int>(before * 100 / total) : -1;
+    }
+    static constexpr int contents_top = 350;
     void draw_contents() {
         view = View::Contents;
-        hits.clear();
-        canvas.clear();
-        reading_header();
-        tabs(104, Contents);
+        if (!panel_background(contents_top - panel_strip)) return;
+        tabs(contents_top, Contents);
         const auto &toc = document.toc();
         const auto current = current_toc();
+        const int list_top = contents_top + 100, list_height = footer_zone - list_top;
         toc_visible.clear();
         toc_starts = {0};
+        auto title_width = [&](std::size_t index) {
+            return 456 - std::min<int>(toc[index].depth, 3) * 40 - (toc_parent(index) ? 88 : 0);
+        };
         auto row_height = [&](std::size_t index) {
-            const auto &item = toc[index];
-            const int width = (index == current ? 440 : 570) - std::min<int>(item.depth, 3) * 48 - (toc_parent(index) ? 88 : 0);
-            return std::max(88, std::min(wrapped(item.label, 0, 0, width, 26, false), 80) + 24);
+            return std::max(92, std::min(wrapped(toc[index].label, 0, 0, title_width(index), 26, false), 80) + 24);
         };
         int used = 0;
         for (std::size_t i = 0; i < toc.size(); ++i) {
             const int height = row_height(i);
-            if (used && used + height > 892) { toc_starts.push_back(toc_visible.size()); used = 0; }
+            if (used && used + height > list_height) { toc_starts.push_back(toc_visible.size()); used = 0; }
             if (toc_locate_current && i == current) toc_page = toc_starts.size() - 1;
             toc_visible.push_back(i);
             used += height;
@@ -2329,57 +2608,59 @@ struct ReaderApp::Impl final : DisplayBackend {
         toc_page = std::min(toc_page, toc_starts.size() - 1);
         const auto begin = toc_starts[toc_page];
         const auto end = toc_page + 1 < toc_starts.size() ? toc_starts[toc_page+1] : toc_visible.size();
-        int y = 204;
+        int y = list_top;
         for (std::size_t row = begin; row < end; ++row) {
             const auto i = toc_visible[row];
             const auto &item = toc[i];
-            const int h = row_height(i), indent = std::min<int>(item.depth, 3) * 48;
+            const int h = row_height(i), indent = std::min<int>(item.depth, 3) * 40;
             const bool selected = i == current, parent = toc_parent(i);
-            const int title_width = (selected ? 440 : 570) - indent - (parent ? 88 : 0);
-            if (selected) outline(24, y + 3, 636, h - 6, 3);
-            title_lines(item.label, 36 + indent, y + 20, title_width, item.depth ? 24 : 28, selected);
-            if (selected) {
-                const int x = parent ? 458 : 546;
-                canvas.fill_rect(x, y + 28, 102, 36, 1);
-                center("当前位置", x, y + 31, 102, 22, 15);
-            }
+            const std::uint8_t ink = selected ? 15 : 1;
+            if (selected) canvas.fill_rect(0, y, 684, h - 1, 1);
+            title_lines(item.label, 36 + indent, y + (h > 92 ? 14 : 28), title_width(i), item.depth ? 24 : 28, selected, 2, ink);
+            const int percent = toc_percent(i);
+            const auto position = selected ? "当前 · " + book_percent() : percent < 0 ? std::string() : std::to_string(percent) + "%";
+            const int right = parent ? 560 : 648, width = text_width(position, 22);
+            text(position, right - width, y + (h - 22) / 2 - 4, 22, width, selected ? 15 : 3);
             if (parent) {
                 std::size_t count = 0;
                 for (auto j = i + 1; j < toc.size() && toc[j].depth > item.depth; ++j) ++count;
-                canvas.line(572, y, 572, y + h, 12, 2);
-                const int cx = 590, cy = y + 44;
+                canvas.line(572, y, 572, y + h - 2, selected ? 15 : 12, 2);
+                const int cx = 590, cy = y + h / 2;
                 if (toc_collapsed.count(i)) {
-                    canvas.line(cx - 3, cy - 6, cx + 3, cy, 1, 3);
-                    canvas.line(cx + 3, cy, cx - 3, cy + 6, 1, 3);
+                    canvas.line(cx - 3, cy - 6, cx + 3, cy, ink, 3);
+                    canvas.line(cx + 3, cy, cx - 3, cy + 6, ink, 3);
                 } else {
-                    canvas.line(cx - 6, cy - 3, cx, cy + 3, 1, 3);
-                    canvas.line(cx, cy + 3, cx + 6, cy - 3, 1, 3);
+                    canvas.line(cx - 6, cy - 3, cx, cy + 3, ink, 3);
+                    canvas.line(cx, cy + 3, cx + 6, cy - 3, ink, 3);
                 }
-                center(std::to_string(count), 604, y + 24, 52, 26);
-                hits.push_back({572, y, 88, h, TocToggleBase + static_cast<int>(i)});
+                center(std::to_string(count), 604, y + h / 2 - 20, 52, 26, ink);
+                hits.push_back({572, y, 112, h, TocToggleBase + static_cast<int>(i)});
             }
-            canvas.line(24, y + h - 1, 660, y + h - 1, 12, 2);
-            hits.push_back({24, y, parent ? 548 : 636, h, TocBase + static_cast<int>(i)});
+            if (!selected) canvas.line(0, y + h - 1, 683, y + h - 1, 1, 2);
+            hits.push_back({0, y, parent ? 572 : 684, h, TocBase + static_cast<int>(i)});
             y += h;
         }
-        if (toc.empty()) note("这本书未提供目录，可收起后继续阅读。", 256);
-        pager(Prev, Next, toc_page, toc_starts.size());
+        if (toc.empty()) note("这本书未提供目录，可收起后继续阅读。", list_top + 40);
+        footer_bar("", toc_page, toc_starts.size());
     }
     void draw_typography() {
-        if (async_content && !image_prepared) {
-            if (const auto* image = image_at(readable_offset(offset))) {
-                begin_image(offset, *image, true);
-                return;
-            }
-        }
+        const auto* pending_image = async_content && !image_prepared ? image_at(readable_offset(offset)) : nullptr;
         view = View::Typography;
         hits.clear();
         canvas.clear();
         load_fonts(&draft);
-        const auto spec = layout(draft, 64, 656);
-        const auto preview = plan_page(offset, spec);
-        if (!preview.error.empty() || !draw_page_content(preview, spec))
-            text("预览暂不可用", 36, 96, 28);
+        const auto spec = layout(draft, 64, preview_bottom);
+        if (pending_image) {
+            // The worker prepares the image; the panel stays visible and only cancelling is accepted.
+            begin_image(offset, *pending_image, true);
+            text("正在准备图片…", 36, 300, 26, 400, 3);
+            button(Dismiss, "取消", 262, 368, 160, 64, false, 24);
+            loading_cancel = hits.back();
+        } else {
+            const auto preview = plan_page(offset, spec);
+            if (!preview.error.empty() || !draw_page_content(preview, spec))
+                text("预览暂不可用", 36, 96, 28);
+        }
         canvas.fill_rect(16, 12, 270, 40, 15);
         const bool changed = typography_changed();
         outline(16, 12, changed ? 236 : 120, 40);
@@ -2437,12 +2718,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         center(value(parameter), 168, 946, 348, 34, 1, true);
         button(Plus, "+", 528, 904, 120, 88, false, 40);
         canvas.line(0, 1012, 683, 1012, 12);
-        text(changed ? "取消预览" : "作用域：此书", 36, 1034, 22, 190);
-        if (changed) {
-            canvas.line(36, 1064, 124, 1064, 1);
-            hits.push_back({24, 1014, 190, 72, Back});
-        }
-        text("段距、缩进 >", 236, 1034, 22, 238);
+        text(changed ? "取消预览" : "作用域：此书", 36, 1034, 22, 190, changed ? 1 : 3);
+        if (changed) hits.push_back({24, 1014, 190, 72, Back});
+        text("段距、缩进 ›", 236, 1034, 22, 238);
         hits.push_back({220, 1014, 258, 72, Advanced});
         text("恢复默认", 514, 1034, 22, 146);
         hits.push_back({494, 1014, 166, 72, Defaults});
@@ -2453,8 +2731,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             disabled_button("已应用", 350, 1088, 298, 96);
         else {
             disabled_button("无法应用", 350, 1088, 298, 96);
-            canvas.fill_rect(24, 586, 636, 58, 15);
-            note("字体缺失或损坏，预览使用替代字体。", 596);
+            canvas.fill_rect(24, preview_bottom - 70, 636, 58, 15);
+            note("字体缺失或损坏，预览使用替代字体。", preview_bottom - 60);
         }
     }
     static std::string font_name(const std::string &font) {
@@ -2493,7 +2771,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         hits.push_back({24, y, 636, 116, id});
     }
-    bool panel_background(int top) {
+    /**
+     * Draws the reading page behind a panel that starts at top and clears the panel area. With
+     * live false the header only names the book, for a page that accepts panel controls alone.
+     */
+    bool panel_background(int top, bool live = true) {
         hits.clear();
         if (has_book()) {
             load_fonts();
@@ -2501,22 +2783,21 @@ struct ReaderApp::Impl final : DisplayBackend {
             for (const auto &line : page.lines)
                 if ((line.top < 104 && line.bottom > 104) || (line.top < top && line.bottom > top))
                     canvas.fill_rect(0, line.top, 684, line.bottom - line.top + 1, 15);
-            reading_header();
+            if (live) reading_header(true);
+            else header(document.metadata().title, 0);
         } else {
             canvas.clear();
             header("显示与刷新", Back, "设置");
         }
         canvas.fill_rect(0, top, 684, 1216 - top, 15);
-        if (refresh_from_settings) {
-            hits.clear();
-            header("显示与刷新", Back, "设置");
-        }
         return true;
     }
     void draw_refresh() {
         view = View::Refresh;
-        if (!panel_background(502)) return;
+        if (!panel_background(refresh_from_settings ? 502 : 502 - panel_strip)) return;
         if (refresh_from_settings) {
+            hits.clear();
+            header("显示与刷新", Back, "设置");
             text("阅读默认 · 本书覆盖项保持不变", 36, 536, 24, 612, 3);
             canvas.line(0, 502, 683, 502, 1, 3);
         } else tabs(502, Refresh);
@@ -2537,6 +2818,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (view == View::Error) return;
         view = View::RefreshConfirm;
         hits.clear();
+        if (has_book() && !refresh_from_settings) header(document.metadata().title, 0);
+        else header("显示与刷新", 0);
         canvas.fill_rect(0, 752, 684, 464, 15);
         canvas.line(0, 752, 683, 752, 1, 3);
         text("改用快速刷新？", 36, 788, 32, 612, 1, true);
@@ -2547,7 +2830,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void draw_interval() {
         view = View::RefreshInterval;
-        hits.clear(); canvas.clear(); header("自动全刷间隔");
+        hits.clear(); canvas.clear(); header("自动全刷间隔", Back, "刷新");
         text(refresh_name(draft) + "模式", 36, 170, 32, 612, 1, true);
         wrapped("间隔越短，清理残影越频繁。此设置不影响 K2 手动全刷。", 36, 246, 612, 26);
         button(IntervalLess, "−", 36, 440, 120, 96);
@@ -2584,9 +2867,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         settings_row(PowerSettings, "电源与休眠", sleep_name(values) + " · " +
                      (values.auto_sleep_minutes ? std::to_string(values.auto_sleep_minutes) + " 分钟" : "不自动休眠"), 648);
         settings_row(StorageSettings, "存储与设备", (measured ? "可用 " + file_size(card_free) : "可用空间未知") + " · 固件 " + firmware_version(), 780);
-        if (!cfg.diagnostics.empty()) note("设置文件无效，请检查后重新打开。", 950);
-        else if (!message.empty()) note(message, 950);
-        if (session.needs_save()) button(SaveRetry, "重试保存进度", 24, 1056, 636, 96);
+        if (session.needs_save()) button(SaveRetry, "重试保存进度", 24, 992, 636, 96);
+        footer_bar(cfg.diagnostics.empty() ? notice() : "设置文件无效，请检查后重新打开。");
     }
     void draw_power() {
         view = View::PowerSettings;
@@ -2619,11 +2901,11 @@ struct ReaderApp::Impl final : DisplayBackend {
 #endif
     }
     /**
-     * Sums regular files below a card-relative directory; epub_only keeps EPUB names only.
+     * Sums regular files below a card-relative directory; books_only keeps EPUB and TXT names.
      * The walk blocks the application task, so it stops after 2000 entries. nullopt when a
      * directory cannot be read or that limit is exceeded.
      */
-    std::optional<std::uint64_t> tree_bytes(const std::string &relative, bool epub_only) {
+    std::optional<std::uint64_t> tree_bytes(const std::string &relative, bool books_only) {
         unsigned remaining = 2000;
         std::uint64_t total = 0;
         std::vector<std::string> pending{relative};
@@ -2646,7 +2928,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                     return std::nullopt;
                 }
                 if (S_ISDIR(st.st_mode)) pending.push_back(directory + "/" + name);
-                else if (S_ISREG(st.st_mode) && (!epub_only || epub_name(name))) total += static_cast<std::uint64_t>(st.st_size);
+                else if (S_ISREG(st.st_mode) && (!books_only || book_name(name))) total += static_cast<std::uint64_t>(st.st_size);
             }
             closedir(dir);
         }
@@ -2682,26 +2964,24 @@ struct ReaderApp::Impl final : DisplayBackend {
         text("文件位置", 36, 606, 22, 612, 3);
         value_row(0, "设置", "", "PicoPage/settings.toml", 642, 70);
         value_row(0, "阅读进度", "", "原书旁的 .picopage 目录", 712, 70);
-        if (!message.empty()) note(message, 830);
-        canvas.line(0, 1056, 683, 1056, 1, 3);
-        text("清理全部缓存", 36, 1086, 26, 540, 1, true);
-        text("不删除书和阅读进度，下次打开会稍慢", 36, 1130, 20, 540, 3);
-        text("›", 620, 1098, 28, 40);
-        hits.push_back({0, 1058, 684, 158, ClearCache});
+        if (!notice().empty()) note(message, 830);
+        note("清理缓存不会删除书和阅读进度，下次打开会稍慢。", 1020);
+        button(ClearCache, "清理全部缓存", 24, 1080, 636, 96);
     }
     void draw_input_settings() {
         view = View::InputSettings;
         hits.clear(); canvas.clear(); header("输入与阅读", Back, "设置");
         const auto values = store.load_settings().settings;
-        value_row(LibraryView, "书库默认视图", "", values.library_view == "grid" ? "卡片" : "列表", 104);
+        value_row(LibraryView, "书库默认视图", "点按切换", values.library_view == "grid" ? "卡片" : "列表", 104, 104, false, false);
         value_row(has_book() ? Typography : 0, "阅读默认排版", typography_summary(values), "", 208);
-        value_row(FullRefresh, "立即全刷", "K2 在所有页面全刷当前画面，不改变位置", "", 312);
-        text("正文翻页", 36, 452, 22, 612, 3);
-        note("K1 上一页，K3 下一页。", 496);
-        note("触摸正文左右区域翻页，中部打开工具。", 548);
-        note("关闭和取消使用屏幕控件。", 600);
-        if (!has_book()) note("打开一本书后，可在排版页调整阅读默认排版。", 652);
-        if (!message.empty()) {
+        text("按键与触摸", 36, 344, 22, 612, 3);
+        note("K1 上一页，K3 下一页。", 388);
+        note("K2 在所有页面全刷当前画面，不改变位置。", 440);
+        note("触摸正文左右区域翻页，中部打开工具。", 492);
+        note("长按书库中的书，查看书籍详情。", 544);
+        if (!has_book()) note("打开一本书后，可在排版页调整阅读默认排版。", 596);
+        button(FullRefresh, "立即全刷", 24, 680, 636, 96);
+        if (!notice().empty()) {
             canvas.line(0, 1012, 683, 1012, 1, 3);
             wrapped(message, 36, 1044, 612, 22);
         }
@@ -2721,9 +3001,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         text("同步策略", 36, 452, 22, 612, 3);
         value_row(0, "检查与上传", "在正文工具的“同步”中手动执行", "手动", 488);
         value_row(0, "书籍匹配方式", "按原书内容识别，与文件名无关", "按内容", 592);
-        button(PortalStart, "用手机配置", 24, 760, 636, 96);
-        if (has_book() && configured) button(Sync, "检查当前书籍的同步", 24, 1056, 636, 96);
-        else note(configured ? "打开一本书后，可在工具中检查同步。" : "配置完成前不会联网。", 1090);
+        value_row(PortalStart, "用手机配置", "", "", 744);
+        if (has_book() && configured && !txt_name(book_path)) value_row(Sync, "检查当前书籍的同步", "", "", 848);
+        else if (has_book() && txt_name(book_path)) note("TXT 仅保存本机进度；KOReader 接续仅支持 EPUB。", 890);
+        else note(configured ? "打开一本书后，可在工具中检查同步。" : "配置完成前不会联网。", 890);
     }
     static std::string file_size(std::uint64_t bytes) {
         if (bytes < 1024) return std::to_string(bytes) + " B";
@@ -2750,7 +3031,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (inspected.open(root + "/" + path, detail_error)) {
                 const auto *source = &inspected;
                 detail_metadata = source->metadata();
-                detail_progress = store.load_progress(path, detail_metadata.book_id, content_revision);
+                detail_progress = store.load_progress(path, detail_metadata.book_id, revision_for(path, detail_metadata));
                 if (detail_progress.record) {
                     const auto &anchor = detail_progress.record->anchor;
                     for (const auto &item : source->toc())
@@ -2781,17 +3062,34 @@ struct ReaderApp::Impl final : DisplayBackend {
         text("进度", 36, 408, 24, 130, 3);
         text(detail_progress.record ? detail_position : (detail_progress.status == StoreStatus::Missing || detail_progress.status == StoreStatus::Cleared) ? "尚无本地阅读记录" : "阅读记录无法验证", 186, 408, 24, 462);
         text("同步", 36, 478, 24, 130, 3);
-        text(detail_path == book_path && detail_metadata.book_id == document.metadata().book_id ? sync_badge() : "打开书籍后检查", 186, 478, 24, 462);
+        text(txt_name(detail_path) ? "仅本地" : detail_path == book_path && detail_metadata.book_id == document.metadata().book_id ? sync_badge() : "打开书籍后检查", 186, 478, 24, 462);
         text("原书占用", 36, 548, 24, 150, 3);
         text(detail_size ? file_size(*detail_size) : "未知", 210, 548, 24, 438);
         if (detail_error.empty()) button(DetailOpen, detail_progress.record ? "继续阅读" : "打开书籍", 36, 630, 612, 96, true);
-        else wrapped("无法打开：" + detail_error, 36, 620, 612, 24);
+        else wrapped("无法打开：" + reason(detail_error) + "。", 36, 620, 612, 24);
         canvas.line(0, 764, 683, 764, 1, 3);
         button(DetailCache, "清理本书缓存", 36, 788, 612, 76);
         if (detail_error.empty()) button(DetailReset, "清除本地阅读进度", 36, 880, 612, 76);
         button(DetailDelete, "删除原书文件", 36, 972, 612, 76);
-        if (!message.empty()) note(message, 1062);
-        button(Back, "返回书库", 24, 1120, 636, 80);
+        footer_bar(notice());
+    }
+    /**
+     * Confirmation page: the header names the origin, followed by the question, the affected
+     * object when there is one, and the consequence. The caller adds the two buttons at 1080;
+     * the filled one is the recommended choice.
+     */
+    void confirm_page(const std::string &origin, const std::string &question, const std::string &object,
+                      const std::string &path, const std::string &consequence) {
+        hits.clear(); canvas.clear(); header(origin, 0);
+        text(question, 36, 160, 40, 612, 1, true);
+        int y = 244;
+        if (!object.empty()) {
+            title_lines(object, 36, y, 612, 30);
+            y += std::min(wrapped(object, 0, 0, 612, 30, false), 80) + 4;
+            title_lines(path, 36, y, 612, 22, false, 2, 3);
+            y += std::min(wrapped(path, 0, 0, 612, 22, false), 64) + 28;
+        }
+        wrapped(consequence, 36, y, 612, 28);
     }
     void confirm_management(bool remove) {
         if (!persist()) { error(message); return; }
@@ -2806,16 +3104,12 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         delete_original = remove;
         view = View::BookManagement;
-        hits.clear(); canvas.clear(); header("书籍管理", 0);
-        text(remove ? "删除这本书？" : "清除本地进度？", 36, 184, 34, 612, 1, true);
-        title_lines(detail_metadata.title.empty() ? basename(detail_path) : detail_metadata.title, 36, 280, 612, 28, true, 3);
-        title_lines(detail_path, 36, 448, 612, 22, false, 3);
-        wrapped(remove ? "删除 TF 卡中的原书文件。阅读记录与排版设置保留，重新放回相同原书后可恢复。" :
-                "清除本书的本地阅读位置及其备份，下次打开从头开始。原书和排版设置保留。", 36, 624, 612, 28);
-        note("不会修改服务器上的阅读记录。", 876);
-        note("K2 仅全刷；请使用下方按钮选择。", 942);
+        confirm_page("书籍管理", remove ? "删除这本书？" : "清除本地进度？",
+                     detail_metadata.title.empty() ? basename(detail_path) : detail_metadata.title, detail_path,
+                     remove ? "将删除 TF 卡中的原书文件。阅读记录和排版设置会保留，放回同一本书后可以恢复。服务器上的记录不受影响。"
+                            : "将清除本书在本机的阅读位置及其备份，下次打开从头开始。原书和排版设置会保留。服务器上的记录不受影响。");
         button(Back, "取消", 24, 1080, 306, 96, true);
-        button(ManageConfirm, remove ? "删除原书" : "清除进度", 354, 1080, 306, 96);
+        danger_button(ManageConfirm, remove ? "删除原书" : "清除进度", 354, 1080, 306);
     }
     void manage_book() {
         if (detail_path == book_path) {
@@ -2829,7 +3123,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         stop_counting_job();
         identities.clear();
         font_identity.clear(); font_scan.reset(); effective_font.clear();
-        const auto result = store.manage_book(management_snapshot, delete_original, detail_metadata.book_id, content_revision);
+        const auto result = store.manage_book(management_snapshot, delete_original, detail_metadata.book_id, revision_for(detail_path, detail_metadata));
         if (result != StoreStatus::Ok) {
             error(result == StoreStatus::ExternalChange ? "文件已被外部修改，操作未执行。请重新打开书籍详情。" :
                   "操作未完成，请检查 TF 卡并重新打开详情核实文件状态。");
@@ -2843,6 +3137,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             message = "原书已删除，阅读记录保留";
             scan_library(); draw_library();
         } else {
+            // The recorded percentage belongs to the cleared position.
+            store.save_cache(position_name(detail_path), "");
             message = "本地进度已清除，远端记录未修改";
             inspect_book(detail_path, true);
         }
@@ -2875,7 +3171,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             canvas.line(72, 594, 612, 594, 1, 2);
             cover_title(has_book() ? document.metadata().title : "Pico Page", 72, 626, 540, 140, 32);
             text(has_book() ? chapter_label() + " · " + position : "尚未打开书籍", 72, 806, 22, 540, 3);
-            text(has_book() ? "此处已保存 · " + sync_state : "", 72, 854, 22, 540, 3);
+            text(has_book() ? "已保存 · " + sync_state : "", 72, 854, 22, 540, 3);
             view = View::Sleeping;
             return;
         }
@@ -2910,7 +3206,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         canvas.fill_rect(0, top, 684, 1216 - top, 1);
         text("已休眠", 36, top + 24, 30, 290, 15, true);
         text("按电源键继续阅读", 36, top + 72, 22, 290, 15);
-        text(has_book() ? "此处已保存" : "尚未打开书籍", 364, top + 24, 22, 284, 15);
+        text(has_book() ? "已保存" : "尚未打开书籍", 364, top + 24, 22, 284, 15);
         text(has_book() ? sync_state : "", 364, top + 60, 22, 284, 15);
         if (!reading && has_book()) text(position, 364, top + 106, 22, 284, 15);
         view = View::Sleeping;
@@ -2921,28 +3217,24 @@ struct ReaderApp::Impl final : DisplayBackend {
         canvas.clear();
         header("网络与传输", Back, import_from_settings ? "设置" : "书库");
         text("USB 文件传输", 36, 128, 22, 612, 3);
-        note("开启后，电脑可以直接管理 TF 卡。", 172);
-        note("传输期间暂停阅读和同步。", 220);
-        note("请在电脑安全弹出后退出。", 268);
-        note("退出将重启，恢复阅读与 USB 烧录。", 316);
-        button(UsbStart, "开启 USB 文件传输", 24, 384, 636, 96);
-        canvas.line(36, 520, 647, 520, 12, 2);
-        text("Wi-Fi 与 KOReader 同步", 36, 548, 22, 612, 3);
+        const int usb = wrapped("电脑可直接管理 TF 卡。传输期间暂停阅读和同步，退出时会重启。", 36, 168, 612, 26);
+        button(UsbStart, "开启 USB 传输", 24, 192 + usb, 636, 96);
+        canvas.line(36, 328 + usb, 647, 328 + usb, 12, 2);
+        text("Wi-Fi", 36, 356 + usb, 22, 612, 3);
         provision::WifiCredentials wifi;
         std::string detail;
-        note(provision::load_wifi(root, wifi, detail) ? "Wi-Fi：" + wifi.ssid : "Wi-Fi 未配置", 592);
-        note("用手机填写，设备验证后保存。", 640);
-        button(PortalStart, "开启手机配置", 24, 708, 636, 96);
-        if (!message.empty()) note(message, 860);
-        button(Dismiss, "返回书库", 24, 1056, 636, 96);
+        value_row(PortalStart, "Wi-Fi 与同步账户", "", provision::load_wifi(root, wifi, detail) ? wifi.ssid : "未配置", 388 + usb, 88);
+        value_row(WifiUpload, "Wi-Fi 传书", "", "", 476 + usb, 88);
+        wrapped("配置要在手机上填写，设备验证通过后才会保存。", 36, 588 + usb, 612, 22, true, 3);
+        footer_bar(notice());
     }
     void draw_portal() {
         view = View::Portal;
         hits.clear();
         canvas.clear();
-        header("手机配置", 0);
+        header(portal_upload ? "Wi-Fi 传书" : "手机配置", 0);
         if (portal.access_ssid.empty()) {
-            note(portal_closing ? "正在结束配置…" : "正在开启设备热点…", 200);
+            note(portal_closing ? "正在结束…" : "正在开启设备热点…", 200);
         } else {
             text("1  用手机连接设备热点", 36, 128, 26, 612, 1, true);
             graphics::draw_qr(canvas, provision::wifi_qr({portal.access_ssid, portal.access_password}), 36, 176, 264);
@@ -2951,12 +3243,12 @@ struct ReaderApp::Impl final : DisplayBackend {
             text("密码", 324, 300, 22, 324, 3);
             text(portal.access_password, 324, 334, 28, 324);
             text("扫码可直接连接", 324, 400, 22, 324, 3);
-            text("2  连接后扫码打开配置页", 36, 472, 26, 612, 1, true);
+            text(portal_upload ? "2  连接后扫码打开传书页" : "2  连接后扫码打开配置页", 36, 472, 26, 612, 1, true);
             graphics::draw_qr(canvas, portal.url, 36, 520, 264);
             text("或在浏览器输入", 324, 540, 22, 324, 3);
             const auto scheme = portal.url.find("://");
             text(scheme == std::string::npos ? portal.url : portal.url.substr(scheme + 3), 324, 574, 28, 324);
-            text("只支持 2.4 GHz 网络", 324, 660, 22, 324, 3);
+            text(portal_upload ? "EPUB/TXT · 最大 64 MiB" : "只支持 2.4 GHz 网络", 324, 660, 22, 324, 3);
             canvas.line(0, 816, 683, 816, 1, 3);
             std::string title, body = portal.detail;
             switch (portal.phase) {
@@ -2977,32 +3269,31 @@ struct ReaderApp::Impl final : DisplayBackend {
                 body += "请在手机上重新填写。";
                 break;
             default:
-                title = "等待手机提交";
-                body = "在配置页填写后，设备先验证，成功后才保存。";
+                title = portal_upload ? "Wi-Fi 传书已开启" : "等待手机提交";
+                body = portal_upload ? "上传结果请查看浏览器。结束后返回书库。" : "在配置页填写后，设备先验证，成功后才保存。";
             }
-            if (portal_closing) { title = "正在结束配置…"; body.clear(); }
+            if (portal_closing) { title = "正在结束…"; body.clear(); }
             text(title, 36, 844, 28, 612, 1, true);
             wrapped(body, 36, 904, 612, 24);
         }
-        if (!portal_closing) button(PortalStop, "结束配置", 24, 1080, 636, 96);
+        if (!portal_closing) button(PortalStop, portal_upload ? "结束传书" : "结束配置", 24, 1080, 636, 96);
     }
     void draw_usb() {
         view = View::UsbTransfer;
         hits.clear();
         canvas.clear();
         // TF ownership may already belong to the host; this page uses no card resources.
-        center("USB 文件传输", 0, 100, 684, 36);
         if (usb_confirm) {
-            note("请先在电脑安全弹出设备。", 340);
-            note("确认后将退出传输并重启。", 420);
-            button(UsbCancel, "取消", 24, 1056, 306, 96);
-            button(UsbExitConfirm, "退出并重启", 354, 1056, 306, 96);
+            confirm_page("USB 文件传输中", "退出 USB 传输？", "", "",
+                         "请先在电脑上安全弹出设备。确认后设备会重启，并回到书库。");
+            button(UsbCancel, "取消", 24, 1080, 306, 96);
+            button(UsbExitConfirm, "退出并重启", 354, 1080, 306, 96, true);
         } else {
-            note(usb_active ? "USB 文件传输中" : "USB 文件传输未开启", 300);
-            note("电脑使用 TF 卡时，设备暂停阅读。", 390);
-            note("请先安全弹出，再退出并重启。", 470);
-            if (!message.empty()) note(message, 650);
-            button(UsbExit, "退出并重启", 24, 1056, 636, 96);
+            header(usb_active ? "USB 文件传输中" : "USB 文件传输", 0);
+            text(usb_active ? "电脑正在使用 TF 卡" : "USB 文件传输未开启", 36, 160, 40, 612, 1, true);
+            const int height = wrapped("传输期间设备暂停阅读和同步。完成后先在电脑上安全弹出，再退出并重启。", 36, 244, 612, 28);
+            if (!message.empty()) wrapped(message, 36, 272 + height, 612, 26);
+            button(UsbExit, "退出并重启", 24, 1080, 636, 96);
         }
     }
     static bool same_account(const sync::Config &a, const sync::Config &b) {
@@ -3028,85 +3319,108 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (item.resource == anchor.resource) return item.label;
         return basename(anchor.resource);
     }
+    /** Returns the sync panel to its unchecked state after a cancelled request. */
+    void sync_cancelled(bool sent) {
+        cancel_sync();
+        server_state = "—"; remote_state = "未检查";
+        sync_status = sent ? "已取消。已发出的上传仍可能生效，请重新检查远端。" : "已取消。本机位置没有改动。";
+    }
     void draw_sync() {
         view = View::Sync;
         if (!has_book()) {
             hits.clear(); canvas.clear(); header("阅读同步", Back, "书库");
             note("请先打开一本 EPUB。", 246); return;
         }
-        refresh_from_settings = false;
-        if (!panel_background(508)) return;
-        // All controls above the panel are disabled while choosing a remote candidate.
-        hits.clear();
-        if (remote_anchor && !active_network) {
+        if (txt_name(book_path)) {
+            hits.clear(); canvas.clear(); header("阅读同步", Back, "正文");
+            wrapped("TXT 阅读位置保存在本机 TF 卡。KOReader 双向位置接续仅支持 EPUB。", 36, 266, 612, 28);
+            button(Back, "继续阅读", 24, 1080, 636, 96, true);
+            return;
+        }
+        // content_loading here means that a position is being mapped for this panel.
+        const bool busy = active_network || content_loading;
+        if (remote_anchor && !busy) {
+            // Choosing a remote candidate accepts only the controls of this panel.
+            if (!panel_background(508, false)) return;
             canvas.line(0, 508, 683, 508, 1, 3);
             text("发现不同的阅读位置", 36, 550, 32, 612, 1, true);
             note("请选择继续位置；不会自动覆盖远端。", 612);
             outline(36, 674, 297, 210, 3); outline(351, 674, 297, 210, 2);
             text("本机", 56, 694, 24, 258, 3);
             title_lines(session.saved_record() ? anchor_label(session.saved_record()->anchor) : "尚未保存", 56, 742, 256, 28, true, 2);
-            text(session.needs_save() ? "此处尚未保存" : "本地已保存", 56, 838, 22, 256);
+            text(session.needs_save() ? "尚未保存" : "已保存", 56, 838, 22, 256);
             text("远端记录", 371, 694, 24, 256, 3);
             title_lines(anchor_label(*remote_anchor), 371, 742, 256, 28, true, 2);
             text("源位置已验证", 371, 838, 22, 256);
             button(Back, "继续此处", 36, 900, 297, 96);
             button(SyncJump, "使用远端位置", 351, 900, 297, 96, true);
             note("继续此处只关闭提示，不上传。", 1030);
-            button(SyncUpload, "上传此处，替换远端位置", 36, 1092, 612, 88);
+            danger_button(SyncUpload, "上传此处，替换远端位置", 36, 1092, 612, 88);
             return;
         }
+        if (!panel_background(508 - panel_strip)) return;
         tabs(508, Sync);
-        const auto& configured = badge_config;
-        const bool ready = badge_configured;
-        if (!ready && !active_network) { server_state = "未配置"; remote_state = "未检查"; }
+        if (!badge_configured && !busy) {
+            server_state = "未配置"; remote_state = "未检查";
+            text("KOReader 同步未配置", 36, 650, 32, 612, 1, true);
+            const int height = wrapped("在“设置 › KOReader 同步”中用手机配置，或在电脑上编辑 PicoPage/sync.toml。", 36, 724, 612, 26);
+            // A failed recheck names the configuration problem in place of the general note.
+            wrapped(sync_status.empty() ? "配置完成前不会联网，阅读位置仍保存在存储卡。" : sync_status, 36, 752 + height, 612, 24, true, 3);
+            button(SyncCheck, "重新检查配置", 36, 916, 612, 96);
+            button(Back, "继续阅读", 36, 1032, 612, 96, true);
+            return;
+        }
         for (int x : {228, 456}) canvas.line(x, 610, x, 795, 1, 2);
         canvas.line(0, 795, 683, 795, 1, 2);
         text("本机", 36, 634, 24, 185, 3);
-        text(session.needs_save() ? "未保存" : session.saved_record() ? "已保存" : "无记录", 36, 682, 30, 185, 1, true);
-        text("当前正文位置", 36, 740, 22, 185);
+        text(session.needs_save() ? "尚未保存" : session.saved_record() ? "已保存" : "无记录", 36, 682, 30, 185, 1, true);
+        text(chapter_label() + " · " + book_percent(), 36, 740, 22, 185, 3);
         text("服务器", 248, 634, 24, 185, 3);
         text(server_state, 248, 682, 28, 185, 1, true);
-        text(active_network ? (uploading ? "提交已存版本" : "读取远端记录") : "本次请求状态", 248, 740, 22, 190);
+        if (active_network) text(uploading ? "提交已存版本" : "读取远端记录", 248, 740, 22, 190, 3);
         text("远端记录", 476, 634, 24, 185, 3);
         text(remote_state, 476, 682, 28, 185, 1, true);
-        text("非设备实时状态", 476, 740, 20, 188, 3);
-        if (!ready && !active_network) {
-            wrapped("同步未配置或配置无效。请在电脑上编辑配置文件后重试。", 36, 822, 612, 26);
-            note("服务：PicoPage/sync.toml", 938);
-            note("网络：PicoPage/network.toml", 992);
-            button(SyncCheck, "重新检查配置", 36, 1056, 612, 96);
-            return;
-        }
         title_lines(sync_status.empty() ? (sync_badge() == "待核实" ? "上次上传结果未确认，请重新检查远端。" : "先读取远端位置，再决定是否上传。") : sync_status,
                     36, 820, 612, 26, false, 2);
-        if (active_network) {
+        if (busy) {
             dashed(36, 916, 612, 96);
-            center(uploading ? "上传中" : "检查中", 36, 946, 612, 28);
-            button(Back, "取消同步", 36, 1032, 612, 96);
+            center(content_loading ? "准备中" : uploading ? "上传中" : "检查中", 36, 946, 612, 28, 5);
+            button(SyncCancel, "取消同步", 36, 1032, 612, 96);
+            if (content_loading) loading_cancel = hits.back();
             note(uploading ? "取消后，已发出的上传仍可能生效。" : "取消后保留本机位置。", 1160);
-        } else {
-            button(SyncCheck, "检查远端位置", 36, 916, 612, 96, !sync_checked);
-            if (sync_checked) button(SyncUpload, "上传本机位置", 36, 1032, 612, 96);
-            else button(Back, "继续阅读", 36, 1032, 612, 96);
-            note(acknowledged_record && session.saved_record() && *acknowledged_record == *session.saved_record() && same_account(configured, acknowledged_config)
-                 ? "此版本已收到服务器上传确认。" : "仅上传已成功显示并保存的位置。", 1160);
+            return;
         }
+        // One recommended action per state: check first, upload once the remote is known,
+        // and nothing further when both sides already agree.
+        const bool settled = remote_state == "位置相同" || remote_state == "已更新";
+        if (settled) {
+            button(Back, "继续阅读", 36, 916, 612, 96, true);
+            button(SyncCheck, "检查远端位置", 36, 1032, 612, 96);
+        } else {
+            if (sync_checked) button(SyncUpload, "上传本机位置", 36, 916, 612, 96, true);
+            else button(SyncCheck, "检查远端位置", 36, 916, 612, 96, true);
+            button(Back, "继续阅读", 36, 1032, 612, 96);
+        }
+        if (acknowledged_record && session.saved_record() && *acknowledged_record == *session.saved_record() &&
+            same_account(badge_config, acknowledged_config))
+            note("此版本已收到服务器上传确认。", 1160);
     }
     void check_sync() {
+        if (txt_name(book_path)) { draw_sync(); return; }
         cancel_sync();
         server_state = "检查中"; remote_state = "检查中";
         std::string detail;
         refresh_badge_config();
         if (!sync::load_config(root, sync_config, detail)) {
             server_state = "未配置"; remote_state = "未检查";
-            sync_status = "同步未配置或配置无效：" + detail;
+            sync_status = "同步配置不存在或内容无效。";
             draw_sync();
             overlay();
             return;
         }
         sync::HttpRequest request;
         if (!sync::get_request(sync_config, document.metadata().partial_md5, request, detail)) {
-            sync_status = detail;
+            sync_status = "无法生成同步请求，请检查同步配置。";
             draw_sync();
             overlay();
             return;
@@ -3120,15 +3434,13 @@ struct ReaderApp::Impl final : DisplayBackend {
         overlay();
     }
     void confirm_upload() {
-        if (!panel_background(752)) return;
+        if (!panel_background(752, false)) return;
         view = View::Confirmation;
-        hits.clear();
         canvas.line(0, 752, 683, 752, 1, 3);
-        text("用本机位置更新远端？", 36, 786, 32, 612, 1, true);
-        wrapped("仅上传当前已保存的阅读位置。其他设备下次同步会收到此位置。", 36, 864, 612, 26);
-        note("确认后将替换服务器上的记录。", 984);
+        text("用本机位置替换远端？", 36, 786, 32, 612, 1, true);
+        wrapped("将上传当前已保存的阅读位置，并替换服务器上的记录。其他设备下次同步会收到此位置。", 36, 864, 612, 26);
         button(Back, "取消", 24, 1080, 306, 96, true);
-        button(SyncConfirm, "确认上传", 354, 1080, 306, 96);
+        danger_button(SyncConfirm, "确认上传", 354, 1080, 306);
     }
     void begin_mapping(ContentJob::Kind kind, const std::string& xpointer = "") {
         abandon_content(); invalidate_counting(); release_counting(); clear_prefetch();
@@ -3137,10 +3449,13 @@ struct ReaderApp::Impl final : DisplayBackend {
         request.dom_version = sync_config.dom_version; request.xpointer = xpointer;
         if (kind == ContentJob::Kind::MapUpload) request.record = session.saved_record();
         request.generation = foreground_generation;
-        pending_content = std::move(request); content_loading = true; view = View::Loading;
-        canvas.fill_rect(0, footer_top, 684, 88, 15);
-        text("正在准备位置…", 36, 1156, 24, 400, 3);
-        button(Dismiss, "取消", 488, 1140, 160, 64, false, 24); overlay();
+        pending_content = std::move(request); content_loading = true;
+        // The panel itself shows the work and its cancel control.
+        sync_status = "正在准备位置…";
+        draw_sync();
+        if (view != View::Sync) { abandon_content(); return; }
+        view = View::Loading;
+        overlay();
     }
     void accept_remote_mapping(const Anchor& candidate, const std::string& detail) {
         if (detail.empty()) {
@@ -3187,7 +3502,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             !find_content(store, document, index, source, detail, ChapterLoad::Mapping, holds) ||
             !sync::to_xpointer(document, source, record.anchor, sync_config.dom_version, xpointer,
                                detail)) {
-            sync_status = memory_error(detail) ? "设备内存不足，暂时无法计算同步位置。" : "此位置暂不支持精确同步：" + detail;
+            sync_status = memory_error(detail) ? "设备内存不足，暂时无法计算同步位置。" : "此位置暂不支持精确同步。";
             draw_sync();
             overlay();
             return;
@@ -3205,7 +3520,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         sync::HttpRequest request;
         if (!sync::put_request(sync_config, document.metadata().partial_md5, xpointer, percent,
                                record, request, detail)) {
-            sync_status = detail;
+            sync_status = "无法生成同步请求，请检查同步配置。";
             draw_sync();
             overlay();
             return;
@@ -3262,7 +3577,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (remote.status == sync::RemoteStatus::NoRecord) {
                 uncertain_record.reset(); acknowledged_record.reset();
                 sync_checked = true; remote_state = "无记录";
-                sync_status = "远端没有此书的阅读记录，可上传本机位置。";
+                sync_status = "远端还没有这本书的阅读记录。";
             } else if (remote.status == sync::RemoteStatus::Found) {
                 uncertain_record.reset(); acknowledged_record.reset();
                 Anchor candidate;
@@ -3281,7 +3596,38 @@ struct ReaderApp::Impl final : DisplayBackend {
         draw_sync();
         overlay();
     }
-    void error(const std::string &detail) {
+    /**
+     * Chinese wording for a failure detail produced by the document, store or sync layers. Their
+     * details are English diagnostic text for the log; text that is already Chinese passes through.
+     * A colon-separated detail may also include a non-ASCII resource path. The layers report no
+     * error codes; an unknown diagnostic is described as invalid content.
+     */
+    static std::string reason(const std::string &detail) {
+        std::string lower = detail;
+        for (auto &c : lower) if (c >= 'A' && c <= 'Z') c += 32;
+        const auto has = [&](const char *word) { return lower.find(word) != std::string::npos; };
+        if (has("memory") || has("alloc")) return "设备内存不足";
+        if (has("changed")) return "文件在读取过程中发生了变化";
+        if (has("unsupported") || has("requires") || has("exactly") || has("not retained")) return "内容结构暂不支持";
+        if (has("unavailable") || has("no longer") || has("cannot be read") || has("read failed") ||
+            has("cannot open") || has("cannot seek") || has("cannot hash") || has("cannot read"))
+            return "文件无法读取，请检查 TF 卡";
+        if (detail.find(": ") == std::string::npos &&
+            std::any_of(detail.begin(), detail.end(), [](unsigned char c) { return c >= 0x80; })) {
+            const std::string stop = "。";
+            const bool ended = detail.size() >= stop.size() && detail.compare(detail.size() - stop.size(), stop.size(), stop) == 0;
+            return ended ? detail.substr(0, detail.size() - stop.size()) : detail;
+        }
+        return "文件内容无效或已损坏";
+    }
+    std::string retry_path;
+    /**
+     * Shows a failure. The text up to the first full stop, comma or colon is the specific title;
+     * the rest explains it. retry names a book whose opening failed and can be repeated.
+     */
+    void error(const std::string &text_in, const std::string &retry = "") {
+        // The argument may alias message, which is assigned below.
+        const std::string detail = text_in;
 #ifdef ESP_PLATFORM
         ESP_LOGW("reader_app", "Error shown: %s", detail.c_str());
 #endif
@@ -3294,22 +3640,45 @@ struct ReaderApp::Impl final : DisplayBackend {
         cancel_sync();
         link_return = confirmed_link_return;
         message = detail;
+        retry_path = retry;
+        std::size_t split = std::string::npos, mark = 0;
+        for (const char *separator : {"。", "，", "："}) {
+            const auto found = detail.find(separator);
+            if (found < split) { split = found; mark = std::strlen(separator); }
+        }
+        const auto title = detail.substr(0, split);
+        const auto body = split == std::string::npos ? std::string() : detail.substr(split + mark);
         std::uint32_t visible_offset;
         const bool available = session.visible_record() && chapter.offset_for(session.visible_record()->anchor, visible_offset);
         const bool retained = (!async_content || available) && !foreground_job && card_available && has_book() && session.visible_record() &&
-                              restore_confirmed_position() && panel_background(752);
+                              restore_confirmed_position() && panel_background(752, false);
         view = View::Error;
         hits.clear();
-        if (!retained) { canvas.clear(); header("暂时无法继续", 0); }
-        else {
+        const bool unsaved = session.needs_save();
+        const bool resumes = has_book() && (session.visible_record() || session.saved_record());
+        if (retained) {
             canvas.fill_rect(0, 752, 684, 464, 15);
             canvas.line(0, 752, 683, 752, 1, 3);
+            text(title, 36, 784, 32, 612, 1, true);
+            title_lines(body, 36, 850, 612, 26, false, 3);
+            note("保留最后确认的位置。", 1012);
+        } else {
+            canvas.clear();
+            header(retry.empty() ? "暂时无法继续" : "无法打开", unsaved || resumes ? 0 : Back, "书库");
+            title_lines(title, 36, 160, 612, 40, true);
+            int y = 160 + std::min(wrapped(title, 0, 0, 612, 40, false), 96) + 28;
+            if (!body.empty()) y += wrapped(body, 36, y, 612, 28) + 28;
+            if (!retry.empty()) {
+                y += wrapped(retry, 36, y, 612, 24, true, 3);
+                wrapped("可重试一次；仍失败时请检查 TF 卡。", 36, y, 612, 24, true, 3);
+            }
         }
-        text("暂时无法继续", 36, retained ? 784 : 190, 32, 612, 1, true);
-        title_lines(detail, 36, retained ? 850 : 300, 612, 26, false, retained ? 3 : 10);
-        if (retained) note("保留最后确认的位置。", 1012);
-        button(Back, retained && !session.needs_save() ? "恢复阅读" : "返回", 24, 1080, 306, 96);
-        if (session.needs_save()) button(SaveRetry, "重试保存", 354, 1080, 306, 96);
+        // Two actions share the row with the recommended one on the right; one action fills it.
+        const auto leave = unsaved || !card_available ? "返回" : resumes ? "恢复阅读" : "返回书库";
+        const bool second = unsaved || !retry.empty();
+        button(Back, leave, 24, 1080, second ? 306 : 636, 96, !second);
+        if (unsaved) button(SaveRetry, "重试保存", 354, 1080, 306, 96, true);
+        else if (!retry.empty()) button(Retry, "重试", 354, 1080, 306, 96, true);
         drawing_error = false;
         if (!display.busy()) overlay();
     }
@@ -3341,7 +3710,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (view == View::Library) {
             if (!folder.empty()) {
                 auto p = folder.find_last_of('/');
-                folder = p == std::string::npos ? "" : folder.substr(0, p);
+                folder = folder_root || p == std::string::npos ? "" : folder.substr(0, p);
                 library_page = 0;
                 scan_library();
                 draw_library();
@@ -3387,8 +3756,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
             return;
         }
-        if (id == PortalStart) {
-            portal_action = PortalAction::Start;
+        if (id == PortalStart || id == WifiUpload) {
+            portal_action = id == WifiUpload ? PortalAction::Upload : PortalAction::Start;
             return;
         }
         if (id == UsbStart) {
@@ -3514,11 +3883,19 @@ struct ReaderApp::Impl final : DisplayBackend {
                 overlay();
             }
             return;
+        case Retry:
+            if (!retry_path.empty()) open(retry_path);
+            return;
+        case SyncCancel:
+            sync_cancelled(uploading);
+            draw_sync();
+            break;
         case Library:
             if (!persist()) {
                 error(message);
                 return;
             }
+            remember_position();
             save_pages();
             scan_library();
             draw_library();
@@ -3632,7 +4009,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         case PowerSave: {
             std::string detail;
             if (store.apply_settings(edit_snapshot, draft, false, detail) != StoreStatus::Ok) {
-                error("休眠设置未保存：" + detail); return;
+                error("休眠设置未保存。" + reason(detail) + "。"); return;
             }
             settings.auto_sleep_minutes = draft.auto_sleep_minutes;
             settings.sleep_screen = draft.sleep_screen;
@@ -3683,7 +4060,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             refresh_badge_config();
             cancel_sync();
             sync_status.clear();
-            server_state = "未检查"; remote_state = "未检查";
+            server_state = "—"; remote_state = "未检查";
             draw_sync();
             break;
         case SyncCheck:
@@ -3848,14 +4225,14 @@ struct ReaderApp::Impl final : DisplayBackend {
         release_counting();
         if (content_loading) {
             if (!input.touch && input.event.input == Input::K2) force_refresh();
-            else if (!input.queued && input.touch && input.x >= 488 && input.y >= 1140) {
+            else if (!input.queued && input.touch && loading_cancel.contains(input.x, input.y)) {
                 const auto& request = pending_content ? *pending_content : foreground_job->request;
                 const auto kind = request.kind;
                 const bool preview = request.preview;
                 const bool mapping = kind == ContentJob::Kind::MapUpload || kind == ContentJob::Kind::MapDownload;
                 abandon_content();
                 link_return = confirmed_link_return;
-                if (mapping) { cancel_sync(); sync_status = "同步已取消"; draw_sync(); }
+                if (mapping) { sync_cancelled(false); draw_sync(); }
                 else if (preview) draw_tools();
                 else draw_library();
                 overlay();
@@ -3876,6 +4253,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             return;
         }
         turned = false;
+        // A notice lasts until the input after the one that showed it; K2 only repaints the page.
+        if ((input.touch || input.event.input != Input::K2) && std::exchange(notice_shown, false)) message.clear();
         if (input.touch) {
             if (view == View::Reading) {
                 if (input.y >= footer_top) {
@@ -3898,7 +4277,11 @@ struct ReaderApp::Impl final : DisplayBackend {
             } else {
                 for (const auto &hit : hits)
                     if (hit.contains(input.x, input.y)) {
-                        const int id = hit.id;
+                        int id = hit.id;
+                        // A long press on a book in the library opens its details instead of the book.
+                        if (input.long_press && view == View::Library && id >= EntryBase && id < TocBase &&
+                            !entries[static_cast<std::size_t>(id - EntryBase)].directory)
+                            id += DetailBase - EntryBase;
                         control(id);
                         break;
                     }
@@ -3928,7 +4311,7 @@ void ReaderApp::Impl::apply_typography() {
                             ? store.clear_book_settings(edit_snapshot, detail)
                             : store.apply_settings(edit_snapshot, draft, book_scope, detail);
     if (result != StoreStatus::Ok) {
-        error("排版未保存：" + detail);
+        error("排版未保存。" + reason(detail) + "。");
         return;
     }
     const auto effective = store.load_settings(book_path).settings;
@@ -3962,7 +4345,7 @@ void ReaderApp::Impl::apply_refresh(int id) {
 void ReaderApp::Impl::save_refresh(const ReaderSettings &values) {
     std::string detail;
     if (store.apply_settings(edit_snapshot, values, !refresh_from_settings, detail) != StoreStatus::Ok) {
-        error("刷新设置未保存：" + detail);
+        error("刷新设置未保存。" + reason(detail) + "。");
         return;
     }
     // Refresh edits do not apply external typography changes to the visible page.
@@ -4089,7 +4472,7 @@ void ReaderApp::show_usb_transfer(bool active, const std::string& error) {
 PortalAction ReaderApp::take_portal_action() {
     return std::exchange(impl_->portal_action, PortalAction::None);
 }
-bool ReaderApp::prepare_portal() {
+bool ReaderApp::prepare_portal(bool upload) {
     if (impl_->content_loading || impl_->usb_prepared || impl_->display.busy() || impl_->active_network ||
         !impl_->card_available || !impl_->persist()) return false;
     impl_->cancel_sync();
@@ -4097,6 +4480,8 @@ bool ReaderApp::prepare_portal() {
     impl_->stop_covers();
     impl_->stop_raster();
     impl_->release_counting();
+    impl_->stop_counting_job();
+    impl_->portal_upload = upload;
     impl_->portal = {};
     impl_->portal_closing = false;
     impl_->draw_portal();
@@ -4113,7 +4498,12 @@ void ReaderApp::show_portal(const PortalStatus &status) {
         impl_->portal = {};
         impl_->portal_closing = false;
         impl_->message = status.detail;
-        impl_->draw_settings();
+        const bool uploaded = impl_->portal_upload && view == View::Portal;
+        impl_->portal_upload = false;
+        if (uploaded && impl_->card_available) {
+            invalidate_identity_cache();
+            impl_->scan_library(); impl_->draw_library();
+        } else impl_->draw_settings();
         impl_->overlay();
         return;
     }
@@ -4130,6 +4520,7 @@ bool ReaderApp::prepare_sleep() {
     if (impl_->display.busy() || impl_->active_network || !impl_->persist())
         return false;
     if (impl_->has_book() && !impl_->session.visible_record()) return false;
+    impl_->remember_position();
     impl_->save_pages();
     impl_->clear_body_cache();
     impl_->clear_prefetch();

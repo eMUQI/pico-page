@@ -1,5 +1,6 @@
 #include "pico_page/stage_timer.h"
 #include "pico_page/document.h"
+#include "gb18030.h"
 #include "expat.h"
 #include "miniz.h"
 
@@ -56,6 +57,12 @@ constexpr std::size_t kMaxPath = 2048;
 constexpr std::size_t kMaxCssBytes = 256 * 1024;
 
 bool fail(std::string& error, const std::string& message) { error = message; return false; }
+bool txt_path(std::string_view path) {
+    if (path.size() < 4) return false;
+    path.remove_prefix(path.size() - 4);
+    return (path[0] == '.' && (path[1] == 't' || path[1] == 'T') &&
+            (path[2] == 'x' || path[2] == 'X') && (path[3] == 't' || path[3] == 'T'));
+}
 std::string local_name(const char* name) {
     const char* sep = std::strrchr(name, '|');
     return sep ? sep + 1 : name;
@@ -720,6 +727,8 @@ struct ZipTiming {
 
 struct EpubDocument::Impl {
     FILE* file = nullptr;
+    bool txt = false;
+    std::uint32_t txt_bytes = 0;
     mz_zip_archive zip{};
     std::size_t zip_allocated = 0;
     struct alignas(std::max_align_t) Allocation { std::size_t size; };
@@ -764,6 +773,9 @@ struct EpubDocument::Impl {
     bool load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
               std::uint32_t wanted, const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop,
               const std::function<void(const Chapter&)>& visit);
+    bool load_txt(Chapter& chapter, std::string& error, ChapterLoad detail, std::uint32_t wanted,
+                  const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop,
+                  const std::function<void(const Chapter&)>& visit);
     bool parse(const std::string& path, Xml& xml, std::string& error, std::uint32_t max_bytes = kMaxXmlBytes, const std::function<bool()>& stop = {}) {
         const StageTimer timer{"xml_read_inflate_parse"};
         const int index = mz_zip_reader_locate_file(&zip, path.c_str(), nullptr, MZ_ZIP_FLAG_CASE_SENSITIVE);
@@ -837,12 +849,117 @@ bool EpubDocument::open_verified(const std::string& path, const DocumentMetadata
             return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
         });
     };
-    if (!hex(identity.book_id, 64) || !hex(identity.partial_md5, 32)) return fail(error, "Invalid verified EPUB identity");
+    if (!hex(identity.book_id, 64) || !hex(identity.partial_md5, 32)) return fail(error, "Invalid verified book identity");
     const auto copy = identity;
     return open_impl(path, error, false, &copy, stop);
 }
 
 bool EpubDocument::open_impl(const std::string& path, std::string& error, bool cover_only, const DocumentMetadata* identity, const std::function<bool()>& stop) {
+    if (txt_path(path)) {
+        close(); error.clear();
+        if (cover_only) return fail(error, "TXT 没有内嵌封面");
+        if (stop && stop()) return fail(error, "TXT 读取已取消");
+        std::unique_ptr<Impl> next(new Impl);
+        next->file = std::fopen(path.c_str(), "rb");
+        if (!next->file) return fail(error, "无法打开 TXT 文件");
+        if (std::fseek(next->file, 0, SEEK_END) != 0) return fail(error, "无法读取 TXT 文件");
+        const auto length = std::ftell(next->file);
+        if (length <= 0 || static_cast<std::uint64_t>(length) > 64ULL * 1024 * 1024)
+            return fail(error, "TXT 文件为空或超过 64 MiB");
+        next->txt = true;
+        next->txt_bytes = static_cast<std::uint32_t>(length);
+        if (identity) {
+            next->metadata.book_id = identity->book_id;
+            next->metadata.partial_md5 = identity->partial_md5;
+            next->metadata.txt_gb18030 = identity->txt_gb18030;
+            next->metadata.txt_offsets = identity->txt_offsets;
+            if (identity->txt_gb18030 && (identity->txt_offsets.size() < 2 ||
+                identity->txt_offsets.front() != 0 || identity->txt_offsets.back() != next->txt_bytes ||
+                !std::is_sorted(identity->txt_offsets.begin(), identity->txt_offsets.end())))
+                return fail(error, "TXT 阅读位置索引无效");
+        } else {
+            identity_scans.fetch_add(1, std::memory_order_relaxed);
+            Hash sha(false), md5(true);
+            std::array<unsigned char, 8192> buffer{};
+            if (std::fseek(next->file, 0, SEEK_SET) != 0) return fail(error, "无法读取 TXT 文件");
+            unsigned remaining = 0;
+            char32_t cp = 0, minimum = 0;
+            bool utf8_valid = true, utf8_has_text = false;
+            bool gb_valid = true, gb_has_text = false;
+            gb18030::Decoder gb_decoder;
+            char32_t previous_gb_scalar = 0;
+            std::vector<std::uint32_t> gb_offsets{0};
+            std::uint32_t position = 0, next_boundary = kTxtPartBytes;
+            for (;;) {
+                if (stop && stop()) return fail(error, "TXT 读取已取消");
+                const auto count = std::fread(buffer.data(), 1, buffer.size(), next->file);
+                if (count && !sha.update(buffer.data(), count)) return fail(error, "TXT SHA-256 failed");
+                for (std::size_t i = 0; i < count; ++i) {
+                    const auto byte = buffer[i];
+                    if (byte == 0) return fail(error, "TXT 文件包含 NUL 字节");
+                    if (utf8_valid) {
+                        if (remaining) {
+                            if ((byte & 0xc0) != 0x80) utf8_valid = false;
+                            else {
+                                cp = (cp << 6) | (byte & 63);
+                                if (--remaining == 0 && (cp < minimum || cp > 0x10ffff ||
+                                    (cp >= 0xd800 && cp <= 0xdfff))) utf8_valid = false;
+                            }
+                        } else if (byte < 0x80) cp = byte;
+                        else if (byte >= 0xc2 && byte <= 0xdf) { cp = byte & 31; minimum = 0x80; remaining = 1; }
+                        else if (byte >= 0xe0 && byte <= 0xef) { cp = byte & 15; minimum = 0x800; remaining = 2; }
+                        else if (byte >= 0xf0 && byte <= 0xf4) { cp = byte & 7; minimum = 0x10000; remaining = 3; }
+                        else utf8_valid = false;
+                        if (utf8_valid && !remaining && !space(cp) && cp != 0xfeff) utf8_has_text = true;
+                    }
+                    if (gb_valid) {
+                        if (!gb_decoder.pending() && position + i >= next_boundary && next_boundary < next->txt_bytes) {
+                            const auto split = static_cast<std::uint32_t>(position + i +
+                                (byte == '\n' && previous_gb_scalar == U'\r'));
+                            gb_offsets.push_back(split);
+                            next_boundary += kTxtPartBytes;
+                        }
+                        char32_t scalar = 0;
+                        const auto result = gb_decoder.feed(byte, scalar);
+                        if (result == gb18030::Decoder::Result::Invalid) gb_valid = false;
+                        else if (result == gb18030::Decoder::Result::Complete) {
+                            previous_gb_scalar = scalar;
+                            if (!space(scalar) && scalar != 0xfeff) gb_has_text = true;
+                        }
+                    }
+                }
+                position += static_cast<std::uint32_t>(count);
+                if (count < buffer.size()) {
+                    if (std::ferror(next->file)) return fail(error, "无法读取 TXT 文件");
+                    break;
+                }
+            }
+            utf8_valid = utf8_valid && remaining == 0;
+            gb_valid = gb_valid && !gb_decoder.pending();
+            if (utf8_valid ? !utf8_has_text : !gb_valid || !gb_has_text)
+                return fail(error, utf8_valid || gb_valid ? "TXT 没有可阅读的文字" :
+                    "TXT 编码不受支持（支持 UTF-8、GB18030）");
+            if (!utf8_valid) {
+                next->metadata.txt_gb18030 = true;
+                if (gb_offsets.back() != next->txt_bytes) gb_offsets.push_back(next->txt_bytes);
+                next->metadata.txt_offsets = std::move(gb_offsets);
+            }
+            if (!sha.finish(next->metadata.book_id)) return fail(error, "TXT SHA-256 failed");
+            for (std::uint64_t offset = 0; offset < static_cast<std::uint64_t>(length); offset = offset == 0 ? 1024 : offset * 4) {
+                const auto size = static_cast<std::size_t>(std::min<std::uint64_t>(1024, length - offset));
+                if (Impl::read(next.get(), offset, buffer.data(), size) != size || !md5.update(buffer.data(), size))
+                    return fail(error, "TXT partial MD5 failed");
+            }
+            if (!md5.finish(next->metadata.partial_md5)) return fail(error, "TXT partial MD5 failed");
+        }
+        const auto slash = path.rfind('/');
+        next->metadata.title = path.substr(slash == std::string::npos ? 0 : slash + 1);
+        next->metadata.title.resize(next->metadata.title.size() - 4);
+        next->spine.push_back({"text", "text", true, static_cast<std::uint32_t>(length)});
+        next->toc.push_back({"正文", "text", "", 0});
+        impl_ = std::move(next);
+        return true;
+    }
     const StageTimer timer{"epub_open"};
     epub_opens.fetch_add(1, std::memory_order_relaxed);
     close(); error.clear();
@@ -1084,7 +1201,8 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
                               const std::function<void(const Chapter&)>& visit) {
     pico_page::release(chapter); error.clear();
     if (stop && stop()) return fail(error, kChapterCancelled);
-    if (!file || index >= spine.size()) return fail(error, "Invalid EPUB chapter index");
+    if (!file || index >= spine.size()) return fail(error, "Invalid chapter index");
+    if (txt) return load_txt(chapter, error, detail, wanted, match, stop, visit);
     ChapterParser parser(chapter, spine[index].resource);
     parser.wanted = wanted;
     parser.match = match;
@@ -1138,6 +1256,78 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
         chapter.text.swap(exact);
     }
     return true;
+}
+bool EpubDocument::Impl::load_txt(Chapter& chapter, std::string& error, ChapterLoad detail,
+                                  std::uint32_t wanted, const std::function<bool(const Chapter&)>* match,
+                                  const std::function<bool()>& stop, const std::function<void(const Chapter&)>& visit) {
+    const bool gb = metadata.txt_gb18030;
+    auto last = gb ? static_cast<std::uint32_t>(metadata.txt_offsets.size() - 2) :
+        (txt_bytes - 1) / kTxtPartBytes;
+    const auto aligned = [this](std::uint32_t boundary, std::uint32_t& result) {
+        result = std::min(boundary, txt_bytes);
+        unsigned char byte = 0, previous = 0;
+        while (result < txt_bytes) {
+            if (read(this, result, &byte, 1) != 1) return false;
+            if ((byte & 0xc0) != 0x80) break;
+            ++result;
+        }
+        if (result && result < txt_bytes && byte == '\n') {
+            if (read(this, result - 1, &previous, 1) != 1) return false;
+            if (previous == '\r') ++result;
+        }
+        return true;
+    };
+    // A character or line ending that crosses the final boundary moves the aligned start of the
+    // last part to the end of the file; the preceding part then holds the rest of the text.
+    if (!gb && last > 0) {
+        std::uint32_t start = 0;
+        if (!aligned(last * kTxtPartBytes, start)) return fail(error, "无法读取 TXT 文件");
+        if (start >= txt_bytes) --last;
+    }
+    if (!match && wanted != kLastChapterPart && wanted > last)
+        return fail(error, "TXT 内容段不可用");
+    for (std::uint32_t part = match ? 0 : wanted == kLastChapterPart ? last : wanted; part <= last; ++part) {
+        if (stop && stop()) { pico_page::release(chapter); return fail(error, kChapterCancelled); }
+        std::uint32_t begin = 0, end = 0;
+        if (gb) { begin = metadata.txt_offsets[part]; end = metadata.txt_offsets[part + 1]; }
+        else if (!aligned(part * kTxtPartBytes, begin) || !aligned((part + 1) * kTxtPartBytes, end)) {
+            pico_page::release(chapter); return fail(error, "无法读取 TXT 文件");
+        }
+        if (end < begin) { pico_page::release(chapter); return fail(error, "TXT 阅读位置索引无效"); }
+        const auto size = end - begin;
+        if (!memory_room(size * (sizeof(char32_t) + 1))) {
+            pico_page::release(chapter); return fail(error, std::string(kChapterMemoryError) + ": text");
+        }
+        std::string bytes(size, '\0');
+        if (read(this, begin, bytes.data(), size) != size) {
+            pico_page::release(chapter); return fail(error, "无法读取 TXT 文件");
+        }
+        if (!gb && part == 0 && bytes.size() >= 3 && bytes.compare(0, 3, "\xef\xbb\xbf") == 0) bytes.erase(0, 3);
+        Chapter current;
+        current.resource = "text";
+        current.part = part;
+        current.last_part = part == last;
+        current.split_node = part != 0 || !current.last_part;
+        current.plain_dom = false;
+        current.text.reserve(bytes.size());
+        if (!(gb ? gb18030::decode(bytes, current.text) : decode(bytes.data(), bytes.size(), current.text))) {
+            pico_page::release(chapter); return fail(error, "TXT 内容解码失败");
+        }
+        if (!current.text.empty()) {
+            current.blocks.push_back({0, static_cast<std::uint32_t>(current.text.size()), BlockKind::Paragraph});
+            Anchor source;
+            if (detail != ChapterLoad::Layout) source = {current.resource, "part:" + std::to_string(part), 0};
+            current.runs.push_back({0, static_cast<std::uint32_t>(current.text.size()), std::move(source)});
+        }
+        if (detail == ChapterLoad::Reading && visit) visit(current);
+        if ((match && (*match)(current)) || (!match && (wanted == kLastChapterPart ? part == last : part == wanted))) {
+            chapter = std::move(current);
+            return true;
+        }
+        if (!match) break;
+    }
+    pico_page::release(chapter);
+    return fail(error, "TXT 阅读位置不可用");
 }
 bool EpubDocument::chapter_index_for(const std::string& resource, std::size_t& index) const {
     for (std::size_t i = 0; i < impl_->spine.size(); ++i) if (impl_->spine[i].resource == resource) { index = i; return true; }

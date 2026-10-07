@@ -22,6 +22,7 @@
 #include "esp_pm.h"
 #include "esp_sleep.h"
 #include "esp_timer.h"
+#include "ff.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -401,6 +402,21 @@ bool refresh_card(std::string& error) {
 
 bool release_card_for_usb(std::string& error) {
     if (!on_owner(error) || !mounted || usb_owns_card) return false;
+    // The TF card is the only mounted FatFs drive and uses drive 0. The host
+    // displays its volume label rather than the USB product string.
+    char label[64]{};
+    const auto read_label = f_getlabel("0:", label, nullptr);
+    if (read_label != FR_OK) {
+        error = "Read TF volume label: " + std::to_string(read_label);
+        return false;
+    }
+    if (label[0] == '\0' || std::strcmp(label, "NONAME") == 0) {
+        const auto set_label = f_setlabel("0:PICO PAGE");
+        if (set_label != FR_OK) {
+            error = "Set TF volume label: " + std::to_string(set_label);
+            return false;
+        }
+    }
     const auto result = read_pico_sd_release();
     if (result != ESP_OK) return failure(error, "SD release", result);
     mounted = false;

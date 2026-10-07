@@ -405,8 +405,8 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
             error(id, "open_failed");
             return;
         }
-    } else if (word == "key" || word == "tap") {
-        AppInput event{{0, Phase::Begin, Input::TouchCenter}, word == "tap", 0, 0};
+    } else if (word == "key" || word == "tap" || word == "hold") {
+        AppInput event{{0, Phase::Begin, Input::TouchCenter}, word != "key", 0, 0, false, word == "hold"};
         std::string_view first, second, extra;
         if (!token(input, first)) {
             error(id, "missing_input");

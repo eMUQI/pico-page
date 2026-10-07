@@ -163,7 +163,8 @@ bool jpeg(const std::vector<std::uint8_t>& input, int width, int height, Raster&
     if (!dimensions(decoder.width, decoder.height)) return fail(error, "JPEG exceeds 4096-pixel side or 8-megapixel limit");
     if (!raster.create(decoder.width, decoder.height, width, height)) return fail(error, "Image canvas allocation failed");
     unsigned scale = 0;
-    while (scale < 3 && (decoder.width >> (scale + 1)) >= raster.width && (decoder.height >> (scale + 1)) >= raster.height) ++scale;
+    while (scale < 3 && static_cast<unsigned>(decoder.width >> (scale + 1)) >= raster.width &&
+           static_cast<unsigned>(decoder.height >> (scale + 1)) >= raster.height) ++scale;
     raster.source(decoder.width >> scale, decoder.height >> scale);
     result = jd_decomp(&decoder, [](JDEC* decoder, void* bitmap, JRECT* rect) -> int {
         auto& raster = static_cast<JpegInput*>(decoder->device)->raster;

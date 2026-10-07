@@ -38,6 +38,8 @@ static void opened(ReaderApp& app, const std::string& book) {
     }
     assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Body);
 }
+// Reports the calling line when an expected frame is missing.
+#define present() present_at(__LINE__)
 struct Driver {
     ReaderApp& app;
     std::uint64_t sequence = 0;
@@ -51,6 +53,11 @@ struct Driver {
         app.input({{sequence, Phase::Begin, Input::TouchCenter}, true, x, y});
         app.input({{sequence, Phase::End, Input::TouchCenter}, true, x, y});
     }
+    void hold(int x, int y) {
+        ++sequence;
+        app.input({{sequence, Phase::Begin, Input::TouchCenter}, true, x, y, false, true});
+        app.input({{sequence, Phase::End, Input::TouchCenter}, true, x, y, false, true});
+    }
     // Mirrors the firmware loop: every frame queued by deferred work, then the idle-time save.
     // A contact that began while the previous frame was still in flight.
     void queued(Input key, bool touch = false, int x = 0, int y = 0) {
@@ -58,8 +65,8 @@ struct Driver {
         app.input({{sequence, Phase::Begin, key}, touch, x, y, true});
         app.input({{sequence, Phase::End, key}, touch, x, y, true});
     }
-    void present() {
-        assert(app.pending_frame());
+    void present_at(int line) {
+        if (!app.pending_frame()) { std::cerr << "No frame to present at line " << line << '\n'; std::abort(); }
         while (app.pending_frame()) app.complete_frame(true);
         if (app.save_due()) app.save_progress();
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
@@ -80,11 +87,11 @@ struct Driver {
     }
     void close() {
         if (app.view() == View::Tools) tap(342, 500);
-        else if (app.view() == View::Typography) tap(628, 700);
-        else if (app.view() == View::Contents) tap(628, 150);
-        else if (app.view() == View::Refresh) tap(628, 550);
+        else if (app.view() == View::Typography) tap(628, 628);
+        else if (app.view() == View::Contents) tap(628, 322);
+        else if (app.view() == View::Refresh) tap(628, 474);
         else if (app.view() == View::Sync) {
-            tap(628, 550);
+            tap(628, 480);
             if (!app.pending_frame()) tap(100, 950);
         }
         else if (app.view() == View::Error || app.view() == View::Confirmation || app.view() == View::UsbTransfer) tap(100, 1100);
@@ -131,28 +138,53 @@ int main(int argc, char** argv) {
     fs::copy_file(fixtures / "nested-toc.epub", card / "Books/nested.epub");
     fs::copy_file(fixtures / "image-cover.epub", card / "Books/cover.epub");
     fs::copy_file(fixtures / "image-flow.epub", card / "Books/images.epub");
+    fs::create_directories(card / "Txt");
+    fs::copy_file(fixtures / "sample.txt", card / "Txt/sample.txt");
     const auto progress = card / "Books/book.epub.picopage/progress.json";
     const auto settings = card / "Books/book.epub.picopage/settings.toml";
     ReadingRecord confirmed;
+    ReadingRecord txt_saved;
     {
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present();
-        driver.tap(240, 482); driver.present();
-        // Undecoded covers first appear as titles; the cover replaces the title in a second frame.
-        driver.tap(610, 384);
-        assert(app.canvas().pixel(270, 490) == 15);
+        opened(app, "Txt/sample.txt"); driver.present();
+        assert(app.saved_record() && app.saved_record()->content_revision == "txt-utf8-v1");
+        driver.key(Input::K3); driver.complete_content(); driver.present();
+        txt_saved = *app.saved_record();
+        driver.sync_view();
+        assert(!app.take_network_request());
+        assert(app.prepare_sleep()); driver.present();
+        const auto progress = FileStore(card.string()).load_progress("Txt/sample.txt", txt_saved.book_id, txt_saved.content_revision);
+        assert(progress.record && progress.record->anchor == txt_saved.anchor);
+    }
+    {
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        opened(app, "Txt/sample.txt");
+        assert(app.pending_frame()->anchor == txt_saved.anchor);
+        driver.present();
+    }
+    {
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        // Undecoded covers first appear as titles; the cover joins its list row in a second frame.
+        driver.tap(240, 482);
+        assert(app.canvas().pixel(50, 640) == 15);
         app.complete_frame(true);
         assert(app.pending_frame() && app.view() == View::Library);
-        assert(app.canvas().pixel(270, 490) == 0 && app.canvas().pixel(270, 610) == 5);
+        assert(app.canvas().pixel(50, 640) == 5);
         driver.present();
+        // The card view shows the same cached thumbnail at full size.
+        driver.tap(610, 384); driver.present();
+        assert(app.canvas().pixel(300, 560) == 0 && app.canvas().pixel(270, 610) == 5);
         driver.refresh();
         const auto original_cover = read(card / "Books/cover.epub");
         write(card / "Books/cover.epub", "broken");
         driver.tap(520, 384); driver.present(); driver.tap(610, 384); driver.present();
-        assert(app.canvas().pixel(270, 490) == 15);
+        assert(app.canvas().pixel(300, 560) == 15);
         write(card / "Books/cover.epub", original_cover);
         driver.tap(520, 384); driver.present(); driver.tap(610, 384); driver.present();
-        assert(app.canvas().pixel(270, 490) == 0 && app.canvas().pixel(270, 610) == 5);
+        assert(app.canvas().pixel(300, 560) == 0 && app.canvas().pixel(270, 610) == 5);
         driver.tap(520, 384); driver.present();
         assert(app.view() == View::Library);
         opened(app, "Books/cover.epub");
@@ -164,7 +196,7 @@ int main(int argc, char** argv) {
     }
     {
         // A cached thumbnail survives a restart; an entry that fails validation is rebuilt from the EPUB.
-        constexpr std::size_t thumbnail_bytes = 82 * 184;
+        constexpr std::size_t thumbnail_bytes = 92 * 250;
         fs::path cached;
         for (const auto& item : fs::directory_iterator(card / "PicoPage/cache/covers")) {
             const auto bytes = read(item.path());
@@ -181,9 +213,10 @@ int main(int argc, char** argv) {
             driver.tap(610, 384); driver.present();
             return app.canvas().pixel(x, y);
         };
-        assert(grid_pixel(270, 490) == 15);
+        // A white thumbnail counts as no cover: the card shows the title placeholder with its rule.
+        assert(grid_pixel(300, 560) == 15 && grid_pixel(270, 682) == 1);
         write(cached, "stale");
-        assert(grid_pixel(270, 490) == 0 && grid_pixel(270, 610) == 5);
+        assert(grid_pixel(300, 560) == 0 && grid_pixel(270, 610) == 5);
         assert(read(cached).size() > thumbnail_bytes);
     }
     {
@@ -195,8 +228,8 @@ int main(int argc, char** argv) {
             fs::remove_all(root / "PicoPage/cache/covers");
             ReaderApp app(root.string(), "cover-worker", true, true); Driver driver{app};
             assert(app.initialize()); driver.present();
-            driver.tap(240, 482); driver.present();
-            driver.tap(610, 384); driver.present();
+            driver.tap(240, 232); driver.present();
+            driver.tap(610, 134); driver.present();
             assert(app.background_due() && !app.pending_frame());
             app.poll_background(); driver.refresh();
             if (cancel) { driver.tap(600, 50); driver.present(); assert(app.view() == View::Settings); }
@@ -212,20 +245,20 @@ int main(int argc, char** argv) {
             if (cancel) assert(frames == 0 && app.canvas().pixels() == before);
             else {
                 assert(frames == 1 && app.view() == View::Library);
-                assert(app.canvas().pixel(60, 490) == 0 && app.canvas().pixel(270, 610) == 5);
+                assert(app.canvas().pixel(60, 250) == 0 && app.canvas().pixel(270, 400) == 5);
             }
         }
     }
     {
         const auto root = card / "CoverWorker";
         ReaderApp app(root.string(), "details-worker", true, true); Driver driver{app};
-        assert(app.initialize()); driver.present(); driver.tap(240, 482); driver.present();
-        driver.tap(610, 384); driver.present();
-        driver.tap(100, 680); driver.present();
+        assert(app.initialize()); driver.present(); driver.tap(240, 232); driver.present();
+        driver.tap(610, 134); driver.present();
+        driver.hold(100, 300); driver.present();
         assert(app.view() == View::Loading); driver.refresh();
         app.poll_background(); driver.tap(580, 1170); driver.present(); driver.complete_content();
         assert(app.view() == View::Library && !app.saved_record());
-        driver.tap(100, 680); driver.present(); driver.complete_content();
+        driver.hold(100, 300); driver.present(); driver.complete_content();
         assert(app.view() == View::BookDetails && !app.saved_record());
         assert(app.canvas().pixel(50, 180) == 0);
         const auto hashes = identity_hash_count();
@@ -242,7 +275,7 @@ int main(int argc, char** argv) {
         ReaderApp app(root.string()); Driver driver{app};
         assert(app.initialize()); driver.present();
         opened(app, "Books/book.epub");
-        assert(app.view() == View::Reading && app.status() == "缺字，请复制字体到 PicoPage/fonts");
+        assert(app.view() == View::Reading && app.status() == "部分字符无法显示，可在排版中更换字体");
         assert(app.canvas().pixels() != graphics::Canvas().pixels());
         driver.present(); assert(app.saved_record());
         const auto first = *app.saved_record();
@@ -251,7 +284,7 @@ int main(int argc, char** argv) {
         assert(app.view() == View::Reading && app.saved_record()->anchor != first.anchor);
         assert(app.status().empty());
         driver.key(Input::K1); driver.present();
-        assert(app.status() == "缺字，请复制字体到 PicoPage/fonts");
+        assert(app.status() == "部分字符无法显示，可在排版中更换字体");
     }
     {
         // Background page counting completes with the built-in font.
@@ -305,12 +338,13 @@ int main(int argc, char** argv) {
         assert(!fs::exists(settings) && *app.saved_record() == confirmed);
         driver.tap(342, 500); driver.present(); driver.tap(68, 1150); driver.present();
         assert(app.view() == View::Contents); driver.refresh();
-        driver.tap(205, 150); driver.present(); assert(app.view() == View::Typography);
+        driver.tap(256, 400); driver.present(); assert(app.view() == View::Typography);
         driver.close(); driver.present();
         driver.tap(342, 500); driver.present(); driver.tap(60, 50);
         assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean);
         driver.present();
         assert(app.view() == View::Library); driver.refresh();
+        assert(fs::exists(card / "PicoPage/cache/positions") && !fs::is_empty(card / "PicoPage/cache/positions"));
         driver.tap(610, 384); driver.present(); driver.refresh();
         driver.tap(520, 384); driver.present();
         driver.tap(390, 384); driver.present();
@@ -341,6 +375,14 @@ int main(int argc, char** argv) {
         assert(read(progress) == invalid);
     }
     write(progress, valid_progress);
+    {
+        fs::copy_file(fixtures / "missing-chinese-resource.epub", card / "Books/missing-resource.epub");
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        assert(!app.open_book("Books/missing-resource.epub") && app.view() == View::Error);
+        assert(app.status().find("文件内容无效或已损坏") != std::string::npos);
+        assert(app.status().find("Missing EPUB resource") == std::string::npos);
+    }
     {
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present(); opened(app, "Books/cover.epub"); driver.present();
@@ -375,7 +417,7 @@ int main(int argc, char** argv) {
         driver.present();
         driver.tap(342, 500); driver.present();
         driver.tap(68, 1140); assert(app.view() == View::Contents); driver.present();
-        driver.tap(300, 204 + 88 + 44); assert(app.view() == View::Reading); driver.present();
+        driver.tap(300, 450 + 92 + 46); assert(app.view() == View::Reading); driver.present();
         const auto second = *app.saved_record();
         assert(second.anchor.resource.find("chapter2") != std::string::npos);
         // Turning back into a long chapter announces the layout and keeps the confirmed position meanwhile.
@@ -504,7 +546,7 @@ int main(int argc, char** argv) {
         driver.sync_view(); auto request = driver.check_remote();
         app.complete_network(request.id, 200, remote, "");
         assert(app.view() == View::Loading && *app.saved_record() == saved);
-        driver.present(); driver.refresh(); driver.tap(560, 1170); driver.present();
+        driver.present(); driver.refresh(); driver.tap(342, 1075); driver.present();
         driver.complete_content();
         assert(app.view() == View::Sync && !app.take_network_request() && *app.saved_record() == saved);
         request = driver.check_remote(); app.complete_network(request.id, 200, remote, "");
@@ -512,12 +554,12 @@ int main(int argc, char** argv) {
         assert(app.view() == View::Sync && *app.saved_record() == saved);
         driver.close(); driver.present(); driver.sync_view();
         request = driver.check_remote(); app.complete_network(request.id, 200, "{}", ""); driver.present();
-        driver.tap(342, 1075); driver.present(); driver.tap(500, 1120); driver.present();
+        driver.tap(342, 960); driver.present(); driver.tap(500, 1120); driver.present();
         assert(app.view() == View::Loading && !app.take_network_request());
-        driver.tap(560, 1170); driver.present(); driver.complete_content();
+        driver.tap(342, 1075); driver.present(); driver.complete_content();
         assert(!app.take_network_request() && *app.saved_record() == saved);
         request = driver.check_remote(); app.complete_network(request.id, 200, "{}", ""); driver.present();
-        driver.tap(342, 1075); driver.present(); driver.tap(500, 1120); driver.present();
+        driver.tap(342, 960); driver.present(); driver.tap(500, 1120); driver.present();
         driver.complete_content();
         auto upload = app.take_network_request();
         assert(upload && upload->request.method == "PUT" && *app.saved_record() == saved);
@@ -537,7 +579,13 @@ int main(int argc, char** argv) {
         app.complete_network(cancelled.id, 200, remote, "");
         assert(!app.pending_frame() && !app.take_network_request() && *app.saved_record() == before);
 
-        driver.sync_view(); const auto candidate = driver.check_remote();
+        // Cancelling from the panel stays on it; the late response is discarded.
+        driver.sync_view(); const auto stopped = driver.check_remote();
+        driver.tap(342, 1075);
+        assert(app.view() == View::Sync && stopped.cancelled->load() && app.pending_frame());
+        driver.present(); assert(app.status().empty() && !app.take_network_request());
+        app.complete_network(stopped.id, 200, remote, ""); assert(!app.pending_frame());
+        const auto candidate = driver.check_remote();
         app.complete_network(candidate.id, 200, remote, ""); driver.present();
         auto switched_account = sync_config;
         switched_account.replace(switched_account.find("test-user"), 9, "other-user");
@@ -556,7 +604,7 @@ int main(int argc, char** argv) {
         assert(!app.pending_frame() && !app.take_network_request() && *app.saved_record() == cover);
         app.complete_network(current.id, 200, "{}", ""); driver.present();
         assert(*app.saved_record() == cover && !app.take_network_request());
-        driver.tap(342, 1075); assert(app.view() == View::Confirmation); driver.present();
+        driver.tap(342, 960); assert(app.view() == View::Confirmation); driver.present();
         driver.refresh(); assert(!app.take_network_request());
         driver.close(); driver.present();
         assert(app.view() == View::Reading && !app.take_network_request() && *app.saved_record() == cover);
@@ -564,7 +612,7 @@ int main(int argc, char** argv) {
         const auto sync_saved = *app.saved_record();
         driver.sync_view(); const auto no_record = driver.check_remote();
         app.complete_network(no_record.id, 200, "{}", ""); driver.present();
-        driver.tap(342, 1075); driver.present(); driver.tap(500, 1120); driver.present();
+        driver.tap(342, 960); driver.present(); driver.tap(500, 1120); driver.present();
         auto upload = app.take_network_request(); assert(upload && upload->request.method == "PUT");
         driver.close(); driver.present();
         assert(upload->cancelled->load());
@@ -575,7 +623,7 @@ int main(int argc, char** argv) {
         assert(!app.take_network_request() && *app.saved_record() == sync_saved);
         const auto retry = driver.check_remote();
         app.complete_network(retry.id, 200, "{}", ""); driver.present();
-        driver.tap(342, 1075); driver.present(); driver.tap(500, 1120); driver.present();
+        driver.tap(342, 960); driver.present(); driver.tap(500, 1120); driver.present();
         upload = app.take_network_request(); assert(upload && upload->request.method == "PUT");
         app.complete_network(upload->id, 200, "{}", ""); driver.present(); driver.refresh();
         assert(*app.saved_record() == sync_saved);
@@ -706,13 +754,13 @@ int main(int argc, char** argv) {
         const auto saved = *app.saved_record();
         driver.tap(342, 500); driver.present(); driver.tap(68, 1150); driver.present();
         const auto collapsed = app.canvas().pixels();
-        driver.tap(615, 248); driver.present();
+        driver.tap(615, 496); driver.present();
         assert(app.view() == View::Contents && app.canvas().pixels() != collapsed && *app.saved_record() == saved);
         driver.refresh();
-        driver.tap(615, 248); driver.present();
+        driver.tap(615, 496); driver.present();
         assert(app.canvas().pixels() == collapsed && *app.saved_record() == saved);
-        driver.tap(615, 248); driver.present();
-        driver.tap(200, 340); driver.present();
+        driver.tap(615, 496); driver.present();
+        driver.tap(200, 588); driver.present();
         assert(app.view() == View::Reading && app.saved_record()->anchor != saved.anchor);
     }
     {
@@ -730,12 +778,12 @@ int main(int argc, char** argv) {
         driver.close(); driver.present();
         driver.tap(340, 500); driver.present(); driver.tap(50, 50); driver.present();
         driver.tap(100, 480); driver.present();
-        driver.tap(600, 480); driver.present();
+        driver.hold(300, 480); driver.present();
         assert(app.view() == View::BookDetails && *app.saved_record() == saved);
         driver.refresh(); driver.close(); driver.present();
         assert(app.view() == View::Library && *app.saved_record() == saved);
         driver.tap(610, 384); driver.present();
-        driver.tap(100, 680); driver.present();
+        driver.hold(100, 560); driver.present();
         assert(app.view() == View::BookDetails && *app.saved_record() == saved);
         driver.refresh(); driver.close(); driver.present();
         driver.tap(600, 50); driver.present();
@@ -759,7 +807,7 @@ int main(int argc, char** argv) {
         write(card / "PicoPage/cache/layout", "cache");
         const auto book_before = read(card / "Books/book.epub");
         const auto progress_before = read(progress);
-        driver.tap(340, 1080); driver.present();
+        driver.tap(340, 1120); driver.present();
         assert(!fs::exists(card / "PicoPage/cache/layout") && read(progress) == progress_before);
         assert(read(card / "Books/book.epub") == book_before && *app.saved_record() == saved);
         driver.close(); driver.present(); driver.tap(340, 710); driver.present();
@@ -792,7 +840,7 @@ int main(int argc, char** argv) {
         const auto sidecar = card / "Manage/only.epub.picopage/progress.json";
         driver.tap(342, 500); driver.present(); driver.tap(60, 50); driver.present();
         driver.tap(240, 480); driver.present();
-        driver.tap(610, 480); driver.present();
+        driver.hold(300, 480); driver.present();
         assert(app.view() == View::BookDetails);
         driver.tap(342, 918); driver.present();
         assert(app.view() == View::BookManagement); driver.refresh();
@@ -808,7 +856,7 @@ int main(int argc, char** argv) {
         assert(app.view() == View::Reading && app.saved_record() && app.saved_record()->anchor != saved.anchor);
         assert(read(sidecar.string() + ".bak") == cleared);
         const auto reset_record = read(sidecar);
-        driver.tap(342, 500); driver.present(); driver.tap(60, 50); driver.present(); driver.tap(610, 480); driver.present();
+        driver.tap(342, 500); driver.present(); driver.tap(60, 50); driver.present(); driver.hold(300, 480); driver.present();
         driver.tap(342, 1010); driver.present(); driver.refresh();
         driver.tap(500, 1120); driver.present();
         assert(app.view() == View::Library && !app.saved_record());
@@ -971,7 +1019,7 @@ int main(int argc, char** argv) {
             }
             driver.tap(342, 500); driver.present(); driver.tap(68, 1150); driver.present();
             assert(app.view() == View::Contents);
-            driver.tap(300, 336); driver.present();
+            driver.tap(300, 588); driver.present();
             assert(app.view() == View::Reading);
             late = app.saved_record()->anchor;
             late_page = app.book_pages()->page;
@@ -1203,7 +1251,7 @@ int main(int argc, char** argv) {
         const auto before = graphics::image_decode_count();
         driver.tap(205, 1140);
         assert(app.view() == View::Loading && graphics::image_decode_count() == before);
-        driver.present(); driver.refresh(); driver.tap(560, 1170); driver.present();
+        driver.present(); driver.refresh(); driver.tap(342, 400); driver.present();
         driver.complete_content();
         assert(app.view() == View::Tools && *app.saved_record() == saved);
         driver.tap(205, 1140); driver.present(); driver.complete_content();
@@ -1314,7 +1362,7 @@ int main(int argc, char** argv) {
         assert(async.saved_record()->anchor == first);
         for (auto* d : {&ref_driver, &driver}) {
             d->tap(342, 500); d->present(); d->tap(68, 1140); d->present();
-            d->tap(300, 424); d->present(); d->complete_content();
+            d->tap(300, 680); d->present(); d->complete_content();
         }
         assert(async.saved_record()->anchor.resource.find("chapter2") != std::string::npos);
         same_body();
@@ -1343,12 +1391,12 @@ int main(int argc, char** argv) {
         assert(app.initialize()); driver.present();
         driver.tap(600, 50); driver.present(); assert(app.view() == View::Settings);
         driver.tap(300, 180); driver.present(); assert(app.view() == View::Import);
-        driver.tap(342, 750);
+        driver.tap(342, 510);
         assert(!app.pending_frame() && app.view() == View::Import);
         assert(app.take_portal_action() == PortalAction::Start && app.take_portal_action() == PortalAction::None);
         app.show_portal({PortalPhase::Closed, "", "", "", "无法开启手机配置，请稍后重试。"}); driver.present();
         assert(app.view() == View::Settings && app.status() == "无法开启手机配置，请稍后重试。");
-        driver.tap(300, 310); driver.present(); assert(app.view() == View::SyncSettings);
+        driver.tap(300, 310); driver.present(); assert(app.view() == View::SyncSettings && app.status().empty());
         driver.tap(342, 800);
         assert(app.take_portal_action() == PortalAction::Start);
         assert(app.prepare_portal()); driver.present(); assert(app.view() == View::Portal);
@@ -1392,6 +1440,19 @@ int main(int argc, char** argv) {
         const auto saved = *app.saved_record();
         app.show_portal({PortalPhase::Closed, "", "", "", ""}); driver.present();
         assert(app.view() == View::Settings && *app.saved_record() == saved);
+        driver.tap(300, 180); driver.present();
+        driver.tap(342, 600);
+        assert(app.take_portal_action() == PortalAction::Upload);
+        assert(app.prepare_portal(true)); driver.present();
+        app.show_portal({PortalPhase::Waiting, "PicoPage-TEST", "abcd2345", "http://192.168.4.1", ""});
+        driver.present(); driver.refresh();
+        assert(app.view() == View::Portal && *app.saved_record() == saved && !app.prepare_sleep());
+        fs::copy_file(card / "Books/book.epub", card / "Books/wifi-import.epub");
+        driver.tap(342, 1120);
+        assert(app.take_portal_action() == PortalAction::Stop); driver.present();
+        app.show_portal({PortalPhase::Closed, "", "", "", ""}); driver.present();
+        assert(app.view() == View::Library && *app.saved_record() == saved);
+        fs::remove(card / "Books/wifi-import.epub");
     }
     {
         fs::create_directories(card / "SaveWorker");
@@ -1433,6 +1494,40 @@ int main(int argc, char** argv) {
         driver.present(); driver.complete_content();
         assert(app.view() == View::Error && app.saved_record()->anchor == second);
         assert(identity_hash_count() == hashes);
+        fs::remove(sidecar); fs::rename(sidecar.string() + ".held", sidecar);
+    }
+    {
+        // A TXT shorter than one 48 KiB part reports its position against its own length.
+        std::string text;
+        for (int i = 0; i < 300; ++i) text += "短文测试。";
+        write(card / "Txt/short.txt", text);
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Txt/short.txt"); driver.present();
+        driver.tap(342, 500); driver.present(); driver.tap(60, 50); driver.present();
+        assert(app.view() == View::Library);
+        int percent = -1;
+        for (const auto& item : fs::directory_iterator(card / "PicoPage/cache/positions")) {
+            const auto bytes = read(item.path());
+            if (bytes.find("\nTxt/short.txt\n") != std::string::npos) percent = std::stoi(bytes.substr(bytes.rfind('\n') + 1));
+        }
+        assert(percent > 0 && percent < 60);
+    }
+    {
+        // The library position follows the saved record: a page whose commit fails is not cached.
+        ReaderApp app(card.string(), "position-worker", true, true);
+        Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "SaveWorker/book.epub");
+        app.complete_frame(true);
+        driver.key(Input::K3); assert(app.pending_frame()); app.complete_frame(true);
+        const auto sidecar = card / "SaveWorker/book.epub.picopage";
+        fs::rename(sidecar, sidecar.string() + ".held");
+        write(sidecar, "not a directory");
+        assert(app.open_book("Books/cover.epub"));
+        driver.present(); driver.complete_content();
+        assert(app.view() == View::Error);
+        if (fs::exists(card / "PicoPage/cache/positions"))
+            for (const auto& item : fs::directory_iterator(card / "PicoPage/cache/positions"))
+                assert(read(item.path()).find("\nSaveWorker/book.epub\n") == std::string::npos);
         fs::remove(sidecar); fs::rename(sidecar.string() + ".held", sidecar);
     }
     fs::remove_all(card);

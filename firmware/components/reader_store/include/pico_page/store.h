@@ -71,6 +71,8 @@ public:
     StoreStatus append(std::uint64_t offset, const void* data, std::size_t size, std::string& error);
     /** Verifies size/CRC, synchronizes, reads back and publishes without replacing any destination. */
     StoreStatus finish(std::string& error);
+    /** Closes the transaction and removes only its unpublished staging file; reports cleanup errors. */
+    StoreStatus cancel(std::string& error);
     std::uint64_t received() const { return received_; }
 private:
     friend class FileStore;
@@ -141,9 +143,10 @@ public:
 
     /**
      * Starts a new resource import of 1 byte through 64 MiB. Allowed destinations
-     * are EPUBs in Books/Articles, fonts or license text in PicoPage/fonts, and
-     * images in PicoPage/images. Existing destinations and staging files are
-     * preserved. No settings, credentials or reading records are importable.
+     * are EPUB or TXT books in Books/Articles, fonts or license text in PicoPage/fonts, and
+     * images in PicoPage/images. Existing destinations are preserved. An abandoned regular
+     * staging file for this destination is removed before starting; unsafe paths are refused.
+     * No settings, credentials or reading records are importable.
      * The caller serializes card access until the returned transaction is released.
      */
     std::unique_ptr<FileImport> begin_import(const std::string& path, std::uint64_t size,
@@ -153,11 +156,11 @@ public:
     StoreStatus inspect_asset(const std::string& path, std::uint64_t& size,
                               std::uint32_t& crc32, std::string& error) const;
 
-    /** Captures the EPUB digest and exact progress slots before a management confirmation. */
+    /** Captures the original book digest and exact progress slots before a management confirmation. */
     StoreStatus book_snapshot(const std::string& path, BookSnapshot& snapshot) const;
 
     /**
-     * Revalidates the snapshot, then deletes only the original EPUB or commits a
+     * Revalidates the snapshot, then deletes only the original book or commits a
      * cleared marker to both progress slots. The caller must first stop the book
      * session and its asynchronous work. Remote records and book settings remain.
      * Failure may leave a published slot; reload before retrying.

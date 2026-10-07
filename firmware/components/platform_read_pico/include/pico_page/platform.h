@@ -163,10 +163,13 @@ using PortalHandler = std::string (*)(void* context, bool submitted, const std::
  * body_limit bytes are refused. Requests for any other path are redirected to the page, and a
  * name service on UDP port 53 answers every host name with the access point address, so a
  * phone that has just joined presents the page as the network's sign-in page. Call after
- * start_access_point(). context must outlive stop_portal_server().
+ * start_access_point(). context and cancelled must outlive stop_portal_server().
+ * A nonempty upload_root selects book upload instead of configuration; the caller must
+ * suspend other card writers until stop returns. Uploads never replace existing files.
  */
 bool start_portal_server(PortalHandler handler, void* context, std::size_t body_limit,
-                         std::string& error);
+                         std::string& error, const std::string& upload_root = "",
+                         const std::atomic_bool* cancelled = nullptr);
 
 /** Stops the name service and the server, waiting for a running handler to return. */
 void stop_portal_server();

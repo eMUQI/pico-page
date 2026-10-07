@@ -49,6 +49,13 @@ int main() {
     }
     {
         using namespace pico_page::platform;
+        // Only a touch held for the threshold is a long press; keys never are.
+        CHECK(long_press({EventKind::Touch, EventPhase::Begin, 1, 0, 0, 1000}, {EventKind::Touch, EventPhase::End, 1, 0, 0, 1000 + kLongPressUs}));
+        CHECK(!long_press({EventKind::Touch, EventPhase::Begin, 1, 0, 0, 1000}, {EventKind::Touch, EventPhase::End, 1, 0, 0, 999 + kLongPressUs}));
+        CHECK(!long_press({EventKind::K2, EventPhase::Begin, 1, 0, 0, 0}, {EventKind::K2, EventPhase::End, 1, 0, 0, 2 * kLongPressUs}));
+    }
+    {
+        using namespace pico_page::platform;
         ReleasedTap taps;
         CHECK(!taps.accept({EventKind::K3, EventPhase::Begin, 1}, 1));
         CHECK(!taps.accept({EventKind::InputReset, EventPhase::Cancel, 9}, 1));

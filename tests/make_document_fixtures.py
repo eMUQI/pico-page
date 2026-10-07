@@ -7,7 +7,15 @@ from make_epub_fixture import fixture_entries, write_fixture
 
 def generate(directory: Path) -> None:
     directory.mkdir(parents=True, exist_ok=True)
+    (directory / "sample.txt").write_bytes(("\ufeff" + "甲" * 16384 + "\r\n第二段😀\n" +
+                                            "长段文字。" * 12000).encode("utf-8"))
+    (directory / "invalid.txt").write_bytes(b"valid\xffinvalid")
+    (directory / "gb18030.txt").write_bytes(("甲" * 24575 + "😀\ue587" + "乙" * 500 + "\r\n末尾").encode("gb18030"))
     write_fixture(directory / "valid.epub")
+    entries = fixture_entries()
+    entries["META-INF/container.xml"] = entries["META-INF/container.xml"].replace(
+        "EPUB/package.opf", "EPUB/缺失的书目.opf")
+    write_fixture(directory / "missing-chinese-resource.epub", entries)
     entries = fixture_entries()
     entries["EPUB/nav.xhtml"] = entries["EPUB/nav.xhtml"].replace(
         '<li><a href="chapter1.xhtml">第一章</a></li>',

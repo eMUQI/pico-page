@@ -265,7 +265,8 @@ void ContentJob::open_book() {
           document.open_verified(request.path, request.identity, result.error, stop)) || stop()) return;
     FileStore store(request.root);
     result.configuration = store.load_settings(request.relative_path);
-    result.progress = store.load_progress(request.relative_path, document.metadata().book_id, request.content_revision);
+    result.progress = store.load_progress(request.relative_path, document.metadata().book_id,
+        document.metadata().txt_gb18030 ? kTxtGb18030Revision : request.content_revision);
     if (request.kind != Kind::Inspect && result.progress.status != StoreStatus::Ok && result.progress.status != StoreStatus::Missing &&
         result.progress.status != StoreStatus::Cleared) {
         result.error = "Reading progress cannot be read; original record preserved"; return;
@@ -370,11 +371,11 @@ void ContentJob::library_covers() {
 #ifdef ESP_PLATFORM
         if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 3U * 1024 * 1024) continue;
 #endif
-        graphics::Canvas thumbnail(164, 184);
+        graphics::Canvas thumbnail(kLibraryCoverWidth, kLibraryCoverHeight);
         std::vector<std::uint8_t> encoded;
         std::string error;
         const bool loaded = EpubDocument::read_cover(request.root + "/" + source.path, encoded, error, stop) &&
-            graphics::render_image(thumbnail, encoded, 0, 0, 164, 184, error, false, stop);
+            graphics::render_image(thumbnail, encoded, 0, 0, kLibraryCoverWidth, kLibraryCoverHeight, error, true, stop);
         if (stop()) return;
         struct stat info{};
         if (stat((request.root + "/" + source.path).c_str(), &info) != 0 ||

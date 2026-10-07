@@ -1,4 +1,5 @@
 #include "pico_page/document.h"
+#include <fstream>
 #include <cassert>
 #include <iostream>
 
@@ -257,6 +258,62 @@ int main(int argc, char** argv) {
         }
         assert(book.metadata().book_id == identity);
         assert(book.load_chapter(0, first, error) && first.resource == "EPUB/chapter1.xhtml");
+    }
+    {
+        const std::string directory = std::string(argv[1]).substr(0, std::string(argv[1]).find_last_of('/') + 1);
+        EpubDocument txt;
+        assert(txt.open(directory + "sample.txt", error));
+        assert(txt.metadata().title == "sample" && txt.spine().size() == 1 && txt.toc().size() == 1);
+        assert(txt.metadata().book_id == sha256_file(directory + "sample.txt"));
+        EpubDocument verified;
+        assert(verified.open_verified(directory + "sample.txt", txt.metadata(), error));
+        std::u32string joined;
+        Anchor saved;
+        for (std::uint32_t part = 0;; ++part) {
+            Chapter piece;
+            assert(verified.load_chapter(0, piece, error, ChapterLoad::Reading, part));
+            assert(piece.part == part && !piece.text.empty());
+            if (part == 1) {
+                assert(piece.anchor_at(10, saved));
+                std::uint32_t position = 0;
+                assert(piece.offset_for(saved, position) && position == 10);
+            }
+            joined += piece.text;
+            if (piece.last_part) break;
+        }
+        std::u32string expected(16384, U'甲');
+        expected += U"\r\n第二段😀\n";
+        for (int i = 0; i < 12000; ++i) expected += U"长段文字。";
+        assert(joined == expected);
+        Chapter restored;
+        assert(verified.find_chapter_part(0, restored, error, ChapterLoad::Reading,
+                                          [&](const Chapter& part) { std::uint32_t offset = 0; return part.offset_for(saved, offset); }));
+        assert(restored.part == 1);
+        {
+            // A character that crosses the last 48 KiB boundary belongs to the preceding part,
+            // which is then the final one; no empty part follows it.
+            const auto path = directory + "boundary.txt";
+            std::ofstream(path, std::ios::binary) << std::string(kTxtPartBytes - 2, 'a') << "\xf0\x9f\x98\x80";
+            EpubDocument crossing;
+            Chapter piece;
+            assert(crossing.open(path, error));
+            assert(crossing.load_chapter(0, piece, error, ChapterLoad::Reading, 0));
+            assert(piece.last_part && piece.text.size() == kTxtPartBytes - 1);
+            assert(!crossing.load_chapter(0, piece, error, ChapterLoad::Reading, 1));
+            assert(crossing.load_chapter(0, piece, error, ChapterLoad::Reading, kLastChapterPart) && piece.part == 0);
+        }
+        assert(!txt.open(directory + "invalid.txt", error) && error.find("编码不受支持") != std::string::npos);
+        assert(txt.open(directory + "gb18030.txt", error) && txt.metadata().txt_gb18030);
+        assert(txt.metadata().txt_offsets.size() == 3 && txt.metadata().txt_offsets[1] == 49154);
+        assert(verified.open_verified(directory + "gb18030.txt", txt.metadata(), error));
+        std::u32string decoded;
+        for (std::uint32_t part = 0;; ++part) {
+            Chapter piece;
+            assert(verified.load_chapter(0, piece, error, ChapterLoad::Reading, part));
+            decoded += piece.text;
+            if (piece.last_part) break;
+        }
+        assert(decoded == std::u32string(24575, U'甲') + U"😀\ue587" + std::u32string(500, U'乙') + U"\r\n末尾");
     }
     return 0;
 }
