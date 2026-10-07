@@ -481,7 +481,8 @@ extern "C" void app_main() {
             } else if (tap) {
                 pico_page::AppInput input{
                     {physical_sequence, pico_page::Phase::Begin, pico_page::Input::TouchCenter},
-                    tap->kind == EventKind::Touch, tap->x, tap->y, tap->time_us < settled_us};
+                    tap->kind == EventKind::Touch, tap->x, tap->y, tap->time_us < settled_us,
+                    pico_page::platform::long_press(*tap, event)};
                 if (tap->kind == EventKind::K1) input.event.input = pico_page::Input::K1;
                 if (tap->kind == EventKind::K2) input.event.input = pico_page::Input::K2;
                 if (tap->kind == EventKind::K3) input.event.input = pico_page::Input::K3;

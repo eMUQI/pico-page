@@ -63,6 +63,8 @@ struct AppInput {
      * screen. Only a page turn that follows a page turn is honoured; anything else is ignored.
      */
     bool queued = false;
+    /** The touch was held before release. It opens book details in the library and is a tap elsewhere. */
+    bool long_press = false;
 };
 
 /** Retained payload capacities; allocator bookkeeping and hash nodes are excluded. */

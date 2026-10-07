@@ -17,7 +17,7 @@ void usage() {
     std::cout
         << "Pico Page --card DIRECTORY [--book Books/file.epub|Books/file.txt] [--script FILE] [--headless]\n"
            "Keys: Left/1=K1, R/2=K2 full refresh, Right/3=K3, Escape=K2, Space=sleep/wake.\n"
-           "Script: k1 | k2 | k3 | tap X Y | capture FILE.bmp | sleep | wake | open PATH | count\n";
+           "Script: k1 | k2 | k3 | tap X Y | hold X Y | capture FILE.bmp | sleep | wake | open PATH | count\n";
 }
 struct Response {
     std::uint64_t id = 0;
@@ -191,10 +191,10 @@ struct Host {
             app.show_portal({PortalPhase::Closed, "", "", "", "桌面预览不提供设备热点。"});
         return flush();
     }
-    bool gesture(Input key, bool touch = false, int x = 0, int y = 0) {
+    bool gesture(Input key, bool touch = false, int x = 0, int y = 0, bool hold = false) {
         ++sequence;
-        app.input({{sequence, Phase::Begin, key}, touch, x, y});
-        app.input({{sequence, Phase::End, key}, touch, x, y});
+        app.input({{sequence, Phase::Begin, key}, touch, x, y, false, hold});
+        app.input({{sequence, Phase::End, key}, touch, x, y, false, hold});
         return flush() && poll_portal();
     }
     bool capture(const std::string &path) {
@@ -219,11 +219,11 @@ struct Host {
             return gesture(Input::K2);
         if (command == "k3")
             return gesture(Input::K3);
-        if (command == "tap") {
+        if (command == "tap" || command == "hold") {
             int x, y;
             if (!(input >> x >> y))
                 return false;
-            return gesture(Input::TouchCenter, true, x, y);
+            return gesture(Input::TouchCenter, true, x, y, command == "hold");
         }
         if (command == "capture") {
             std::string path;
@@ -328,8 +328,9 @@ int main(int argc, char **argv) {
             SDL_RenderClear(host.renderer);
             SDL_RenderCopy(host.renderer, host.texture, nullptr, nullptr);
             SDL_RenderPresent(host.renderer);
-        } else if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT)
-            host.gesture(Input::TouchCenter, true, event.button.x, event.button.y);
+        } else if (event.type == SDL_MOUSEBUTTONDOWN && (event.button.button == SDL_BUTTON_LEFT || event.button.button == SDL_BUTTON_RIGHT))
+            // The right button stands for a long press.
+            host.gesture(Input::TouchCenter, true, event.button.x, event.button.y, event.button.button == SDL_BUTTON_RIGHT);
         else if (event.type == SDL_KEYDOWN && !event.key.repeat) {
             switch (event.key.keysym.sym) {
             case SDLK_LEFT:

@@ -371,11 +371,11 @@ void ContentJob::library_covers() {
 #ifdef ESP_PLATFORM
         if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 3U * 1024 * 1024) continue;
 #endif
-        graphics::Canvas thumbnail(164, 184);
+        graphics::Canvas thumbnail(kLibraryCoverWidth, kLibraryCoverHeight);
         std::vector<std::uint8_t> encoded;
         std::string error;
         const bool loaded = EpubDocument::read_cover(request.root + "/" + source.path, encoded, error, stop) &&
-            graphics::render_image(thumbnail, encoded, 0, 0, 164, 184, error, false, stop);
+            graphics::render_image(thumbnail, encoded, 0, 0, kLibraryCoverWidth, kLibraryCoverHeight, error, true, stop);
         if (stop()) return;
         struct stat info{};
         if (stat((request.root + "/" + source.path).c_str(), &info) != 0 ||

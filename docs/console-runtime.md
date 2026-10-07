@@ -39,6 +39,7 @@
 | `PP 3 ls 0 Books` | 列出安全相对目录；拒绝绝对路径、上级路径和符号链接目录 |
 | `PP 4 key K2` | 经正常 App API 发送按下和释放；正文仍为立即全刷 |
 | `PP 5 tap 342 600` | 发送屏幕内一次触摸；坐标范围为 x 0–683、y 0–1215 |
+| `PP 5 hold 128 560` | 发送一次长按；参数与 `tap` 相同。只验证应用对长按的处理，不经过触摸采样和时长判定 |
 | `PP 6 open Books/example.epub` | 经正常 App API 开书；路径必须存在于卡内 |
 | `PP 7 screen 12 0 256` | 导出第 12 个已确认帧从字节 0 开始的 256 字节 packed 数据 |
 | `PP 8 file PicoPage/fonts/reader.ttf` | 只返回白名单资源的长度与 CRC32 |
