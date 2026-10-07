@@ -3599,15 +3599,10 @@ struct ReaderApp::Impl final : DisplayBackend {
     /**
      * Chinese wording for a failure detail produced by the document, store or sync layers. Their
      * details are English diagnostic text for the log; text that is already Chinese passes through.
-     * The category is chosen by keywords in the detail text, because those layers report no error
-     * codes; a detail without a known keyword is described as invalid content.
+     * A colon-separated detail may also include a non-ASCII resource path. The layers report no
+     * error codes; an unknown diagnostic is described as invalid content.
      */
     static std::string reason(const std::string &detail) {
-        if (std::any_of(detail.begin(), detail.end(), [](unsigned char c) { return c >= 0x80; })) {
-            const std::string stop = "。";
-            const bool ended = detail.size() >= stop.size() && detail.compare(detail.size() - stop.size(), stop.size(), stop) == 0;
-            return ended ? detail.substr(0, detail.size() - stop.size()) : detail;
-        }
         std::string lower = detail;
         for (auto &c : lower) if (c >= 'A' && c <= 'Z') c += 32;
         const auto has = [&](const char *word) { return lower.find(word) != std::string::npos; };
@@ -3617,6 +3612,12 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (has("unavailable") || has("no longer") || has("cannot be read") || has("read failed") ||
             has("cannot open") || has("cannot seek") || has("cannot hash") || has("cannot read"))
             return "文件无法读取，请检查 TF 卡";
+        if (detail.find(": ") == std::string::npos &&
+            std::any_of(detail.begin(), detail.end(), [](unsigned char c) { return c >= 0x80; })) {
+            const std::string stop = "。";
+            const bool ended = detail.size() >= stop.size() && detail.compare(detail.size() - stop.size(), stop.size(), stop) == 0;
+            return ended ? detail.substr(0, detail.size() - stop.size()) : detail;
+        }
         return "文件内容无效或已损坏";
     }
     std::string retry_path;

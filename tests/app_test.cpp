@@ -376,6 +376,14 @@ int main(int argc, char** argv) {
     }
     write(progress, valid_progress);
     {
+        fs::copy_file(fixtures / "missing-chinese-resource.epub", card / "Books/missing-resource.epub");
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        assert(!app.open_book("Books/missing-resource.epub") && app.view() == View::Error);
+        assert(app.status().find("文件内容无效或已损坏") != std::string::npos);
+        assert(app.status().find("Missing EPUB resource") == std::string::npos);
+    }
+    {
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present(); opened(app, "Books/cover.epub"); driver.present();
         assert(app.saved_record() && app.saved_record()->anchor.node == "/html[1]/body[1]/img[1]" && app.saved_record()->anchor.offset == 0);

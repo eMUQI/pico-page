@@ -13,6 +13,10 @@ def generate(directory: Path) -> None:
     (directory / "gb18030.txt").write_bytes(("甲" * 24575 + "😀\ue587" + "乙" * 500 + "\r\n末尾").encode("gb18030"))
     write_fixture(directory / "valid.epub")
     entries = fixture_entries()
+    entries["META-INF/container.xml"] = entries["META-INF/container.xml"].replace(
+        "EPUB/package.opf", "EPUB/缺失的书目.opf")
+    write_fixture(directory / "missing-chinese-resource.epub", entries)
+    entries = fixture_entries()
     entries["EPUB/nav.xhtml"] = entries["EPUB/nav.xhtml"].replace(
         '<li><a href="chapter1.xhtml">第一章</a></li>',
         '<li><a href="chapter1.xhtml">第一章：长标题检查目录折行与右侧展开热区不能重叠</a>'
