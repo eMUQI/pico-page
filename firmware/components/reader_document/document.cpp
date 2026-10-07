@@ -1017,20 +1017,42 @@ void set_chapter_memory_probe(bool (*probe)(std::size_t bytes)) {
     memory_room = probe ? probe : platform_memory_room;
 }
 
-std::string sha256_file(const std::string& path, const std::function<bool()>& stop) {
-    std::unique_ptr<FILE, decltype(&std::fclose)> file(std::fopen(path.c_str(), "rb"), &std::fclose);
-    if (!file) return {};
-    Hash sha(false);
-    std::array<unsigned char, 8192> bytes;
-    while (!stop || !stop()) {
-        const auto count = std::fread(bytes.data(), 1, bytes.size(), file.get());
-        if (count && !sha.update(bytes.data(), count)) return {};
-        if (count < bytes.size()) {
-            std::string digest;
-            return !std::ferror(file.get()) && sha.finish(digest) ? digest : std::string();
-        }
+struct FileDigest::Impl {
+    std::unique_ptr<FILE, decltype(&std::fclose)> file{nullptr, &std::fclose};
+    Hash sha{false};
+    bool finished = false;
+    std::string path, value;
+    explicit Impl(const std::string& name) : path(name) {}
+};
+FileDigest::FileDigest(const std::string& path) : impl_(std::make_unique<Impl>(path)) {}
+FileDigest::~FileDigest() = default;
+const std::string& FileDigest::digest() const { return impl_->value; }
+bool FileDigest::step(std::size_t budget, const std::function<bool()>& stop) {
+    auto& state = *impl_;
+    if (state.finished) return true;
+    if (!budget || (stop && stop())) return false;
+    if (!state.file) {
+        state.file.reset(std::fopen(state.path.c_str(), "rb"));
+        if (!state.file) { state.finished = true; return true; }
     }
-    return {};
+    std::array<unsigned char, 8192> bytes;
+    while (budget && (!stop || !stop())) {
+        const auto requested = std::min(budget, bytes.size());
+        const auto count = std::fread(bytes.data(), 1, requested, state.file.get());
+        if (count && !state.sha.update(bytes.data(), count)) {
+            state.finished = true;
+        } else if (count < requested) {
+            if (!std::ferror(state.file.get())) state.sha.finish(state.value);
+            state.finished = true;
+        }
+        if (state.finished) { state.file.reset(); return true; }
+        budget -= count;
+    }
+    return false;
+}
+std::string sha256_file(const std::string& path, const std::function<bool()>& stop) {
+    FileDigest scan(path);
+    return scan.step(std::numeric_limits<std::size_t>::max(), stop) ? scan.digest() : std::string();
 }
 
 std::string md5_hex(std::string_view bytes) {

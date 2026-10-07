@@ -53,18 +53,42 @@ CFF、SFNT、PS 辅助模块和灰阶/单色栅格化模块；关闭压缩字体
 descender 10 px；Noto UI 28 px 的对应值是 33 和 9 px。绘制调用使用 baseline，不能将 top
 直接当 baseline，否则中文上部会被裁切。
 
-## 内置提示字体与许可
+## 内置字体与许可
 
-`fonts/PicoPageFallback.otf` 从上述 Noto Sans SC 按本轮 UI 字符生成，保留 ASCII 和中文错误提示。
-完整字形清单在 `fonts/fallback_characters.txt`。字体未作为完整中文正文替代方案。
-生成器遇到源字体缺失的请求字符会失败，不把缺字框当作有效提示字形。
-新增 UI 文案后运行：
+`fonts/PicoPageFallback.otf` 从上述 Noto Sans SC 裁剪生成，共 4,084 个字符、916,420 字节，
+SHA-256 `18d9a0d50b473590d09bbce06c60371439984f1d3cff8a890f4bc748db6c19be`。它有两个用途：
+TF 卡上的界面字体打不开时显示界面和错误提示；TF 卡上没有可用正文字体时显示正文。
+
+字符范围由三部分组成，完整清单在 `fonts/fallback_characters.txt`：
+
+- ASCII、脚本内的界面文案，以及 `--strings` 指定源文件中的全部字符。源字体缺少其中任何一个时生成失败。
+- 《通用规范汉字表》一级字 3,500 个，清单在 `fonts/common_characters.txt`。源字体缺少其中任何一个时生成失败。
+- 正文常见符号：U+00A0–017F、U+01CD–01DC、U+2000–206F、U+2460–2473、U+3000–303F、U+FF00–FFEF。
+  源字体没有的码位直接跳过。
+
+内置字体不能替代完整中文字体：一级字以外的简体字、繁体字和生僻字不在其中。
+子集保留了 `.notdef` 轮廓，缺少的字符显示为方框。正文使用内置字体且当前页有缺字时，
+页面照常显示，状态栏提示“缺字，请复制字体到 PicoPage/fonts”；没有缺字的页面显示页码。
+实测两本繁体公版书（《呐喊》《阿Q正传》）约 19% 的字符缺字，简体演示书缺字数为 0。
+
+`common_characters.txt` 取自 Unicode 17.0.0 的 Unihan 数据库：
+`https://www.unicode.org/Public/17.0.0/ucd/Unihan.zip`，
+SHA-256 `f7a48b2b545acfaa77b2d607ae28747404ce02baefee16396c5d2d7a8ef34b5e`。
+提取 `Unihan_OtherMappings.txt` 中 `kTGH` 字段值为 `2013:1` 至 `2013:3500` 的字符，按序号排列，每行 50 个。
+Unihan 数据适用 Unicode License v3；仓库只包含这 3,500 个字符的清单，不包含 Unihan 文件。
+
+新增界面文案后运行：
 
 ```sh
 python3 -m venv .local/font-tools
 .local/font-tools/bin/pip install fonttools==4.60.1
-.local/font-tools/bin/python tools/setup_fonts_subset.py --strings firmware/components/reader_app/app.cpp
+.local/font-tools/bin/python tools/setup_fonts_subset.py \
+  --strings firmware/components/reader_app/app.cpp \
+  --strings firmware/main/app_main.cpp \
+  --strings firmware/components/reader_sync/provision.cpp
 ```
+
+字体字节编译进固件只读数据段，由 Flash 映射读取，不复制到 RAM。真机用内置字体阅读时，内部空闲内存与使用卡上字体时相同（约 137 KB）；字体打开耗时没有单独测量。
 
 fonttools 只用于维护生成步骤，普通构建不需要它。字体子集修改了字形范围和字体名称，
 名称表及 CFF 名称已改为 `Pico Page Fallback`，保持 OFL 1.1。已阅读上游 OFL 及字体版权字段；

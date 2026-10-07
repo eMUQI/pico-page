@@ -15,6 +15,13 @@ int main(int argc, char** argv) {
     assert(font.open_fallback());
     const auto fallback_text = decode_utf8("未检测到存储卡，请插入后重新启动。初始化失败，重试。正在准备书籍章节图片…取消。内容任务无法启动。内存不足。");
     for (const auto c : fallback_text) assert(font.contains(c));
+    // The built-in subset holds common body characters; a rare one is absent and draws as the .notdef box.
+    for (const auto c : decode_utf8("我们在黄昏时读完了这本书，“窗外”下起雨来——他说：好！①")) assert(font.contains(c));
+    {
+        Canvas missing;
+        assert(!font.contains(U'龘') && font.size(28) && font.draw(missing, U'龘', 40, 60));
+        assert(missing.pixels() != Canvas().pixels());
+    }
     {
         // Prewarming an independent font face must preserve the rasterized pixels.
         Canvas rasterized, cached;

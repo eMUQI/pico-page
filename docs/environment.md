@@ -74,7 +74,7 @@ sh tools/build_firmware.sh
 | 验证 | 实际结果 |
 |---|---|
 | BSP 源码锁与差异检查 | commit 匹配，组件无修改 |
-| ESP-IDF 完整构建 | `sh tools/build_firmware.sh` 成功；包括 ROM 符号隔离、PSRAM 分配、默认字体、排版反馈、字宽缓存及 410 字符内置提示字体 |
+| ESP-IDF 完整构建 | `sh tools/build_firmware.sh` 成功；包括 ROM 符号隔离、PSRAM 分配、默认字体、排版反馈、字宽缓存及 4,084 字符内置字体 |
 | 应用产物 | `firmware/build/pico_page.bin`，1,956,464 字节；另有同目录 `pico_page.elf` |
 | 最新完整构建日志 | `.local/firmware-metrics-cache.log`、`firmware/build/log/`；均为忽略产物 |
 | 设备应用写入 | `0x10000` 的实测 4 MiB `ota_0` 槽，仅写入应用，`Hash of data verified`；`.local/device/install/offline-final-flash.log` |
@@ -165,7 +165,7 @@ python3 tools/check_koreader_mapping.py
 版本、命令和逐组证据见 [同步记录](sync-runtime.md)。外部账户服务及 Read Pico Wi-Fi/HTTPS 同步仍未验收。
 
 固件加入联网后超过最初 1 MiB 诊断构建分区。现在使用本地
-`firmware/partitions.build.csv` 的 3 MiB 单应用构建配置，完整 `idf.py build` 可通过。
+`firmware/partitions.build.csv` 的 4 MiB 单应用构建配置（与设备 ota_0 槽同大），完整 `idf.py build` 可通过。
 这只是构建配置，与已读回的双槽设备布局不同；生成的 flash_args 不可当作已确认的安装方案。
 主应用任务栈为 32 KiB，网络工作任务为 16 KiB。普通分配阈值设为 0，优先使用 PSRAM；
 内部预留保持 32 KiB。设备离线路径的堆、最大连续块和栈采样见 device-validation，不作为所有内容的峰值保证。

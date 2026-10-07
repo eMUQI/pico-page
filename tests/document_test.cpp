@@ -12,6 +12,20 @@ int main(int argc, char** argv) {
     assert(book.metadata().title == "Pico Page 合成位置样本");
     assert(book.metadata().language == "zh-CN");
     assert(book.metadata().book_id == "62338330991b0244f2388036892a2891546fd9fe446fab0547c18b9707a6b118");
+    {
+        FileDigest scan(argv[1]);
+        bool complete = false;
+        for (unsigned slices = 0; !complete; ++slices) {
+            assert(slices < 10000);
+            assert(!scan.step(8192, [] { return true; }));
+            unsigned checks = 0;
+            complete = scan.step(7, [&] { return ++checks > 2; });
+        }
+        assert(scan.digest() == book.metadata().book_id);
+        assert(scan.step(1) && scan.digest() == book.metadata().book_id);
+        FileDigest missing(std::string(argv[1]) + ".missing");
+        assert(missing.step(8192) && missing.digest().empty());
+    }
     assert(book.metadata().partial_md5 == "acc8613b9b4639011c4ff6dbdef6b6f7");
     assert(book.spine().size() == 2 && book.toc().size() == 2);
     Chapter first;

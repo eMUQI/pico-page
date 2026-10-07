@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate the OFL UI subset with fonttools 4.60.1 in a local virtual environment."""
+"""Regenerate the embedded OFL subset with fonttools 4.60.1 in a local virtual environment."""
 from pathlib import Path
 import argparse
 from fontTools import subset
@@ -15,6 +15,16 @@ DEFAULT_TEXT = (
     "本地远端同步上传下载冲突本书全局继承恢复睡眠电量刷新暂停繁忙错误帮助"
     "：，。！？（）【】《》、；—…“”‘’「」·－＋←→↑↓％"
 )
+FONTS = ROOT / "firmware/components/reader_graphics/fonts"
+# Body-text symbols outside the character lists. Code points the source font lacks are skipped.
+SYMBOL_RANGES = (
+    (0x00A0, 0x017F),  # Latin-1 Supplement and Latin Extended-A
+    (0x01CD, 0x01DC),  # Pinyin tone vowels
+    (0x2000, 0x206F),  # General Punctuation
+    (0x2460, 0x2473),  # Circled numbers used as note markers
+    (0x3000, 0x303F),  # CJK Symbols and Punctuation
+    (0xFF00, 0xFFEF),  # Halfwidth and Fullwidth Forms
+)
 
 
 def main():
@@ -23,16 +33,25 @@ def main():
     parser.add_argument("--strings", type=Path, action="append", default=[])
     args = parser.parse_args()
     text = DEFAULT_TEXT + "".join(chr(c) for c in range(32, 127))
+    # Level 1 of the Table of General Standard Chinese Characters: 3,500 common characters.
+    common = "".join((FONTS / "common_characters.txt").read_text(encoding="utf-8").split())
+    if len(set(common)) != 3500:
+        raise ValueError("common_characters.txt must hold exactly 3,500 distinct characters")
+    text += common
     for path in args.strings:
-        # C++ string content and identifiers are harmless extras in this small UI subset.
+        # C++ identifiers and syntax add only ASCII, which the subset already holds.
         text += path.read_text(encoding="utf-8")
     font = TTFont(args.font, recalcTimestamp=False)
     requested = set(map(ord, text)) - set(range(32))
-    missing = requested - set(font.getBestCmap())
+    available = set(font.getBestCmap())
+    missing = requested - available
     if missing:
         raise ValueError("Font lacks requested characters: " + ", ".join(f"U+{c:04X}" for c in sorted(missing)))
+    requested |= {c for first, last in SYMBOL_RANGES for c in range(first, last + 1)} & available
     options = subset.Options()
     options.layout_features = []
+    # Characters outside the subset must draw as a visible box, not as blank space.
+    options.notdef_outline = True
     options.name_IDs = [0, 1, 2, 3, 4, 5, 6, 13, 14]
     options.name_legacy = True
     options.name_languages = ["*"]
@@ -48,7 +67,7 @@ def main():
         cff.fontNames = ["PicoPageFallback"]
         cff.topDictIndex[0].FamilyName = "Pico Page Fallback"
         cff.topDictIndex[0].FullName = "Pico Page Fallback"
-    target = ROOT / "firmware/components/reader_graphics/fonts/PicoPageFallback.otf"
+    target = FONTS / "PicoPageFallback.otf"
     font.save(target)
     (target.parent / "fallback_characters.txt").write_text("".join(map(chr, sorted(requested))) + "\n", encoding="utf-8")
     print(f"Generated {target}: {len(requested)} characters, {target.stat().st_size} bytes")

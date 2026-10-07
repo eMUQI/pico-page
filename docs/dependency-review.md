@@ -13,7 +13,9 @@
 | tomlc17 | cktan/tomlc17 | `8a4564e0b257b010c24c973d4353e0c1ebf33f80` | MIT；C17；32 KiB 输入上限，UTF-8 校验；不支持无损写回 | Xtensa `PRIx32` 打印格式修正 | 纳入 reader_store，仅解析配置 |
 | cJSON | DaveGamble/cJSON v1.7.19 | `c859b25da02955fef659d658b8f324b5cde87be3` | MIT；16 KiB 输入及 16 层嵌套上限；大修订号用字符串 | 源码无修改 | 纳入 reader_store，进度 JSON |
 | FreeType | freetype/freetype | `526ec5c47b9ebccc4754c85ac0c0cdf7c85a5e9b` | FTL、MIT 及 Adobe CFF 附加条款 | 模块/选项配置 | 固定下载到 .local，纳入 reader_graphics |
-| 文楷 / Noto Sans SC | 官方发布与官方仓库 | 固定 SHA-256，见 graphics-runtime | OFL 1.1；随附两份许可证 | Noto UI 子集改名 Pico Page Fallback | 全字体在 .local，内置子集纳入组件 |
+| 文楷 / Noto Sans SC | 官方发布与官方仓库 | 固定 SHA-256，见 graphics-runtime | OFL 1.1；随附两份许可证 | Noto 子集改名 Pico Page Fallback | 全字体在 .local，内置子集纳入组件 |
+| Unihan `kTGH`（《通用规范汉字表》一级字） | unicode.org Unicode 17.0.0 `Unihan.zip` | SHA-256 `f7a48b2b…4b5e`，见 graphics-runtime | Unicode License v3；只取 3,500 个字符的清单 | 按序号提取为文本 | 清单纳入 reader_graphics，决定内置字体的字符范围 |
+| 内置中文子集的做法 | 0x1abin/crossmux（本地检出） | `3fb809f6ceeb753a7c40fef86dee7c9d40eabdf3` | 只参考做法，未复制代码、字表或字体 | 无 | CrossMux 内嵌 8/10/12pt 点阵，覆盖约 3,500 个高频字；本项目内嵌一份矢量子集 |
 | CREngine 对照工具 | koreader/crengine | `f4a8be93255a439db4777d00f0bc53316acabebd` | GPL-2.0；链接工具仅用于本地验证 | 无引擎源码修改 | 不纳入固件/host 阅读程序；映射工具与来源记录单列 |
 | SDL2 / OpenSSL / libcurl | 本机现有开发库 | 构建日志记录已解析版本 | zlib / Apache-2.0 / curl license，各自动态链接 | 无 | 仅 host；未复制库源码 |
 | esp_tinyusb / TinyUSB | Espressif Component Registry | 2.4.0 / 0.21.0~1；component hash 见 dependencies.lock | Apache-2.0 / MIT；已读组件 LICENSE；依赖 ESP-IDF | 不修改上游文件；构建排除便利存储层，接入同步 SDMMC 回调 | 仅开启 MSC；分发时保留许可证、版权和适用 NOTICE |

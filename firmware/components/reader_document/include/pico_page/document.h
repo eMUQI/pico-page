@@ -100,6 +100,21 @@ std::uint64_t identity_hash_count();
 /** SHA-256 of a file, read in 8 KiB chunks. Empty on read failure or cancellation. */
 std::string sha256_file(const std::string& path, const std::function<bool()>& stop = {});
 
+/** Incremental SHA-256 reader. A single owner calls step(); cancellation retains the cursor.
+ * The caller must discard the reader before the underlying storage may change or unmount.
+ */
+class FileDigest {
+public:
+    explicit FileDigest(const std::string& path);
+    ~FileDigest();
+    /** Reads at most budget bytes; true means finished, including an error (empty digest). */
+    bool step(std::size_t budget, const std::function<bool()>& stop = {});
+    const std::string& digest() const;
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
 /** Lowercase hexadecimal MD5 of bytes; empty when the digest backend fails. */
 std::string md5_hex(std::string_view bytes);
 

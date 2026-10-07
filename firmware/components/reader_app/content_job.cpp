@@ -93,8 +93,10 @@ void ContentJob::run() {
         return;
     }
     if (request.kind == ContentJob::Kind::FontIdentity) {
-        result.font_identity = request.font.empty() ? graphics::Font::fallback_identity() : sha256_file(request.font, stop);
-        if (result.font_identity.empty() && !stop()) result.error = "Font identity read failed";
+        if (request.font_scan && request.font_scan->step(64U * 1024, stop)) {
+            result.font_identity = request.font_scan->digest();
+            if (result.font_identity.empty()) result.error = "Font identity read failed";
+        }
         return;
     }
     if (request.kind == Kind::MapUpload || request.kind == Kind::MapDownload) { map_position(); return; }
@@ -110,7 +112,11 @@ void ContentJob::run() {
     EpubDocument document;
     graphics::Font font;
     Chapter source;
-    if (!document.open_verified(request.path, request.identity, result.error, stop) || stop()) return;
+    if (!document.open_verified(request.path, request.identity, result.error, stop) || stop()) {
+        // A cancelled open reports an error text; the next counting job repeats it, so it is not a failure.
+        if (stop()) result.error.clear();
+        return;
+    }
     if (!(request.font.empty() ? font.open_fallback() : font.open(request.font))) {
         result.error = font.error(); return;
     }
@@ -131,8 +137,8 @@ void ContentJob::run() {
         }
         result.starts.push_back(static_cast<std::uint32_t>(page.start));
         result.offset = page.end;
-        // Bound the result independently of chapter length and font geometry.
-        if (result.starts.size() >= 16384) return;
+        // Yield between small batches so font verification can also advance while reading.
+        if (result.starts.size() >= 8) return;
 #ifdef ESP_PLATFORM
         taskYIELD();
 #endif

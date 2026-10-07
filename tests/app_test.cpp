@@ -154,17 +154,13 @@ int main(int argc, char** argv) {
         driver.tap(520, 384); driver.present(); driver.tap(610, 384); driver.present();
         assert(app.canvas().pixel(270, 490) == 0 && app.canvas().pixel(270, 610) == 5);
         driver.tap(520, 384); driver.present();
-        assert(!app.open_book("Books/book.epub") && app.view() == View::Error);
-        driver.present(); assert(!app.saved_record() && !fs::exists(progress));
-        driver.close(); driver.present();
         assert(app.view() == View::Library);
         opened(app, "Books/cover.epub");
         assert(app.canvas().pixel(100, 400) == 0 && app.canvas().pixel(100, 800) == 5);
         driver.present(); const auto cover = *app.saved_record();
-        driver.key(Input::K3); assert(app.view() == View::Error); driver.present();
-        assert(*app.saved_record() == cover);
-        driver.close(); driver.present();
-        assert(app.view() == View::Reading && *app.saved_record() == cover);
+        // The text chapter after the cover renders with the built-in subset; it is not saved until presented.
+        driver.key(Input::K3);
+        assert(app.view() == View::Reading && app.pending_frame() && *app.saved_record() == cover);
     }
     {
         // A cached thumbnail survives a restart; an entry that fails validation is rebuilt from the EPUB.
@@ -236,6 +232,48 @@ int main(int argc, char** argv) {
         driver.tap(300, 660); driver.present(); driver.complete_content();
         assert(app.view() == View::Reading && app.saved_record());
         assert(identity_hash_count() == hashes);
+    }
+    {
+        // Without card fonts the built-in subset renders body text and reports characters outside it.
+        const auto root = card / "BuiltinFont";
+        fs::create_directories(root / "PicoPage");
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
+        ReaderApp app(root.string()); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        opened(app, "Books/book.epub");
+        assert(app.view() == View::Reading && app.status() == "缺字，请复制字体到 PicoPage/fonts");
+        assert(app.canvas().pixels() != graphics::Canvas().pixels());
+        driver.present(); assert(app.saved_record());
+        const auto first = *app.saved_record();
+        // The notice belongs to the page with the missing characters; the next page shows the position.
+        driver.key(Input::K3); driver.present();
+        assert(app.view() == View::Reading && app.saved_record()->anchor != first.anchor);
+        assert(app.status().empty());
+        driver.key(Input::K1); driver.present();
+        assert(app.status() == "缺字，请复制字体到 PicoPage/fonts");
+    }
+    {
+        // Background page counting completes with the built-in font.
+        const auto root = card / "BuiltinFont";
+        ReaderApp app(root.string(), "builtin-worker", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        assert(app.open_book("Books/book.epub")); driver.complete_content();
+        // Input cancels a counting job while it opens the book; counting resumes instead of failing.
+        for (int i = 0; i < 200; ++i) {
+            app.background_step(); app.poll_background(true);
+            assert(app.background_state() != std::string("failed"));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (app.background_due()) {
+            app.poll_background(); app.background_step();
+            if (app.pending_frame()) driver.present();
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(app.view() == View::Reading && app.background_state() == std::string("idle"));
+        assert(app.book_pages() && app.book_pages()->total > 1);
     }
     fs::create_directories(card / "PicoPage/fonts");
     fs::copy_file(argv[2], card / "PicoPage/fonts/LXGWWenKai-Regular.ttf");
@@ -993,6 +1031,44 @@ int main(int argc, char** argv) {
         assert(cached.text == original.text && read(cache) == data);
         assert(!load_content(store, doc, 0, cached, error, ChapterLoad::Reading, 2, [] { return true; }));
         assert(error == kChapterCancelled && cached.text.empty());
+    }
+    {
+        const auto root = card / "CountWithoutCache";
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "long-chapter.epub", root / "Books/book.epub");
+        const auto font = read(card / "PicoPage/fonts/LXGWWenKai-Regular.ttf");
+        // Trailing padding preserves the font while making its identity scan span many slices.
+        write(root / "PicoPage/fonts/LXGWWenKai-Regular.ttf", font + std::string(8U * 1024 * 1024, '\0'));
+        write(root / "PicoPage/cache/pages", "Blocks only the optional pagination cache directory.");
+        ReaderApp app(root.string(), "count-without-cache", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+        const auto saved = app.saved_record();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        bool counted_before_identity = false;
+        while (app.background_due()) {
+            app.background_step(); app.poll_background();
+            if (app.book_pages() && std::string(app.background_state()) == "font-identity")
+                counted_before_identity = true;
+            assert(app.saved_record() == saved && !app.pending_frame());
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(counted_before_identity && app.book_pages() && app.book_pages()->total > 40);
+        const auto total = app.book_pages()->total;
+        opened(app, "Books/book.epub"); driver.present();
+        while (app.background_due()) {
+            app.background_step(); app.poll_background();
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(app.book_pages() && app.book_pages()->total == total);
+        ReaderApp reference(root.string()); Driver ref_driver{reference};
+        assert(reference.initialize()); ref_driver.present(); opened(reference, "Books/book.epub"); ref_driver.present();
+        while (reference.background_due()) {
+            reference.background_step();
+            assert(std::chrono::steady_clock::now() < deadline);
+        }
+        assert(reference.book_pages() && reference.book_pages()->total == total);
     }
     {
         ReaderApp app(card.string(), "exclusive-storage-test", true); Driver driver{app};
