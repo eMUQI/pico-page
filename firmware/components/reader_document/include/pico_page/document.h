@@ -96,6 +96,8 @@ struct Chapter {
 
 /** Number of full-file EPUB identity scan attempts in this process. */
 std::uint64_t identity_hash_count();
+/** Number of EPUB container opens attempted in this process. */
+std::uint64_t epub_open_count();
 
 /** SHA-256 of a file, read in 8 KiB chunks. Empty on read failure or cancellation. */
 std::string sha256_file(const std::string& path, const std::function<bool()>& stop = {});

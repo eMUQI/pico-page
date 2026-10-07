@@ -25,7 +25,7 @@
 
 namespace pico_page {
 namespace {
-std::atomic<std::uint64_t> identity_scans{0};
+std::atomic<std::uint64_t> identity_scans{0}, epub_opens{0};
 constexpr std::uint64_t kMaxBook = 256ULL * 1024 * 1024;
 // XHTML is parsed as a stream and kept one part at a time, so these two bound parsing time
 // rather than memory.
@@ -829,6 +829,7 @@ bool EpubDocument::open(const std::string& path, std::string& error, const std::
 }
 
 std::uint64_t identity_hash_count() { return identity_scans.load(std::memory_order_relaxed); }
+std::uint64_t epub_open_count() { return epub_opens.load(std::memory_order_relaxed); }
 
 bool EpubDocument::open_verified(const std::string& path, const DocumentMetadata& identity, std::string& error, const std::function<bool()>& stop) {
     const auto hex = [](const std::string& s, std::size_t size) {
@@ -843,6 +844,7 @@ bool EpubDocument::open_verified(const std::string& path, const DocumentMetadata
 
 bool EpubDocument::open_impl(const std::string& path, std::string& error, bool cover_only, const DocumentMetadata* identity, const std::function<bool()>& stop) {
     const StageTimer timer{"epub_open"};
+    epub_opens.fetch_add(1, std::memory_order_relaxed);
     close(); error.clear();
     if (stop && stop()) return fail(error, "EPUB open cancelled");
     std::unique_ptr<Impl> next(new Impl);

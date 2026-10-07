@@ -21,7 +21,23 @@ graphics::Page plan_content(graphics::Font& font, const Chapter& source, std::si
 
 std::string image_cache_key(const std::string& book_id, const std::string& resource, const graphics::LayoutSpec& spec);
 
-/** A single job owns its parser and font. Only done() permits access to its result. */
+/**
+ * Open book, body font and loaded chapter part shared by the pagination jobs of one counting
+ * session, so that a job does not repeat the preparation of the previous one.
+ * Only the job that received the session accesses its members until that job is done. The
+ * owner may drop its reference at any time; the session then ends with the running job.
+ */
+struct PaginationSession {
+    EpubDocument document;
+    graphics::Font font;
+    Chapter chapter;
+    std::string path, font_path;
+    std::size_t chapter_index = 0;
+    std::uint32_t part = 0;
+    bool opened = false, font_opened = false, loaded = false;
+};
+
+/** A single job owns its parser and font, or borrows them from a PaginationSession. Only done() permits access to its result. */
 class ContentJob {
 public:
     enum class Kind { Pagination, FontIdentity, Image, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload };
@@ -48,6 +64,8 @@ public:
         std::vector<SpineItem> spine;
         std::optional<ReadingRecord> record;
         std::shared_ptr<FileDigest> font_scan;
+        /** Pagination only. Without a session the job prepares and discards its own. */
+        std::shared_ptr<PaginationSession> session;
         bool save_last_book = false, prefetch = false, cover_crop = false, preview = false;
         std::uint64_t generation = 0;
         std::size_t chapter = 0, offset = 0;

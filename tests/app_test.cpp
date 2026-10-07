@@ -1045,6 +1045,7 @@ int main(int argc, char** argv) {
         const auto saved = app.saved_record();
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
         bool counted_before_identity = false;
+        const auto opens = epub_open_count();
         while (app.background_due()) {
             app.background_step(); app.poll_background();
             if (app.book_pages() && std::string(app.background_state()) == "font-identity")
@@ -1054,6 +1055,8 @@ int main(int argc, char** argv) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         assert(counted_before_identity && app.book_pages() && app.book_pages()->total > 40);
+        // The counting jobs share one open book; they do not reopen it for each batch of pages.
+        assert(epub_open_count() - opens < 5);
         const auto total = app.book_pages()->total;
         opened(app, "Books/book.epub"); driver.present();
         while (app.background_due()) {

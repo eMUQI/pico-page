@@ -258,6 +258,8 @@ struct ReaderApp::Impl final : DisplayBackend {
                     while (index < document.spine().size() && !document.spine()[index].linear) ++index;
                 }
                 if (index >= document.spine().size()) { prefetch_done = true; return; }
+                // The chapter job opens the book and font itself; the idle session yields its files and memory.
+                counting_session.reset();
 #ifdef ESP_PLATFORM
                 if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 5U * 1024 * 1024 ||
                     heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 2U * 1024 * 1024) {
@@ -277,6 +279,8 @@ struct ReaderApp::Impl final : DisplayBackend {
 #ifdef ESP_PLATFORM
             if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2048U * 1024 ||
                 heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 256U * 1024) {
+                // The next page has priority over counting; retry once the session memory is free.
+                if (yield_counting_session()) return;
                 prefetch_done = true;
                 return;
             }
@@ -296,11 +300,13 @@ struct ReaderApp::Impl final : DisplayBackend {
 #ifdef ESP_PLATFORM
         if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2048U * 1024 ||
             heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 64U * 1024) {
+            if (yield_counting_session()) return;
             next_page.reset(); prefetch_done = true; return;
         }
 #endif
         const auto* image = image_at(next_page->start);
         if (image && async_content && !raster_disabled && !counting_job) {
+            counting_session.reset();
             ContentJob::Request request;
             request.kind = ContentJob::Kind::Image; request.root = root; request.path = root + "/" + book_path;
             request.identity = document.metadata(); request.layout = next_spec;
@@ -463,6 +469,18 @@ struct ReaderApp::Impl final : DisplayBackend {
     Chapter counting_chapter;
     bool async_content = false;
     std::uint64_t counting_generation = 0;
+    // Kept between pagination jobs while reading. It holds the book and body font open and one
+    // chapter part in memory, so it is dropped whenever other work needs the files or the memory.
+    std::shared_ptr<PaginationSession> counting_session;
+    /** Discards results of running counting jobs and the preparation they share. */
+    void invalidate_counting() { ++counting_generation; counting_session.reset(); }
+    /** Ends the counting session for foreground work; true when there was one to end. */
+    bool yield_counting_session() {
+        if (!counting_session) return false;
+        if (counting_job && counting_job->request.session) counting_job->cancel();
+        counting_session.reset();
+        return true;
+    }
     std::unique_ptr<ContentJob> counting_job;
     std::unique_ptr<ContentJob> foreground_job;
     std::optional<ContentJob::Request> pending_content;
@@ -538,7 +556,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             return show_page(offset);
         }
         abandon_content();
-        ++counting_generation;
+        invalidate_counting();
         release_counting();
         ContentJob::Request request;
         request.kind = ContentJob::Kind::Chapter; request.target = target;
@@ -662,6 +680,7 @@ struct ReaderApp::Impl final : DisplayBackend {
 
     void stop_counting_job() {
         if (counting_job) { counting_job->cancel(); counting_job.reset(); }
+        counting_session.reset();
         font_scan.reset();
     }
     void poll_counting_job() {
@@ -1402,7 +1421,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool open(std::string path) {
         if (display.busy() || !card_available) return false;
         abandon_content();
-        ++counting_generation;
+        invalidate_counting();
         if (counting_job) counting_job->cancel();
         refresh_badge_config();
         clear_body_cache();
@@ -1609,7 +1628,7 @@ struct ReaderApp::Impl final : DisplayBackend {
      * The entry is bound to the book file, the body font file and the page geometry.
      */
     void reset_pages(bool keep_prepared_frames = false) {
-        ++counting_generation;
+        invalidate_counting();
         if (!keep_prepared_frames) { clear_body_cache(); clear_prefetch(); }
         const auto &spine = document.spine();
         chapter_pages.assign(spine.size(), {});
@@ -1750,6 +1769,8 @@ struct ReaderApp::Impl final : DisplayBackend {
 #endif
         };
         if (!pressure()) return;
+        // The counting session is rebuilt on demand, so it goes before any counted pages.
+        if (yield_counting_session()) { defer_counting(); return; }
         const StageTimer timer{"cache_reclaim"};
         if (!covers.empty()) { covers.clear(); ++cache_evictions; }
         bool dropped = false;
@@ -1760,7 +1781,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             dropped = true; ++cache_evictions;
         }
         if (dropped) {
-            ++counting_generation; release_counting(); counting_index = not_counting;
+            invalidate_counting(); release_counting(); counting_index = not_counting;
             defer_counting(); pages_cache_pending = pages_dirty = false;
             pages_complete = std::find(counted.begin(), counted.end(), false) == counted.end();
         }
@@ -1769,7 +1790,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         if (pressure()) {
             if (counting_job && counting_job->request.generation == counting_generation) {
-                ++counting_generation; release_counting(); counting_index = not_counting;
+                invalidate_counting(); release_counting(); counting_index = not_counting;
             }
             const auto before = ui.cached_glyph_bytes() + body.cached_glyph_bytes();
             ui.trim_glyph_cache(128U * 1024); body.trim_glyph_cache(256U * 1024);
@@ -1786,6 +1807,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     /** Frees the chapter loaded for counting; its partial count resumes after a reload. */
     void release_counting() {
         if (counting_job) counting_job->cancel();
+        else if (counting_session) { release(counting_session->chapter); counting_session->loaded = false; }
         release(counting_chapter);
         counting_loaded = false;
     }
@@ -1840,6 +1862,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             // The encoded payload and expanded index are each bounded to kPageIndexBytes.
             if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2 * kPageIndexBytes + 256U * 1024 ||
                 heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < kPageIndexBytes + 64U * 1024) {
+                if (yield_counting_session()) return;
                 pages_cache_disabled = true; pages_cache_pending = pages_dirty = false;
                 return;
             }
@@ -1882,13 +1905,22 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (async_content) {
             if (counting_job) return;
             font_scan_turn = true;
-            if (!counting_memory(spine[counting_index].bytes)) { defer_counting(); return; }
+            // No job runs here, so the session members may be read. The memory check covers the
+            // load of a new part and assumes that the previous part is no longer held.
+            const bool part_loaded = counting_session && counting_session->loaded &&
+                counting_session->chapter_index == counting_index && counting_session->part == counting_part;
+            if (!part_loaded) {
+                release_counting();
+                if (!counting_memory(spine[counting_index].bytes)) { counting_session.reset(); defer_counting(); return; }
+            }
             ContentJob::Request request;
             request.root = root; request.path = root + "/" + book_path;
             request.font = body_font_path();
             request.identity = document.metadata(); request.layout = layout(settings);
             request.generation = counting_generation; request.chapter = counting_index;
             request.part = counting_part; request.offset = counting_offset;
+            if (!counting_session) counting_session = std::make_shared<PaginationSession>();
+            request.session = counting_session;
             counting_job = std::make_unique<ContentJob>(std::move(request));
             if (!counting_job->start()) { counting_job.reset(); defer_counting(); }
             return;
@@ -2706,7 +2738,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         detail_path = path; detail_metadata = {}; detail_progress = {}; detail_cover.reset();
         detail_position.clear(); detail_error.clear(); detail_size.reset();
         if (async_content && safe_existing(root, path)) {
-            abandon_content(); ++counting_generation; release_counting();
+            abandon_content(); invalidate_counting(); release_counting();
             begin_open(path, ContentJob::Kind::Inspect); return;
         }
         struct stat st{};
@@ -3099,7 +3131,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         button(SyncConfirm, "确认上传", 354, 1080, 306, 96);
     }
     void begin_mapping(ContentJob::Kind kind, const std::string& xpointer = "") {
-        abandon_content(); ++counting_generation; release_counting(); clear_prefetch();
+        abandon_content(); invalidate_counting(); release_counting(); clear_prefetch();
         ContentJob::Request request;
         request.kind = kind; request.path = root + "/" + book_path; request.identity = document.metadata();
         request.dom_version = sync_config.dom_version; request.xpointer = xpointer;
@@ -4178,6 +4210,8 @@ void ReaderApp::poll_background(bool cancel) {
     if (cancel && impl_->counting_job) impl_->counting_job->cancel();
     impl_->poll_raster();
     impl_->poll_counting_job();
+    // The counting session lives only while the reading page is shown.
+    if (impl_->view != View::Reading && !impl_->counting_job) impl_->counting_session.reset();
     impl_->poll_covers();
     impl_->poll_save();
     if (!cancel) impl_->reclaim_caches();

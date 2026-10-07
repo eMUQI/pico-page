@@ -109,21 +109,37 @@ void ContentJob::run() {
     }
     if (request.kind == Kind::Open || request.kind == Kind::Inspect) { open_book(); return; }
     if (request.kind == Kind::Image) { render_image(request.image_resource, request.cache_name); return; }
-    EpubDocument document;
-    graphics::Font font;
-    Chapter source;
-    if (!document.open_verified(request.path, request.identity, result.error, stop) || stop()) {
-        // A cancelled open reports an error text; the next counting job repeats it, so it is not a failure.
-        if (stop()) result.error.clear();
-        return;
+    const auto session = request.session ? request.session : std::make_shared<PaginationSession>();
+    auto& document = session->document;
+    auto& font = session->font;
+    auto& source = session->chapter;
+    if (session->path != request.path) {
+        release(source);
+        session->opened = session->loaded = false; session->path = request.path;
     }
-    if (!(request.font.empty() ? font.open_fallback() : font.open(request.font))) {
-        result.error = font.error(); return;
+    if (session->font_path != request.font) { session->font_opened = false; session->font_path = request.font; }
+    if (!session->opened) {
+        session->opened = document.open_verified(request.path, request.identity, result.error, stop);
+        if (!session->opened) {
+            // A cancelled open reports an error text; the next counting job repeats it, so it is not a failure.
+            if (stop()) result.error.clear();
+            return;
+        }
     }
     if (stop()) return;
-    if (!load_content(FileStore(request.root), document, request.chapter, source, result.error, ChapterLoad::Layout, request.part, stop)) {
-        if (result.error == kChapterCancelled) result.error.clear();
-        return;
+    if (!session->font_opened) {
+        session->font_opened = request.font.empty() ? font.open_fallback() : font.open(request.font);
+        if (!session->font_opened) { result.error = font.error(); return; }
+    }
+    if (stop()) return;
+    if (!session->loaded || session->chapter_index != request.chapter || session->part != request.part) {
+        release(source);
+        session->loaded = false;
+        if (!load_content(FileStore(request.root), document, request.chapter, source, result.error, ChapterLoad::Layout, request.part, stop)) {
+            if (result.error == kChapterCancelled) result.error.clear();
+            return;
+        }
+        session->loaded = true; session->chapter_index = request.chapter; session->part = request.part;
     }
     while (!stop()) {
         const auto start = readable_offset(source, result.offset);
