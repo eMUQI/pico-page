@@ -299,16 +299,14 @@ struct ReaderApp::Impl final : DisplayBackend {
             next_page.reset(); prefetch_done = true; return;
         }
 #endif
-        if (async_content && !raster_disabled && !counting_job) {
+        const auto* image = image_at(next_page->start);
+        if (image && async_content && !raster_disabled && !counting_job) {
             ContentJob::Request request;
-            request.kind = ContentJob::Kind::RasterPage; request.font = body_font_path();
-            request.identity = document.metadata(); request.layout = next_spec; request.page = *next_page;
+            request.kind = ContentJob::Kind::Image; request.root = root; request.path = root + "/" + book_path;
+            request.identity = document.metadata(); request.layout = next_spec;
             request.offset = next_page->start; request.generation = prefetch_generation; request.prefetch = true;
-            if (const auto* image = image_at(next_page->start)) {
-                request.kind = ContentJob::Kind::Image; request.root = root; request.path = root + "/" + book_path;
-                request.image_resource = image->resource;
-                request.cache_name = image_cache_key(request.identity.book_id, image->resource, request.layout);
-            }
+            request.image_resource = image->resource;
+            request.cache_name = image_cache_key(request.identity.book_id, image->resource, request.layout);
             raster_job = std::make_unique<ContentJob>(std::move(request));
             if (raster_job->start()) { prefetch_done = true; return; }
             raster_job.reset(); raster_disabled = true;
@@ -321,6 +319,14 @@ struct ReaderApp::Impl final : DisplayBackend {
                 next_page.reset(); prefetch_done = true; return;
             }
             ++warm_cursor;
+        }
+        // A text page is drawn here, after its glyphs are warm, because the glyph cache belongs to
+        // this task; a cancelled attempt is discarded and repeated in a later step.
+        if (!image && !next_bitmap && body_cache_room()) {
+            const StageTimer timer{"next_page_bitmap"};
+            auto bitmap = std::make_unique<graphics::Canvas>();
+            if (graphics::render_page(*bitmap, body, *next_page, 1, stop)) next_bitmap = std::move(bitmap);
+            else if (stop && stop()) return;
         }
         prefetch_done = true;
     }

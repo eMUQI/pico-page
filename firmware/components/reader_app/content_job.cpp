@@ -45,13 +45,15 @@ ContentJob::~ContentJob() { cancel(); wait(); }
 bool ContentJob::start() {
     if (started_) return false;
 #ifdef ESP_PLATFORM
-    if ((request.kind == Kind::Pagination || request.kind == Kind::FontIdentity || request.kind == Kind::RasterPage || request.kind == Kind::LibraryCovers ||
+    if ((request.kind == Kind::Pagination || request.kind == Kind::FontIdentity || request.kind == Kind::LibraryCovers ||
          request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite || request.kind == Kind::SleepCover || request.prefetch) &&
         heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < 64U * 1024) return false;
     started_ = xTaskCreate([](void* opaque) {
         auto* job = static_cast<ContentJob*>(opaque);
         job->run();
-        ESP_LOGI("content_worker", "stack_free=%u", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+        ESP_LOGI("content_worker", "stack_free=%u kind=%d psram_free=%u psram_min=%u", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)),
+                 static_cast<int>(job->request.kind), static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+                 static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM)));
         job->done_.store(true, std::memory_order_release);
         vTaskDelete(nullptr);
     }, "content_worker", 32768, this, 1, nullptr) == pdPASS;
@@ -98,7 +100,6 @@ void ContentJob::run() {
     if (request.kind == Kind::MapUpload || request.kind == Kind::MapDownload) { map_position(); return; }
     if (request.kind == Kind::SleepCover) { prepare_cover(); result.cache_finished = !stop(); return; }
     if (request.kind == Kind::LibraryCovers) { library_covers(); return; }
-    if (request.kind == Kind::RasterPage) { raster_page(); return; }
     if (request.kind == Kind::Chapter) {
         load_chapter();
         if (request.prefetch && !stop() && result.error.empty()) prepare_chapter_page();
@@ -335,24 +336,6 @@ void ContentJob::prepare_chapter_page() {
         if (!graphics::render_page(*result.image, font, result.page, 1, stop)) {
             result.error = "Prefetched page rasterization failed"; result.image.reset();
         }
-    }
-}
-void ContentJob::raster_page() {
-    const StageTimer timer{"next_page_raster"};
-    const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
-#ifdef ESP_PLATFORM
-    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 3U * 1024 * 1024 ||
-        heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 684U * 1216U / 2) {
-        result.error = "Page bitmap memory unavailable"; return;
-    }
-#endif
-    if (stop()) { result.error = "Page bitmap cancelled"; return; }
-    graphics::Font font;
-    if (!(request.font.empty() ? font.open_fallback() : font.open(request.font))) { result.error = font.error(); return; }
-    result.image = std::make_unique<graphics::Canvas>();
-    if (!graphics::render_page(*result.image, font, request.page, 1, stop)) {
-        result.error = stop() ? "Page bitmap cancelled" : "Page rasterization failed";
-        result.image.reset();
     }
 }
 void ContentJob::library_covers() {
