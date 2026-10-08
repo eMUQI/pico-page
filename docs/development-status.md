@@ -1,7 +1,117 @@
 # 开发状态
 
-最后更新：2026-10-08。休眠后自动唤醒的板级修正未编译、未安装，见下文首条。传输与配网修改稿及 PR #3 的图片排版与查看功能已通过 host 和固件构建，均未安装到设备。最近一次设备烧录仍为基于 `d8ed960` 的固件，`esptool` 已验证写入摘要；本次复位后的书库画面、触摸和 TF 卡状态尚未确认。该镜像包含书库首页、锁屏返回书库及 PR #2 路径提示修正，不包含图片查看或本次传输与配网改动。此前设备诊断、TF 卡迁移、界面调整、GB18030 TXT 阅读及 USB 卷名验证记录见下文。
+最后更新：2026-10-08。PR #8 电源菜单已按用户确认简化：正常选择后直接保存本地进度并关机/重启，只有本地保存失败可返回或明确继续；收尾不再恢复现场，电源按钮滑出取消且旧触摸不穿透。host 的 13 项 CTest 和固件构建通过，未安装到设备；真机时序、重启和断电待测。此前休眠后自动唤醒的板级修正也随本次构建通过，尚未安装。传输与配网修改稿及 PR #3 的图片排版与查看功能已通过 host 和固件构建，均未安装到设备。最近一次设备烧录仍为基于 `d8ed960` 的固件，`esptool` 已验证写入摘要；本次复位后的书库画面、触摸和 TF 卡状态尚未确认。该镜像包含书库首页、锁屏返回书库及 PR #2 路径提示修正，不包含图片查看或本次传输与配网改动。此前设备诊断、TF 卡迁移、界面调整、GB18030 TXT 阅读及 USB 卷名验证记录见下文。
 各批次命令、结果及未测项分别记录；host 构建与测试不代表真机通过。
+
+## 2026-10-08 · PR #8 电源菜单防误触（验证通过，未安装）
+
+- 电源菜单继续使用长按进入、松手后派发点击和旧帧输入隔离。触摸采样新增本次接触的坐标范围；
+  关机、重启以及保存失败后的明确继续按钮要求整个已采样轨迹都在原按钮内。滑出后再移回也取消，
+  不增加正常关机的二次确认，不改变其他页面的点击/长按行为。
+- 回归覆盖四边越界、移回按钮、外部滑入、旧帧触摸、菜单打开时取消已有接触、重复松手、
+  明确跳过保存按钮的误触保护，以及按钮内轻微移动仍能正常执行。
+- `source /workspace/cloud-tools/activate-host.sh`；`cmake --build build -j4`；
+  `ctest --test-dir build --output-on-failure`：13/13 通过，日志 `/tmp/power-touch-ctest.log`。
+- `source /workspace/cloud-tools/activate-idf.sh`；`sh tools/build_firmware.sh`：通过，
+  应用镜像 3,281,472 字节，4 MiB 槽余量 22%；最终确认日志 `/tmp/power-touch-final-firmware.log`。
+- `python3 tools/check_handoff.py`：370 项通过；`git diff --check` 通过。
+- 未刷写或真机验证。实际手指轨迹、采样间隔、按键时序及断电/重启仍待设备验收。
+
+## 2026-10-08 · PR #8 电源流程简化（本地验证通过，未安装）
+
+- 按用户本轮确认调整 D34：正常点击关机/重启直接保存本地进度与最近阅读记录，不再二次确认，
+  不启动云端同步。仅 TF 卡保存失败提供“仍然关机/重启”和“返回”，返回保留原页面、草稿及同步候选。
+- 保存成功或明确跳过后进入不可取消的收尾。最终帧失败仍关闭文件；卸载失败仍请求 PMU 断电或重启。
+  删除 TF 重挂载、原书身份校验、字体与页面恢复及多轮重试状态。PMU 不支持/失败时尝试呈现手动关机提示，
+  关闭面板电源后停止应用和存储工作。USB 供电让主机存活时同样不恢复应用。
+- 更新电源回归，保留按键去重、K2、草稿与封面恢复、Portal/USB 保护；新增验证保存失败返回/明确继续、
+  最终帧失败后文件可关闭、关机终态不再接受输入或调度工作、保存失败返回后同步候选可跳转及上传确认有效。
+  此处取代下方历史记录中“收尾失败后取消并恢复原现场”的行为。
+- 实际命令（`/workspace/pico-page`）：
+  - `source /workspace/cloud-tools/activate-host.sh`；`cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug`；
+    `cmake --build build -j4`；`ctest --test-dir build --output-on-failure`：13/13 通过。
+    日志 `/tmp/power-config.log`、`/tmp/power-build.log`、`/tmp/power-ctest.log`。
+  - `source /workspace/cloud-tools/activate-idf.sh`；`sh tools/build_firmware.sh`：成功；
+    应用镜像 3,281,296 字节，4 MiB 槽余量 22%，日志 `/tmp/power-firmware.log`。
+    第三方 FreeType 有一条未使用变量警告，未修改其源码。
+  - `python3 tools/check_handoff.py`：370 项通过；`git diff --check` 通过。
+  - `python3 artifacts/power-menu-simple-20261008/render.py`：实际 C++ 画布四张截图生成成功，
+    菜单、保存失败及手动关机提示已目视核对；新增文案均在内置字体字符表中。
+- 未刷写、未执行真机验证。长按菜单与松手时序、强制关机、电池供电断电电流、USB 供电表现、
+  真实刷屏/卸载失败及重启进度恢复仍待设备验证。未改变分区、BSP 或工厂校准。
+
+## 2026-10-08 · PR #8 第二轮评审修正（host 与固件构建通过，未安装）
+
+- Codex 对 `478989d` 提出 3 条 P2，核对后均成立并修正：
+  1. TF、书籍身份或字体恢复失败时，清除失效的阅读会话、正文和跳转缓存。取消后进入错误页，
+     错误页返回书库，要求重新打开书籍，不再恢复旧正文；磁盘进度保留。
+  2. 保存重试成功后清除保存失败状态。后续显示或收尾失败仅提供重试与取消，不再显示跳过保存入口。
+  3. 每次打开或取消菜单重置本次保存结果，区分尚未保存、保存成功与保存失败；
+     确认页显示失败不会沿用上次的成功结果。资源失效后重试仍保留原保存结果，避免空会话被误记为保存成功。
+- 新增 host 回归：TF、字体缺失、原书删除或替换后的取消与错误页返回；磁盘进度不变；
+  保存失败后重试成功、收尾显示再失败；取消后翻页并重新打开菜单的确认页失败；
+  明确跳过保存后资源恢复失败，后续重试仍如实报告未完整保存。
+- 实际验证：`source /workspace/cloud-tools/activate-host.sh`；`cmake --build build -j4`；
+  `ctest --test-dir build --output-on-failure`，13/13 通过（`/tmp/pico-power-review2-ctest.log`）。
+  `source /workspace/cloud-tools/activate-idf.sh`；`sh tools/build_firmware.sh` 构建成功
+  （`/tmp/pico-power-review2-firmware-build.log`）。应用镜像 3,283,648 字节，4 MiB 应用槽余量 22%。
+  `python3 tools/check_handoff.py` 369 项通过，`git diff --check` 通过。
+- 下一步：推送 PR #8 并请求再次评审；实际面板、卸载或 PMU 失败注入、TF 重新挂载、真实断电与重启仍待真机验证。未刷写设备。
+
+## 2026-10-08 · PR #8 评审修正（host 与固件构建通过，未安装）
+
+- Codex 对 `f08d696` 提出 3 条 P2，核对后均成立并修正：
+  1. 收尾刷屏、TF 卸载或 PMU 命令失败原先停在无控件的 `PowerOff`。现在保留原页面、草稿与正文缓存，
+     收尾画面成功后才关闭文件；显示失败直接返回可重试、取消的菜单。关闭文件后的失败先重新挂载 TF，
+     校验原书身份并恢复字体，再返回菜单；资源无法恢复时，取消进入错误页，不恢复失效文件对象。
+  2. 取消书库电源菜单后重新绘制书库，重建缺失封面的工作请求，避免缩略图永久停在占位状态。
+  3. 诊断 `view_name()` 增加 `power_menu` 与 `power_off`，不再显示 `unknown`。
+- 新增 host 回归：最终帧呈现失败后的重试；关闭文件后失败、恢复外部字体、取消回原页并继续翻页；
+  TF 恢复失败后仍可取消；异步封面任务被菜单中断后恢复并实际完成。
+- 实际验证：`source /workspace/cloud-tools/activate-host.sh`；`cmake --build build -j4`；
+  `ctest --test-dir build --output-on-failure`，13/13 通过（`/tmp/pico-power-review-ctest.log`）。
+  `source /workspace/cloud-tools/activate-idf.sh`；`sh tools/build_firmware.sh` 构建成功
+  （`/tmp/pico-power-review-firmware-build.log`）。`python3 tools/check_handoff.py` 369 项通过，`git diff --check` 通过。
+- 未验证：实际面板、卸载或 PMU 失败注入；TF 重新挂载、真实断电与重启。未刷写设备。
+
+## 2026-10-08 · 电源菜单实际渲染预览
+
+- 使用当前 `build/pico_page` 和 `--headless --script`，从设置页进入电源菜单并选择关机、重启，
+  捕获实际 C++ 界面画布；未修改菜单布局或文案，未执行关机、重启或网络任务。
+- 命令：`source /workspace/cloud-tools/activate-host.sh`；
+  `build/pico_page --card .local/card --headless --script artifacts/power-menu-20261008/render.txt`，退出码 0。
+  使用系统 Pillow 将 BMP 无缩放转换为 PNG；四张截图均为 684×1216。
+- 截图：`artifacts/power-menu-20261008/settings.png`、`menu.png`、`shutdown-confirm.png`、`restart-confirm.png`。
+  已查看菜单和两张确认页，文字与按钮无明显裁切。这些是桌面实际绘制结果，不模拟墨水屏残影，不能代替真机显示验收。
+
+## 2026-10-08 · 长按电源键关机与重启（代码、host 和固件构建通过，未安装）
+
+- 需求记为 D34。电源键短按保持浅睡；长按打开“关机 / 重启 / 取消”菜单，出现菜单后松手。
+  “设置 → 电源与休眠”也可打开菜单。选择关机或重启后在屏幕二次确认；K2 只全刷。
+- PMU 已有 `KEY_LONG`，不修改长按或硬件强制关机阈值。同次长按只处理一次，后续短按事件不进入休眠；
+  启动和唤醒时等待电源键释放。取消菜单恢复原画布、页面、热区及设置草稿，包含正文图片查看。
+- 确认后提交已呈现的阅读位置和最近阅读记录；保存失败保持运行，可重试、取消或明确继续。
+  然后停止并等待内容工作、关闭文档与字体、用内置字体全刷收尾画面、卸载 TF 卡，再执行设备动作。
+  取消菜单或 K2 不提交新位置；重启不会改写书籍、配置、分区或工厂校准。
+- 锁定 BSP commit `5f3406deec33304de8801046db583dec7c49e55b` 的 PMU 组件实际提供
+  `read_pico_pmu_power_off()`（协作关机，含 logical-off 回退），已审查该接口源码及 Apache-2.0 许可，
+  直接调用公开接口，无新增依赖或 BSP 修改。此前路线图“未发现主机断电命令”的说明已更正。
+  平台检查 `PMU_CAP_HOST_EN_CONTROL`，命令失败时提示硬件关机，保留真实保存结果；重启使用 `esp_restart()`。
+- 网络、配网、Wi-Fi 传书、诊断传输及内容任务进行中先要求结束任务，不直接中断。
+  USB 传输中提示先在电脑弹出设备并通过原屏幕控件结束传输。R8 低电量与 R11 升级阶段保护仍随对应功能实现。
+- 实际命令与结果：
+  - `source /workspace/cloud-tools/activate-host.sh`；`cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug`；
+    `cmake --build build -j4`；`ctest --test-dir build --output-on-failure`：13/13 通过。
+    新增电源事件去重、长按后短按消费、菜单取消与图片查看恢复、K2 全刷、确认后保存、重开恢复、
+    保存失败保持运行及明确跳过保存、Portal/USB 阻止菜单测试。日志 `/tmp/pico-power-ctest.log`。
+  - `source /workspace/cloud-tools/activate-idf.sh`；`sh tools/build_firmware.sh`：成功。
+    `firmware/build/pico_page.bin` 为 3,280,784 字节（`0x320f90`），4 MiB 应用槽余量 22%。
+    日志 `/tmp/pico-power-firmware-build.log`。既有 IDF FatFs Kconfig 布尔默认值提示未阻止构建。
+  - 电源页新增文案的内置字体字符检查：无缺字；`python3 tools/check_handoff.py` 通过 369 项；`git diff --check` 通过。
+- 未验证：真实电源键长按至菜单的延迟、松手不休眠、启动/唤醒按住不弹菜单、PMU 强制关机时序、
+  关机电流、USB 供电下 EN 拉低后的状态、真机重启及保存恢复、卡卸载/PMU 命令失败提示。
+  未连接或刷写设备；当前构建不作为 PW04 的 D 类通过证据。
+- 下一步：使用当前分区核验后的应用刷写流程安装并执行 PW04，同时复测休眠超过 1 分钟不自行唤醒。
 
 ## 2026-10-08 · 路线图按 Codex 评审修正（仅文档）
 

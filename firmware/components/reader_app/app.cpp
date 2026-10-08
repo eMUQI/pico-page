@@ -114,6 +114,11 @@ enum Control {
     PortalStop,
     SyncCancel,
     Retry,
+    PowerMenu,
+    PowerShutdown,
+    PowerRestart,
+    PowerCancel,
+    PowerForce,
     EntryBase = 100,
     TocBase = 1000,
     TocToggleBase = 10000,
@@ -376,6 +381,49 @@ struct ReaderApp::Impl final : DisplayBackend {
     ReaderSettings settings, draft;
     SettingsSnapshot edit_snapshot;
     View view = View::Library;
+    std::optional<graphics::Canvas> power_return_canvas;
+    std::vector<Hit> power_return_hits;
+    View power_return_view = View::Library;
+    std::string power_return_message;
+    PowerAction power_selected = PowerAction::None;
+    PowerRequest power_request;
+    bool power_save_failed = false;
+    bool power_progress_saved = false;
+    void draw_power_menu() {
+        view = View::PowerMenu;
+        hits.clear(); canvas.clear(); header("电源", 0);
+        if (!power_save_failed) {
+            text("关机或重启", 36, 184, 36, 612, 1, true);
+            wrapped("菜单出现后松开电源键。选择后保存本地阅读位置，不等待云端同步。", 36, 276, 612, 26);
+            button(PowerShutdown, "关机", 24, 480, 636, 96);
+            button(PowerRestart, "重启", 24, 612, 636, 96);
+            button(PowerCancel, "取消", 24, 1080, 636, 96);
+        } else {
+            const bool restart = power_selected == PowerAction::Restart;
+            text("本地保存未完成", 36, 184, 36, 612, 1, true);
+            wrapped(message, 36, 276, 612, 26);
+            wrapped("继续可能丢失最后一段阅读进度。", 36, 456, 612, 26);
+            button(PowerCancel, "返回", 24, 1080, 306, 96);
+            button(PowerForce, restart ? "仍然重启" : "仍然关机", 354, 1080, 306, 96, true);
+        }
+    }
+    void close_power_menu() {
+        if (!power_return_canvas) return;
+        canvas = std::move(*power_return_canvas); power_return_canvas.reset();
+        hits = std::move(power_return_hits); view = power_return_view;
+        message = power_return_message; power_selected = PowerAction::None;
+        power_save_failed = false; power_request = {};
+        if (view == View::Library) draw_library();
+        overlay(true);
+    }
+    void draw_power_off(const std::string& detail, bool manual = false) {
+        view = View::PowerOff;
+        message = detail;
+        hits.clear(); canvas.clear(); header("电源", 0);
+        text(manual ? "请手动关机" : power_selected == PowerAction::Restart ? "正在重启" : "正在关机",
+             36, 240, 40, 612, 1, true);
+        wrapped(detail, 36, 360, 612, 28);
+    }
     bool resume_to_library = false;
     bool usb_prepared = false, usb_active = false, usb_confirm = false;
     UsbTransferAction usb_action = UsbTransferAction::None;
@@ -3048,7 +3096,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         center(draft.auto_sleep_minutes ? std::to_string(draft.auto_sleep_minutes) + " 分钟" : "关闭", 168, 728, 348, 34);
         button(SleepMore, "+", 528, 706, 120, 96);
         note("按电源键唤醒；保存失败时不进入休眠。", 856);
-        note("选择后点击保存生效。", 930);
+        button(PowerMenu, "关机 / 重启", 24, 952, 636, 96);
         button(Back, "取消", 24, 1080, 306, 96);
         button(PowerSave, "保存设置", 354, 1080, 306, 96, true);
     }
@@ -3919,6 +3967,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!display.busy()) overlay();
     }
     void back() {
+        if (view == View::PowerMenu) { close_power_menu(); return; }
         if (view == View::Portal) return;
         if (view == View::BookManagement) { draw_details(); overlay(); return; }
         if (usb_prepared) {
@@ -4110,6 +4159,27 @@ struct ReaderApp::Impl final : DisplayBackend {
             show_page(target_offset);
             return;
         }
+        case PowerMenu:
+            if (!display.busy() && !active_network && !content_loading && !foreground_job && !usb_prepared && view != View::Portal) {
+                drain_save(); stop_covers(); stop_raster(); stop_counting_job();
+                power_return_canvas = canvas; power_return_hits = hits; power_return_view = view;
+                power_return_message = message; power_selected = PowerAction::None; power_save_failed = false;
+                draw_power_menu(); overlay(true);
+            }
+            return;
+        case PowerShutdown:
+        case PowerRestart:
+            if (view == View::PowerMenu && !power_save_failed) {
+                power_selected = id == PowerRestart ? PowerAction::Restart : PowerAction::Shutdown;
+                power_request = {power_selected, false};
+            }
+            return;
+        case PowerForce:
+            if (view == View::PowerMenu && power_save_failed)
+                power_request = {power_selected, true};
+            return;
+        case PowerCancel:
+            close_power_menu(); return;
         case Back:
             back();
             return;
@@ -4458,7 +4528,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void input(const AppInput &input) {
         const bool accepted = router.accept(input.event);
-        if (!accepted || display.busy() || view == View::Sleeping)
+        if (!accepted || display.busy() || view == View::Sleeping || view == View::PowerOff)
             return;
         release_counting();
         if (content_loading) {
@@ -4478,7 +4548,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
             return;
         }
-        if (image_viewing) {
+        if (image_viewing && view == View::Reading) {
             if (!input.queued && !input.touch && input.event.input == Input::K2) force_refresh();
             else if (!input.queued && input.touch && input.y < viewer_toolbar_height) {
                 if (input.x >= viewer_action_left) {
@@ -4531,6 +4601,12 @@ struct ReaderApp::Impl final : DisplayBackend {
             } else {
                 for (const auto &hit : hits)
                     if (hit.contains(input.x, input.y)) {
+                        // A power choice requires the whole sampled contact to stay in its button.
+                        if (view == View::PowerMenu && input.touch_bounds) {
+                            const auto& bounds = *input.touch_bounds;
+                            if (!hit.contains(bounds.min_x, bounds.min_y) ||
+                                !hit.contains(bounds.max_x, bounds.max_y)) return;
+                        }
                         int id = hit.id;
                         // A long press on a book in the library opens its details instead of the book.
                         if (input.long_press && view == View::Library && id >= EntryBase && id < TocBase &&
@@ -4670,11 +4746,15 @@ void ReaderApp::complete_frame(bool success) {
     }
     if (auto work = std::exchange(impl_->deferred, nullptr); work && success)
         work();
+    // A final-frame failure must not restart application work during shutdown.
+    if (impl_->view == View::PowerOff) return;
     if (!success) {
         impl_->abandon_content();
         if (impl_->usb_prepared) {
             impl_->message = "屏幕更新失败，请退出并重启。";
             impl_->draw_usb(); impl_->overlay(true);
+        } else if (impl_->view == View::PowerMenu && impl_->power_return_canvas) {
+            impl_->close_power_menu();
         } else impl_->error("屏幕更新失败，当前页未保存。返回将恢复已确认位置。");
     }
 }
@@ -4782,9 +4862,65 @@ void ReaderApp::show_portal(const PortalStatus &status) {
     impl_->draw_portal();
     impl_->overlay(codes_appear);
 }
+bool ReaderApp::show_power_menu() {
+    if (impl_->display.busy() || impl_->active_network || impl_->content_loading || impl_->foreground_job ||
+        impl_->usb_prepared || impl_->view == View::Portal || impl_->view == View::PowerOff) return false;
+    if (impl_->view == View::PowerMenu) return true;
+    impl_->control(PowerMenu);
+    return impl_->view == View::PowerMenu;
+}
+PowerRequest ReaderApp::take_power_request() {
+    return std::exchange(impl_->power_request, PowerRequest{});
+}
+void ReaderApp::power_unavailable(const std::string& message) {
+    if (impl_->display.busy()) return;
+    impl_->note(message, 1012);
+    impl_->overlay(true);
+}
+bool ReaderApp::prepare_power(PowerRequest request) {
+    if (request.action == PowerAction::None || impl_->view != View::PowerMenu ||
+        request.action != impl_->power_selected || impl_->display.busy() || impl_->active_network ||
+        impl_->usb_prepared || (request.without_save && !impl_->power_save_failed)) return false;
+    bool saved = !request.without_save && impl_->persist();
+    std::string detail;
+    if (saved && impl_->has_book() && impl_->session.visible_record() && impl_->card_available) {
+        saved = impl_->store.save_last_book(impl_->book_path, detail) == StoreStatus::Ok;
+        if (saved) { impl_->last_recorded = impl_->book_path; impl_->recent_save_failed = false; }
+    }
+    impl_->power_save_failed = !saved;
+    impl_->power_progress_saved = saved;
+    if (!saved && !request.without_save) {
+        impl_->message = "阅读位置或最近阅读记录未能保存到 TF 卡，仍要" +
+            std::string(request.action == PowerAction::Restart ? "重启吗？" : "关机吗？");
+        impl_->draw_power_menu(); impl_->overlay(true); return false;
+    }
+    impl_->remember_position();
+    impl_->cancel_sync();
+    impl_->drain_save(); impl_->abandon_content(); impl_->foreground_job.reset();
+    impl_->stop_covers(); impl_->stop_raster(); impl_->stop_counting_job();
+    // Saving is the last cancellable step. Never restore a snapshot after teardown starts.
+    impl_->power_return_canvas.reset(); impl_->power_return_hits.clear();
+    impl_->power_request = {};
+    impl_->draw_power_off(saved ? "本地阅读位置已保存。" : "本地阅读位置未完整保存。");
+    impl_->overlay(true);
+    return true;
+}
+bool ReaderApp::close_power_files() {
+    if (impl_->display.busy() || impl_->view != View::PowerOff) return false;
+    impl_->document.close();
+    impl_->ui.open_fallback(); impl_->body.open_fallback();
+    impl_->identities.clear(); impl_->font_scan.reset(); impl_->font_identity.clear();
+    return true;
+}
+void ReaderApp::show_power_off_help() {
+    if (impl_->display.busy() || impl_->view != View::PowerOff) return;
+    impl_->draw_power_off(std::string(impl_->power_progress_saved ? "本地阅读位置已保存。" : "本地阅读位置未完整保存。") +
+        "请长按电源键强制关机；若连接 USB，请拔下电源线。", true);
+    impl_->overlay(true);
+}
 bool ReaderApp::prepare_sleep() {
     invalidate_identity_cache();
-    if (impl_->usb_prepared || impl_->view == View::Portal) return false;
+    if (impl_->usb_prepared || impl_->view == View::Portal || impl_->view == View::PowerMenu || impl_->view == View::PowerOff) return false;
     if (impl_->display.busy() || impl_->active_network || !impl_->persist())
         return false;
     if (impl_->has_book() && !impl_->session.visible_record()) return false;
@@ -4813,6 +4949,7 @@ void ReaderApp::wake() {
     }
 }
 void ReaderApp::card_removed() {
+    impl_->power_return_canvas.reset(); impl_->power_request = {};
     invalidate_identity_cache();
     impl_->clear_body_cache();
     impl_->clear_prefetch();
@@ -4827,7 +4964,8 @@ void ReaderApp::card_removed() {
     impl_->error("TF 卡已移除。请重新插卡并重启设备。");
 }
 bool ReaderApp::save_due() const {
-    return !impl_->usb_prepared && !impl_->display.busy() && (impl_->session.needs_save() ||
+    return impl_->view != View::PowerMenu && impl_->view != View::PowerOff &&
+           !impl_->usb_prepared && !impl_->display.busy() && (impl_->session.needs_save() ||
            (impl_->async_content && !impl_->recent_save_failed && impl_->session.visible_record() && impl_->last_recorded != impl_->book_path)) &&
            !impl_->save_failed && !impl_->save_job;
 }
@@ -4867,6 +5005,7 @@ const char *ReaderApp::background_state() const {
     return "counting";
 }
 void ReaderApp::poll_background(bool cancel) {
+    if (impl_->view == View::PowerOff) return;
     if (cancel && impl_->counting_job) impl_->counting_job->cancel();
     impl_->poll_raster();
     impl_->poll_counting_job();
@@ -4875,12 +5014,13 @@ void ReaderApp::poll_background(bool cancel) {
     impl_->poll_covers();
     impl_->poll_save();
     if (!cancel) impl_->reclaim_caches();
-    if (impl_->save_error_pending && !impl_->display.busy() && !impl_->content_loading) {
+    if (impl_->save_error_pending && impl_->view != View::PowerMenu && !impl_->display.busy() && !impl_->content_loading) {
         impl_->save_error_pending = false; impl_->error(impl_->message);
     }
     if (!cancel || !impl_->content_loading) impl_->poll_content();
 }
 void ReaderApp::background_step(const std::function<bool()>& stop) {
+    if (impl_->view == View::PowerOff) return;
     impl_->poll_raster();
     impl_->poll_counting_job();
     if (stop && stop()) { if (impl_->counting_job) impl_->counting_job->cancel(); return; }

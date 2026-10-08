@@ -124,6 +124,8 @@ const char *view_name(View view) {
     case View::RefreshInterval: return "refresh_interval";
     case View::BookDetails: return "book_details";
     case View::PowerSettings: return "power_settings";
+    case View::PowerMenu: return "power_menu";
+    case View::PowerOff: return "power_off";
     case View::StorageSettings: return "storage_settings";
     case View::InputSettings: return "input_settings";
     case View::BookManagement: return "book_management";

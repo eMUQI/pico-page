@@ -18,7 +18,9 @@
 | `card_root()` / `card_error()` | 返回当前有效的 `/sdcard` 挂载点或空指针及原因 |
 | `refresh_card(error)` | 调用方关闭所有文件后显式重新挂载；无格式化路径 |
 | `present(packed, size, full_clean, error)` | 接收 684×1216 竖屏 4bpp 帧，执行波形并报告驱动返回值和电源状态 |
-| `poll(event, error)` | 按下、释放、取消及电源短按、拔卡事件；无事件时返回 `EventKind::None` |
+| `poll(event, error)` | 按下、释放、取消及电源短按、长按、拔卡事件；无事件时返回 `EventKind::None` |
+| `finish_power(error)` | 调用方停止全部文件消费者后关闭面板电源并尝试卸载 TF 卡；失败不恢复读写 |
+| `power_off(error)` | 校验 PMU 主机 EN 控制能力，调用官方协作关机接口，失败时返回原因 |
 | `battery()` | 返回最近一次有效 PMU 状态快照；读失败时 `valid=false` |
 | `set_performance(high)` | 持有或释放 CPU 最高频率锁；释放后空闲频率为 80 MHz。`present()` 总是先恢复最高频率 |
 | `sleep(error)` | 关闭面板高压、使触摸进入深睡、ESP32-S3 浅睡；PMU 电源键唤醒后恢复触摸 |
@@ -93,6 +95,28 @@ I2C 失败时，调用方仍需处理随失败返回的 `Cancel`。
 加速度计只初始化并关闭采样，不启用拿起唤醒。
 读取电池失败、PMU 未设置电池有效位或电量超出协议范围时，不把快照作为有效电量；
 没有新增电量校准或 PMU 阈值设置。
+
+### 电源键菜单与关机、重启（2026-10-08）
+
+PMU `KEY_LONG` 打开菜单，`KEY_SHORT` 仍进入浅睡；同次长按的重复及后续短按被消费。
+启动或唤醒时先等待电源键释放，不改 PMU 阈值。持续按住仍可能触发硬件强制关机。
+网络、USB、诊断传输或内容任务进行中提示先结束任务。菜单取消恢复原页面、草稿和同步候选。
+
+触摸采样器随释放事件携带本次接触的坐标范围；电源菜单要求所有已采样位置都在原按钮内，
+滑出后再移回也取消。派发仍等待松手；呈现前开始的输入及打开菜单时已按住的输入被消费。
+点击关机/重启直接保存 TF 卡上的已呈现位置和最近阅读记录，不启动云端同步、不再二次确认。
+本地保存失败仅提供“仍然关机/重启”和“返回”。此时未清除同步状态，返回后原同步操作仍有效。
+保存成功或明确跳过后，停止内容工作、尝试全刷结果画面、关闭文档与字体，再尝试卸载 TF 卡。
+最终呈现或卸载失败不恢复应用，也不阻止 `esp_restart()` 或 PMU 断电请求。
+`finish_power()` 即使卸载失败也关闭面板电源；所有文件消费者停止后才允许继续断电。
+
+关机使用 `PMU_CAP_HOST_EN_CONTROL` 与锁定 BSP 的 `read_pico_pmu_power_off()`：
+`HOST_REQUEST_OFF` → `SHUTDOWN_READY`，BSP 自带 logical-off 回退和有界轮询。
+不支持或命令失败时，以内置字体尝试呈现硬件关机提示，保留真实的本地保存结果；
+随后关闭面板电源，停止应用及存储操作，不重新挂载 TF 或恢复阅读现场。
+USB 供电下命令成功仍可能保持主机供电，因此成功后同样停止应用工作。
+
+长按响应时间、硬件强制关机时序、真实断电电流、USB 供电表现与重启恢复仍待设备验收。
 
 ## 显式网络会话
 
@@ -195,7 +219,8 @@ HTTP 只接受 HTTPS GET/PUT/POST，使用 ESP-IDF 系统证书包和主机名�
 
 来源：[MindReset/read_pico_firmware](https://github.com/MindReset/read_pico_firmware/tree/5f3406deec33304de8801046db583dec7c49e55b)。
 初始化、按键区域和浅睡流程参考该 commit 的 `read_pico_init.c`、`read_pico_board.c`、
-`main/display.c`、`main/sleep.c` 及 `main/ui/ui_menu.h`。适配源文件保留上游 Apache-2.0
+`main/display.c`、`main/sleep.c` 及 `main/ui/ui_menu.h`。关机直接调用同一 commit 的
+`components/read_pico_pmu/read_pico_pmu.c` 公开接口，其 Apache-2.0 许可与依赖不变。适配源文件保留上游 Apache-2.0
 版权与许可标识，组件目录附完整 `LICENSE`，文件头标明本项目变更。
 没有修改锁定 BSP。EPDiy 的 LGPL-3.0-or-later 义务继续适用，详见 [BSP 审查](bsp-review.md)。
 

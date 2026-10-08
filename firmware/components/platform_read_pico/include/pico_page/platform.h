@@ -13,7 +13,7 @@ inline constexpr int width = 684;
 inline constexpr int height = 1216;
 inline constexpr std::size_t framebuffer_bytes = width * height / 2;
 
-enum class EventKind { None, K1, K2, K3, Touch, Power, SdRemoved, InputReset };
+enum class EventKind { None, K1, K2, K3, Touch, Power, SdRemoved, InputReset, PowerLong };
 enum class EventPhase { Begin, End, Cancel };
 
 struct Event {
@@ -24,6 +24,8 @@ struct Event {
     int y = 0;
     /** esp_timer time of the controller sample that produced a touch or key event. */
     std::int64_t time_us = 0;
+    /** Inclusive extrema of all sampled positions in this contact, carried on release. */
+    int min_x = x, min_y = y, max_x = x, max_y = y;
 };
 
 struct Battery {
@@ -120,6 +122,11 @@ Battery battery();
  * The wake input is consumed; this function does not advance reading state.
  */
 bool sleep(std::string& error);
+
+/** Drops panel rails and attempts TF release after all file consumers stop. Failure does not resume I/O. */
+bool finish_power(std::string& error);
+/** Requests PMU power-off after a final-frame and finish_power attempt, including release failure. */
+bool power_off(std::string& error);
 
 /** Where connect_network() or synchronize_clock() stopped. Link carries the Wi-Fi driver's disconnect reason. */
 struct ConnectFailure {

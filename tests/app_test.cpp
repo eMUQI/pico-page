@@ -55,6 +55,14 @@ struct Driver {
         app.input({{sequence, Phase::Begin, Input::TouchCenter}, true, x, y});
         app.input({{sequence, Phase::End, Input::TouchCenter}, true, x, y});
     }
+    void drag(int x, int y, AppInput::TouchBounds bounds) {
+        ++sequence;
+        AppInput input{{sequence, Phase::Begin, Input::TouchCenter}, true, x, y};
+        input.touch_bounds = bounds;
+        app.input(input);
+        input.event.phase = Phase::End;
+        app.input(input);
+    }
     void hold(int x, int y) {
         ++sequence;
         app.input({{sequence, Phase::Begin, Input::TouchCenter}, true, x, y, false, true});
@@ -573,6 +581,9 @@ int main(int argc, char** argv) {
         assert(app.view() == View::Reading && app.canvas().pixels() != image_pixels);
         assert(graphics::image_decode_count() > image_decodes && app.canvas().pixel(400, 95) == 1);
         const auto viewer_pixels = app.canvas().pixels();
+        assert(app.show_power_menu()); driver.present();
+        driver.tap(100, 1100); driver.present();
+        assert(app.view() == View::Reading && app.canvas().pixels() == viewer_pixels);
         const auto viewer_decodes = graphics::image_decode_count();
         int gray_x = -1, gray_y = -1;
         for (int y = 104; y < 1192 && gray_x < 0; ++y)
@@ -1672,6 +1683,162 @@ int main(int argc, char** argv) {
             for (const auto& item : fs::directory_iterator(card / "PicoPage/cache/positions"))
                 assert(read(item.path()).find("\nSaveWorker/book.epub\n") == std::string::npos);
         fs::remove(sidecar); fs::rename(sidecar.string() + ".held", sidecar);
+    }
+    for (const auto action : {PowerAction::Shutdown, PowerAction::Restart}) {
+        const auto home = card / (action == PowerAction::Shutdown ? "PowerShutdown" : "PowerRestart");
+        fs::create_directories(home / "Books");
+        fs::copy_file(fixtures / "valid.epub", home / "Books/book.epub");
+        ReaderApp app(home.string()); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+        const auto before = app.saved_record();
+        const auto pixels = app.canvas().pixels();
+        assert(app.show_power_menu()); driver.present(); driver.refresh();
+        driver.key(Input::K1); driver.key(Input::K3);
+        assert(!app.pending_frame() && app.take_power_request().action == PowerAction::None);
+        driver.tap(100, 1100); driver.present();
+        assert(app.view() == View::Reading && app.canvas().pixels() == pixels && app.saved_record() == before);
+        driver.typography();
+        const auto draft_view = app.view(); const auto draft_pixels = app.canvas().pixels();
+        assert(app.show_power_menu()); driver.present(); driver.tap(100, 1100); driver.present();
+        assert(app.view() == draft_view && app.canvas().pixels() == draft_pixels);
+        assert(app.show_power_menu()); driver.present();
+        const int y = action == PowerAction::Shutdown ? 520 : 650;
+        driver.queued(Input::TouchCenter, true, 300, y);
+        assert(app.take_power_request().action == PowerAction::None && !app.pending_frame());
+        // Crossing any edge cancels, even if the finger moves back before release.
+        driver.drag(300, y, {23, y, 300, y});
+        driver.drag(300, y, {300, y, 660, y});
+        driver.drag(300, y, {300, y - 45, 300, y});
+        driver.drag(300, y, {300, y, 300, y + 96});
+        assert(app.take_power_request().action == PowerAction::None && !app.pending_frame());
+        // Starting outside and ending inside cannot select a power action.
+        driver.drag(10, y, {10, y, 300, y});
+        assert(app.take_power_request().action == PowerAction::None && !app.pending_frame());
+        driver.drag(300, y, {298, y - 2, 303, y + 2});
+        const auto request = app.take_power_request();
+        assert(request.action == action && !request.without_save && !app.pending_frame());
+        assert(app.take_power_request().action == PowerAction::None);
+        assert(app.prepare_power(request));
+        assert(app.view() == View::PowerOff && app.pending_frame()->refresh == RefreshIntent::FullClean);
+        assert(!app.close_power_files());
+        // Failed final presentation still permits closing files and never queues a recovery page.
+        app.complete_frame(false);
+        assert(app.view() == View::PowerOff && !app.pending_frame() && app.close_power_files());
+        assert(!app.save_due() && !app.background_due() && !app.take_network_request());
+        app.show_power_off_help(); driver.present();
+        assert(app.status().find("已保存") != std::string::npos);
+        assert(app.status().find("强制关机") != std::string::npos);
+        driver.tap(100, 1100); driver.key(Input::K2); driver.key(Input::K3);
+        app.poll_background(); app.background_step({});
+        assert(app.view() == View::PowerOff && !app.pending_frame() && !app.show_power_menu());
+        std::string detail;
+        assert(FileStore(home.string()).load_last_book(detail) == "Books/book.epub");
+        ReaderApp reopened(home.string()); Driver reloaded{reopened};
+        assert(reopened.initialize()); reloaded.present(); opened(reopened, "Books/book.epub"); reloaded.present();
+        assert(reopened.saved_record()->anchor == before->anchor);
+    }
+    for (const bool force : {false, true}) {
+        const auto home = card / (force ? "PowerForce" : "PowerReturn");
+        fs::create_directories(home / "Books");
+        fs::copy_file(fixtures / "valid.epub", home / "Books/book.epub");
+        ReaderApp app(home.string()); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+        const auto previous = app.saved_record();
+        driver.key(Input::K3); app.complete_frame(true);
+        const auto sidecar = home / "Books/book.epub.picopage";
+        fs::rename(sidecar, sidecar.string() + ".held"); write(sidecar, "not a directory");
+        assert(app.show_power_menu()); driver.present(); driver.tap(300, 520);
+        assert(!app.prepare_power(app.take_power_request())); driver.present();
+        assert(app.view() == View::PowerMenu && app.saved_record() == previous);
+        assert(app.status().find("TF 卡") != std::string::npos);
+        driver.refresh();
+        if (force) {
+            driver.drag(500, 1100, {353, 1100, 500, 1100});
+            driver.queued(Input::TouchCenter, true, 500, 1100);
+            assert(app.take_power_request().action == PowerAction::None && !app.pending_frame());
+            driver.tap(500, 1100);
+            const auto request = app.take_power_request();
+            assert(request.action == PowerAction::Shutdown && request.without_save);
+            assert(app.prepare_power(request)); app.complete_frame(false);
+            assert(app.close_power_files()); app.show_power_off_help();
+            app.complete_frame(false);
+            assert(app.view() == View::PowerOff && !app.pending_frame());
+            assert(app.status().find("未完整保存") != std::string::npos && app.saved_record() == previous);
+            assert(!app.take_network_request());
+        } else {
+            driver.tap(100, 1100); driver.present();
+            assert(app.view() == View::Reading && app.saved_record() == previous);
+            fs::remove(sidecar); fs::rename(sidecar.string() + ".held", sidecar);
+            assert(app.show_power_menu()); driver.present(); driver.tap(300, 650);
+            assert(app.prepare_power(app.take_power_request())); driver.present();
+            assert(app.saved_record()->anchor != previous->anchor);
+            assert(app.status().find("已保存") != std::string::npos);
+        }
+    }
+    // Save failure is before sync teardown: returning preserves both candidate and upload actions.
+    for (const bool upload : {false, true}) {
+        const auto home = card / (upload ? "PowerSyncUpload" : "PowerSyncCandidate");
+        fs::create_directories(home / "Books");
+        fs::copy_file(fixtures / "valid.epub", home / "Books/book.epub");
+        write(home / "PicoPage/sync.toml", sync_config);
+        ReaderApp app(home.string()); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+        driver.key(Input::K3); driver.present();
+        const auto before = app.saved_record();
+        driver.sync_view(); auto request = driver.check_remote();
+        assert(!app.show_power_menu());
+        app.complete_network(request.id, 200, upload ? "{}" :
+            R"({"progress":"/body[1]/DocFragment[1]/body[1]/h1[1]/text()[1].0","percentage":0.1})", "");
+        driver.present();
+        if (upload) { driver.tap(342, 960); driver.present(); }
+        const auto sync_view = app.view(); const auto pixels = app.canvas().pixels();
+        const auto recent = home / "PicoPage/data/last-book.txt";
+        fs::rename(recent, recent.string() + ".held"); fs::create_directory(recent);
+        assert(app.show_power_menu()); driver.present(); driver.tap(300, 520);
+        assert(!app.prepare_power(app.take_power_request())); driver.present();
+        driver.tap(100, 1100); driver.present();
+        assert(app.view() == sync_view && app.canvas().pixels() == pixels);
+        fs::remove(recent); fs::rename(recent.string() + ".held", recent);
+        driver.tap(500, upload ? 1120 : 950); driver.present();
+        if (upload) {
+            const auto sent = app.take_network_request();
+            assert(sent && sent->request.method == "PUT");
+        } else {
+            assert(app.view() == View::Reading && app.saved_record()->anchor != before->anchor);
+        }
+    }
+    {
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        assert(app.show_power_menu()); app.complete_frame(false); driver.present();
+        assert(app.view() == View::Library && app.take_power_request().action == PowerAction::None);
+        assert(app.prepare_portal()); driver.present();
+        assert(!app.show_power_menu() && app.view() == View::Portal);
+        app.show_portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); driver.present();
+        assert(app.prepare_usb_transfer()); app.show_usb_transfer(true, ""); driver.present();
+        assert(!app.show_power_menu() && app.view() == View::UsbTransfer);
+    }
+    {
+        const auto home = card / "PowerCoverResume";
+        fs::create_directories(home / "Books");
+        fs::copy_file(fixtures / "image-cover.epub", home / "Books/cover.epub");
+        write(home / "PicoPage/settings.toml", "schema_version = 1\n[library]\nview = 'grid'\n");
+        ReaderApp app(home.string(), "cover-resume", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        assert(app.background_due() && std::string(app.background_state()) == "covers");
+        const auto placeholders = app.canvas().pixels();
+        app.poll_background();
+        assert(app.show_power_menu()); driver.present();
+        driver.tap(100, 1100); driver.present();
+        assert(app.view() == View::Library && app.background_due());
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (app.background_due()) {
+            app.poll_background();
+            if (app.pending_frame()) driver.present();
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(app.canvas().pixels() != placeholders);
     }
     fs::remove_all(card);
     std::cout << "reader app display, progress protection, typography, cover and stale network checks: passed\n";

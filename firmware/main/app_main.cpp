@@ -531,6 +531,32 @@ extern "C" void app_main() {
         app->set_battery(battery.valid ? std::optional<int>(battery.percent) : std::nullopt);
         if (app->pending_frame())
             present(*app);
+        const auto power_request = app->take_power_request();
+        if (power_request.action != pico_page::PowerAction::None && !usb_mode && !network_busy &&
+            !physical_source && !pico_page::console::transfer_active()) {
+            sleep_requested = false;
+            if (app->prepare_power(power_request)) {
+                present(*app); // The final image is best effort; it cannot veto shutdown.
+                if (!app->close_power_files()) {
+                    ESP_LOGE(tag, "Power teardown did not close file consumers");
+                    for (;;) vTaskDelay(pdMS_TO_TICKS(1000));
+                }
+                if (!pico_page::platform::finish_power(error))
+                    ESP_LOGW(tag, "Power teardown: %s", error.c_str());
+                if (power_request.action == pico_page::PowerAction::Restart) esp_restart();
+                if (!pico_page::platform::power_off(error)) {
+                    ESP_LOGE(tag, "PMU power-off: %s", error.c_str());
+                    app->show_power_off_help();
+                    present(*app);
+                    // Drop panel rails after the fallback frame; at most one more release attempt.
+                    pico_page::platform::finish_power(error);
+                }
+                // USB supply can keep the ESP alive. Do not resume app or storage work.
+                pico_page::platform::set_performance(false);
+                for (;;) vTaskDelay(pdMS_TO_TICKS(1000));
+            }
+            present(*app);
+        }
         const auto usb_action = app->take_usb_transfer_action();
         if (usb_action == pico_page::UsbTransferAction::Start && !usb_mode) {
             if (network_busy || physical_source || sleep_requested ||
@@ -644,6 +670,8 @@ extern "C" void app_main() {
                 {physical_sequence, pico_page::Phase::Begin, pico_page::Input::TouchCenter},
                 tap.kind == EventKind::Touch, tap.x, tap.y, tap.time_us < settled_us,
                 pico_page::platform::long_press(tap, end)};
+            if (input.touch)
+                input.touch_bounds = {end.min_x, end.min_y, end.max_x, end.max_y};
             if (tap.kind == EventKind::K1) input.event.input = pico_page::Input::K1;
             if (tap.kind == EventKind::K2) input.event.input = pico_page::Input::K2;
             if (tap.kind == EventKind::K3) input.event.input = pico_page::Input::K3;
@@ -664,8 +692,17 @@ extern "C" void app_main() {
         } else if (event.kind == EventKind::SdRemoved) {
             app->card_removed();
             present(*app);
+        } else if (event.kind == EventKind::PowerLong) {
+            sleep_requested = false;
+            if (!usb_mode && !network_busy && !pico_page::console::transfer_active()) {
+                released_tap.accept({EventKind::InputReset}, presentation_sequence);
+                physical_source = physical_sequence = 0;
+                physical_suppressed = false;
+                if (!app->show_power_menu()) app->power_unavailable("请先结束当前任务，再关机或重启。");
+            } else app->power_unavailable(usb_mode ? "请先弹出设备并结束 USB 传输。" : "请先结束网络或传输任务。");
+            present(*app);
         } else if (event.kind == EventKind::Power) {
-            if (usb_mode) continue;
+            if (usb_mode || app->view() == pico_page::View::PowerMenu || app->view() == pico_page::View::PowerOff) continue;
             if (network_busy || physical_source || pico_page::console::transfer_active()) {
                 sleep_requested = true;
             } else {
@@ -729,7 +766,8 @@ extern "C" void app_main() {
         }
         if (pico_page::console::transfer_active()) app->invalidate_identity_cache();
         const auto idle = esp_timer_get_time() - last_activity;
-        if (!usb_mode && idle >= idle_save_us && !physical_source && !app->pending_frame() &&
+        if (!usb_mode && app->view() != pico_page::View::PowerMenu && app->view() != pico_page::View::PowerOff &&
+            idle >= idle_save_us && !physical_source && !app->pending_frame() &&
             app->save_due()) {
             app->save_progress();
             present(*app);
@@ -751,7 +789,8 @@ extern "C" void app_main() {
         else if (!usb_mode && idle >= idle_slow_us && !app->pending_frame() && !app->content_busy() && !app->save_busy())
             pico_page::platform::set_performance(false);
         const std::int64_t sleep_after = app->auto_sleep_minutes() * 60'000'000LL;
-        if (!usb_mode && sleep_after > 0 && idle >= sleep_after)
+        if (!usb_mode && app->view() != pico_page::View::PowerMenu && app->view() != pico_page::View::PowerOff &&
+            sleep_after > 0 && idle >= sleep_after)
             sleep_requested = true;
         if (pico_page::console::transfer_active()) vTaskDelay(pdMS_TO_TICKS(1));
         // A full tick between counting slices lets lower-priority tasks run.

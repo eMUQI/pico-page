@@ -8,6 +8,7 @@
  */
 
 #include "pico_page/platform.h"
+#include "pico_page/power_key.h"
 
 #include <algorithm>
 #include <atomic>
@@ -46,7 +47,8 @@ bool display_ready = false;
 bool baseline_valid = false;
 bool mounted = false;
 bool usb_owns_card = false;
-bool suppress_power = false;
+bool suppress_power = true;
+PowerKey power_key;
 int panel_vcom = 0;
 std::int64_t rails_deadline = 0;
 std::int64_t last_pmu_poll = 0;
@@ -139,9 +141,10 @@ bool await_mount(std::string& error) {
     return mounted;
 }
 
-bool pmu_events(bool& short_press, bool& wake_press, std::string& error) {
+bool pmu_events(bool& short_press, bool& wake_press, std::string& error, bool* long_press = nullptr) {
     short_press = false;
     wake_press = false;
+    if (long_press) *long_press = false;
     for (int i = 0; i <= PMU_EVENT_FIFO_DEPTH; ++i) {
         const auto result = read_pico_pmu_poll();
         const auto* snapshot = read_pico_pmu_get();
@@ -163,7 +166,12 @@ bool pmu_events(bool& short_press, bool& wake_press, std::string& error) {
         const auto type = snapshot->event.type;
         const auto ack = read_pico_pmu_event_ack(snapshot->event.event_id);
         if (ack != ESP_OK) return failure(error, "PMU event acknowledgement", ack);
-        short_press = short_press || type == PMU_EVT_KEY_SHORT;
+        PowerKey::Action action = PowerKey::Action::None;
+        if (type == PMU_EVT_KEY_DOWN) action = power_key.accept(PowerKey::Event::Down);
+        if (type == PMU_EVT_KEY_SHORT) action = power_key.accept(PowerKey::Event::Short);
+        if (type == PMU_EVT_KEY_LONG) action = power_key.accept(PowerKey::Event::Long);
+        short_press = short_press || action == PowerKey::Action::Sleep;
+        if (long_press && action == PowerKey::Action::Menu) *long_press = true;
         wake_press = wake_press || type == PMU_EVT_KEY_DOWN || type == PMU_EVT_KEY_SHORT;
     }
     return true;
@@ -313,6 +321,10 @@ void sample_touch(void*) {
             } else {
                 active.x = sample.x;
                 active.y = sample.y;
+                active.min_x = std::min<int>(active.min_x, sample.x);
+                active.min_y = std::min<int>(active.min_y, sample.y);
+                active.max_x = std::max<int>(active.max_x, sample.x);
+                active.max_y = std::max<int>(active.max_y, sample.y);
             }
         } else if (active.kind != EventKind::None) {
             emit(EventPhase::End, now);
@@ -444,6 +456,28 @@ const char* card_root() { return mounted ? "/sdcard" : nullptr; }
 const std::string& card_error() { return mount_error; }
 Battery battery() { return battery_state; }
 
+bool finish_power(std::string& error) {
+    error.clear();
+    if (!on_owner(error) || !ready || usb_owns_card) return false;
+    epd_poweroff(); rails_deadline = 0;
+    if (mounted) {
+        const auto result = read_pico_sd_release();
+        if (result != ESP_OK) return failure(error, "SD release", result);
+        mounted = false;
+    }
+    return true;
+}
+bool power_off(std::string& error) {
+    error.clear();
+    if (!on_owner(error) || !ready || usb_owns_card) return false;
+    const auto* snapshot = read_pico_pmu_get();
+    if (!snapshot->identity_ok || !(snapshot->caps & PMU_CAP_HOST_EN_CONTROL))
+        return failure(error, "PMU power-off unavailable", ESP_ERR_NOT_SUPPORTED);
+    const auto result = read_pico_pmu_power_off();
+    if (result != ESP_OK) return failure(error, "PMU power-off", result);
+    return true;
+}
+
 bool refresh_card(std::string& error) {
     error.clear();
     if (!on_owner(error) || !ready) return false;
@@ -564,14 +598,15 @@ bool poll(Event& event, std::string& error) {
         last_pmu_poll = now;
         bool short_press = false;
         bool wake_press = false;
-        if (!pmu_events(short_press, wake_press, error)) {
+        bool long_press = false;
+        if (!pmu_events(short_press, wake_press, error, &long_press)) {
             suppress_touch = true;
             return false;
         }
         if (suppress_power) {
             if (!(read_pico_pmu_get()->key_state & 1) && now >= power_ignore_until) suppress_power = false;
-        } else if (short_press) {
-            system_event(EventKind::Power, event);
+        } else if (long_press || short_press) {
+            system_event(long_press ? EventKind::PowerLong : EventKind::Power, event);
             return true;
         }
     }

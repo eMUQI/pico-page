@@ -72,6 +72,17 @@ int main() {
         CHECK(!taps.accept({EventKind::K2, EventPhase::Begin, 10}, 1));
         CHECK(taps.accept({EventKind::K2, EventPhase::End, 10}, 1));
     }
+    {
+        using namespace pico_page::platform;
+        // Opening a power menu cancels the old contact; its later release cannot hit the menu.
+        ReleasedTap taps;
+        CHECK(!taps.accept({EventKind::Touch, EventPhase::Begin, 20, 300, 520}, 10));
+        CHECK(!taps.accept({EventKind::InputReset}, 10));
+        CHECK(!taps.accept({EventKind::Touch, EventPhase::End, 20, 300, 520}, 11));
+        CHECK(!taps.accept({EventKind::Touch, EventPhase::Begin, 21, 300, 520}, 11));
+        CHECK(taps.accept({EventKind::Touch, EventPhase::End, 21, 300, 520}, 11));
+        CHECK(!taps.accept({EventKind::Touch, EventPhase::End, 21, 300, 520}, 11));
+    }
     // IN03/IN04: a context change cannot reuse the input that opened it.
     InputRouter input;
     CHECK(input.route(Context::Reading, {1, Phase::Begin, Input::TouchCenter}) == Action::OpenTools);

@@ -31,8 +31,12 @@ enum class View {
     BookManagement,
     SyncSettings,
     Portal,
-    Loading
+    Loading,
+    PowerMenu,
+    PowerOff
 };
+enum class PowerAction { None, Shutdown, Restart };
+struct PowerRequest { PowerAction action = PowerAction::None; bool without_save = false; };
 enum class UsbTransferAction { None, Start, Exit };
 /** Upload runs over the device access point; UploadStation over the best nearby saved network. */
 enum class PortalAction { None, Start, Stop, Upload, UploadStation };
@@ -71,6 +75,9 @@ struct AppInput {
     bool queued = false;
     /** The touch was held before release. Book rows and reading images have long-press actions. */
     bool long_press = false;
+    struct TouchBounds { int min_x, min_y, max_x, max_y; };
+    /** Sampled contact extent, including press and release; omitted for synthetic point taps. */
+    std::optional<TouchBounds> touch_bounds = std::nullopt;
 };
 
 /** Retained payload capacities; allocator bookkeeping and hash nodes are excluded. */
@@ -134,6 +141,18 @@ class ReaderApp {
      */
     void show_portal(const PortalStatus &status);
     bool prepare_sleep();
+    /** Opens a modal menu without changing the underlying page or its draft. Busy tasks must finish first. */
+    bool show_power_menu();
+    /** Displays why the menu is unavailable while preserving the current task and controls. */
+    void power_unavailable(const std::string& message);
+    /** Consumes an explicit menu choice; the device loop performs the hardware operation. */
+    PowerRequest take_power_request();
+    /** Saves local progress and starts irreversible teardown. Only save failure allows returning. */
+    bool prepare_power(PowerRequest request);
+    /** Closes card consumers after the final frame attempt, even if presentation failed. */
+    bool close_power_files();
+    /** Draws terminal hardware-off instructions using fallback fonts; never resumes reading. */
+    void show_power_off_help();
     void wake();
     void card_removed();
     /**
