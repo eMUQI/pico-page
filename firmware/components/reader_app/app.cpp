@@ -947,6 +947,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     bool begin_image(std::size_t start, const graphics::Page& planned, bool preview = false, bool progressive = false) {
         abandon_content();
+        yield_counting_session();
         release_counting();
         ContentJob::Request request;
         request.kind = ContentJob::Kind::Image;
@@ -1035,6 +1036,12 @@ struct ReaderApp::Impl final : DisplayBackend {
             request.part != chapter.part || request.offset != page.start ||
             !same_layout(request.layout, layout(settings, link_return ? 144 : 64))) return;
         body_images_pending = false;
+#ifdef ESP_PLATFORM
+        if (!job.result.error.empty())
+            ESP_LOGW("reader_app", "Inline image unavailable: error=%s psram_free=%u largest=%u",
+                     job.result.error.c_str(), static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+                     static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
+#endif
         RefreshRegion region{684, 1216, 0, 0};
         int right = 0, bottom = 0;
         for (const auto& box : request.page.images) {

@@ -262,6 +262,10 @@ void ContentJob::render_image() {
         if (box.resource.empty() || !document.read_image(box.resource, bytes, detail, stop) ||
             !graphics::render_image(*result.image, bytes, box.x, box.y, box.width, box.height, detail, false, stop)) {
             if (stop()) { result.error = graphics::kImageCancelled; return; }
+#ifdef ESP_PLATFORM
+            ESP_LOGW("content_worker", "Image resource unavailable: resource=%s error=%s",
+                     box.resource.c_str(), box.resource.empty() ? "Empty image resource" : detail.c_str());
+#endif
             result.failed_images.push_back(box.begin);
         }
     }
