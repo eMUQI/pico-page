@@ -169,6 +169,63 @@ bool pmu_events(bool& short_press, bool& wake_press, std::string& error) {
     return true;
 }
 
+/**
+ * Clears the expander interrupt and reports whether a later PMU event will produce a new edge.
+ *
+ * The PMU holds CW_INT (FCA9555 P0.2) low while events are unacknowledged. An event queued
+ * after the last acknowledgement but before this clear leaves CW_INT low with the expander
+ * latch already reset, so no further edge can wake light sleep. The PMU queue is therefore
+ * read after the clear; @p idle also refreshes the snapshot's key_state.
+ *
+ * @param irq Expander interrupt line, active low.
+ * @param idle Set when the line is released and the PMU has no pending events.
+ * @return false if the PMU status read fails; @p error then describes the failure.
+ */
+bool wake_lines_idle(gpio_num_t irq, bool& idle, std::string& error) {
+    idle = false;
+    read_pico_clear_ioe_int();
+    if (!gpio_get_level(irq)) return true;
+    const auto result = read_pico_pmu_poll();
+    const auto* snapshot = read_pico_pmu_get();
+    if (result != ESP_OK || !snapshot->identity_ok || !snapshot->status_ok) {
+        return failure(error, "PMU status", result != ESP_OK ? result : ESP_ERR_INVALID_RESPONSE);
+    }
+    // The poll keeps the previous event count when that register read fails; the
+    // CRC-checked STATUS flags reflect the queue and CW_INT as of this poll.
+    constexpr auto pending = PMU_STATUS_EVENT_PENDING | PMU_STATUS_CW_INT_ASSERTED;
+    idle = snapshot->pending_events == 0 && !(snapshot->flags & pending);
+    return true;
+}
+
+/**
+ * Consumes the PMU events behind a light-sleep wake and re-arms the expander interrupt.
+ *
+ * Besides key events, the PMU reports a battery sample about every 30 s while the host is
+ * powered. Acknowledging events releases CW_INT, and the expander reports that release as
+ * a further input change, so its interrupt is cleared only after the events are consumed.
+ *
+ * @param irq Expander interrupt line, active low.
+ * @param wake_press Set when the events include a power-key press.
+ * @return false if the PMU fails, or if the line or the PMU queue does not become idle
+ *         within 2 s without a key press; @p error then describes the failure.
+ */
+bool settle_wake_interrupt(gpio_num_t irq, bool& wake_press, std::string& error) {
+    const auto deadline = esp_timer_get_time() + 2'000'000;
+    for (;;) {
+        bool short_press = false;
+        if (!pmu_events(short_press, wake_press, error)) return false;
+        if (wake_press) return true;
+        bool idle = false;
+        if (!wake_lines_idle(irq, idle, error)) return false;
+        if (idle) return true;
+        if (esp_timer_get_time() >= deadline) {
+            error = "Wake interrupt or PMU events did not settle without a power-key event";
+            return false;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+
 EventKind hit_test(int x, int y) {
     if (y >= key_area_top && x >= 0 && x < 3 * key_pitch) {
         constexpr EventKind keys[] = {EventKind::K1, EventKind::K2, EventKind::K3};
@@ -558,22 +615,18 @@ bool sleep(std::string& error) {
         bool short_press = false;
         bool wake_press = false;
         if (!pmu_events(short_press, wake_press, error)) break;
-        read_pico_clear_ioe_int();
-        if (!(read_pico_pmu_get()->key_state & 1) && gpio_get_level(irq)) {
+        bool idle = false;
+        if (!wake_lines_idle(irq, idle, error)) break;
+        if (idle && !(read_pico_pmu_get()->key_state & 1)) {
             result = gpio_wakeup_enable(irq, GPIO_INTR_LOW_LEVEL);
             if (result == ESP_OK) result = esp_sleep_enable_gpio_wakeup();
             if (result != ESP_OK) break;
             while (result == ESP_OK) {
                 result = esp_light_sleep_start();
                 if (result != ESP_OK) break;
-                read_pico_clear_ioe_int();
-                if (!pmu_events(short_press, wake_press, error)) break;
+                if (!settle_wake_interrupt(irq, wake_press, error)) break;
                 if (wake_press) {
                     slept = true;
-                    break;
-                }
-                if (!gpio_get_level(irq)) {
-                    error = "Wake interrupt remains asserted without a power-key event";
                     break;
                 }
             }
