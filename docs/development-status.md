@@ -1,8 +1,72 @@
 # 开发状态
 
+本轮新增：手机配置按填写来源处理 Wi-Fi，从扫描列表选择的网络验证后保存，手动填写直接保存，支持尚未开启的手机热点。
+设备屏幕显示验证与保存结果，手机掉线后可重连设备热点查看。host 13 项 CTest 和 ESP-IDF 固件构建通过，未烧录；
+手机掉线与重连、结束配置后开启手机热点并进行同步或 Wi-Fi 传书的真机流程待测。
+
 最后更新：2026-10-08。R2 Wi-Fi 开关已修复 PR #10 第二轮的 3 条评审意见：诊断导入期间延后入口失败处理、同步取消等待 worker 完成、长错误说明不再与开关重叠；host/ASan/UBSan 各 13/13、固件构建通过，未安装。PR #8 电源菜单已按用户确认简化：正常选择后直接保存本地进度并关机/重启，只有本地保存失败可返回或明确继续；收尾不再恢复现场，电源按钮滑出取消且旧触摸不穿透。host 的 13 项 CTest 和固件构建通过，未安装到设备；真机时序、重启和断电待测。此前休眠后自动唤醒的板级修正也随本次构建通过，尚未安装。传输与配网修改稿及 PR #3 的图片排版与查看功能已通过 host 和固件构建，均未安装到设备。最近一次设备烧录仍为基于 `d8ed960` 的固件，`esptool` 已验证写入摘要；本次复位后的书库画面、触摸和 TF 卡状态尚未确认。该镜像包含书库首页、锁屏返回书库及 PR #2 路径提示修正，不包含图片查看或本次传输与配网改动。此前设备诊断、TF 卡迁移、界面调整、GB18030 TXT 阅读及 USB 卷名验证记录见下文。
 各批次命令、结果及未测项分别记录；host 构建与测试不代表真机通过。
 路线图新增 R12：首次开机引导或内置使用说明，形式待实现时确定，尚未实现。
+
+## 2026-10-08 · 配网 PR 整理与最新主线验证（未安装）
+
+- 分支 `fix/wifi-setup-source` 变基到 `24cdbad`（R2 持久化 Wi-Fi 开关），仅包含本轮配网修改。
+  保留主线的会话代次、网络退出与长说明边界；新增设备画布测试改用主线的 `driver.portal()` 代次辅助入口。
+  开发状态摘要和历史保留两批记录，没有覆盖主线的 Wi-Fi 开关内容。
+- `source /workspace/cloud-tools/activate-host.sh`；`cmake --build build/host -j4`；
+  `ctest --test-dir build/host -N` 注册 13 项；`ctest --test-dir build/host --output-on-failure`：13/13 通过，
+  日志 `/tmp/wifi-pr-ctest.log`。`source /workspace/cloud-tools/activate-idf.sh`；
+  `sh tools/build_firmware.sh`：成功，日志 `/tmp/wifi-pr-firmware.log`；4 MiB 应用构建槽检查通过。
+  `python3 tools/check_handoff.py`：379 项通过；`git diff --check` 通过。
+- 未烧录或执行真机验证，CFG06/CFG07 的设备与手机流程仍待验收；此批未新增 sanitizer 运行。
+
+## 2026-10-08 · 区分扫描与手动 Wi-Fi，设备显示验证结果（验证通过，未安装）
+
+- 用户继续明确：从扫描列表选择的网络验证后保存，手动填写直接保存；本条更新前一批“所有 Wi-Fi 直接保存”的行为。
+  表单以非空 `ssid` 标记列表选择，以空 `ssid` 和 `manual` 标记手动输入，不按网络名称或是否相同推断来源。
+  验证只检查设备连接并取得 IP 地址，不代表互联网可用；连接失败不保存。
+- 按选择来源切换网页按钮与处理中阶段。设备显示“已验证并保存”或“已保存，未验证连接”，
+  失败显示真实原因和未保存。等待页及连接页说明两条路径，手机网页在提交前和验证中提示可能掉线、应看设备结果。
+  APSTA 保留设备热点；信道可能跟随站点连接变化。结果留在原会话状态中，重连设备热点打开原配置页可再查看。
+- 执行上下文、网络任务 16 KiB 栈、队列、4 KiB 表单/文件上限及 5 个网络限制沿用；仅增加几个来源/结果布尔字段和固定提示文本。
+  列表验证沿用原连接路径，单次驱动等待最长约 30 秒且不能强制取消；连接完成后检查取消，再进行不可抢断的 TF 提交。
+  手动路径不连接、不伪造时间；失败仍从原表单重试。未测真机内存峰值、最低剩余栈或实际不可取消区间。
+- 回归覆盖解析来源与字段重置、默认按钮、两种阶段、掉线提示、两种成功结果、手动保存失败保留配置及账户，
+  设备画布区分两种成功结果并在 K2 后保留。首次新增断言误把重复状态投递视作不刷新，
+  经核对原 `show_portal()` 契约后改为验证 K2 保留结果，未改变应用的原刷新协议。
+- 实际命令（`/workspace/pico-page`）：`source /workspace/cloud-tools/activate-host.sh`；
+  `cmake --build build/host -j4`；`ctest --test-dir build/host -N` 注册 13 项；
+  `ctest --test-dir build/host --output-on-failure`：13/13 通过，日志 `/tmp/wifi-source-ctest.log`。
+  `source /workspace/cloud-tools/activate-idf.sh`；`sh tools/build_firmware.sh`：成功，日志 `/tmp/wifi-source-firmware.log`。
+  工具链、BSP、依赖及 sdkconfig 沿用上一批；镜像 3,282,640 字节（`0x3216d0`），4 MiB 应用构建槽余量 22%。
+  新增设备文案全部在内置字体字符表中；`python3 tools/check_handoff.py` 379 项和 `git diff --check` 通过。
+- 未烧录、未新增 sanitizer 或真机验证。CFG06/CFG07 待设备实测：未开启手机热点手动保存后使用、
+  列表验证成功/错误密码/TF 写入失败、手机因信道变化掉线、设备结果保留与手机重连后查看。
+
+## 2026-10-08 · Wi-Fi 配置直接保存，支持未开启的手机热点（验证通过，未安装）
+
+- 按用户更新调整 D28：Wi-Fi 提交只校验名称与密码格式，沿用保留 TOML 注释、比较原文和回读确认的提交协议，
+  不再先连接目标网络。新网络的连接时间为 0，同名密码更新保留真实的上次连接时间；同步账户仍验证后保存。
+- 手机按钮改为“保存 Wi-Fi”，处理中只显示保存阶段。保存成功后说明尚未测试连接，并提示先在设备上结束配置，
+  再开启手机的 2.4 GHz 热点，发起同步或经已保存的 Wi-Fi 传书。没有新增自动连接或常驻无线任务。
+- 回归覆盖手动填写未开启热点的表单和文件往返、不伪造连接时间、无扫描结果时的备用连接选择、
+  临时文件路径受阻时保留原配置及账户、解除故障后重试、同名离线更新保留连接时间，以及网页保存阶段和提示。
+- 执行上下文仍为原网络任务（16 KiB 栈），HTTP 任务只提交表单；无新增任务、队列或长期缓冲。
+  单次表单与网络文件仍各限 4 KiB、最多 5 个网络；HTML 仅增加固定提示文字。
+  Wi-Fi 保存路径移除了最长约 30 秒的连接等待，取消在文件提交前检查；单次 TF 卡提交不能被抢断，真机最长耗时和堆峰值未测。
+  文件失败返回“未保存”，保留原有失败入口；原提交协议的掉电边界不变。
+- 实际命令与结果（`/workspace/pico-page`）：
+  - `source /workspace/cloud-tools/activate-host.sh`；`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`；
+    `cmake --build build/host -j4`；`ctest --test-dir build/host -N` 注册 13 项；
+    `ctest --test-dir build/host --output-on-failure`：13/13 通过，日志 `/tmp/wifi-save-ctest.log`。
+  - `source /workspace/cloud-tools/activate-idf.sh`；`sh tools/build_firmware.sh`：通过，日志 `/tmp/wifi-save-firmware.log`。
+    ESP-IDF v6.1，commit `fff9895c82d744c7237be8847347bdd1b07c6643`，IDF 已跟踪工作区无差异；
+    BSP 锁定 `5f3406deec33304de8801046db583dec7c49e55b`，依赖锁未变；生效目标 ESP32-S3、16 MiB Flash、Octal PSRAM。
+    应用镜像 3,281,440 字节（`0x321220`），4 MiB 应用构建槽余量 22%。
+    既有 FreeType 未使用变量警告和 IDF FatFs Kconfig 布尔默认值提示未阻止构建；host 有既有模板属性警告。
+  - `python3 tools/check_handoff.py`：379 项通过；`git diff --check` 通过。
+- 未刷写、未新增 sanitizer 运行、未验证真机手机页面或实体热点连接。仍需验证 CFG06：
+  手机连设备热点保存 → 设备结束配置 → 手机打开 2.4 GHz 热点 → 设备同步或 Wi-Fi 传书，及真实 TF 卡失败提示。
 
 ## 2026-10-08 · 路线图加入首次开机引导或内置使用说明（仅文档）
 

@@ -86,6 +86,7 @@ std::string portal_page(void *context, bool submitted, const std::string &body) 
         if (provision::parse_form(body, submission, problem)) {
             page.busy = true;
             page.busy_action = submission.action;
+            page.busy_verify_wifi = submission.verify_wifi;
             page.busy_name = submission.network.ssid;
             page.stage = 0;
             page.result.reset();
@@ -161,7 +162,8 @@ void remember_connection(const std::string &card, const std::string &ssid) {
         ESP_LOGW(tag, "Connection record not saved: %s", error.c_str());
 }
 /**
- * Verifies and applies one setup action; Wi-Fi and the account are written separately and a
+ * Applies one setup action; scanned Wi-Fi is verified before saving, while manually entered
+ * credentials are saved without connecting. The account is verified before saving, and a
  * failure of one leaves the other unchanged. Returns an empty string on success, otherwise the
  * reason for the user. account is the saved account and receives the new one once it is written.
  */
@@ -190,17 +192,21 @@ std::string apply_submission(const NetworkJob &job, PortalSession &session, pico
     if (submission.action == Action::WifiAdd) {
         if (!known && saved.size() >= provision::saved_limit)
             return "已保存 5 个网络，请先删除一个。";
-        status.phase = pico_page::PortalPhase::JoiningWifi;
-        status.detail = wifi.ssid;
-        emit(status);
-        platform::ConnectFailure failure;
-        if (!platform::connect_network(wifi.ssid, wifi.password, error, &failure, false)) {
-            ESP_LOGW(tag, "Setup: %s", error.c_str());
-            return wifi_failure(wifi.ssid, failure);
+        if (submission.verify_wifi) {
+            status.phase = pico_page::PortalPhase::JoiningWifi;
+            status.detail = wifi.ssid;
+            emit(status);
+            platform::ConnectFailure failure;
+            if (!platform::connect_network(wifi.ssid, wifi.password, error, &failure, false)) {
+                ESP_LOGW(tag, "Setup: %s", error.c_str());
+                return wifi_failure(wifi.ssid, failure);
+            }
+            if (job.operation.cancelled->load()) return "操作已取消。";
+            set_stage(session, 1);
         }
         if (job.operation.cancelled->load()) return "操作已取消。";
-        set_stage(session, 1);
-        if (!provision::save_network_edit(job.card, wifi, false, std::time(nullptr), error)) {
+        const auto connected_at = submission.verify_wifi ? std::time(nullptr) : 0;
+        if (!provision::save_network_edit(job.card, wifi, false, connected_at, error)) {
             ESP_LOGW(tag, "Setup: %s", error.c_str());
             return "保存 Wi-Fi 失败，请检查 PicoPage/network.toml 和 TF 卡。";
         }
@@ -386,7 +392,9 @@ void run_portal(NetworkJob &job) {
             auto &page = session.page;
             page.busy = false;
             page.result = provision::Result{submission->action, !problem.empty(),
-                                            problem.empty() ? provision::saved_summary(*submission) : problem};
+                                            problem.empty() ? provision::saved_summary(*submission) : problem,
+                                            problem.empty() && submission->action == provision::Action::WifiAdd &&
+                                                submission->verify_wifi};
             page.saved = std::move(saved);
             page.saved_readable = readable;
             page.retry_endpoint = submission->endpoint;

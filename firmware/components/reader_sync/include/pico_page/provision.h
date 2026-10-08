@@ -62,7 +62,7 @@ std::string sync_toml(const sync::Config& config);
 
 /**
  * Saved networks in the order to try: those seen nearby, strongest first. When none was seen,
- * only the most recently connected one, so a failed scan or a hidden network still gets one try.
+ * only the configured fallback, so a failed scan or a hidden network still gets one try.
  */
 std::vector<SavedWifi> connection_order(const std::vector<SavedWifi>& saved,
                                         const std::vector<NearbyWifi>& nearby);
@@ -85,7 +85,8 @@ bool save_connection(const std::string& card_root, const std::string& ssid, std:
                      std::string& error);
 
 /**
- * Adds or removes one network after phone-side verification while retaining other TOML text.
+ * Adds or removes one network without operating the radio while retaining other TOML text.
+ * now is a successful connection time in Unix seconds; pass 0 for an untested save.
  * remove ignores the password and time. Unsupported syntax, an external edit, or a failed
  * commit leaves the file unchanged and returns false with an error.
  */
@@ -93,7 +94,7 @@ bool save_network_edit(const std::string& card_root, const WifiCredentials& wifi
                        std::int64_t now, std::string& error);
 
 /**
- * Adds a verified network, or replaces the password of a saved network with the same name, and
+ * Adds a network, or replaces the password of a saved network with the same name, and
  * moves it to the fallback position. false, with the list unchanged, when the name is new and
  * the list already holds saved_limit entries.
  */
@@ -107,7 +108,8 @@ enum class Action { WifiAdd, WifiDelete, Account };
 
 struct Submission {
     Action action = Action::WifiAdd;
-    WifiCredentials network;  // WifiAdd: the network to verify; WifiDelete: ssid only.
+    WifiCredentials network;  // WifiAdd: credentials to save; WifiDelete: ssid only.
+    bool verify_wifi = false; // WifiAdd: a name selected from the scanned list.
     std::string endpoint;     // Account fields.
     std::string username;
     std::string userkey;      // MD5 of the account password, as KOReader sends it.
@@ -117,18 +119,20 @@ struct Submission {
  * Decodes an application/x-www-form-urlencoded body. action is wifi_add (ssid, or manual when
  * ssid is empty, and wifi_password), wifi_delete (ssid) or account (endpoint, username,
  * password; an empty endpoint selects default_endpoint). On failure problem is a sentence for
- * the user. The account password is not retained.
+ * the user. WifiAdd with a nonempty ssid sets verify_wifi; a manual name leaves it false.
+ * The account password is not retained.
  */
 bool parse_form(std::string_view body, Submission& submission, std::string& problem);
 
-/** Steps shown while an action is verified, in order. */
-std::vector<std::string> stages(Action action, const std::string& ssid);
+/** Steps shown while an action is processed, in order. */
+std::vector<std::string> stages(Action action, const std::string& ssid, bool verify_wifi = false);
 
 /** Outcome of the previous submission, shown in the block of its action. */
 struct Result {
     Action action = Action::WifiAdd;
     bool failed = false;
     std::string text;  // A sentence for the user.
+    bool wifi_verified = false; // Only true after a successful WifiAdd connection and save.
 };
 
 struct PageState {
@@ -141,8 +145,9 @@ struct PageState {
     std::optional<Result> result;
     /** Values of a refused account submission, offered again with an empty password. */
     std::string retry_endpoint, retry_username;
-    bool busy = false;               // A submission is being verified; forms are withheld.
+    bool busy = false;               // A submission is being processed; forms are withheld.
     Action busy_action = Action::WifiAdd;
+    bool busy_verify_wifi = false;
     std::size_t stage = 0;           // Index into stages(busy_action, busy_name).
     std::string busy_name;           // The network being added or deleted.
 };

@@ -3567,7 +3567,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 switch (portal.phase) {
                 case PortalPhase::JoiningWifi:
                     title = "正在连接“" + portal.detail + "”…";
-                    body = "验证期间，手机可能暂时断开设备热点。";
+                    body = "手机可能暂时断开设备热点。请在本屏查看结果。";
                     break;
                 case PortalPhase::CheckingAccount:
                     title = "正在验证同步账户…";
@@ -3579,11 +3579,11 @@ struct ReaderApp::Impl final : DisplayBackend {
                     break;
                 case PortalPhase::Failed:
                     title = "未保存";
-                    body += "请在手机上重新填写。";
+                    body += "手机掉线时，重新连接上方热点并打开配置页修改。";
                     break;
                 default:
                     title = "等待手机提交";
-                    body = "在配置页填写后，设备先验证，成功后才保存。";
+                    body = "选择附近网络会先验证；手动填写直接保存。结果在本屏显示。";
                 }
                 if (portal_closing) { title = "正在结束…"; body.clear(); }
                 text(title, 36, 844, 28, 612, 1, true);

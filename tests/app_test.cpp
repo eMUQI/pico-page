@@ -1664,9 +1664,16 @@ int main(int argc, char** argv) {
         driver.portal(status); driver.present();
         for (int y = 1048; y < 1080; ++y)
             for (int x = 24; x < 660; ++x) assert(app.canvas().pixel(x, y) == 15);
-        status.phase = PortalPhase::Saved; status.detail = "已保存 Wi-Fi “home”。";
+        status.phase = PortalPhase::Saved; status.detail = "已验证并保存 Wi-Fi “home”。";
         driver.portal(status); driver.present();
         assert(app.canvas().pixels() != failed && app.view() == View::Portal); driver.refresh();
+        const auto verified = app.canvas().pixels();
+        status.detail = "已保存 Wi-Fi “phone”，未验证连接。";
+        driver.portal(status); driver.present();
+        assert(app.canvas().pixels() != verified && app.view() == View::Portal);
+        const auto manual_saved = app.canvas().pixels();
+        driver.refresh();
+        assert(!app.pending_frame() && app.canvas().pixels() == manual_saved);
         driver.tap(342, 1120);
         assert(app.take_portal_action() == PortalAction::Stop); driver.present();
         driver.tap(342, 1120);

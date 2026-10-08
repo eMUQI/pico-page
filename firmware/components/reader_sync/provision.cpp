@@ -357,12 +357,16 @@ std::string alert(const std::string& title, const std::string& body) {
 
 std::string busy_block(const PageState& state) {
     std::string out = "<ol class=\"stages\">";
-    const auto steps = stages(state.busy_action, state.busy_name);
+    const auto steps = stages(state.busy_action, state.busy_name, state.busy_verify_wifi);
     for (std::size_t i = 0; i < steps.size(); ++i) {
         const char* kind = i < state.stage ? "done" : i == state.stage ? "now" : "next";
         out += std::string("<li class=\"") + kind + "\">" + html(steps[i]) + (i == state.stage ? "…" : "") + "</li>";
     }
-    return out + "</ol><p class=\"hint\">结果也会显示在设备屏幕上。本页每 2 秒刷新一次。</p>";
+    out += "</ol><p class=\"hint\">结果也会显示在设备屏幕上。本页每 2 秒刷新一次。</p>";
+    if (state.busy_action == Action::Account || state.busy_verify_wifi)
+        out += "<p class=\"hint\">验证时手机可能暂时断开设备热点，请看设备屏幕上的结果。"
+               "继续修改时，重新连接设备热点并打开配置页。</p>";
+    return out;
 }
 
 const char page_style[] =
@@ -416,7 +420,8 @@ const char page_script[] =
     "const shown=i.type==='password';i.type=shown?'text':'password';b.textContent=shown?'隐藏':'显示';};"
     "const manual=$('manual'),label=$('pw-label'),pick=()=>{const c=document.querySelector('input[name=ssid]:checked');"
     "if(manual)manual.hidden=!!(c&&c.value);"
-    "if(label)label.textContent=c&&c.value?'“'+c.value+'”的密码':'密码';};"
+    "if(label)label.textContent=c&&c.value?'“'+c.value+'”的密码':'密码';"
+    "const submit=$('wifi-submit');if(submit)submit.textContent=c&&c.value?'验证并保存 Wi-Fi':'保存 Wi-Fi';};"
     "for(const r of document.querySelectorAll('input[name=ssid]'))r.onchange=pick;pick();"
     "const now=new Date();for(const e of document.querySelectorAll('[data-t]')){const d=new Date(e.dataset.t*1000);"
     "const day=d.toDateString()===now.toDateString()?'今天':' '+(d.getFullYear()===now.getFullYear()?'':d.getFullYear()+' 年 ')"
@@ -444,6 +449,11 @@ std::string wifi_section(const PageState& state) {
             ? alert(result->action == Action::WifiAdd ? "Wi-Fi 未保存" : "Wi-Fi 未删除",
                     result->text + "已保存的网络和同步账户不受影响。")
             : "<div class=\"ok\" role=\"status\">" + html(result->text) + "</div>";
+    if (wifi_result && !result->failed && result->action == Action::WifiAdd && !result->wifi_verified)
+        notice += "<p class=\"hint\">配置已保存，尚未测试连接。使用手机热点时，请在设备上结束配置，"
+                  "再打开手机的 2.4 GHz 热点，然后使用同步或经已保存的 Wi-Fi 传书。</p>";
+    if (wifi_result && !result->failed && result->wifi_verified)
+        notice += "<p class=\"hint\">设备已连接该网络并取得 IP 地址。验证结果也显示在设备屏幕上。</p>";
     if (state.busy) {
         // Another block is being verified: show the saved networks without controls.
         out += "<div class=\"head\"><h2>Wi-Fi</h2><span class=\"meta\">" +
@@ -489,7 +499,7 @@ std::string wifi_section(const PageState& state) {
                    "value=\"wifi_delete\"><input type=\"hidden\" name=\"ssid\" value=\"" + name +
                    "\"><button class=\"link\">删除</button></form></div>";
         }
-        out += "</div><p class=\"hint\">设备会连接附近信号最强的已保存网络。</p>";
+        out += "</div><p class=\"hint\">同步或 Wi-Fi 传书时，设备会连接附近信号最强的已保存网络。</p>";
         out += full ? "<button class=\"btn\" disabled>已保存 5 个，删除一个后才能添加</button>"
                     : "<button type=\"button\" class=\"btn\" id=\"add-open\">添加网络</button>";
         out += "</div>";
@@ -523,10 +533,14 @@ std::string wifi_section(const PageState& state) {
            "maxlength=\"32\" autocomplete=\"off\" autocapitalize=\"none\"></span></label>";
     out += "<label class=\"field\"><span id=\"pw-label\">密码</span><span class=\"input\">" +
            password_input("wifi_password", "wifi-password", 64) + "</span></label>";
-    out += "<p class=\"hint\">开放网络不填。没看到你的网络时，它可能只有 5 GHz。</p>"
-           "<button class=\"btn primary\">验证并保存 Wi-Fi</button>";
+    out += "<p class=\"hint\">开放网络不填。未开启的手机热点也可手动填写；设备只支持 2.4 GHz Wi-Fi。</p>"
+           "<button id=\"wifi-submit\" class=\"btn primary\">" +
+           std::string(checked ? "验证并保存 Wi-Fi" : "保存 Wi-Fi") + "</button>"
+           "<p class=\"hint\">从列表选择的网络先验证，成功后保存；手动填写的网络直接保存，不测试连接。"
+           "验证时手机可能暂时掉线，请看设备屏幕上的结果。继续修改时，重新连接设备热点并打开配置页。</p>"
+           "<p class=\"hint\">使用手机热点时，先保存并在设备上结束配置，再打开手机热点。</p>";
     if (!saved.empty())
-        out += "<p class=\"hint\">验证通过后加入已保存的网络，已有网络和同步账户不受影响。已满 5 个时需先删除一个。</p>";
+        out += "<p class=\"hint\">保存后加入网络列表，已有网络和同步账户不受影响。已满 5 个时需先删除一个。</p>";
     return out + "</form></section>";
 }
 
@@ -747,6 +761,7 @@ bool parse_form(std::string_view body, Submission& submission, std::string& prob
     }
     if (action == "wifi_add" || action == "wifi_delete") {
         submission.action = action == "wifi_add" ? Action::WifiAdd : Action::WifiDelete;
+        submission.verify_wifi = submission.action == Action::WifiAdd && !ssid.empty();
         submission.network = {ssid.empty() && submission.action == Action::WifiAdd ? std::move(manual) : std::move(ssid),
                               submission.action == Action::WifiAdd ? std::move(wifi_password) : std::string()};
         if (submission.network.ssid.empty()) {
@@ -783,9 +798,11 @@ bool parse_form(std::string_view body, Submission& submission, std::string& prob
     return true;
 }
 
-std::vector<std::string> stages(Action action, const std::string& ssid) {
+std::vector<std::string> stages(Action action, const std::string& ssid, bool verify_wifi) {
     switch (action) {
-    case Action::WifiAdd: return {"连接" + quote_name(ssid), "保存"};
+    case Action::WifiAdd:
+        if (verify_wifi) return {"连接" + quote_name(ssid), "保存"};
+        return {"保存" + quote_name(ssid)};
     case Action::WifiDelete: return {"删除" + quote_name(ssid)};
     case Action::Account: break;
     }
@@ -830,7 +847,9 @@ std::string account_problem(bool transported, int status, const std::string& det
 
 std::string saved_summary(const Submission& submission) {
     switch (submission.action) {
-    case Action::WifiAdd: return "已保存 Wi-Fi " + quote_name(submission.network.ssid) + "。";
+    case Action::WifiAdd:
+        return std::string(submission.verify_wifi ? "已验证并保存 Wi-Fi " : "已保存 Wi-Fi ") +
+               quote_name(submission.network.ssid) + (submission.verify_wifi ? "。" : "，未验证连接。");
     case Action::WifiDelete: return "已删除 Wi-Fi " + quote_name(submission.network.ssid) + "。";
     case Action::Account: break;
     }
