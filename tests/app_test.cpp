@@ -330,6 +330,16 @@ int main(int argc, char** argv) {
         write(cached, "stale");
         assert(grid_pixel(300, 560) == 0 && grid_pixel(270, 610) == 5);
         assert(read(cached).size() > thumbnail_bytes);
+        // A previous decoder's negative cache must not hide a newly supported cover.
+        auto obsolete = read(cached);
+        assert(obsolete.find("PPCOVER2\n") == 0);
+        obsolete[7] = '1';
+        obsolete.resize(obsolete.size() - thumbnail_bytes);
+        write(cached, obsolete);
+        const auto decodes = graphics::image_decode_count();
+        assert(grid_pixel(300, 560) == 0 && grid_pixel(270, 610) == 5);
+        assert(graphics::image_decode_count() == decodes + 1);
+        assert(read(cached).find("PPCOVER2\n") == 0 && read(cached).size() > thumbnail_bytes);
     }
     {
         ReaderApp app(card.string(), "sleep-library", true, true); Driver driver{app};

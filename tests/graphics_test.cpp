@@ -84,6 +84,34 @@ int main(int argc, char** argv) {
                          [&] { return ++cancellation_checks >= 3; }));
     assert(image_error == kImageCancelled && canvas.pixels() == jpeg_unchanged);
     assert(!render_image(canvas, bad, 0, 0, 32, 24, image_error) && canvas.pixels() == jpeg_unchanged);
+    for (const auto& progressive : {
+            std::vector<std::uint8_t>(std::begin(kProgressiveJpeg), std::end(kProgressiveJpeg)),
+            std::vector<std::uint8_t>(std::begin(kProgressiveGrayJpeg), std::end(kProgressiveGrayJpeg))}) {
+        assert(render_image(canvas, progressive, 0, 0, 32, 32, image_error));
+        assert(canvas.pixel(4, 4) >= 4 && canvas.pixel(4, 4) <= 5);
+        assert(canvas.pixel(28, 4) >= 8 && canvas.pixel(28, 4) <= 9);
+        assert(canvas.pixel(4, 28) >= 1 && canvas.pixel(4, 28) <= 2);
+        assert(canvas.pixel(28, 28) >= 14);
+        const auto before = canvas.pixels();
+        for (const unsigned stop_at : {1U, 3U, 6U, 12U}) {
+            unsigned checks = 0;
+            assert(!render_image(canvas, progressive, 0, 0, 32, 32, image_error, false,
+                                 [&] { return ++checks >= stop_at; }));
+            assert(image_error == kImageCancelled && canvas.pixels() == before);
+        }
+        auto invalid = progressive;
+        for (std::size_t i = 0; i + 9 < invalid.size(); ++i) if (invalid[i] == 0xff && invalid[i + 1] == 0xc2) {
+            invalid[i + 7] = 0x10; invalid[i + 8] = 1;
+            break;
+        }
+        assert(!render_image(canvas, invalid, 0, 0, 32, 32, image_error) && canvas.pixels() == before);
+        invalid = progressive;
+        for (std::size_t i = 0; i + 2 < invalid.size(); ++i) if (invalid[i] == 0xff && invalid[i + 1] == 0xda) {
+            invalid.resize(i + 2);
+            break;
+        }
+        assert(!render_image(canvas, invalid, 0, 0, 32, 32, image_error) && canvas.pixels() == before);
+    }
     canvas.pixel(0, 0, 1);
     canvas.pixel(1, 0, 3);
     assert(canvas.data()[0] == 0x31);

@@ -1960,7 +1960,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         char name[64];
         std::snprintf(name, sizeof(name), "covers/%016llx-%dx%d%s", path_hash(relative),
                       width, height, crop ? "c" : "");
-        return {name, "PPCOVER1\n" + relative + "\n" + std::to_string(info.st_size) + " " +
+        return {name, "PPCOVER2\n" + relative + "\n" + std::to_string(info.st_size) + " " +
                           std::to_string(static_cast<long long>(info.st_mtime)) + "\n",
                 static_cast<std::size_t>((width + 1) / 2) * height};
     }

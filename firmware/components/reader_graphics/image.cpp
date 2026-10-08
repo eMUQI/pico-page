@@ -2,12 +2,14 @@
 #include "pico_page/graphics.h"
 #include "pngle.h"
 #include "tjpgd.h"
+#include "JPEGDEC.h"
 
 #include <algorithm>
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <vector>
 #ifdef ESP_PLATFORM
 #include "freertos/FreeRTOS.h"
@@ -145,6 +147,60 @@ struct JpegInput {
     std::size_t offset = 0;
     Raster& raster;
 };
+bool progressive_jpeg(const std::vector<std::uint8_t>& input, int width, int height,
+                      Raster& raster, std::string& error) {
+    std::unique_ptr<JPEGDEC> decoder(new (std::nothrow) JPEGDEC);
+    if (!decoder) return fail(error, "JPEG decoder allocation failed");
+    JpegInput io{input, 0, raster};
+    const auto opened = decoder->open(&io, static_cast<int>(input.size()), nullptr,
+        [](JPEGFILE* file, std::uint8_t* destination, std::int32_t count) -> std::int32_t {
+            auto& io = *static_cast<JpegInput*>(file->fHandle);
+            if (io.raster.cancelled() || count <= 0 || file->iPos < 0 ||
+                static_cast<std::size_t>(file->iPos) > io.bytes.size()) return 0;
+            const auto size = std::min<std::size_t>(count, io.bytes.size() - file->iPos);
+            std::memcpy(destination, io.bytes.data() + file->iPos, size);
+            file->iPos += static_cast<std::int32_t>(size);
+            return static_cast<std::int32_t>(size);
+        },
+        [](JPEGFILE* file, std::int32_t position) -> std::int32_t {
+            auto& io = *static_cast<JpegInput*>(file->fHandle);
+            if (io.raster.cancelled() || position < 0 ||
+                static_cast<std::size_t>(position) > io.bytes.size()) return -1;
+            return file->iPos = position;
+        },
+        [](JPEGDRAW* draw) -> int {
+            auto& raster = *static_cast<Raster*>(draw->pUser);
+            if (raster.cancelled() || draw->iBpp != 8 || draw->x < 0 || draw->y < 0 ||
+                draw->iWidth <= 0 || draw->iWidthUsed <= 0 || draw->iWidthUsed > draw->iWidth ||
+                draw->iHeight <= 0 || static_cast<unsigned>(draw->x) >= raster.source_width ||
+                static_cast<unsigned>(draw->y) >= raster.source_height) return 0;
+            const auto columns = std::min<unsigned>(draw->iWidthUsed, raster.source_width - draw->x);
+            const auto rows = std::min<unsigned>(draw->iHeight, raster.source_height - draw->y);
+            const auto* pixels = reinterpret_cast<const std::uint8_t*>(draw->pPixels);
+            for (unsigned y = 0; y < rows; ++y) for (unsigned x = 0; x < columns; ++x) {
+                const auto gray = pixels[y * draw->iWidth + x];
+                const std::uint8_t rgb[]{gray, gray, gray};
+                raster.sample(draw->x + x, draw->y + y, 1, 1, rgb);
+            }
+            return 1;
+        });
+    if (raster.cancelled()) return fail(error, kImageCancelled);
+    if (!opened || decoder->getJPEGType() != JPEG_MODE_PROGRESSIVE)
+        return fail(error, "JPEG header is invalid or unsupported");
+    const auto source_w = decoder->getWidth(), source_h = decoder->getHeight();
+    if (!dimensions(source_w, source_h)) return fail(error, "JPEG exceeds 4096-pixel side or 8-megapixel limit");
+    if (!raster.create(source_w, source_h, width, height)) return fail(error, "Image canvas allocation failed");
+    // JPEGDEC retains only DC coefficients, producing one pixel per 8-by-8 source block.
+    raster.source((source_w + 7) / 8, (source_h + 7) / 8);
+    decoder->setPixelType(EIGHT_BIT_GRAYSCALE);
+    decoder->setMaxOutputSize(1);
+    decoder->setUserPointer(&raster);
+    const auto decoded = decoder->decode(0, 0, JPEG_SCALE_EIGHTH);
+    if (raster.cancelled()) return fail(error, kImageCancelled);
+    if (!decoded || raster.samples != std::uint64_t(raster.source_width) * raster.source_height)
+        return fail(error, "JPEG pixel stream is invalid or incomplete");
+    return true;
+}
 bool jpeg(const std::vector<std::uint8_t>& input, int width, int height, Raster& raster, std::string& error) {
     JpegInput io{input, 0, raster};
     std::unique_ptr<void, decltype(&std::free)> workspace(std::malloc(8192), &std::free);
@@ -159,7 +215,11 @@ bool jpeg(const std::vector<std::uint8_t>& input, int width, int height, Raster&
         return count;
     }, workspace.get(), 8192, &io);
     if (raster.cancelled()) return fail(error, kImageCancelled);
-    if (result != JDR_OK) return fail(error, "JPEG header is invalid or unsupported (baseline JPEG required)");
+    if (result == JDR_FMT3) {
+        workspace.reset();
+        return progressive_jpeg(input, width, height, raster, error);
+    }
+    if (result != JDR_OK) return fail(error, "JPEG header is invalid or unsupported");
     if (!dimensions(decoder.width, decoder.height)) return fail(error, "JPEG exceeds 4096-pixel side or 8-megapixel limit");
     if (!raster.create(decoder.width, decoder.height, width, height)) return fail(error, "Image canvas allocation failed");
     unsigned scale = 0;

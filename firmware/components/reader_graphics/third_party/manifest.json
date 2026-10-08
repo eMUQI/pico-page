@@ -54,5 +54,60 @@
     "upstream_sha256": "d21849bb5509aa515cf3a61907dcc2e5f00245eb284a228dbab88043df8da743",
     "local_sha256": "d21849bb5509aa515cf3a61907dcc2e5f00245eb284a228dbab88043df8da743",
     "modified": false
+  },
+  {
+    "path": "jpegdec/JPEGDEC.cpp",
+    "commit": "86282979224c8a32fd51e091ed5a35b0c699a52b",
+    "upstream_sha256": "cce4a7cd6fe8fe26825276f9c65ed9c96bf1fe31a15c79e0169ee2385543d210",
+    "local_sha256": "cce4a7cd6fe8fe26825276f9c65ed9c96bf1fe31a15c79e0169ee2385543d210",
+    "modified": false
+  },
+  {
+    "path": "jpegdec/JPEGDEC.h",
+    "commit": "86282979224c8a32fd51e091ed5a35b0c699a52b",
+    "upstream_sha256": "ebb0b79d627d9585e1b985c29a85ea19f9b78e69c6235e2a8e95daed3030e402",
+    "local_sha256": "5a46e6c794bc55c5193ce53a14dacdb901387c65fb3becabfb2e032b92fd4262",
+    "modified": true
+  },
+  {
+    "path": "jpegdec/jpeg.inl",
+    "commit": "86282979224c8a32fd51e091ed5a35b0c699a52b",
+    "upstream_sha256": "34c6eb16b56b9ee86108b8ca22ac42bbdf0c31bc3bb4ceb61f844f9ee344e2a9",
+    "local_sha256": "53222f694f29aaad22194a9cd2f8fb3dfc67a87237dd5d046fe2a32bd32ce7d9",
+    "modified": true
+  },
+  {
+    "path": "jpegdec/LICENSE",
+    "commit": "86282979224c8a32fd51e091ed5a35b0c699a52b",
+    "upstream_sha256": "16b742c2110129c89df82164a28dbecb7ca1fe100c75c30e5c506f050c0c6de5",
+    "local_sha256": "16b742c2110129c89df82164a28dbecb7ca1fe100c75c30e5c506f050c0c6de5",
+    "modified": false
+  },
+  {
+    "path": "jpegdec/patches/0001-redirect-pmcu-on-mcu-skip.patch",
+    "source": "crosspoint-reader/crosspoint-reader@43694c9018d26446ab30cce2fa65ee608355ae50",
+    "local_sha256": "59e69d602446976d36bd5505258353ce1e8dc96e9d2626d25d321817d8418ae2"
+  },
+  {
+    "path": "jpegdec/patches/0002-guard-dc-writes-on-mcu-skip.patch",
+    "source": "crosspoint-reader/crosspoint-reader@43694c9018d26446ab30cce2fa65ee608355ae50",
+    "local_sha256": "1473c0b769c8f0c3e70b3e385670225b38b0e3f292e5ca3e4c38290363dccadb"
+  },
+  {
+    "path": "jpegdec/patches/0003-fix-skip-absent-progressive-chroma-scans.patch",
+    "source": "crosspoint-reader/crosspoint-reader@43694c9018d26446ab30cce2fa65ee608355ae50",
+    "local_sha256": "dec719b08b32efd08ddd6dc2c63496cb8625242e8a7baaec1dc385047cf58b8d"
+  },
+  {
+    "path": "jpegdec/patches/0004-portable-reads-and-defined-shifts.patch",
+    "source": "Pico Page",
+    "local_sha256": "b919d03541d0e5bf02b57e025d9ffcd0a2d6d9512c327470578ba0a3a7f9988e"
+  },
+  {
+    "path": "jpegdec/CrossPoint-MIT.txt",
+    "commit": "43694c9018d26446ab30cce2fa65ee608355ae50",
+    "upstream_sha256": "5d025639b5237e35cf93c4ca598ebde40f31f032bf9a9a19fceb3703dca68b84",
+    "local_sha256": "5d025639b5237e35cf93c4ca598ebde40f31f032bf9a9a19fceb3703dca68b84",
+    "modified": false
   }
 ]

@@ -22,8 +22,8 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/fallback_font.h"
     "static const unsigned char kFallbackFont[] = {${fallback_bytes}};\nstatic const unsigned long kFallbackFontSize = sizeof(kFallbackFont);\nstatic const char kFallbackIdentity[] = \"${fallback_sha256}\";\n")
 
 set(image_sources image.cpp qr.cpp third_party/pngle/pngle.c third_party/tjpgd/tjpgd.c
-    third_party/qrcodegen/qrcodegen.c)
-set(image_includes third_party/pngle third_party/tjpgd third_party/qrcodegen ../reader_document/third_party/miniz)
+    third_party/qrcodegen/qrcodegen.c third_party/jpegdec/JPEGDEC.cpp)
+set(image_includes third_party/pngle third_party/tjpgd third_party/qrcodegen third_party/jpegdec ../reader_document/third_party/miniz)
 if(ESP_PLATFORM)
     idf_component_register(SRCS graphics.cpp ${image_sources} ${ft_sources}
         INCLUDE_DIRS include
@@ -38,6 +38,8 @@ else()
     set(graphics_target reader_graphics)
     set_source_files_properties(graphics.cpp image.cpp qr.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")
 endif()
+set_source_files_properties(image.cpp third_party/jpegdec/JPEGDEC.cpp PROPERTIES
+    COMPILE_DEFINITIONS "NO_SIMD;$<$<PLATFORM_ID:Linux>:__LINUX__>")
 target_compile_features(${graphics_target} PUBLIC cxx_std_17)
 target_compile_definitions(${graphics_target} PRIVATE FT2_BUILD_LIBRARY
     FT_CONFIG_MODULES_H="freetype_modules.h" FT_CONFIG_OPTIONS_H="freetype_options.h"

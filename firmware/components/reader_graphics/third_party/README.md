@@ -1,12 +1,13 @@
 # Image decoder and QR encoder sources
 
-Sources and licenses were inspected before copying on 2026-10-06. The decoder wrappers
+Sources and licenses were inspected before copying on 2026-10-06 (JPEGDEC on 2026-10-08). The decoder wrappers
 and `tjpgdcnf.h` are local integration code. `manifest.json` records upstream and local hashes.
 
 | Component | Exact source | License and retained notice |
 |---|---|---|
 | pngle | `kikuchan/pngle` commit `b1c68193f1d3f8642b3e0e095d457a828038e6fb`, `src/pngle.c`, `src/pngle.h` | MIT; original headers and `pngle/LICENSE` |
 | TJpgDec R0.03 | `MindReset/read_pico_firmware` commit `28cde682a4468a581c278761922724f57d976418`, `main/book/vendor/tjpgd.c`, `tjpgd.h` | ChaN's permissive notice in `tjpgd.c` permits use/modification/redistribution and requires keeping the source notice; the source repository's Apache-2.0 license is also retained for its changes |
+| JPEGDEC | `bitbank2/JPEGDEC` commit `86282979224c8a32fd51e091ed5a35b0c699a52b` | Apache-2.0; CrossPoint patches retain their MIT notice. Sources, changes and distribution requirements: [JPEGDEC notes](jpegdec/README.md) |
 | QR Code generator | `espressif/idf-extra-components` commit `3117b1e6806738c0271bbd18df17f6d74ec66452`, `qrcode/qrcodegen.c`, `qrcodegen.h` (component `espressif/qrcode` 0.2.0, Project Nayuki's C library) | MIT; the notice is the header of both files. The component's Apache-2.0 wrapper files are not copied |
 | miniz | Existing reviewed `reader_document/third_party/miniz` | Existing MIT/public-domain notices; linked once, no second inflate implementation |
 
