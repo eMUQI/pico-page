@@ -41,11 +41,21 @@ bool operator==(const OperationContext& a, const OperationContext& b);
 
 enum class FramePurpose { Body, Overlay, ManualRefresh };
 enum class RefreshIntent { Content, FullClean };
+/** Optional portrait-pixel damage bounds; a full clean always ignores them. */
+struct RefreshRegion {
+    int x = 0, y = 0, width = 0, height = 0;
+    bool fits(int screen_width, int screen_height) const {
+        return x >= 0 && y >= 0 && width > 0 && height > 0 &&
+               x < screen_width && y < screen_height &&
+               width <= screen_width - x && height <= screen_height - y;
+    }
+};
 struct Frame {
     OperationContext token;
     Anchor anchor;
     FramePurpose purpose = FramePurpose::Body;
     RefreshIntent refresh = RefreshIntent::Content;
+    std::optional<RefreshRegion> region = std::nullopt;
 };
 struct FrameResult {
     Frame frame;

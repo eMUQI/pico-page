@@ -1,5 +1,7 @@
 #pragma once
 
+#include "pico_page/core.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <atomic>
@@ -63,10 +65,11 @@ bool stop_usb_storage(std::string& error);
  * even x in the low nibble, odd x in the high nibble, 0 black and 15 white.
  * The caller owns packed and keeps it immutable until this function returns.
  * full_clean always drives physical clearing, including for unchanged pixels.
+ * region limits gray updates in portrait coordinates when the baseline is valid.
  * false means that the physical display state is no longer a valid baseline.
  */
 bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
-             std::string& error);
+             std::string& error, std::optional<RefreshRegion> region = std::nullopt);
 
 /**
  * Polls one event; EventKind::None means no new event. Touch coordinates use

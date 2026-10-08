@@ -4,10 +4,20 @@
 设备屏幕显示验证与保存结果，手机掉线后可重连设备热点查看。host 13 项 CTest 和 ESP-IDF 固件构建通过，未烧录；
 手机掉线与重连、结束配置后开启手机热点并进行同步或 Wi-Fi 传书的真机流程待测。
 
-最后更新：2026-10-08。R2 Wi-Fi 开关已修复 PR #10 第二轮的 3 条评审意见：诊断导入期间延后入口失败处理、同步取消等待 worker 完成、长错误说明不再与开关重叠；host/ASan/UBSan 各 13/13、固件构建通过，未安装。PR #8 电源菜单已按用户确认简化：正常选择后直接保存本地进度并关机/重启，只有本地保存失败可返回或明确继续；收尾不再恢复现场，电源按钮滑出取消且旧触摸不穿透。host 的 13 项 CTest 和固件构建通过，未安装到设备；真机时序、重启和断电待测。此前休眠后自动唤醒的板级修正也随本次构建通过，尚未安装。传输与配网修改稿及 PR #3 的图片排版与查看功能已通过 host 和固件构建，均未安装到设备。最近一次设备烧录仍为基于 `d8ed960` 的固件，`esptool` 已验证写入摘要；本次复位后的书库画面、触摸和 TF 卡状态尚未确认。该镜像包含书库首页、锁屏返回书库及 PR #2 路径提示修正，不包含图片查看或本次传输与配网改动。此前设备诊断、TF 卡迁移、界面调整、GB18030 TXT 阅读及 USB 卷名验证记录见下文。
+最后更新：2026-10-08。正文图片已改为先显示文字和占位，后台准备后局部补刷；连续翻页取消旧请求，补图不改变阅读进度。host 的 13 项 CTest 和固件构建通过，未安装；真机灰阶、残影、输入时延和资源峰值待测。R2 Wi-Fi 开关已修复 PR #10 第二轮的 3 条评审意见：诊断导入期间延后入口失败处理、同步取消等待 worker 完成、长错误说明不再与开关重叠；host/ASan/UBSan 各 13/13、固件构建通过，未安装。PR #8 电源菜单已按用户确认简化：正常选择后直接保存本地进度并关机/重启，只有本地保存失败可返回或明确继续；收尾不再恢复现场，电源按钮滑出取消且旧触摸不穿透。host 的 13 项 CTest 和固件构建通过，未安装到设备；真机时序、重启和断电待测。此前休眠后自动唤醒的板级修正也随本次构建通过，尚未安装。传输与配网修改稿及 PR #3 的图片排版与查看功能已通过 host 和固件构建，均未安装到设备。最近一次设备烧录仍为基于 `d8ed960` 的固件，`esptool` 已验证写入摘要；本次复位后的书库画面、触摸和 TF 卡状态尚未确认。该镜像包含书库首页、锁屏返回书库及 PR #2 路径提示修正，不包含图片查看或本次传输与配网改动。此前设备诊断、TF 卡迁移、界面调整、GB18030 TXT 阅读及 USB 卷名验证记录见下文。
 各批次命令、结果及未测项分别记录；host 构建与测试不代表真机通过。
 R12 已采用内置分页使用说明：设置中固定入口，8 屏离线内容，无卡及无用户字体可查看；
 本批 host 与 ASan/UBSan 各 13/13、固件构建通过，未安装，真机及新用户操作验收待测。
+
+## 2026-10-08 · PR #15 合并主线后验证（未安装）
+
+- Codex 对 `417ceb3` 的评审未发现重大问题，GitHub Host checks 通过。按用户合并指令纳入
+  `origin/main=a9da5cf`（#13 使用说明、#14 配网验证）；冲突仅在本文件摘要，保留两边记录，代码自动合并。
+- 合并后 host CTest 13/13、ASan/UBSan 13/13 通过；后者沿用 `ASAN_OPTIONS=detect_leaks=0`，
+  当前环境的泄漏检查限制不变。日志 `/tmp/pico-image-merge-ctest.log`、`/tmp/pico-image-merge-asan.log`。
+- 标准 `sh tools/build_firmware.sh` 通过，应用镜像 3,298,656 字节，4 MiB 槽余量 21%；
+  日志 `/tmp/pico-image-merge-firmware.log`。交接检查 381 项及 `git diff --check` 通过。
+- 未刷写设备，图片区域灰阶、残影、响应性及内存峰值仍待真机验证。
 
 ## 2026-10-08 · R12 内置离线使用说明（验证通过，未安装）
 
@@ -105,6 +115,44 @@ R12 已采用内置分页使用说明：设置中固定入口，8 屏离线内�
   - `python3 tools/check_handoff.py`：379 项通过；`git diff --check` 通过。
 - 未刷写、未新增 sanitizer 运行、未验证真机手机页面或实体热点连接。仍需验证 CFG06：
   手机连设备热点保存 → 设备结束配置 → 手机打开 2.4 GHz 热点 → 设备同步或 Wi-Fi 传书，及真实 TF 卡失败提示。
+
+## 2026-10-08 · 正文图片渐进呈现与区域补刷（未安装）
+
+- 按 D36，异步正文不再进入“正在准备图片”的阻塞页面。正文及固定图片占位先作为 Body 帧提交，
+  成功呈现后正常确认阅读位置；已准备好的当前页与预取位图仍直接显示。图片工作复用内容任务槽，
+  完成后校验书籍、请求代次、章节/分段、页起点与排版，只替换图片矩形，以 Overlay 帧补刷，不增加阅读修订。
+- 输入待处理时不启动或应用补图；翻页只请求取消，旧任务完成后才回收，不在翻页路径等待析构。
+  打开菜单取消补图，返回占位页会重新调度；长按图片查看可取代未完成的正文图片请求，关闭后恢复补图。
+  解码失败或内存不足只显示图片区域错误。新增 `image_patch` 阶段日志，记录全部补图合成样本。
+- Frame 增加可选竖屏区域，板级调用固定 BSP 的 `epd_hl_update_area`；核对其逆竖屏旋转与 `copy_portrait`
+  坐标一致，区域差分更新 back buffer。K2、基准失效或失败恢复仍走全刷；图片补刷失败不声称已保存位置丢失。
+  BSP commit 仍为 `5f3406deec33304de8801046db583dec7c49e55b`，未修改第三方源码、波形、频率或供电窗口。
+  继续遵循 [BSP 审查](bsp-review.md) 中 epdiy 的 LGPL-3.0-or-later 源码、告知及重新链接材料义务。
+- 执行与资源：UI/会话/画布仍由应用任务独占，解码使用既有 `content_worker`（优先级 1、不指定亲和性、
+  栈 32,768 字节）；沿用一个活动内容任务和一个可替换的待启动请求，旧任务退出前不启动新任务。
+  补图不新增整屏常驻缓冲，但解码期间保留当前占位页缓存，相对原等待路径最多多保留 415,872 字节。
+  峰值还包含已有主画布、图片输出、至多 2 MiB 编码资源、缩放临时位图、解析器、字体、驱动帧缓冲和任务栈；
+  沿用 PSRAM 剩余/连续块门槛，资源不足降级为图片区错误，设备峰值及内部 RAM 最小余量未实测。
+  取消仍受单次 SD 调用、缓存摘要/提交与最终像素复制约束，没有新增硬毫秒承诺；显示波形开始后不抢断。
+- host：`source /workspace/cloud-tools/activate-host.sh`；`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`；
+  `cmake --build build/host --parallel 4`；`ctest --test-dir build/host --output-on-failure`，13/13 通过。
+  日志 `/tmp/pico-progressive-build.log`、`/tmp/pico-progressive-ctest.log`。
+  新增异步回归验证占位呈现前解码计数不增加、待处理输入优先、运行中翻页、缺图局部降级、奇数边距像素保护、
+  补图不修改已保存记录、菜单/查看页返回、切书后旧结果丢弃、补刷失败与全刷恢复；保留既有冷/热缓存及预取测试。
+- 内存检查：`build/sanitized` 以 `-fsanitize=address,undefined -fno-omit-frame-pointer` 配置并构建。
+  默认 CTest 的 LeakSanitizer 因运行环境受 ptrace 跟踪而报 fatal error（`/tmp/pico-progressive-asan-ctest.log`）；
+  使用 `ASAN_OPTIONS=detect_leaks=0 ctest --test-dir build/sanitized --output-on-failure`，13/13 通过，
+  日志 `/tmp/pico-progressive-asan-no-lsan.log`。ASan/UBSan 检查通过，泄漏检查仍未验证。
+- 固件：`source /workspace/cloud-tools/activate-idf.sh`；`sh tools/build_firmware.sh`，通过。
+  IDF commit `fff9895c82d744c7237be8847347bdd1b07c6643`（工作树干净）；目标 ESP32-S3，Octal PSRAM 80 MHz。
+  `firmware/build/pico_page.bin` 为 3,284,400 字节，4 MiB 应用槽余量 22%；日志 `/tmp/pico-progressive-firmware.log`。
+- `python3 tools/check_handoff.py` 通过 379 项；`git diff --check` 通过。
+- PR 准备时变基到 `origin/main=24cdbad`（Wi-Fi 开关 #10），合并保留两批开发摘要。
+  重新构建后 host CTest 与 ASan/UBSan（`ASAN_OPTIONS=detect_leaks=0`）均为 13/13 通过；
+  标准固件构建通过，应用镜像 3,290,880 字节，4 MiB 槽余量 22%；交接检查 380 项及 diff 检查通过。
+  日志为 `/tmp/pico-image-pr-ctest.log`、`/tmp/pico-image-pr-sanitized-ctest.log`、`/tmp/pico-image-pr-firmware.log`。
+- 未刷写设备；EP06/DP05 的 host 路径不代替真机验收。真实输入到翻页的分位数、连续补图灰阶/残影、
+  旋转区域边界、内存不足降级和耗电对比待同样本冷/热条件下记录并用 `tools/summarize_reader_perf.py` 分析。
 
 ## 2026-10-08 · 路线图加入首次开机引导或内置使用说明（仅文档）
 

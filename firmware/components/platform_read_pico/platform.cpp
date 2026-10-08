@@ -516,10 +516,11 @@ bool release_card_for_usb(std::string& error) {
 }
 
 bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
-             std::string& error) {
+             std::string& error, std::optional<RefreshRegion> region) {
     error.clear();
     if (!on_owner(error)) return false;
-    if (!display_ready || packed == nullptr || size != framebuffer_bytes) {
+    if (!display_ready || packed == nullptr || size != framebuffer_bytes ||
+        (region && !region->fits(width, height))) {
         return failure(error, "Panel frame", ESP_ERR_INVALID_ARG);
     }
     set_performance(true);
@@ -543,6 +544,12 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
     baseline_valid = false;
     epd_set_leading_skip(!clear);
     EpdDrawError draw_result;
+    // epd_hl_update_area applies EPD_ROT_INVERTED_PORTRAIT, matching copy_portrait.
+    const auto update = [&] {
+        if (region) return epd_hl_update_area(&display, MODE_GL16, status.temperature_c,
+                                             EpdRect{region->x, region->y, region->width, region->height});
+        return epd_hl_update_screen_full(&display, MODE_GL16, status.temperature_c);
+    };
     if (clear) {
         // Physical black/white pulses establish a new baseline independently
         // of the previous frame, including when all target pixels are equal.
@@ -550,10 +557,10 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
         draw_result = epd_hl_update_screen_from_white(&display, MODE_GC16, status.temperature_c);
     } else if (page_waveform == PageWaveform::Gray8) {
         epd_hl_waveform(&display, &E0470_GRAY8_WAVEFORM);
-        draw_result = epd_hl_update_screen_full(&display, MODE_GL16, status.temperature_c);
+        draw_result = update();
         epd_hl_waveform(&display, &E0470_WAVEFORM);
     } else {
-        draw_result = epd_hl_update_screen_full(&display, MODE_GL16, status.temperature_c);
+        draw_result = update();
     }
     timing.draw_us = esp_timer_get_time() - drawing;
     const bool power_good = panel_status(status, error);

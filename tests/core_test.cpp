@@ -19,6 +19,32 @@ struct Recorder final : DisplayBackend {
 };
 
 int main() {
+    {
+        CHECK((RefreshRegion{0, 0, 684, 1216}.fits(684, 1216)));
+        CHECK(!(RefreshRegion{-1, 0, 10, 10}.fits(684, 1216)));
+        CHECK(!(RefreshRegion{0, 0, 0, 10}.fits(684, 1216)));
+        CHECK(!(RefreshRegion{683, 1215, 2, 1}.fits(684, 1216)));
+        CHECK(!(RefreshRegion{1, 1, INT32_MAX, INT32_MAX}.fits(684, 1216)));
+        Recorder recorder;
+        Display screen(recorder);
+        Frame patch{{"image", 1, 1, 1}, {}, FramePurpose::Overlay, RefreshIntent::Content,
+                    RefreshRegion{36, 100, 612, 480}};
+        CHECK(screen.present(patch));
+        CHECK(recorder.frames.back().refresh == RefreshIntent::FullClean && !recorder.frames.back().region);
+        CHECK(screen.finish(patch.token, true));
+        ++patch.token.request;
+        CHECK(screen.present(patch));
+        CHECK(recorder.frames.back().region && recorder.frames.back().refresh == RefreshIntent::Content);
+        CHECK(screen.finish(patch.token, false));
+        ++patch.token.request;
+        CHECK(screen.present(patch));
+        CHECK(recorder.frames.back().refresh == RefreshIntent::FullClean && !recorder.frames.back().region);
+        CHECK(screen.finish(patch.token, true));
+        ++patch.token.request;
+        patch.purpose = FramePurpose::ManualRefresh;
+        CHECK(screen.present(patch));
+        CHECK(recorder.frames.back().refresh == RefreshIntent::FullClean && !recorder.frames.back().region);
+    }
     CHECK(usb_block_range(8, 0, 0, 512));
     CHECK(usb_block_range(8, 1, 511, 2));
     CHECK(usb_block_range(8, 7, 511, 1));

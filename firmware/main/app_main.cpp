@@ -456,7 +456,7 @@ bool present(pico_page::ReaderApp &app) {
                                                                        : PageWaveform::Gray16);
         const bool okay = pico_page::platform::present(
             app.canvas().data(), app.canvas().pixels().size(),
-            app.pending_frame()->refresh == pico_page::RefreshIntent::FullClean, error);
+            app.pending_frame()->refresh == pico_page::RefreshIntent::FullClean, error, app.pending_frame()->region);
         pico_page::console::frame_completed(*app.pending_frame(), okay);
         const auto completed = esp_timer_get_time();
         app.complete_frame(okay);

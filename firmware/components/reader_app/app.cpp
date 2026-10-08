@@ -598,6 +598,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::vector<std::size_t> prepared_image_failures;
     std::uint64_t foreground_generation = 0;
     bool content_loading = false, image_prepared = false;
+    bool inline_image_pending = false, body_images_pending = false;
     std::string prepared_image_error;
     void abandon_content() {
         cancel_covers();
@@ -605,6 +606,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (foreground_job) foreground_job->cancel();
         pending_content.reset();
         content_loading = image_prepared = false;
+        inline_image_pending = false;
         prepared_image.reset();
         prepared_image_failures.clear();
     }
@@ -689,6 +691,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         body_canvas = canvas;
         body_spec = layout(settings, link_return ? 144 : 64);
         body_links = links;
+        abandon_content();
         release_counting(); clear_prefetch();
         ContentJob::Request request;
         request.kind = ContentJob::Kind::ImageViewer;
@@ -700,13 +703,14 @@ struct ReaderApp::Impl final : DisplayBackend {
         pending_content = std::move(request);
         loading("正在查看图片…");
     }
-    bool begin_image(std::size_t start, const graphics::Page& planned, bool preview = false) {
+    bool begin_image(std::size_t start, const graphics::Page& planned, bool preview = false, bool progressive = false) {
         abandon_content();
         release_counting();
         ContentJob::Request request;
         request.kind = ContentJob::Kind::Image;
         request.root = root; request.path = root + "/" + book_path; request.identity = document.metadata();
         request.preview = preview;
+        request.progressive = progressive;
         request.layout = preview ? layout(draft, 64, preview_bottom) : layout(settings, link_return ? 144 : 64);
         request.page = planned;
         request.image_resource = planned.images.front().resource;
@@ -716,6 +720,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         request.part = chapter.part; request.offset = start;
         pending_content = std::move(request);
         clear_prefetch(); covers.clear();
+        if (progressive) { inline_image_pending = true; return true; }
         // The typography panel draws the preview status itself.
         if (preview) { content_loading = true; view = View::Loading; return true; }
         loading("正在准备图片…");
@@ -778,8 +783,47 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!document.chapter_index_for(anchor.resource, index)) { error("目标位置不在正文中"); return false; }
         return begin_chapter(index, 0, ContentJob::Target::Anchor, 0, anchor);
     }
-    void poll_content() {
-        if (foreground_job && (!content_loading || foreground_job->request.generation != foreground_generation)) {
+    /** Applies only image pixels; text, footer, anchor and reading revision stay owned by the visible page. */
+    void complete_inline_image(const ContentJob& job) {
+        const StageTimer timer{"image_patch", 0};
+        const auto& request = job.request;
+        inline_image_pending = false;
+        if (view != View::Reading || image_viewing || request.generation != foreground_generation ||
+            request.identity.book_id != document.metadata().book_id || request.chapter != chapter_index ||
+            request.part != chapter.part || request.offset != page.start ||
+            !same_layout(request.layout, layout(settings, link_return ? 144 : 64))) return;
+        body_images_pending = false;
+        RefreshRegion region{684, 1216, 0, 0};
+        int right = 0, bottom = 0;
+        for (const auto& box : request.page.images) {
+            const bool failed = !job.result.image || !job.result.error.empty() ||
+                std::find(job.result.failed_images.begin(), job.result.failed_images.end(), box.begin) != job.result.failed_images.end();
+            if (failed) {
+                canvas.fill_rect(box.x, box.y, box.width, box.height, 15);
+                draw_image_error(box);
+            } else {
+                // Preserve neighboring nibbles at odd edges; the interior is a packed row copy.
+                const int left = (box.x + 1) & ~1;
+                const int end = box.x + box.width;
+                const int last = end & ~1;
+                for (int y = box.y; y < box.y + box.height; ++y) {
+                    if (box.x & 1) canvas.pixel(box.x, y, job.result.image->pixel(box.x, y));
+                    if (last > left) std::memcpy(canvas.data() + y * canvas.stride() + left / 2,
+                        job.result.image->data() + y * job.result.image->stride() + left / 2, (last - left) / 2);
+                    if (end & 1) canvas.pixel(end - 1, y, job.result.image->pixel(end - 1, y));
+                }
+            }
+            region.x = std::min(region.x, box.x); region.y = std::min(region.y, box.y);
+            right = std::max(right, box.x + box.width); bottom = std::max(bottom, box.y + box.height);
+        }
+        if (body_canvas) *body_canvas = canvas;
+        region.width = right - region.x; region.height = bottom - region.y;
+        if (region.width > 0 && region.height > 0)
+            display.present({{"ui", 0, 0, ++ui_sequence}, {}, FramePurpose::Overlay, RefreshIntent::Content, region});
+    }
+    void poll_content(bool allow_inline = true) {
+        if (inline_image_pending && (view != View::Reading || image_viewing)) abandon_content();
+        if (foreground_job && ((!content_loading && !inline_image_pending) || foreground_job->request.generation != foreground_generation)) {
             if (foreground_job->started() && !foreground_job->done()) return;
             foreground_job.reset();
         }
@@ -788,8 +832,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             pending_content.reset();
         }
         if (!foreground_job) return;
+        if (foreground_job->request.progressive && !allow_inline) return;
         if (!foreground_job->started()) {
-            if (!content_loading) { foreground_job.reset(); return; }
+            if (!content_loading && !inline_image_pending) { foreground_job.reset(); return; }
             if (display.busy() || counting_job || raster_job || save_job || cover_job) return;
             if (foreground_job->request.kind == ContentJob::Kind::Open && session.needs_save()) {
                 if (save_failed) { foreground_job.reset(); content_loading = false; error(kSaveFailed); }
@@ -797,6 +842,10 @@ struct ReaderApp::Impl final : DisplayBackend {
                 return;
             }
             if (!foreground_job->start()) {
+                if (foreground_job->request.progressive) {
+                    foreground_job->result.error = "Image worker unavailable";
+                    complete_inline_image(*foreground_job); foreground_job.reset(); return;
+                }
                 foreground_job.reset(); content_loading = false;
                 error("内容任务无法启动，请返回后重试。");
             }
@@ -805,7 +854,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!foreground_job->done() || display.busy()) return;
         auto job = std::move(foreground_job);
         const auto& request = job->request;
-        if (!content_loading || request.generation != foreground_generation) return;
+        if ((!content_loading && !inline_image_pending) || request.generation != foreground_generation) return;
+        if (request.progressive) { complete_inline_image(*job); return; }
         if (request.kind == ContentJob::Kind::ImageViewer) {
             content_loading = false;
             if (request.chapter != chapter_index || request.part != chapter.part || !body_canvas) return;
@@ -2441,7 +2491,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         center("图片无法显示", box.x + 8, box.y + box.height / 2 - 36, box.width - 16, 28);
         center("图片缺失、损坏或内存不足", box.x + 8, box.y + box.height / 2 + 16, box.width - 16, 22, 3);
     }
-    bool draw_page_content(const graphics::Page& planned, const graphics::LayoutSpec& spec) {
+    bool draw_page_content(const graphics::Page& planned, const graphics::LayoutSpec& spec, bool progressive = false) {
         const StageTimer timer{"page_draw"};
         if (!planned.images.empty()) {
             if (image_prepared) {
@@ -2450,6 +2500,14 @@ struct ReaderApp::Impl final : DisplayBackend {
                     if (!prepared_image || !prepared_image_error.empty() ||
                         std::find(prepared_image_failures.begin(), prepared_image_failures.end(), box.begin) != prepared_image_failures.end())
                         draw_image_error(box);
+                return graphics::render_page(canvas, body, planned);
+            }
+            if (async_content && progressive) {
+                body_images_pending = true;
+                for (const auto& box : planned.images) {
+                    outline(box.x, box.y + 12, box.width, box.height - 24, 2);
+                    center("正在准备图片…", box.x + 8, box.y + box.height / 2 - 14, box.width - 16, 24, 3);
+                }
                 return graphics::render_page(canvas, body, planned);
             }
             const bool cacheable = planned.images.size() == 1 && planned.glyphs.empty() &&
@@ -2515,6 +2573,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (missing) message = kMissingNotice;
         else if (message == kMissingNotice) message.clear();
         canvas.clear();
+        body_images_pending = false;
         if (bitmap) {
             canvas = std::move(*bitmap);
             for (const auto& box : candidate.images)
@@ -2526,7 +2585,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
             ++bitmap_hits;
         }
-        else if (!draw_page_content(candidate, spec)) {
+        else if (!draw_page_content(candidate, spec, true)) {
             error("正文绘制失败。" + reason(body.error()) + "。");
             return false;
         }
@@ -2569,22 +2628,15 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto spec = layout(settings, link_return ? 144 : 64);
         const bool reused = body_canvas && start == page.start && same_layout(body_spec, spec);
         const bool hit = !next_chapter && next_page && next_bitmap && next_page->start == readable_offset(start) && same_layout(next_spec, spec);
-        const bool loading = async_content && !image_prepared && !reused && !hit &&
-                             std::any_of(chapter.images.begin(), chapter.images.end(),
-                                 [start](const DocumentImage& image) { return image.end > start; });
-        const StageTimer timer{loading ? "body_request_loading" : hit ? "body_prepare_hit" : reused ? "body_prepare_reuse" : "body_prepare_miss", 0};
+        const StageTimer timer{hit ? "body_prepare_hit" : reused ? "body_prepare_reuse" : "body_prepare_miss", 0};
         if (display.busy())
             return false;
         load_fonts();
         poll_raster();
-        if (async_content && !image_prepared) {
-            const auto spec = layout(settings, link_return ? 144 : 64);
-            const bool retained = body_canvas && start == page.start && same_layout(body_spec, spec);
-            const bool prefetched = !next_chapter && next_page && next_bitmap && next_page->start == readable_offset(start) && same_layout(next_spec, spec);
-            if (!retained && !prefetched) {
-                const auto planned = plan_page(start, spec);
-                if (planned.error.empty() && !planned.images.empty()) return begin_image(start, planned);
-            }
+        if (inline_image_pending) {
+            const auto& request = pending_content ? *pending_content : foreground_job->request;
+            if (request.offset != readable_offset(start) || request.chapter != chapter_index ||
+                request.part != chapter.part || !same_layout(request.layout, spec)) abandon_content();
         }
         if (!render_body(start))
             return false;
@@ -2605,6 +2657,8 @@ struct ReaderApp::Impl final : DisplayBackend {
                         : RefreshIntent::Content);
         if (!session.layout_ready(token))
             return false;
+        if (async_content && body_images_pending && !inline_image_pending)
+            begin_image(page.start, page, false, true);
         return true;
     }
     /** Records only successfully presented body pages; at most 64 recent spans are retained. */
@@ -4778,6 +4832,7 @@ void ReaderApp::Impl::apply_typography() {
     load_fonts();
     clear_page_history();
     reset_pages();
+    abandon_content();
     session.change_layout();
     show_page(offset);
 }
@@ -4870,7 +4925,8 @@ void ReaderApp::complete_frame(bool success) {
             impl_->draw_usb(); impl_->overlay(true);
         } else if (impl_->view == View::PowerMenu && impl_->power_return_canvas) {
             impl_->close_power_menu();
-        } else impl_->error("屏幕更新失败，当前页未保存。返回将恢复已确认位置。");
+        } else if (frame.region) impl_->error("图片更新失败。返回将恢复已确认位置。");
+        else impl_->error("屏幕更新失败，当前页未保存。返回将恢复已确认位置。");
     }
 }
 View ReaderApp::view() const {
@@ -5134,6 +5190,7 @@ bool ReaderApp::background_due() const {
     return !!impl_->cover_job || impl_->pending_covers.has_value() || !!impl_->raster_job || impl_->prefetch_due() || impl_->counting_due();
 }
 const char *ReaderApp::background_state() const {
+    if (impl_->inline_image_pending) return "image";
     if (impl_->content_loading) {
         const auto kind = impl_->pending_content ? impl_->pending_content->kind : impl_->foreground_job->request.kind;
         return kind == ContentJob::Kind::Open ? "opening" : kind == ContentJob::Kind::Inspect ? "details" :
@@ -5166,7 +5223,13 @@ void ReaderApp::poll_background(bool cancel) {
     if (impl_->save_error_pending && impl_->view != View::PowerMenu && !impl_->display.busy() && !impl_->content_loading) {
         impl_->save_error_pending = false; impl_->error(impl_->message);
     }
-    if (!cancel || !impl_->content_loading) impl_->poll_content();
+    if (!cancel || !impl_->content_loading) impl_->poll_content(!cancel);
+    // Returning from a panel or viewer may restore a page whose image request was cancelled.
+    if (!cancel && impl_->async_content && impl_->body_images_pending && !impl_->inline_image_pending &&
+        !impl_->content_loading && !impl_->foreground_job && !impl_->pending_content &&
+        impl_->view == View::Reading && !impl_->image_viewing && !impl_->display.busy() &&
+        impl_->has_book() && impl_->card_available && !impl_->usb_prepared && !impl_->page.images.empty())
+        impl_->begin_image(impl_->page.start, impl_->page, false, true);
 }
 void ReaderApp::background_step(const std::function<bool()>& stop) {
     if (impl_->view == View::PowerOff) return;

@@ -43,6 +43,7 @@ bool Display::present(Frame frame) {
     if (!baseline_valid_ || frame.purpose == FramePurpose::ManualRefresh) {
         frame.refresh = RefreshIntent::FullClean;
     }
+    if (frame.refresh == RefreshIntent::FullClean) frame.region.reset();
     in_flight_ = std::move(frame);
     if (!backend_.start(*in_flight_)) {
         in_flight_.reset();
