@@ -460,7 +460,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         view = View::PowerOff;
         message = detail;
         hits.clear(); canvas.clear(); header("电源", 0);
-        text(manual ? "请手动关机" : power_selected == PowerAction::Restart ? "正在重启" : "正在关机",
+        text(manual ? "请手动关机" : power_selected == PowerAction::Restart ? "正在重启" : "已关机",
              36, 240, 40, 612, 1, true);
         wrapped(detail, 36, 360, 612, 28);
     }
