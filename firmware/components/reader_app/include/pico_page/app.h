@@ -25,6 +25,7 @@ enum class View {
     RefreshConfirm,
     RefreshInterval,
     BookDetails,
+    WifiSettings,
     PowerSettings,
     StorageSettings,
     InputSettings,
@@ -33,7 +34,8 @@ enum class View {
     Portal,
     Loading,
     PowerMenu,
-    PowerOff
+    PowerOff,
+    NetworkClosing
 };
 enum class PowerAction { None, Shutdown, Restart };
 struct PowerRequest { PowerAction action = PowerAction::None; bool without_save = false; };
@@ -53,6 +55,8 @@ struct PortalStatus {
     /** Upload sessions: books saved so far and the title of the latest one. */
     int saved_books = 0;
     std::string latest_book;
+    /** Nonzero request/session generation; stale events are ignored. */
+    std::uint64_t generation = 0;
 };
 struct BookPages {
     std::uint32_t page;   // 1-based, counted from the first linear chapter.
@@ -100,7 +104,7 @@ class ReaderApp {
     /** Drops all verified identities before storage can change outside this application. */
     void invalidate_identity_cache();
     bool initialize();
-    /** Accepts an open request; asynchronous content finishes through poll_background and body presentation. */
+    /** Refuses while a network worker owns the card; asynchronous content completes through polling/presentation. */
     bool open_book(const std::string &relative_path);
     /** Updates the latest battery reading for the next render; nullopt means unknown. */
     void set_battery(std::optional<int> percent);
@@ -118,6 +122,10 @@ class ReaderApp {
     bool fast_page_updates() const;
     /** Idle minutes before sleep from the global settings loaded at start or book open; 0 disables. */
     int auto_sleep_minutes() const;
+    /** Reloads global settings when idle; uses the admitted state while a network worker owns the card. */
+    bool wifi_enabled() const;
+    /** Requests cancellation on the application owner task without waiting for the worker. */
+    void stop_wifi();
     /** Consumes one explicit UI request; the main loop arbitrates device ownership. */
     UsbTransferAction take_usb_transfer_action();
     /** Saves confirmed progress and releases card files; false forbids USB handoff. */
@@ -126,6 +134,8 @@ class ReaderApp {
     void show_usb_transfer(bool active, const std::string& error);
     /** Consumes one explicit UI request; the main loop owns the radio and the setup page server. */
     PortalAction take_portal_action();
+    /** Generation attached to worker status and completion for the current portal request. */
+    std::uint64_t portal_generation() const;
     /**
      * Saves confirmed progress, ends sync work and shows the starting state of a phone setup
      * session, or of book upload when upload is true; station selects upload over a saved
@@ -134,7 +144,9 @@ class ReaderApp {
      */
     bool prepare_portal(bool upload = false, bool station = false);
     /**
-     * Draws a session state while the setup page is shown. Closed leaves that page, or the page
+     * Draws a state tagged with the request generation. Closed confirms that the worker has
+     * stopped accessing the card and radio; only then can the requested next page read settings.
+     * Closed leaves that page, or the page
      * that requested the session, for settings or the refreshed library after upload. An upload
      * session that closes before its first Waiting state returns to the network page with the
      * closing sentence.
@@ -197,7 +209,7 @@ class ReaderApp {
     void show_error(const std::string &message);
     /** Copies one queued request for an external worker; never call from that worker. */
     std::optional<NetworkOperation> take_network_request();
-    /** Marshal worker completion to the application task; old IDs are discarded. */
+    /** Marshal completion after worker resource release; matching cancelled work unlocks deferred navigation, old IDs are discarded. */
     void complete_network(std::uint64_t id, int status, const std::string &body,
                           const std::string &error);
 

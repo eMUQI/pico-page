@@ -64,10 +64,11 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
         return false;
     }
     if (!(book ? allowed_fields(table, {"schema_version", "reader", "display"}, "", diagnostic)
-               : allowed_fields(table, {"schema_version", "reader", "display", "library", "power"}, "", diagnostic)) ||
+               : allowed_fields(table, {"schema_version", "reader", "display", "library", "power", "network"}, "", diagnostic)) ||
         !allowed_fields(toml_get(table, "reader"), {"font", "font_size_px", "line_height", "margin_x_px", "paragraph_gap_lines", "indent_chars"}, "reader", diagnostic) ||
         !allowed_fields(toml_get(table, "display"), {"refresh_preset", "balanced_full_refresh_pages", "fast_full_refresh_pages"}, "display", diagnostic) ||
         !allowed_fields(toml_get(table, "library"), {"roots", "view"}, "library", diagnostic) ||
+        !allowed_fields(toml_get(table, "network"), {"wifi_enabled"}, "network", diagnostic) ||
         !allowed_fields(toml_get(table, "power"), {"auto_sleep_minutes", "sleep_screen"}, "power", diagnostic)) return false;
 
     auto value = toml_seek(table, "reader.font");
@@ -116,6 +117,13 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
         if (value.type != TOML_INT64 || value.u.int64 < 1 || value.u.int64 > 30) return false;
         (std::strcmp(field, "display.fast_full_refresh_pages") == 0 ? settings.fast_full_refresh_pages
                                                                  : settings.balanced_full_refresh_pages) = static_cast<int>(value.u.int64);
+    }
+    value = toml_seek(table, "network.wifi_enabled");
+    if (value.type != TOML_UNKNOWN) {
+        diagnostic.field = "network.wifi_enabled";
+        diagnostic.detail = "expected a boolean";
+        if (value.type != TOML_BOOLEAN) return false;
+        settings.wifi_enabled = value.u.boolean;
     }
     value = toml_seek(table, "power.sleep_screen");
     if (value.type != TOML_UNKNOWN) {
@@ -202,7 +210,7 @@ std::string number(double value) {
 }
 
 using SettingValues = std::vector<std::pair<std::string, std::string>>;
-/** Fields of one layer in a fixed order; the global layer adds the library view and power values. */
+/** Fields of one layer in a fixed order; the global layer adds library, power and network values. */
 SettingValues setting_values(const ReaderSettings& values, bool global = false) {
     SettingValues fields = {{"reader.font", quoted(values.font)},
             {"reader.font_size_px", std::to_string(values.font_size_px)},
@@ -214,6 +222,7 @@ SettingValues setting_values(const ReaderSettings& values, bool global = false) 
             {"display.balanced_full_refresh_pages", std::to_string(values.balanced_full_refresh_pages)},
             {"display.fast_full_refresh_pages", std::to_string(values.fast_full_refresh_pages)}};
     if (global) {
+        fields.emplace_back("network.wifi_enabled", values.wifi_enabled ? "true" : "false");
         fields.emplace_back("library.view", quoted(values.library_view));
         fields.emplace_back("power.auto_sleep_minutes", std::to_string(values.auto_sleep_minutes));
         fields.emplace_back("power.sleep_screen", quoted(values.sleep_screen));
@@ -367,8 +376,9 @@ StoreStatus save_settings(const std::string& root, const SettingsSnapshot& snaps
     }
     if (values.library_roots != effective.library_roots ||
         (book_only && (values.library_view != effective.library_view ||
+                       values.wifi_enabled != effective.wifi_enabled ||
                        values.auto_sleep_minutes != effective.auto_sleep_minutes || values.sleep_screen != effective.sleep_screen))) {
-        error = "library.roots is read-only; library.view and power fields are global only";
+        error = "library.roots is read-only; library.view, power and network fields are global only";
         return StoreStatus::Invalid;
     }
     const auto desired = setting_values(values, !book_only);

@@ -21,6 +21,10 @@ refresh_preset = "balanced"
 balanced_full_refresh_pages = 8
 fast_full_refresh_pages = 5
 
+[network]
+# Disables sync, phone setup and both Wi-Fi upload paths; retains saved networks/accounts.
+wifi_enabled = true
+
 [power]
 # Minutes without input before the device sleeps; 0 disables idle sleep. Range 0..240.
 auto_sleep_minutes = 10

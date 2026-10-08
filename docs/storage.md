@@ -145,6 +145,9 @@ UTF-8 TOML 用于常改设置；JSON 用于机器维护的结构化状态。格�
 示例见 [examples/sdcard/PicoPage/settings.toml](../examples/sdcard/PicoPage/settings.toml)。
 示例不包含真实字体文件。
 
+全局 Wi-Fi 开关使用 `[network]` 下的 `wifi_enabled = true`，默认开启，只允许布尔值。
+该项不允许单书覆盖；界面修改沿用保注释、比较原文和验证提交流程，不改 `network.toml` 或 `sync.toml`。
+
 ### 读写要求
 
 界面和外部编辑都使用同一文件，不另有 NVS 配置在重启/休眠时覆写。

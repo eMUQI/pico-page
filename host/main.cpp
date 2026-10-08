@@ -185,13 +185,13 @@ struct Host {
         if (action == PortalAction::Start || action == PortalAction::Upload || action == PortalAction::UploadStation) {
             const bool upload = action != PortalAction::Start, station = action == PortalAction::UploadStation;
             if (!app.prepare_portal(upload, station))
-                app.show_portal({PortalPhase::Closed, "", "", "", "无法开启手机配置，请稍后重试。", "", 0, ""});
+                app.show_portal({PortalPhase::Closed, "", "", "", "无法开启手机配置，请稍后重试。", "", 0, "", app.portal_generation()});
             else if (flush() && station)
-                app.show_portal({PortalPhase::Waiting, "", "", "http://192.168.1.23/preview", "", "home-preview", 0, ""});
+                app.show_portal({PortalPhase::Waiting, "", "", "http://192.168.1.23/preview", "", "home-preview", 0, "", app.portal_generation()});
             else if (flush())
-                app.show_portal({PortalPhase::Waiting, "PicoPage-PREVIEW", "preview0", "http://192.168.4.1", "", "", 0, ""});
+                app.show_portal({PortalPhase::Waiting, "PicoPage-PREVIEW", "preview0", "http://192.168.4.1", "", "", 0, "", app.portal_generation()});
         } else if (action == PortalAction::Stop)
-            app.show_portal({PortalPhase::Closed, "", "", "", "桌面预览不提供设备热点。", "", 0, ""});
+            app.show_portal({PortalPhase::Closed, "", "", "", "桌面预览不提供设备热点。", "", 0, "", app.portal_generation()});
         return flush();
     }
     bool gesture(Input key, bool touch = false, int x = 0, int y = 0, bool hold = false) {

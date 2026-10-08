@@ -112,6 +112,8 @@ enum Control {
     WifiUpload,
     WifiUploadStation,
     PortalStop,
+    WifiSettings,
+    WifiToggle,
     SyncCancel,
     Retry,
     PowerMenu,
@@ -430,6 +432,9 @@ struct ReaderApp::Impl final : DisplayBackend {
     PortalAction portal_action = PortalAction::None;
     PortalStatus portal;
     bool portal_closing = false;
+    bool portal_live = false, portal_requested = false, portal_open_wifi = false;
+    std::uint64_t portal_generation = 0;
+    View portal_request_view = View::Import;
     bool portal_upload = false;
     // The upload session runs over a saved network rather than the device access point.
     bool portal_station = false;
@@ -449,6 +454,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         badge_configured = sync::load_config(root, badge_config, detail);
     }
     std::uint64_t network_sequence = 0, active_network = 0;
+    // Dispatch grants the worker card access until its matching completion is received.
+    std::uint64_t network_worker_id = 0;
+    int network_after_cancel = 0;
+    View network_return_view = View::Sync;
     bool sync_checked = false, uploading = false;
     std::string sync_status;
     std::vector<Entry> entries;
@@ -3059,6 +3068,25 @@ struct ReaderApp::Impl final : DisplayBackend {
         canvas.line(24, y + 131, 660, y + 131, 12, 2);
         hits.push_back({24, y, 636, 132, id});
     }
+    bool wifi_enabled() const {
+        // The radio session exclusively owns card access until its completion arrives.
+        if (portal_live || network_worker_id) return true;
+        const auto cfg = store.load_settings();
+        return cfg.diagnostics.empty() && cfg.settings.wifi_enabled;
+    }
+    void wifi_link(int y) {
+        text(wifi_enabled() ? "Wi-Fi 开关 ›" : "Wi-Fi 已关闭 ›", 432, y, 24, 216);
+        hits.push_back({420, y - 12, 240, 52, WifiSettings});
+    }
+    void draw_wifi() {
+        view = View::WifiSettings;
+        hits.clear(); canvas.clear(); header("Wi-Fi 开关", Back, "设置");
+        const auto cfg = store.load_settings();
+        value_row(WifiToggle, "Wi-Fi", "同步、传书和手机配置", wifi_enabled() ? "开启" : "关闭", 144);
+        wrapped("关闭后保留已保存的网络和同步账户。正在进行的网络任务会先结束，再释放 Wi-Fi。", 36, 300, 612, 26);
+        wrapped("已发出的上传取消后，远端仍可能已更新；下次同步需重新检查。", 36, 440, 612, 24);
+        footer_bar(cfg.diagnostics.empty() ? notice() : "设置文件无效，请检查 PicoPage/settings.toml。");
+    }
     void draw_settings() {
         view = View::Settings;
         hits.clear(); canvas.clear(); header("设置", Back, "书库");
@@ -3073,7 +3101,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         const bool readable = provision::load_networks(root, networks, detail);
         const auto *last = provision::last_network(networks);
         settings_row(Import, "网络与传输", std::string("Wi-Fi：") +
-                     (!readable ? "文件无效" : last ? last->ssid : "未配置") + " · USB 文件传输", 120);
+                     (!cfg.diagnostics.empty() ? "已关闭（设置无效）" : !values.wifi_enabled ? "已关闭" : !readable ? "文件无效" : last ? last->ssid : "未配置") + " · USB 文件传输", 120);
         settings_row(SyncSettings, "KOReader 同步", configured ? server_name(account) + " · " + account.username : "未配置", 252);
         settings_row(Refresh, "显示与刷新", refresh_name(values) + " · " +
                      (values.refresh_preset == "clear" ? "每页全刷" : "每 " + std::to_string(refresh_interval(values)) + " 页全刷"), 384);
@@ -3218,7 +3246,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         text("同步策略", 36, 452, 22, 612, 3);
         value_row(0, "检查与上传", "在正文工具的“同步”中手动执行", "手动", 488);
         value_row(0, "书籍匹配方式", "按原书内容识别，与文件名无关", "按内容", 592);
-        value_row(PortalStart, "用手机配置", "", "", 744);
+        value_row(wifi_enabled() ? PortalStart : WifiSettings, wifi_enabled() ? "用手机配置" : "Wi-Fi 已关闭 · 前往开关", "", "", 744);
         if (has_book() && configured && !txt_name(book_path)) value_row(Sync, "检查当前书籍的同步", "", "", 848);
         else if (has_book() && txt_name(book_path)) note("TXT 仅保存本机进度；KOReader 接续仅支持 EPUB。", 890);
         else note(configured ? "打开一本书后，可在工具中检查同步。" : "配置完成前不会联网。", 890);
@@ -3456,6 +3484,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         int y = 340 + usb;
         canvas.line(36, y, 647, y, 12, 2);
         text("Wi-Fi", 36, y + 36, 24, 612, 3);
+        wifi_link(y + 36);
         y += 76;
         std::vector<provision::SavedWifi> networks;
         std::string detail;
@@ -3463,7 +3492,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         sync::Config account;
         const bool synced = sync::load_config(root, account, detail);
         const bool configured = readable && !networks.empty();
-        if (configured) {
+        if (!wifi_enabled()) {
+            wrapped("Wi-Fi 已关闭。请先开启 Wi-Fi，再同步、传书或用手机配置。", 36, y + 20, 612, 28);
+            button(WifiSettings, "前往 Wi-Fi 开关", 24, y + 156, 636, 96);
+        } else if (configured) {
             entry_row(PortalStart, "Wi-Fi 与同步账户",
                       "已保存 " + std::to_string(networks.size()) + " 个网络 · " +
                           (synced ? "同步账户 " + account.username : std::string("未配置同步账户")),
@@ -3501,7 +3533,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         view = View::Portal;
         hits.clear();
         canvas.clear();
-        header(portal_upload ? "Wi-Fi 传书" : "手机配置", 0);
+        header(portal_upload ? "Wi-Fi 传书" : "手机配置", 0, "", 420);
+        if (!portal_closing) wifi_link(44);
         const auto scheme = portal.url.find("://");
         const auto address = scheme == std::string::npos ? portal.url : portal.url.substr(scheme + 3);
         if (portal.url.empty()) {
@@ -3554,7 +3587,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 }
                 if (portal_closing) { title = "正在结束…"; body.clear(); }
                 text(title, 36, 844, 28, 612, 1, true);
-                wrapped(body, 36, 904, 612, 24);
+                title_lines(body, 36, 904, 612, 24, false, 4);
             }
         }
         if (!portal_closing) button(PortalStop, portal_upload ? "结束传书" : "结束配置", 24, 1080, 636, 96);
@@ -3606,6 +3639,18 @@ struct ReaderApp::Impl final : DisplayBackend {
         server_state = "—"; remote_state = "未检查";
         sync_status = sent ? "已取消。已发出的上传仍可能生效，请重新检查远端。" : "已取消。本机位置没有改动。";
     }
+    void draw_network_closing() {
+        view = View::NetworkClosing;
+        hits.clear(); canvas.clear(); header("阅读同步", 0);
+        note("正在结束同步…", 246);
+        wrapped("请稍候，网络任务结束后再继续操作。已发出的上传仍可能生效，下次同步需重新检查远端。", 36, 336, 612, 26);
+    }
+    void wait_network(int next_control) {
+        network_after_cancel = next_control;
+        network_return_view = view;
+        sync_cancelled(uploading);
+        draw_network_closing(); overlay();
+    }
     void draw_sync() {
         view = View::Sync;
         if (!has_book()) {
@@ -3616,6 +3661,12 @@ struct ReaderApp::Impl final : DisplayBackend {
             hits.clear(); canvas.clear(); header("阅读同步", Back, "正文");
             wrapped("TXT 阅读位置保存在本机 TF 卡。KOReader 双向位置接续仅支持 EPUB。", 36, 266, 612, 28);
             button(Back, "继续阅读", 24, 1080, 636, 96, true);
+            return;
+        }
+        if (!wifi_enabled()) {
+            hits.clear(); canvas.clear(); header("阅读同步", Back, "正文");
+            note("Wi-Fi 已关闭", 246);
+            button(WifiSettings, "前往 Wi-Fi 开关", 24, 380, 636, 96);
             return;
         }
         // content_loading here means that a position is being mapped for this panel.
@@ -3689,6 +3740,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     void check_sync() {
         if (txt_name(book_path)) { draw_sync(); return; }
         cancel_sync();
+        if (!wifi_enabled()) { draw_sync(); overlay(); return; }
         server_state = "检查中"; remote_state = "检查中";
         std::string detail;
         refresh_badge_config();
@@ -3797,6 +3849,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         send_upload(record, xpointer, percent);
     }
     void send_upload(const ReadingRecord& record, const std::string& xpointer, double percent) {
+        if (!wifi_enabled()) { cancel_sync(); draw_sync(); overlay(); return; }
         std::string detail;
         sync::HttpRequest request;
         if (!sync::put_request(sync_config, document.metadata().partial_md5, xpointer, percent,
@@ -3967,6 +4020,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!display.busy()) overlay();
     }
     void back() {
+        if (view == View::NetworkClosing) return;
+        if (network_worker_id) { wait_network(Back); return; }
         if (view == View::PowerMenu) { close_power_menu(); return; }
         if (view == View::Portal) return;
         if (view == View::BookManagement) { draw_details(); overlay(); return; }
@@ -3977,7 +4032,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (view == View::RefreshConfirm || view == View::RefreshInterval) {
             draw_refresh(); overlay(); return;
         }
-        if (view == View::PowerSettings || view == View::StorageSettings || view == View::InputSettings ||
+        if (view == View::WifiSettings || view == View::PowerSettings || view == View::StorageSettings || view == View::InputSettings ||
             view == View::SyncSettings || (view == View::Import && import_from_settings) ||
             (view == View::Refresh && refresh_from_settings)) {
             draw_settings(); overlay(); return;
@@ -4031,9 +4086,21 @@ struct ReaderApp::Impl final : DisplayBackend {
         return true;
     }
     void control(int id) {
+        if (view == View::NetworkClosing) return;
+        if (network_worker_id && id != FullRefresh) { wait_network(id); return; }
         if (view == View::Sync && (id == Contents || id == Typography || id == Refresh)) cancel_sync();
         if (usb_prepared && id != UsbExit && id != UsbExitConfirm && id != UsbCancel)
             return;
+        if (id == WifiSettings) {
+            cancel_sync();
+            if (portal_live) {
+                portal_open_wifi = true;
+                portal_closing = true;
+                portal_action = PortalAction::Stop;
+                draw_portal(); overlay(); return;
+            }
+            draw_wifi(); overlay(); return;
+        }
         if (view == View::Portal) {
             if (id == PortalStop && !portal_closing) {
                 portal_action = PortalAction::Stop;
@@ -4043,6 +4110,10 @@ struct ReaderApp::Impl final : DisplayBackend {
             return;
         }
         if (id == PortalStart || id == WifiUpload || id == WifiUploadStation) {
+            if (!wifi_enabled()) { draw_wifi(); overlay(); return; }
+            ++portal_generation;
+            portal_requested = true;
+            portal_request_view = view;
             portal_action = id == WifiUpload ? PortalAction::Upload
                             : id == WifiUploadStation ? PortalAction::UploadStation : PortalAction::Start;
             return;
@@ -4355,6 +4426,21 @@ struct ReaderApp::Impl final : DisplayBackend {
             } else
                 message = "“书库默认视图”未保存，仍按原设置（" + previous + "）生效。请检查存储卡。";
             draw_input_settings();
+            break;
+        }
+        case WifiToggle: {
+            if (!begin_settings_edit(true)) return;
+            auto values = edit_snapshot.global_settings;
+            values.wifi_enabled = !values.wifi_enabled;
+            std::string detail;
+            if (store.apply_settings(edit_snapshot, values, false, detail) != StoreStatus::Ok)
+                message = "Wi-Fi 开关未保存，请检查存储卡。";
+            else {
+                settings.wifi_enabled = values.wifi_enabled;
+                if (!values.wifi_enabled) cancel_sync();
+                message = values.wifi_enabled ? "Wi-Fi 已开启，联网时临时启用。" : "Wi-Fi 已关闭。";
+            }
+            draw_wifi();
             break;
         }
         case Settings:
@@ -4696,6 +4782,7 @@ bool ReaderApp::initialize() {
     return impl_->initialize();
 }
 bool ReaderApp::open_book(const std::string &path) {
+    if (impl_->network_worker_id || impl_->portal_live) return false;
     impl_->clear_body_cache();
     impl_->clear_prefetch();
     impl_->release_counting();
@@ -4778,7 +4865,7 @@ UsbTransferAction ReaderApp::take_usb_transfer_action() {
 }
 bool ReaderApp::prepare_usb_transfer() {
     invalidate_identity_cache();
-    if (impl_->usb_prepared || impl_->display.busy() || impl_->active_network ||
+    if (impl_->network_worker_id || impl_->portal_live || impl_->usb_prepared || impl_->display.busy() || impl_->active_network ||
         !impl_->card_available || !impl_->persist()) return false;
     impl_->cancel_sync();
     impl_->save_pages();
@@ -4809,7 +4896,22 @@ void ReaderApp::show_usb_transfer(bool active, const std::string& error) {
 PortalAction ReaderApp::take_portal_action() {
     return std::exchange(impl_->portal_action, PortalAction::None);
 }
+std::uint64_t ReaderApp::portal_generation() const { return impl_->portal_generation; }
+bool ReaderApp::wifi_enabled() const { return impl_->card_available && impl_->wifi_enabled(); }
+void ReaderApp::stop_wifi() {
+    if (impl_->network_worker_id) {
+        if (impl_->view != View::NetworkClosing) impl_->wait_network(SyncCancel);
+        return;
+    }
+    impl_->cancel_sync();
+    if (impl_->view == View::Sync && !impl_->display.busy() && impl_->sync_status != "Wi-Fi 已关闭") {
+        impl_->sync_status = "Wi-Fi 已关闭";
+        impl_->draw_sync(); impl_->overlay();
+    }
+    if (impl_->view == View::Portal) impl_->portal_action = PortalAction::Stop;
+}
 bool ReaderApp::prepare_portal(bool upload, bool station) {
+    if (impl_->portal_live || impl_->network_worker_id || !wifi_enabled()) return false;
     if (impl_->content_loading || impl_->usb_prepared || impl_->display.busy() || impl_->active_network ||
         !impl_->card_available || !impl_->persist()) return false;
     impl_->cancel_sync();
@@ -4818,6 +4920,10 @@ bool ReaderApp::prepare_portal(bool upload, bool station) {
     impl_->stop_raster();
     impl_->release_counting();
     impl_->stop_counting_job();
+    if (!impl_->portal_requested) ++impl_->portal_generation;
+    impl_->portal_requested = false;
+    impl_->portal_live = true;
+    impl_->portal_open_wifi = false;
     impl_->portal_upload = upload;
     impl_->portal_station = upload && station;
     impl_->portal_started = false;
@@ -4829,10 +4935,25 @@ bool ReaderApp::prepare_portal(bool upload, bool station) {
 }
 void ReaderApp::show_portal(const PortalStatus &status) {
     if (impl_->usb_prepared || impl_->display.busy()) return;
+    if (!status.generation || status.generation != impl_->portal_generation ||
+        (!impl_->portal_live && !impl_->portal_requested)) return;
     const auto view = impl_->view;
     if (status.phase == PortalPhase::Closed) {
-        // A refused start arrives while the requesting page is still shown.
-        if (view != View::Portal && view != View::Import && view != View::SyncSettings) return;
+        const bool requested = impl_->portal_requested;
+        impl_->portal_live = impl_->portal_requested = false;
+        const bool open_wifi = std::exchange(impl_->portal_open_wifi, false);
+        if (view != View::Portal && (!requested || view != impl_->portal_request_view)) return;
+        if (open_wifi) {
+            impl_->refresh_badge_config();
+            if (impl_->portal_upload && impl_->card_available) {
+                invalidate_identity_cache(); impl_->scan_library();
+            }
+            impl_->portal = {};
+            impl_->portal_closing = false;
+            impl_->portal_upload = impl_->portal_station = impl_->portal_started = false;
+            impl_->message = status.detail;
+            impl_->draw_wifi(); impl_->overlay(); return;
+        }
         impl_->refresh_badge_config();
         impl_->portal = {};
         impl_->portal_closing = false;
@@ -4863,7 +4984,7 @@ void ReaderApp::show_portal(const PortalStatus &status) {
     impl_->overlay(codes_appear);
 }
 bool ReaderApp::show_power_menu() {
-    if (impl_->display.busy() || impl_->active_network || impl_->content_loading || impl_->foreground_job ||
+    if (impl_->network_worker_id || impl_->display.busy() || impl_->active_network || impl_->content_loading || impl_->foreground_job ||
         impl_->usb_prepared || impl_->view == View::Portal || impl_->view == View::PowerOff) return false;
     if (impl_->view == View::PowerMenu) return true;
     impl_->control(PowerMenu);
@@ -4920,7 +5041,7 @@ void ReaderApp::show_power_off_help() {
 }
 bool ReaderApp::prepare_sleep() {
     invalidate_identity_cache();
-    if (impl_->usb_prepared || impl_->view == View::Portal || impl_->view == View::PowerMenu || impl_->view == View::PowerOff) return false;
+    if (impl_->network_worker_id || impl_->portal_live || impl_->usb_prepared || impl_->view == View::Portal || impl_->view == View::PowerMenu || impl_->view == View::PowerOff) return false;
     if (impl_->display.busy() || impl_->active_network || !impl_->persist())
         return false;
     if (impl_->has_book() && !impl_->session.visible_record()) return false;
@@ -4964,13 +5085,13 @@ void ReaderApp::card_removed() {
     impl_->error("TF 卡已移除。请重新插卡并重启设备。");
 }
 bool ReaderApp::save_due() const {
-    return impl_->view != View::PowerMenu && impl_->view != View::PowerOff &&
+    return !impl_->network_worker_id && !impl_->portal_live && impl_->view != View::PowerMenu && impl_->view != View::PowerOff &&
            !impl_->usb_prepared && !impl_->display.busy() && (impl_->session.needs_save() ||
            (impl_->async_content && !impl_->recent_save_failed && impl_->session.visible_record() && impl_->last_recorded != impl_->book_path)) &&
            !impl_->save_failed && !impl_->save_job;
 }
 void ReaderApp::save_progress() {
-    if (impl_->usb_prepared || impl_->display.busy()) return;
+    if (impl_->network_worker_id || impl_->portal_live || impl_->usb_prepared || impl_->display.busy()) return;
     impl_->schedule_save();
 }
 bool ReaderApp::save_busy() const { return !!impl_->save_job; }
@@ -5034,15 +5155,32 @@ void ReaderApp::show_error(const std::string &message) {
 std::optional<NetworkOperation> ReaderApp::take_network_request() {
     if (impl_->display.busy())
         return std::nullopt;
-    if (impl_->view != View::Sync || !impl_->active_network || !impl_->network_request ||
+    if (impl_->network_worker_id || impl_->view != View::Sync || !impl_->active_network || !impl_->network_request ||
         impl_->network_request->id != impl_->active_network)
         return std::nullopt;
+    if (!wifi_enabled()) {
+        impl_->cancel_sync(); impl_->draw_sync(); impl_->overlay();
+        return std::nullopt;
+    }
+    impl_->network_worker_id = impl_->active_network;
     auto request = std::move(impl_->network_request);
     impl_->network_request.reset();
     return request;
 }
 void ReaderApp::complete_network(std::uint64_t id, int status, const std::string &body,
                                  const std::string &error) {
+    if (id == impl_->network_worker_id && id) {
+        impl_->network_worker_id = 0;
+        if (impl_->network_after_cancel) {
+            const int action = std::exchange(impl_->network_after_cancel, 0);
+            if (impl_->view == View::NetworkClosing) {
+                impl_->view = impl_->network_return_view;
+                if (action == SyncCancel) { impl_->draw_sync(); impl_->overlay(); }
+                else impl_->control(action);
+            }
+            return;
+        }
+    }
     if (!impl_->usb_prepared) impl_->network_complete(id, status, body, error);
 }
 } // namespace pico_page

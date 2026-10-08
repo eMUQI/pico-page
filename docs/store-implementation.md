@@ -44,7 +44,9 @@ JSON schema_version 为 1；`local_revision` 使用十进制字符串，避免 d
 返回文件路径、字段或解析器行号及原因，保留原文件。
 
 当前支持：`reader.font`、`font_size_px`、`line_height`、`margin_x_px`、`paragraph_gap_lines`、`indent_chars`，以及 `display.refresh_preset`。
-全局另支持 `library.roots`、`library.view` 与 `power.auto_sleep_minutes`。
+全局另支持 `library.roots`、`library.view`、`network.wifi_enabled` 与 `power.auto_sleep_minutes`。
+`network.wifi_enabled` 为布尔值，默认 `true`；单书不可覆盖。关闭后禁止同步、热点配网和两种 Wi-Fi 传书，
+保留网络及同步账户文件。配置无效时网络入口拒绝启动，修正原文件后可重试。
 `power.auto_sleep_minutes` 是无输入后自动休眠的分钟数，范围 0–240，默认 10，0 表示关闭；
 单书配置中出现 `power` 表按未知字段处理。此项只能在 TF 卡上编辑，启动或开书时读取。
 字号当前界限为 12–96 px，行高 1–3，水平边距 0–160 px；

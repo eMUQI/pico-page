@@ -272,7 +272,7 @@ bool start_hotspot(NetworkJob &job, PortalSession &session) {
     xSemaphoreTake(session.lock, portMAX_DELAY);
     session.page.nearby = nearby_wifi(scanned);
     session.page.device_name = name;
-    session.status = {pico_page::PortalPhase::Waiting, name, password, "http://192.168.4.1", "", "", 0, ""};
+    session.status = {pico_page::PortalPhase::Waiting, name, password, "http://192.168.4.1", "", "", 0, "", job.operation.id};
     xSemaphoreGive(session.lock);
     if (job.upload) {
         platform::UploadServer server;
@@ -325,7 +325,7 @@ bool start_station_upload(NetworkJob &job, PortalSession &session) {
         return false;
     }
     xSemaphoreTake(session.lock, portMAX_DELAY);
-    session.status = {pico_page::PortalPhase::Waiting, "", "", "http://" + address + "/" + code, "", joined, 0, ""};
+    session.status = {pico_page::PortalPhase::Waiting, "", "", "http://" + address + "/" + code, "", joined, 0, "", job.operation.id};
     xSemaphoreGive(session.lock);
     return true;
 }
@@ -511,6 +511,7 @@ extern "C" void app_main() {
     bool network_busy = false, sleep_requested = false, physical_suppressed = false;
     // Set while a phone setup session runs on the network worker; storing true ends it.
     std::shared_ptr<std::atomic_bool> portal_stop;
+    std::optional<pico_page::PortalStatus> deferred_portal_failure;
     std::uint64_t input_sequence = 0, physical_sequence = 0, physical_source = 0;
     pico_page::platform::ReleasedTap released_tap;
     std::int64_t last_activity = esp_timer_get_time();
@@ -594,11 +595,14 @@ extern "C" void app_main() {
             const bool station = portal_action == pico_page::PortalAction::UploadStation;
             if (portal_stop || !worker_ready || usb_mode || network_busy || sleep_requested ||
                 pico_page::console::transfer_active() || !app->prepare_portal(upload, station)) {
-                app->show_portal({pico_page::PortalPhase::Closed, "", "", "",
-                                  station ? "无法开启 Wi-Fi 传书，请稍后重试。" : "无法开启设备热点，请稍后重试。", "", 0, ""});
+                pico_page::PortalStatus refused{pico_page::PortalPhase::Closed, "", "", "",
+                    "设备正忙或无法开启网络会话，请稍后重试。", "", 0, "", app->portal_generation()};
+                if (network_busy || pico_page::console::transfer_active())
+                    deferred_portal_failure = std::move(refused);
+                else app->show_portal(refused);
             } else {
                 portal_stop = std::make_shared<std::atomic_bool>(false);
-                auto *job = new NetworkJob{{0, {}, portal_stop}, card ? card : "/sdcard", {}, {}, 0, true, writer, upload, station};
+                auto *job = new NetworkJob{{app->portal_generation(), {}, portal_stop}, card ? card : "/sdcard", {}, {}, 0, true, writer, upload, station};
                 // The request queue is empty whenever network_busy is false.
                 xQueueSend(requests, &job, portMAX_DELAY);
                 network_busy = true;
@@ -624,13 +628,19 @@ extern "C" void app_main() {
                 // States queued after the last drain belong to the session that has ended.
                 while (xQueueReceive(portal_events, &portal_status, 0) == pdTRUE)
                     delete portal_status;
-                app->show_portal({pico_page::PortalPhase::Closed, "", "", "", completed->error, "", 0, ""});
+                app->show_portal({pico_page::PortalPhase::Closed, "", "", "", completed->error, "", 0, "", completed->operation.id});
                 portal_stop.reset();
             } else
                 app->complete_network(completed->operation.id, completed->status, completed->body,
                                       completed->error);
             delete completed;
             network_busy = false;
+            present(*app);
+        }
+        if (deferred_portal_failure && !usb_mode && !network_busy &&
+            !pico_page::console::transfer_active() && !app->pending_frame()) {
+            app->show_portal(*deferred_portal_failure);
+            deferred_portal_failure.reset();
             present(*app);
         }
         if (!usb_mode && !network_busy && !pico_page::console::transfer_active()) {

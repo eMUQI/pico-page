@@ -37,6 +37,7 @@ struct ReaderSettings {
     int fast_full_refresh_pages = 5;
     std::vector<std::string> library_roots = {"Books"};
     std::string library_view = "list";
+    bool wifi_enabled = true;  // Global only; applies to station and access-point sessions.
     int auto_sleep_minutes = 10;  // Global only; 0 disables idle sleep.
     std::string sleep_screen = "cover";  // Global only: cover, reading or simple.
 };
@@ -122,7 +123,7 @@ public:
     SettingsSnapshot settings_snapshot(const std::string& book_path = "") const;
 
     /**
-     * Applies changed reader/display and global power values to one layer after comparing both
+     * Applies changed reader/display and global power/network values to one layer after comparing both
      * source snapshots. Invalid source layers or unsafe TOML edits are rejected.
      * Existing comments and untouched fields are preserved. Book changes equal
      * to global values remove the corresponding override. library.roots is

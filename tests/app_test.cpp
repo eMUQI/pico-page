@@ -3,6 +3,7 @@
 #include "pico_page/app.h"
 #include "pico_page/document.h"
 #include "pico_page/store.h"
+#include "pico_page/provision.h"
 
 #include <algorithm>
 #include <chrono>
@@ -120,6 +121,10 @@ struct Driver {
         present();
         assert(app.view() == view && app.canvas().pixels() == pixels && app.saved_record() == record);
         assert(!app.pending_frame());
+    }
+    void portal(PortalStatus status) {
+        status.generation = app.portal_generation();
+        app.show_portal(status);
     }
     void sync_view() {
         tap(342, 500); assert(app.view() == View::Tools); present();
@@ -637,6 +642,106 @@ int main(int argc, char** argv) {
     const std::string sync_config = "schema_version = 1\ndom_version = 20260812\nendpoint = \"https://example.invalid\"\nusername = \"test-user\"\nuserkey = \"test-only-placeholder\"\ndevice_id = \"app-test\"\n";
     write(card / "PicoPage/sync.toml", sync_config);
     {
+        const auto path = card / "PicoPage/settings.toml";
+        const bool existed = fs::exists(path);
+        const auto original = read(path);
+        const auto accounts = read(card / "PicoPage/sync.toml");
+        for (bool asynchronous : {false, true}) {
+            write(path, "schema_version=1\n[network]\nwifi_enabled=false # retain\n");
+            ReaderApp app(card.string(), "wifi-test", true, asynchronous); Driver driver{app};
+            assert(app.initialize()); driver.present();
+            assert(!app.wifi_enabled() && !app.prepare_portal() && !app.prepare_portal(true) && !app.prepare_portal(true, true));
+            driver.tap(600, 50); driver.present();
+            driver.tap(300, 180); driver.present(); assert(app.view() == View::Import);
+            driver.tap(520, 460); driver.present(); assert(app.view() == View::WifiSettings);
+            driver.refresh();
+            driver.tap(300, 180); driver.present(); assert(app.wifi_enabled());
+            assert(read(path).find("wifi_enabled=true # retain") != std::string::npos);
+            assert(read(card / "PicoPage/sync.toml") == accounts);
+            driver.close(); driver.present();
+            driver.tap(300, 180); driver.present();
+            // The top-right edge of the network row must not hit the switch above it.
+            driver.tap(640, 509); assert(app.take_portal_action() == PortalAction::Start);
+            assert(app.prepare_portal()); driver.present();
+            const auto admitted = read(path);
+            // While a FileImport may own the card, reads use only the admitted in-memory state.
+            write(path, "schema_version=1\n[network]\nwifi_enabled='invalid'\n");
+            std::string import_error;
+            auto in_flight = FileStore(card.string()).begin_import("Books/wifi-inflight.epub", 1, 0, import_error);
+            assert(in_flight && app.wifi_enabled() && !app.prepare_portal());
+            driver.tap(520, 44); driver.present(); assert(app.view() == View::Portal);
+            assert(app.take_portal_action() == PortalAction::Stop);
+            driver.tap(60, 50); assert(!app.pending_frame() && app.view() == View::Portal);
+            driver.refresh();
+            assert(read(path).find("'invalid'") != std::string::npos);
+            assert(in_flight->cancel(import_error) == StoreStatus::Ok);
+            in_flight.reset();
+            write(path, admitted);
+            PortalStatus old_closed{PortalPhase::Closed, "", "", "", "旧会话错误", "", 0, "", app.portal_generation()};
+            app.show_portal(old_closed); driver.present();
+            assert(app.view() == View::WifiSettings);
+            driver.close(); driver.present();
+            driver.tap(300, 180); driver.present(); assert(app.view() == View::Import);
+            app.show_portal(old_closed);
+            assert(app.view() == View::Import && !app.pending_frame());
+            driver.close(); driver.present();
+            driver.tap(300, 310); driver.present(); assert(app.view() == View::SyncSettings);
+            app.show_portal(old_closed);
+            assert(app.view() == View::SyncSettings && !app.pending_frame());
+            driver.tap(342, 800);
+            assert(app.take_portal_action() == PortalAction::Start);
+            app.show_portal(old_closed); assert(!app.pending_frame());
+            assert(app.prepare_portal()); driver.present();
+            assert(app.portal_generation() != old_closed.generation);
+            app.show_portal(old_closed);
+            old_closed.phase = PortalPhase::Waiting;
+            app.show_portal(old_closed);
+            assert(app.view() == View::Portal && !app.pending_frame());
+            driver.portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); driver.present();
+            driver.tap(300, 180); driver.present();
+            driver.tap(520, 460); driver.present();
+            driver.tap(300, 180); driver.present(); assert(!app.wifi_enabled());
+            write(path, "schema_version=1\n[network]\nwifi_enabled=true\n");
+            opened(app, "Books/book.epub"); driver.present();
+            driver.sync_view();
+            driver.tap(342, 960); driver.present();
+            write(path, "schema_version=1\n[network]\nwifi_enabled=false\n");
+            assert(!app.take_network_request()); driver.present();
+            assert(app.view() == View::Sync && !app.wifi_enabled());
+            write(path, "schema_version=1\n[network]\nwifi_enabled=true\n");
+            driver.tap(60, 50); driver.present(); driver.complete_content(); driver.sync_view();
+            const auto request = driver.check_remote();
+            write(path, "schema_version=1\n[network]\nwifi_enabled=false\n");
+            app.stop_wifi(); assert(request.cancelled->load()); driver.present();
+            const auto saved = app.saved_record();
+            assert(app.view() == View::NetworkClosing && !app.prepare_usb_transfer() && !app.prepare_portal());
+            const auto config_while_closing = read(path);
+            driver.tap(60, 50); driver.tap(520, 44); driver.tap(300, 180);
+            assert(!app.pending_frame() && read(path) == config_while_closing);
+            driver.refresh();
+            app.complete_network(request.id + 1000, 200, "{}", "");
+            assert(app.view() == View::NetworkClosing && !app.pending_frame());
+            app.complete_network(request.id, 200, "{}", ""); driver.present();
+            assert(app.view() == View::Sync && app.saved_record() == saved);
+            write(path, "schema_version=1\n[network]\nwifi_enabled='invalid'\n");
+            assert(!app.wifi_enabled() && !app.prepare_portal());
+            // The settings row must reflect the enforced state, rather than the fallback true.
+            ReaderApp summary(card.string()); Driver summary_driver{summary};
+            assert(summary.initialize()); summary_driver.present();
+            summary_driver.tap(600, 50); summary_driver.present();
+            const auto invalid_canvas = summary.canvas();
+            write(path, "schema_version=1\n[network]\nwifi_enabled=true\n");
+            summary_driver.close(); summary_driver.present();
+            summary_driver.tap(600, 50); summary_driver.present();
+            bool summary_changed = false;
+            for (int y = 190; y < 236; ++y)
+                for (int x = 36; x < 590; ++x)
+                    summary_changed |= invalid_canvas.pixel(x, y) != summary.canvas().pixel(x, y);
+            assert(summary_changed);
+        }
+        if (existed) write(path, original); else fs::remove(path);
+    }
+    {
         ReaderApp app(card.string(), "mapping-worker", true, true); Driver driver{app};
         assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
         const auto saved = *app.saved_record();
@@ -674,15 +779,19 @@ int main(int argc, char** argv) {
         assert(!app.prepare_usb_transfer());
         assert(cancelled.request.url.find("https://example.invalid/") == 0);
         driver.close(); driver.present();
-        app.complete_network(cancelled.id, 200, remote, "");
-        assert(!app.pending_frame() && !app.take_network_request() && *app.saved_record() == before);
+        assert(app.view() == View::NetworkClosing && cancelled.cancelled->load());
+        driver.refresh();
+        driver.tap(60, 50); assert(!app.pending_frame());
+        app.complete_network(cancelled.id, 200, remote, ""); driver.present();
+        assert(app.view() == View::Reading && !app.take_network_request() && *app.saved_record() == before);
 
         // Cancelling from the panel stays on it; the late response is discarded.
         driver.sync_view(); const auto stopped = driver.check_remote();
         driver.tap(342, 1075);
-        assert(app.view() == View::Sync && stopped.cancelled->load() && app.pending_frame());
+        assert(app.view() == View::NetworkClosing && stopped.cancelled->load() && app.pending_frame());
         driver.present(); assert(app.status().empty() && !app.take_network_request());
-        app.complete_network(stopped.id, 200, remote, ""); assert(!app.pending_frame());
+        app.complete_network(stopped.id, 200, remote, ""); driver.present();
+        assert(app.view() == View::Sync);
         const auto candidate = driver.check_remote();
         app.complete_network(candidate.id, 200, remote, ""); driver.present();
         auto switched_account = sync_config;
@@ -695,6 +804,9 @@ int main(int argc, char** argv) {
         write(card / "PicoPage/sync.toml", sync_config);
 
         driver.sync_view(); const auto stale = driver.check_remote();
+        assert(!app.open_book("Books/cover.epub"));
+        driver.close(); driver.present();
+        app.complete_network(stale.id, 200, remote, ""); driver.present();
         opened(app, "Books/cover.epub"); driver.present(); const auto cover = *app.saved_record();
         driver.sync_view(); const auto current = driver.check_remote();
         assert(current.id != stale.id);
@@ -712,10 +824,16 @@ int main(int argc, char** argv) {
         app.complete_network(no_record.id, 200, "{}", ""); driver.present();
         driver.tap(342, 960); driver.present(); driver.tap(500, 1120); driver.present();
         auto upload = app.take_network_request(); assert(upload && upload->request.method == "PUT");
-        driver.close(); driver.present();
+        const bool settings_existed = fs::exists(settings);
+        const auto original_settings = read(settings);
+        write(settings, "schema_version=1\n[network]\nwifi_enabled=false\n");
+        app.stop_wifi(); driver.present();
         assert(upload->cancelled->load());
-        app.complete_network(upload->id, 200, "{}", "");
-        assert(!app.pending_frame() && *app.saved_record() == sync_saved);
+        driver.tap(60, 50); assert(!app.pending_frame() && app.view() == View::NetworkClosing);
+        if (settings_existed) write(settings, original_settings); else fs::remove(settings);
+        app.complete_network(upload->id, 200, "{}", ""); driver.present();
+        assert(app.view() == View::Sync && *app.saved_record() == sync_saved);
+        driver.close(); driver.present();
         driver.sync_view(); const auto recheck = driver.check_remote();
         app.complete_network(recheck.id, 401, "{}", ""); driver.present(); driver.refresh();
         assert(!app.take_network_request() && *app.saved_record() == sync_saved);
@@ -1507,7 +1625,7 @@ int main(int argc, char** argv) {
         driver.tap(342, 510);
         assert(!app.pending_frame() && app.view() == View::Import);
         assert(app.take_portal_action() == PortalAction::Start && app.take_portal_action() == PortalAction::None);
-        app.show_portal({PortalPhase::Closed, "", "", "", "无法开启手机配置，请稍后重试。", "", 0, ""}); driver.present();
+        driver.portal({PortalPhase::Closed, "", "", "", "无法开启手机配置，请稍后重试。", "", 0, ""}); driver.present();
         assert(app.view() == View::Settings && app.status() == "无法开启手机配置，请稍后重试。");
         driver.tap(300, 310); driver.present(); assert(app.view() == View::SyncSettings && app.status().empty());
         driver.tap(342, 800);
@@ -1515,7 +1633,7 @@ int main(int argc, char** argv) {
         assert(app.prepare_portal()); driver.present(); assert(app.view() == View::Portal);
         const auto starting = app.canvas().pixels();
         PortalStatus status{PortalPhase::Waiting, "PicoPage-TEST", "abcd2345", "http://192.168.4.1", "", "", 0, ""};
-        app.show_portal(status);
+        driver.portal(status);
         assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean);
         driver.present();
         // Top-left finder modules of the access point code (version 3 at 7 px) and the address
@@ -1528,22 +1646,34 @@ int main(int argc, char** argv) {
         assert(!app.pending_frame() && app.view() == View::Portal);
         assert(app.take_portal_action() == PortalAction::None && !app.prepare_sleep());
         status.phase = PortalPhase::JoiningWifi; status.detail = "home";
-        app.show_portal(status);
+        driver.portal(status);
         assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::Content);
         driver.present();
         status.phase = PortalPhase::Failed; status.detail = "无法连接“home”（驱动原因 8）。设备没有保存这次的设置。";
-        app.show_portal(status); driver.present();
+        driver.portal(status); driver.present();
         const auto failed = app.canvas().pixels();
+        status.detail = provision::wifi_problem("12345678901234567890123456789012", provision::WifiFailure::Rejected, 201) +
+                        "设备没有保存这次的设置。";
+        driver.portal(status); driver.present();
+        assert(app.canvas().pixel(24, 980) == 15 && app.canvas().pixel(659, 1000) == 15);
+        bool third_line = false;
+        for (int y = 968; y < 1032; ++y)
+            for (int x = 36; x < 648; ++x) third_line |= app.canvas().pixel(x, y) < 15;
+        assert(third_line);
+        status.detail = std::string(300, 'x');
+        driver.portal(status); driver.present();
+        for (int y = 1048; y < 1080; ++y)
+            for (int x = 24; x < 660; ++x) assert(app.canvas().pixel(x, y) == 15);
         status.phase = PortalPhase::Saved; status.detail = "已保存 Wi-Fi “home”。";
-        app.show_portal(status); driver.present();
+        driver.portal(status); driver.present();
         assert(app.canvas().pixels() != failed && app.view() == View::Portal); driver.refresh();
         driver.tap(342, 1120);
         assert(app.take_portal_action() == PortalAction::Stop); driver.present();
         driver.tap(342, 1120);
         assert(app.take_portal_action() == PortalAction::None && !app.pending_frame());
-        app.show_portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); driver.present();
+        driver.portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); driver.present();
         assert(app.view() == View::Settings && app.status().empty());
-        app.show_portal(status);
+        driver.portal(status);
         assert(!app.pending_frame() && app.view() == View::Settings);
         // With a book open the session starts from saved progress and leaves it unchanged.
         opened(app, "Books/book.epub"); driver.present();
@@ -1551,19 +1681,19 @@ int main(int argc, char** argv) {
         assert(app.prepare_portal()); driver.present();
         assert(app.view() == View::Portal && !app.save_due());
         const auto saved = *app.saved_record();
-        app.show_portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); driver.present();
+        driver.portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); driver.present();
         assert(app.view() == View::Settings && *app.saved_record() == saved);
         driver.tap(300, 180); driver.present();
         driver.tap(342, 660);
         assert(app.take_portal_action() == PortalAction::Upload);
         assert(app.prepare_portal(true)); driver.present();
-        app.show_portal({PortalPhase::Waiting, "PicoPage-TEST", "abcd2345", "http://192.168.4.1", "", "", 0, ""});
+        driver.portal({PortalPhase::Waiting, "PicoPage-TEST", "abcd2345", "http://192.168.4.1", "", "", 0, ""});
         driver.present(); driver.refresh();
         assert(app.view() == View::Portal && *app.saved_record() == saved && !app.prepare_sleep());
         fs::copy_file(card / "Books/book.epub", card / "Books/wifi-import.epub");
         driver.tap(342, 1120);
         assert(app.take_portal_action() == PortalAction::Stop); driver.present();
-        app.show_portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); driver.present();
+        driver.portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); driver.present();
         assert(app.view() == View::Library && *app.saved_record() == saved);
         fs::remove(card / "Books/wifi-import.epub");
 
@@ -1580,7 +1710,7 @@ int main(int argc, char** argv) {
         assert(app.prepare_portal(true, true)); driver.present();
         assert(app.view() == View::Portal && !app.prepare_sleep());
         const std::string refused = "无法连接“home”，密码可能不正确（驱动原因 15）。可以改用设备热点传书。";
-        app.show_portal({PortalPhase::Closed, "", "", "", refused, "", 0, ""}); driver.present();
+        driver.portal({PortalPhase::Closed, "", "", "", refused, "", 0, ""}); driver.present();
         assert(app.view() == View::Import && app.status() == refused && *app.saved_record() == saved);
         // A started session shows one code for the joined network and the saved-book summary.
         driver.tap(342, 760);
@@ -1588,7 +1718,7 @@ int main(int argc, char** argv) {
         assert(app.prepare_portal(true, true)); driver.present();
         const auto connecting = app.canvas().pixels();
         PortalStatus station{PortalPhase::Waiting, "", "", "http://192.168.1.23/abc234", "", "home", 0, ""};
-        app.show_portal(station);
+        driver.portal(station);
         assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean);
         driver.present();
         // Top-left finder module of the version 2 address code at 11 px inside its quiet zone.
@@ -1596,7 +1726,7 @@ int main(int argc, char** argv) {
         assert(app.canvas().pixel(206, 310) == 0 && app.canvas().pixel(200, 304) == 15);
         const auto waiting = app.canvas().pixels();
         station.saved_books = 2; station.latest_book = "呼兰河传";
-        app.show_portal(station);
+        driver.portal(station);
         assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::Content);
         driver.present();
         assert(app.canvas().pixels() != waiting && app.view() == View::Portal);
@@ -1604,7 +1734,7 @@ int main(int argc, char** argv) {
         driver.key(Input::K1); driver.key(Input::K3); driver.tap(342, 500);
         assert(!app.pending_frame() && app.take_portal_action() == PortalAction::None);
         const std::string lost = "与已保存的 Wi-Fi 连接已断开。可以改用设备热点传书。";
-        app.show_portal({PortalPhase::Closed, "", "", "", lost, "", 0, ""}); driver.present();
+        driver.portal({PortalPhase::Closed, "", "", "", lost, "", 0, ""}); driver.present();
         assert(app.view() == View::Import && app.status() == lost && *app.saved_record() == saved);
         fs::remove(card / "PicoPage/network.toml");
     }
@@ -1814,7 +1944,7 @@ int main(int argc, char** argv) {
         assert(app.view() == View::Library && app.take_power_request().action == PowerAction::None);
         assert(app.prepare_portal()); driver.present();
         assert(!app.show_power_menu() && app.view() == View::Portal);
-        app.show_portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); driver.present();
+        driver.portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); driver.present();
         assert(app.prepare_usb_transfer()); app.show_usb_transfer(true, ""); driver.present();
         assert(!app.show_power_menu() && app.view() == View::UsbTransfer);
     }

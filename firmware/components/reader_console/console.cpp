@@ -96,6 +96,7 @@ void error(std::uint32_t id, const char *reason) {
 const char *view_name(View view) {
     switch (view) {
     case View::Loading: return "loading";
+    case View::NetworkClosing: return "network_closing";
     case View::Library:
         return "library";
     case View::Reading:
@@ -123,6 +124,7 @@ const char *view_name(View view) {
     case View::RefreshConfirm: return "refresh_confirm";
     case View::RefreshInterval: return "refresh_interval";
     case View::BookDetails: return "book_details";
+    case View::WifiSettings: return "wifi_settings";
     case View::PowerSettings: return "power_settings";
     case View::PowerMenu: return "power_menu";
     case View::PowerOff: return "power_off";
