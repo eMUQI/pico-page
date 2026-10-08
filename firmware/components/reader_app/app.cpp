@@ -1,5 +1,6 @@
 #include "content_cache.h"
 #include "content_job.h"
+#include "help_content.h"
 #include "pico_page/stage_timer.h"
 #include "pico_page/app.h"
 #include "pico_page/document.h"
@@ -114,6 +115,7 @@ enum Control {
     PortalStop,
     WifiSettings,
     WifiToggle,
+    Help,
     SyncCancel,
     Retry,
     PowerMenu,
@@ -381,6 +383,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         prefetch_done = true;
     }
     ReaderSettings settings, draft;
+    std::size_t help_page = 0;
     SettingsSnapshot edit_snapshot;
     View view = View::Library;
     std::optional<graphics::Canvas> power_return_canvas;
@@ -3109,8 +3112,24 @@ struct ReaderApp::Impl final : DisplayBackend {
         settings_row(PowerSettings, "电源与休眠", sleep_name(values) + " · " +
                      (values.auto_sleep_minutes ? std::to_string(values.auto_sleep_minutes) + " 分钟" : "不自动休眠"), 648);
         settings_row(StorageSettings, "存储与设备", (measured ? "可用 " + file_size(card_free) : "可用空间未知") + " · 固件 " + firmware_version(), 780);
+        entry_row(Help, "使用说明", "", "离线查看", 912, 80);
         if (session.needs_save()) button(SaveRetry, "重试保存进度", 24, 992, 636, 96);
         footer_bar(cfg.diagnostics.empty() ? notice() : "设置文件无效，请检查后重新打开。");
+    }
+    void draw_help() {
+        view = View::Help;
+        hits.clear(); canvas.clear(); header("使用说明", Back, "设置");
+        const auto& page = kHelpPages[help_page];
+        text(page.title, 36, 144, 34, 612, 1, true);
+        text("Pico Page · " + firmware_version(), 36, 204, 22, 612, 3);
+        int y = 276;
+        for (const auto& section : page.sections) {
+            text(section.title, 36, y, 28, 612, 1, true);
+            y += 48;
+            y += wrapped(section.body, 36, y, 612, 26);
+            y += 36;
+        }
+        footer_bar("", help_page, kHelpPages.size());
     }
     void draw_power() {
         view = View::PowerSettings;
@@ -4032,7 +4051,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (view == View::RefreshConfirm || view == View::RefreshInterval) {
             draw_refresh(); overlay(); return;
         }
-        if (view == View::WifiSettings || view == View::PowerSettings || view == View::StorageSettings || view == View::InputSettings ||
+        if (view == View::Help || view == View::WifiSettings || view == View::PowerSettings || view == View::StorageSettings || view == View::InputSettings ||
             view == View::SyncSettings || (view == View::Import && import_from_settings) ||
             (view == View::Refresh && refresh_from_settings)) {
             draw_settings(); overlay(); return;
@@ -4217,6 +4236,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             return;
         }
         switch (id) {
+        case Help:
+            message.clear(); help_page = 0; draw_help();
+            break;
         case LinkReturn: {
             if (!link_return)
                 return;
@@ -4502,7 +4524,12 @@ struct ReaderApp::Impl final : DisplayBackend {
             return;
         case Prev:
         case Next:
-            if (view == View::Library) {
+            if (view == View::Help) {
+                if (id == Prev && help_page) --help_page;
+                else if (id == Next && help_page + 1 < kHelpPages.size()) ++help_page;
+                else return;
+                draw_help();
+            } else if (view == View::Library) {
                 if (id == Prev && library_page)
                     --library_page;
                 else if (id == Next && (library_page + 1) * library_page_size() < entries.size())
@@ -4599,6 +4626,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         case View::Tools:
             return Context::Tools;
         case View::Contents:
+        case View::Help:
             return Context::Contents;
         case View::Typography:
             return Context::Typography;

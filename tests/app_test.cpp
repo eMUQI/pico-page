@@ -1,5 +1,6 @@
 #include "../firmware/components/reader_app/content_cache.h"
 #include "../firmware/components/reader_app/content_job.h"
+#include "../firmware/components/reader_app/help_content.h"
 #include "pico_page/app.h"
 #include "pico_page/document.h"
 #include "pico_page/store.h"
@@ -142,11 +143,72 @@ struct Driver {
     }
 };
 
+static void help_test(const fs::path& root, const fs::path& fixtures, bool async, bool with_book) {
+    ReaderApp app(root.string(), "help-test", true, async); Driver driver{app};
+    assert(app.initialize()); driver.present();
+    if (with_book) {
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
+        opened(app, "Books/book.epub"); driver.present();
+        driver.tap(342, 500); driver.present(); assert(app.view() == View::Tools);
+        driver.tap(60, 50); driver.present(); assert(app.view() == View::Library);
+    }
+    const auto saved = app.saved_record();
+    const auto progress = read(root / "Books/book.epub.picopage/progress.json");
+    const auto recent = read(root / "PicoPage/data/last-book.txt");
+    driver.tap(600, 50); driver.present(); assert(app.view() == View::Settings);
+    driver.tap(300, 948); driver.present(); assert(app.view() == View::Help);
+    const auto first = app.canvas().pixels();
+    driver.key(Input::K1); driver.tap(60, 1160); assert(!app.pending_frame());
+    graphics::Font fallback; assert(fallback.open_fallback());
+    for (std::size_t index = 0; index < kHelpPages.size(); ++index) {
+        const auto& page = kHelpPages[index];
+        for (const auto text : {page.title, page.sections[0].title, page.sections[0].body,
+                              page.sections[1].title, page.sections[1].body, page.sections[2].title, page.sections[2].body})
+            for (const auto scalar : graphics::decode_utf8(text)) assert(fallback.contains(scalar));
+        // Text must end before the pager, leaving a visible gap above its border.
+        for (int y = 1100; y < 1119; ++y)
+            for (int x = 24; x < 660; ++x)
+                if (app.canvas().pixel(x, y) != 15) {
+                    std::cerr << "Help page " << index + 1 << " overlaps the pager at " << x << ',' << y << '\n';
+                    std::abort();
+                }
+        driver.refresh();
+        const auto pixels = app.canvas().pixels();
+        driver.queued(Input::K3); driver.queued(Input::TouchCenter, true, 600, 1160);
+        assert(!app.pending_frame() && app.canvas().pixels() == pixels);
+        assert(app.saved_record() == saved && !app.take_network_request());
+        assert(app.take_portal_action() == PortalAction::None && app.take_usb_transfer_action() == UsbTransferAction::None);
+        if (index + 1 < kHelpPages.size()) {
+            if (index % 2) driver.tap(600, 1160); else driver.key(Input::K3);
+            assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Overlay);
+            driver.present(); assert(app.canvas().pixels() != pixels);
+        }
+    }
+    driver.key(Input::K3); driver.tap(600, 1160); assert(!app.pending_frame());
+    for (std::size_t index = 1; index < kHelpPages.size(); ++index) {
+        if (index % 2) driver.tap(60, 1160); else driver.key(Input::K1);
+        driver.present(); assert(app.view() == View::Help);
+    }
+    assert(app.canvas().pixels() == first && app.saved_record() == saved);
+    assert(read(root / "Books/book.epub.picopage/progress.json") == progress);
+    assert(read(root / "PicoPage/data/last-book.txt") == recent);
+    driver.key(Input::K3); driver.present();
+    driver.tap(60, 50); driver.present(); assert(app.view() == View::Settings);
+    driver.tap(300, 948); driver.present(); assert(app.canvas().pixels() == first);
+    assert(app.show_power_menu()); driver.present(); driver.tap(300, 1120); driver.present();
+    assert(app.view() == View::Help && app.canvas().pixels() == first && app.saved_record() == saved);
+    if (!with_book) assert(!fs::exists(root));
+}
+
 int main(int argc, char** argv) {
     assert(argc == 3);
     char temporary[] = "/tmp/pico-app-XXXXXX";
     const char* directory = mkdtemp(temporary); assert(directory);
     const fs::path card(directory), fixtures(argv[1]);
+    help_test(card / "HelpNoCard", fixtures, false, false);
+    help_test(card / "HelpSync", fixtures, false, true);
+    help_test(card / "HelpAsync", fixtures, true, true);
     fs::create_directories(card / "Books");
     fs::create_directories(card / "PicoPage");
     fs::copy_file(fixtures / "valid.epub", card / "Books/book.epub");

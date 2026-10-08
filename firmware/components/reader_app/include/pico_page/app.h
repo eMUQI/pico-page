@@ -35,7 +35,8 @@ enum class View {
     Loading,
     PowerMenu,
     PowerOff,
-    NetworkClosing
+    NetworkClosing,
+    Help
 };
 enum class PowerAction { None, Shutdown, Restart };
 struct PowerRequest { PowerAction action = PowerAction::None; bool without_save = false; };

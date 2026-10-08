@@ -6,7 +6,45 @@
 
 最后更新：2026-10-08。R2 Wi-Fi 开关已修复 PR #10 第二轮的 3 条评审意见：诊断导入期间延后入口失败处理、同步取消等待 worker 完成、长错误说明不再与开关重叠；host/ASan/UBSan 各 13/13、固件构建通过，未安装。PR #8 电源菜单已按用户确认简化：正常选择后直接保存本地进度并关机/重启，只有本地保存失败可返回或明确继续；收尾不再恢复现场，电源按钮滑出取消且旧触摸不穿透。host 的 13 项 CTest 和固件构建通过，未安装到设备；真机时序、重启和断电待测。此前休眠后自动唤醒的板级修正也随本次构建通过，尚未安装。传输与配网修改稿及 PR #3 的图片排版与查看功能已通过 host 和固件构建，均未安装到设备。最近一次设备烧录仍为基于 `d8ed960` 的固件，`esptool` 已验证写入摘要；本次复位后的书库画面、触摸和 TF 卡状态尚未确认。该镜像包含书库首页、锁屏返回书库及 PR #2 路径提示修正，不包含图片查看或本次传输与配网改动。此前设备诊断、TF 卡迁移、界面调整、GB18030 TXT 阅读及 USB 卷名验证记录见下文。
 各批次命令、结果及未测项分别记录；host 构建与测试不代表真机通过。
-路线图新增 R12：首次开机引导或内置使用说明，形式待实现时确定，尚未实现。
+R12 已采用内置分页使用说明：设置中固定入口，8 屏离线内容，无卡及无用户字体可查看；
+本批 host 与 ASan/UBSan 各 13/13、固件构建通过，未安装，真机及新用户操作验收待测。
+
+## 2026-10-08 · R12 内置离线使用说明（验证通过，未安装）
+
+- 基于最新主线 `24cdbad` 开发。R2 已由 PR #10 合并，R9 书签在 PR #12 开发，本批实现 R12。
+  采用“设置 → 使用说明”固定入口，不增加首次开机引导或强制配置；说明随固件维护，
+  不向用户书库写入文件。涵盖按键、触摸、全刷、书籍与字体目录、USB/Wi-Fi 传书、配网、
+  KOReader 位置接续、休眠、唤醒及已实现的关机菜单，只介绍当前功能。
+- 8 屏说明沿用现有顶栏、列表行、段落绘制及页脚。K1/K3 和触摸页脚翻屏，K2 全刷；
+  首尾不越界，旧帧输入不翻屏，左上角返回设置，再次打开从首页开始。
+  无网络、TF 卡或用户字体也可查看，不改书籍锚点、排版、进度与最近阅读文件。
+- `app_test` 在无卡、同步及固件使用的异步模式覆盖上述行为，检查全部文字在内置字体中存在，
+  以及正文末尾与翻屏页脚的间隔。电源菜单取消后仍恢复原说明画布。
+  9 张实际 host 画布截图及复现工具位于 `artifacts/help-r12-20261008/`，均已目视检查。
+- 执行上下文/资源：沿用应用任务、现有 UI 字体和有界字形缓存，不新增任务、队列、文件或后台工作。
+  仅增加一个翻屏索引；文本为固定只读数据，最长段落 87 个 Unicode 标量、217 个 UTF-8 字节。
+  每次只排版当前屏的 3 段，使用既有段落绘制的临时字符串/转码分配，
+  不扫描书库、解压原书、解码图片或等待 worker。没有增加不可取消的驱动阶段；
+  画布仍在呈现完成后才能改写。未取得真机内存峰值、最低剩余栈及交互耗时，不作性能通过结论。
+- 实际环境：Linux 云工作区 `/workspace/pico-page`，既有 host 工具链；ESP-IDF v6.1，
+  commit `fff9895c82d744c7237be8847347bdd1b07c6643`；Read Pico BSP 锁定为
+  `5f3406deec33304de8801046db583dec7c49e55b`。未更改 SDK、BSP、依赖锁或 sdkconfig。
+- 实际命令与结果：
+  - `source /workspace/cloud-tools/activate-host.sh`；`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`；
+    `cmake --build build/host --parallel 4`；`ctest --test-dir build/host -N` 注册 **13 项**，
+    `ctest --test-dir build/host --output-on-failure` **13/13 通过**。
+    日志 `/tmp/help-host-config.log`、`/tmp/help-host-build.log`、`/tmp/help-host-ctest.log`。
+  - 按 `docs/environment.md` 配置 `build/sanitized` 的 ASan/UBSan；构建及 CTest **13/13 通过**，
+    无 sanitizer 报错。最初默认沙箱的 LeakSanitizer 因无法检查线程而失败；
+    在获自动审批的进程检查环境重跑，不关闭 leak 检查，日志
+    `/tmp/help-sanitized-final-build.log`、`/tmp/help-sanitized-final-ctest.log`。
+  - `source /workspace/cloud-tools/activate-idf.sh`；原样 `sh tools/build_firmware.sh` 成功，
+    最终日志 `/tmp/help-final-firmware.log`。应用镜像 **3,293,744 字节**，4 MiB 槽剩余 **21%**；
+    SHA-256 `b67551946ada76e3bf6e7d6f64325f54a09ba93bd71bb21662b8291c4c756425`。
+  - `python3 artifacts/help-r12-20261008/render.py` 成功；`python3 tools/check_handoff.py`
+    **380 项通过**；`git diff --check` 通过。
+- 未刷写、未连接设备。实体按键/触摸、墨水屏观感、无卡启动及新用户按说明完成基本操作
+  待统一真机验收；说明不代表硬件功能已验收。按用户要求将本批改动提交 PR，下一步审阅并按 HELP01/HELP02 实测。
 
 ## 2026-10-08 · 配网 PR 整理与最新主线验证（未安装）
 
