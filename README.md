@@ -69,7 +69,7 @@ python3 tools/check_handoff.py
 - [Wi-Fi 传书](docs/wifi-transfer.md)
 - [公开 EPUB 样本与验证](docs/public-books.md) · [设备诊断接口](docs/console-runtime.md)
 - [环境记录](docs/environment.md)
-- [产品决定](docs/decisions.md) · [架构](docs/architecture.md) · [数据存储](docs/storage.md)
+- [产品决定](docs/decisions.md) · [功能路线图](docs/roadmap.md) · [架构](docs/architecture.md) · [数据存储](docs/storage.md)
 - [界面实现约束](docs/ui-implementation.md) · [验收清单](docs/acceptance.md)
 - [依赖审查](docs/dependency-review.md) · [同步范围及引擎验证](docs/sync-runtime.md)
 
