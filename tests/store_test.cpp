@@ -25,6 +25,170 @@ static std::string get(const fs::path& path) {
     return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
 }
 
+static void bookmark_tests(const fs::path& root, const FileStore& store) {
+    const std::string book = "Books/书签.epub", id = "0123456789abcdef", revision = "epub-native-v1";
+    const fs::path file = root / (book + ".picopage/bookmarks.json");
+    put(root / book, "bookmark epub");
+    auto loaded = store.load_bookmarks(book, id, revision);
+    assert(loaded.status == StoreStatus::Missing && loaded.bookmarks.empty() && loaded.next_sequence == 1);
+    assert(!fs::exists(root / (book + ".picopage")));
+
+    Bookmark first{1, {"text/c1.xhtml", "/body/p[2]/text()[1]", 7}, "第一章", "春天来了", 12, {}, {}};
+    Bookmark second{2, {"text/c3.xhtml", "/body/p[1]/text()[1]", 0}, "", "", -1, {}, {}};
+    BookmarkList committed;
+    assert(store.save_bookmarks(book, id, revision, loaded, {first, second}, 3, committed) == StoreStatus::Ok);
+    assert(committed.status == StoreStatus::Ok && committed.bookmarks.size() == 2 &&
+           committed.source && committed.source->size == get(file).size() && !committed.backup_source);
+    const auto two = get(file);
+    assert(two.find("created_at") == std::string::npos && two.find("\"next_sequence\":\t\"3\"") != std::string::npos);
+    loaded = store.load_bookmarks(book, id, revision);
+    assert(loaded.status == StoreStatus::Ok && loaded.bookmarks == committed.bookmarks && loaded.next_sequence == 3);
+
+    // Deleting keeps the sequence counter, and the replaced list becomes the backup.
+    assert(store.save_bookmarks(book, id, revision, loaded, {second}, 3, committed) == StoreStatus::Ok);
+    assert(get(file.string() + ".bak") == two && committed.backup_source && committed.backup_source->size == two.size());
+    loaded = store.load_bookmarks(book, id, revision);
+    assert(loaded.bookmarks.size() == 1 && loaded.bookmarks[0] == second && loaded.next_sequence == 3);
+
+    // Malformed input is rejected before any file changes.
+    const auto one = get(file);
+    Bookmark late = first; late.sequence = 3;
+    assert(store.save_bookmarks(book, id, revision, loaded, {late}, 3, committed) == StoreStatus::Invalid);
+    assert(store.save_bookmarks(book, id, revision, loaded, {second, first}, 3, committed) == StoreStatus::Invalid);
+    assert(store.save_bookmarks(book, id, revision, loaded, {second, second}, 3, committed) == StoreStatus::Invalid);
+    Bookmark untimed = first; untimed.created_at = "2026-10-08T12:00:00Z";
+    assert(store.save_bookmarks(book, id, revision, loaded, {untimed}, 3, committed) == StoreStatus::Invalid);
+    Bookmark control = first; control.excerpt = "line\nbreak";
+    assert(store.save_bookmarks(book, id, revision, loaded, {control}, 3, committed) == StoreStatus::Invalid);
+    std::vector<Bookmark> full;
+    for (std::uint64_t i = 1; i <= kMaxBookmarks + 1; ++i) { auto item = first; item.sequence = i; full.push_back(item); }
+    assert(store.save_bookmarks(book, id, revision, loaded, full, kMaxBookmarks + 2, committed) == StoreStatus::Invalid);
+    assert(get(file) == one);
+
+    // A trusted creation time round-trips with its source.
+    Bookmark timed = first; timed.sequence = 4; timed.created_at = "2026-10-08T12:00:00Z"; timed.time_source = "ntp";
+    assert(store.save_bookmarks(book, id, revision, loaded, {second, timed}, 5, committed) == StoreStatus::Ok);
+    loaded = store.load_bookmarks(book, id, revision);
+    assert(loaded.bookmarks.size() == 2 && loaded.bookmarks[1] == timed);
+
+    // A file changed after loading is never overwritten.
+    const auto current = get(file);
+    put(file, current + "\n");
+    assert(store.save_bookmarks(book, id, revision, loaded, {}, 5, committed) == StoreStatus::ExternalChange);
+    assert(get(file) == current + "\n");
+    loaded = store.load_bookmarks(book, id, revision);
+    assert(loaded.status == StoreStatus::Ok && loaded.bookmarks.size() == 2);
+
+    // A same-length edit is detected through the CRC.
+    put(file, current);
+    loaded = store.load_bookmarks(book, id, revision);
+    auto edited = current;
+    edited[edited.find("春天")] ^= 0x01;
+    put(file, edited);
+    assert(store.save_bookmarks(book, id, revision, loaded, {}, 5, committed) == StoreStatus::ExternalChange);
+    assert(get(file) == edited);
+    put(file, current);
+    // A changed backup is also detected.
+    const auto bak = get(file.string() + ".bak");
+    put(file.string() + ".bak", bak + " ");
+    assert(store.save_bookmarks(book, id, revision, loaded, {}, 5, committed) == StoreStatus::ExternalChange);
+    put(file.string() + ".bak", bak);
+
+    // A damaged main file is kept and blocks writing; the backup does not replace it.
+    put(file, "{damaged");
+    loaded = store.load_bookmarks(book, id, revision);
+    assert(loaded.status == StoreStatus::Invalid && loaded.bookmarks.empty());
+    assert(store.save_bookmarks(book, id, revision, loaded, {first}, 5, committed) == StoreStatus::Invalid);
+    assert(get(file) == "{damaged");
+    put(file, current);
+    assert(store.load_bookmarks(book, id, revision).status == StoreStatus::Ok);
+
+    // A missing main slot recovers its committed backup.
+    const auto backup = get(file.string() + ".bak");
+    fs::remove(file);
+    loaded = store.load_bookmarks(book, id, revision);
+    assert(loaded.status == StoreStatus::Ok && loaded.recovered_backup && !loaded.source &&
+           loaded.backup_source && loaded.backup_source->size == backup.size());
+    assert(store.save_bookmarks(book, id, revision, loaded, loaded.bookmarks, loaded.next_sequence, committed) == StoreStatus::Ok);
+    assert(get(file.string() + ".bak") == backup);
+    put(file, current);
+
+    // Without a main slot, a damaged backup also blocks changes and is never superseded.
+    const auto kept_main = get(file), kept_backup = get(file.string() + ".bak");
+    fs::remove(file);
+    put(file.string() + ".bak", "{damaged backup");
+    loaded = store.load_bookmarks(book, id, revision);
+    assert(loaded.status == StoreStatus::Invalid && !loaded.recovered_backup && loaded.bookmarks.empty());
+    assert(store.save_bookmarks(book, id, revision, loaded, {first}, 5, committed) == StoreStatus::Invalid);
+    assert(!fs::exists(file) && get(file.string() + ".bak") == "{damaged backup");
+    put(file, kept_main); put(file.string() + ".bak", kept_backup);
+
+    // A newer firmware's backup beside a valid main slot blocks changes, so it is not replaced.
+    put(file.string() + ".bak", "{\"schema_version\":2}");
+    loaded = store.load_bookmarks(book, id, revision);
+    assert(loaded.status == StoreStatus::UnsupportedVersion && loaded.bookmarks.empty());
+    assert(store.save_bookmarks(book, id, revision, loaded, {first}, 5, committed) == StoreStatus::UnsupportedVersion);
+    assert(get(file.string() + ".bak") == "{\"schema_version\":2}" && get(file) == kept_main);
+    put(file.string() + ".bak", kept_backup);
+
+    // The same holds when the main slot belongs to other content: archiving it must not expose the backup.
+    put(file.string() + ".bak", "{\"schema_version\":2}");
+    loaded = store.load_bookmarks(book, "fedcba9876543210", revision);
+    assert(loaded.status == StoreStatus::UnsupportedVersion);
+    assert(store.save_bookmarks(book, "fedcba9876543210", revision, loaded, {first}, 5, committed) == StoreStatus::UnsupportedVersion);
+    assert(get(file) == kept_main && get(file.string() + ".bak") == "{\"schema_version\":2}");
+    put(file.string() + ".bak", kept_backup);
+
+    // Literal backslash-u0000 text in an excerpt is ordinary text, not an encoded NUL.
+    loaded = store.load_bookmarks(book, id, revision);
+    Bookmark literal = first; literal.sequence = 6; literal.excerpt = "printf(\"\\u0000\") \\\\u0000";
+    assert(store.save_bookmarks(book, id, revision, loaded, {literal}, 7, committed) == StoreStatus::Ok);
+    loaded = store.load_bookmarks(book, id, revision);
+    assert(loaded.status == StoreStatus::Ok && loaded.bookmarks.size() == 1 && loaded.bookmarks[0] == literal);
+    auto escaped = get(file);
+    escaped.replace(escaped.find("printf"), 6, "\\u0000");
+    put(file, escaped);
+    assert(store.load_bookmarks(book, id, revision).status == StoreStatus::Invalid);
+    put(file, kept_main); put(file.string() + ".bak", kept_backup);
+
+    // A newer schema is neither used nor replaced.
+    put(file, "{\"schema_version\":2}");
+    loaded = store.load_bookmarks(book, id, revision);
+    assert(loaded.status == StoreStatus::UnsupportedVersion);
+    assert(store.save_bookmarks(book, id, revision, loaded, {}, 1, committed) == StoreStatus::UnsupportedVersion);
+    assert(get(file) == "{\"schema_version\":2}");
+    put(file, current);
+
+    // Bookmarks of other content are withheld, then archived without replacing older archives.
+    const std::string other = "fedcba9876543210";
+    loaded = store.load_bookmarks(book, other, revision);
+    assert(loaded.status == StoreStatus::IdentityMismatch && loaded.bookmarks.empty() && loaded.foreign_book_id == id);
+    assert(store.load_bookmarks(book, id, "txt-utf8-v1").status == StoreStatus::IdentityMismatch);
+    const auto old_backup = get(file.string() + ".bak");
+    assert(store.save_bookmarks(book, other, revision, loaded, {first}, 2, committed) == StoreStatus::Ok);
+    const auto archive = root / (book + ".picopage/bookmarks.01234567.1.json");
+    assert(get(archive) == current && get(archive.string() + ".bak") == old_backup);
+    assert(!fs::exists(file.string() + ".bak"));
+    loaded = store.load_bookmarks(book, other, revision);
+    assert(loaded.status == StoreStatus::Ok && loaded.bookmarks.size() == 1);
+    assert(store.load_bookmarks(book, id, revision).status == StoreStatus::IdentityMismatch);
+    // The original book returns: the newer archive takes the next free number.
+    const auto replaced = get(file);
+    loaded = store.load_bookmarks(book, id, revision);
+    assert(store.save_bookmarks(book, id, revision, loaded, {second}, 3, committed) == StoreStatus::Ok);
+    assert(get(archive) == current && get(root / (book + ".picopage/bookmarks.fedcba98.1.json")) == replaced);
+    loaded = store.load_bookmarks(book, other, revision);
+    assert(store.save_bookmarks(book, other, revision, loaded, {}, 1, committed) == StoreStatus::Ok);
+    assert(fs::exists(root / (book + ".picopage/bookmarks.01234567.2.json")) && get(archive) == current);
+
+    // Clearing the cache and committing progress leave bookmarks untouched.
+    const auto kept = get(file);
+    store.clear_cache();
+    assert(get(file) == kept);
+    ReadingRecord position{other, revision, "device-a", 1, first.anchor};
+    assert(store.save_progress(book, position).record && get(file) == kept);
+}
+
 int main() {
     char temporary[] = "/tmp/pico-store-XXXXXX";
     const char* directory = mkdtemp(temporary);
@@ -430,6 +594,8 @@ int main() {
     assert(store.book_snapshot("Books/linked/book.epub", book_state) == StoreStatus::UnsafePath);
     assert(store.book_snapshot("PicoPage/config.epub", book_state) == StoreStatus::UnsafePath);
 
+    bookmark_tests(root, store);
+
     fs::remove_all(root);
-    std::cout << "store: committed recovery, configuration and cache boundaries passed\n";
+    std::cout << "store: committed recovery, configuration, cache and bookmark boundaries passed\n";
 }

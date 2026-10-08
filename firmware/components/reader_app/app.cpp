@@ -123,11 +123,15 @@ enum Control {
     PowerRestart,
     PowerCancel,
     PowerForce,
+    BookmarkToggle,
+    ContentsToc,
+    ContentsBookmarks,
     EntryBase = 100,
     TocBase = 1000,
     TocToggleBase = 10000,
     LinkBase = 20000,
-    DetailBase = 30000
+    DetailBase = 30000,
+    BookmarkBase = 40000
 };
 std::string basename(const std::string &path) {
     const auto i = path.find_last_of('/');
@@ -184,6 +188,35 @@ bool book_name(std::string name) {
 const char* revision_for(const std::string& path, const DocumentMetadata& metadata) {
     return txt_name(path) ? (metadata.txt_gb18030 ? kTxtGb18030Revision : txt_revision) : content_revision;
 }
+/**
+ * Single-line display text of at most limit scalars: control and line-separator characters
+ * become one space, runs of spaces collapse, and surrogates or out-of-range values are dropped.
+ */
+std::string snippet(std::u32string_view text, std::size_t limit) {
+    std::string result;
+    std::size_t count = 0;
+    bool space = false;
+    for (char32_t c : text) {
+        if (count == limit) break;
+        if (c > 0x10ffff || (c >= 0xd800 && c <= 0xdfff)) continue;
+        if (c < 0x20 || c == 0x7f || c == U' ' || c == 0x3000 || c == 0x2028 || c == 0x2029 || c == 0xa0) {
+            space = !result.empty();
+            continue;
+        }
+        if (space) { result += ' '; ++count; space = false; if (count == limit) break; }
+        if (c < 0x80) result += static_cast<char>(c);
+        else if (c < 0x800) { result += static_cast<char>(0xc0 | (c >> 6)); result += static_cast<char>(0x80 | (c & 0x3f)); }
+        else if (c < 0x10000) {
+            result += static_cast<char>(0xe0 | (c >> 12)); result += static_cast<char>(0x80 | ((c >> 6) & 0x3f));
+            result += static_cast<char>(0x80 | (c & 0x3f));
+        } else {
+            result += static_cast<char>(0xf0 | (c >> 18)); result += static_cast<char>(0x80 | ((c >> 12) & 0x3f));
+            result += static_cast<char>(0x80 | ((c >> 6) & 0x3f)); result += static_cast<char>(0x80 | (c & 0x3f));
+        }
+        ++count;
+    }
+    return result;
+}
 } // namespace
 
 struct ReaderApp::Impl final : DisplayBackend {
@@ -218,6 +251,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     Chapter chapter;
     graphics::Page page;
     std::optional<graphics::Canvas> body_canvas;
+    // Whether body_canvas shows the bookmark ribbon; reuse updates it without replacing body pixels.
+    bool body_bookmarked = false;
     std::unique_ptr<graphics::Canvas> viewer_original;
     bool image_viewing = false;
     int image_contrast_level = 0;
@@ -282,7 +317,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     bool prefetch_due() const {
         return view == View::Reading && !image_viewing && has_book() && card_available && !usb_prepared &&
-               !display.busy() && !deferred && !save_job && !foreground_job && !pending_content && !prefetch_done;
+               !display.busy() && !deferred && !save_job && !bookmark_job && !foreground_job && !pending_content && !prefetch_done;
     }
     void prepare_next(const std::function<bool()>& stop) {
         if ((stop && stop()) || raster_job) return;
@@ -498,7 +533,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 draw_library(); overlay();
             }
         }
-        if (!pending_covers || display.busy() || save_job || foreground_job || pending_content || counting_job || raster_job) return;
+        if (!pending_covers || display.busy() || save_job || bookmark_job || foreground_job || pending_content || counting_job || raster_job) return;
         cover_job = std::make_unique<ContentJob>(std::move(*pending_covers)); pending_covers.reset();
         if (!cover_job->start()) {
             cover_job.reset(); message = "封面暂未生成，可继续阅读";
@@ -527,6 +562,210 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::vector<std::size_t> toc_starts, toc_visible;
     std::set<std::size_t> toc_collapsed;
     bool toc_locate_current = false, library_grid = false, library_descending = false;
+    // Bookmarks of the open book, loaded with it. Only Ok and Missing lists are shown.
+    BookmarkList bookmarks;
+    // The contents panel lists bookmarks instead of the table of contents until another book opens.
+    bool contents_bookmarks = false;
+    std::size_t bookmark_page = 0;
+    // Sorted chapter offsets of the bookmarks in the loaded part, rebuilt when either changes.
+    mutable std::vector<std::uint32_t> bookmark_offsets;
+    mutable std::string bookmark_offsets_resource;
+    mutable std::uint32_t bookmark_offsets_part = 0;
+    mutable std::uint64_t bookmark_offsets_version = 0;
+    std::uint64_t bookmark_version = 1;
+    bool bookmarks_usable() const {
+        return bookmarks.status == StoreStatus::Ok || bookmarks.status == StoreStatus::Missing;
+    }
+    void load_bookmarks(BookmarkList* loaded = nullptr) {
+        bookmarks = loaded ? std::move(*loaded) :
+            store.load_bookmarks(book_path, document.metadata().book_id, revision_for(book_path, document.metadata()));
+        ++bookmark_version;
+        bookmark_page = 0;
+    }
+    /** True when a usable bookmark maps into [start, end) of the loaded chapter part. */
+    bool bookmarked(std::size_t start, std::size_t end) const {
+        if (!bookmarks_usable() || bookmarks.bookmarks.empty()) return false;
+        if (bookmark_offsets_version != bookmark_version || bookmark_offsets_resource != chapter.resource ||
+            bookmark_offsets_part != chapter.part) {
+            bookmark_offsets.clear();
+            for (const auto& bookmark : bookmarks.bookmarks) {
+                std::uint32_t position;
+                if (chapter.offset_for(bookmark.anchor, position)) bookmark_offsets.push_back(position);
+            }
+            std::sort(bookmark_offsets.begin(), bookmark_offsets.end());
+            bookmark_offsets_version = bookmark_version;
+            bookmark_offsets_resource = chapter.resource;
+            bookmark_offsets_part = chapter.part;
+        }
+        const auto first = std::lower_bound(bookmark_offsets.begin(), bookmark_offsets.end(), start);
+        return first != bookmark_offsets.end() && *first < end;
+    }
+    /** Indices of the bookmarks inside the visible page. */
+    std::vector<std::size_t> page_bookmarks() const {
+        std::vector<std::size_t> found;
+        if (!bookmarks_usable()) return found;
+        for (std::size_t i = 0; i < bookmarks.bookmarks.size(); ++i) {
+            std::uint32_t position;
+            if (chapter.offset_for(bookmarks.bookmarks[i].anchor, position) && position >= page.start && position < page.end)
+                found.push_back(i);
+        }
+        return found;
+    }
+    /** A 24-pixel-wide bookmark ribbon centred on cx with a notched lower edge; outlined unless filled. */
+    void bookmark_ribbon(int cx, int top, int height, bool filled) {
+        constexpr int half = 12, notch = 12;
+        for (int y = 0; y < height; ++y) {
+            const int cut = y < height - notch ? -1 : y - (height - notch);
+            for (int x = -half; x < half; ++x) {
+                const bool inside = cut < 0 || x < -cut || x >= cut;
+                const bool edge = y < 3 || x < -half + 3 || x >= half - 3 ||
+                                  (cut >= 0 && ((x >= -cut - 3 && x < -cut) || (x >= cut && x < cut + 3)));
+                if (inside && (filled || edge)) canvas.pixel(cx + x, top + y, 1);
+            }
+        }
+    }
+    std::string bookmark_problem() const {
+        switch (bookmarks.status) {
+        case StoreStatus::Ok: case StoreStatus::Missing: return {};
+        case StoreStatus::IdentityMismatch:
+            return "书签文件与当前原书不符，未使用其中的书签。原文件已保留；本书加书签时，旧文件改名后保留在同一目录。";
+        case StoreStatus::Invalid:
+            return "书签文件无法读取，已保留原文件，暂不能添加或删除书签。阅读进度不受影响。";
+        case StoreStatus::UnsupportedVersion:
+            return "书签文件由较新的固件写入，本固件无法读取，原文件未修改。阅读进度不受影响。";
+        default:
+            return "书签文件读取失败，请检查 TF 卡后重新打开本书。阅读进度不受影响。";
+        }
+    }
+    // One bookmark commit at a time. In asynchronous mode it runs on a content worker, never
+    // concurrently with a progress commit, and completes on this task through poll_bookmark.
+    std::unique_ptr<ContentJob> bookmark_job;
+    bool bookmark_adding = false;
+    void toggle_bookmark() {
+        const auto &visible = session.visible_record();
+        if (view != View::Tools || !has_book() || !visible || bookmark_job) return;
+        if (!bookmarks_usable() && bookmarks.status != StoreStatus::IdentityMismatch) {
+            message = bookmarks.status == StoreStatus::UnsupportedVersion
+                          ? "书签文件版本较新，无法修改；原文件未修改"
+                          : "书签文件无法读取，暂不能修改；原文件未修改";
+            draw_tools(); overlay(); return;
+        }
+        ContentJob::Request request;
+        request.kind = ContentJob::Kind::SaveBookmarks;
+        request.root = root; request.relative_path = book_path; request.identity = document.metadata();
+        request.content_revision = revision_for(book_path, document.metadata());
+        request.bookmark_base = bookmarks;
+        request.bookmarks = bookmarks_usable() ? bookmarks.bookmarks : std::vector<Bookmark>{};
+        request.bookmark_next = bookmarks_usable() ? bookmarks.next_sequence : 1;
+        const auto present = page_bookmarks();
+        bookmark_adding = present.empty();
+        auto &list = request.bookmarks;
+        if (bookmark_adding) {
+            if (list.size() >= kMaxBookmarks) {
+                message = "书签已达 " + std::to_string(kMaxBookmarks) + " 个，请先删除不需要的书签";
+                draw_tools(); overlay(); return;
+            }
+            Bookmark bookmark;
+            bookmark.sequence = request.bookmark_next++;
+            bookmark.anchor = visible->anchor;
+            bookmark.chapter = snippet(decode_utf8(chapter_label()), 40);
+            const auto start = std::min(page.start, chapter.text.size());
+            bookmark.excerpt = snippet(std::u32string_view(chapter.text).substr(start, std::min<std::size_t>(page.end, chapter.text.size()) - start), 40);
+            bookmark.percent = book_percent_value(page.start, page.end);
+            list.push_back(std::move(bookmark));
+        } else {
+            for (auto i = present.rbegin(); i != present.rend(); ++i) list.erase(list.begin() + static_cast<std::ptrdiff_t>(*i));
+        }
+        bookmark_job = std::make_unique<ContentJob>(std::move(request));
+        if (!async_content) {
+            // The synchronous mode also commits progress on this task.
+            auto &job = *bookmark_job;
+            FileStore direct(root);
+            job.result.bookmark_status = direct.save_bookmarks(book_path, job.request.identity.book_id, job.request.content_revision,
+                                                               *job.request.bookmark_base, job.request.bookmarks, job.request.bookmark_next,
+                                                               job.result.bookmarks);
+            if (job.result.bookmark_status == StoreStatus::ExternalChange)
+                job.result.bookmarks = direct.load_bookmarks(book_path, job.request.identity.book_id, job.request.content_revision);
+            finish_bookmark(true);
+            return;
+        }
+        if (counting_job) counting_job->cancel();
+        if (raster_job) raster_job->cancel();
+        message = bookmark_adding ? "正在保存书签…" : "正在删除书签…";
+        draw_tools(); overlay();
+        poll_bookmark();
+    }
+    /** Starts a queued commit once no other card writer or worker runs, and adopts a finished one. */
+    void poll_bookmark(bool redraw = true) {
+        if (!bookmark_job || !async_content) return;
+        if (!bookmark_job->started()) {
+            if ((save_job && save_job->started()) || counting_job || raster_job || cover_job ||
+                (foreground_job && foreground_job->started() && !foreground_job->done())) return;
+            if (!bookmark_job->start()) {
+                bookmark_job->result.bookmark_status = StoreStatus::IoError;
+                if (!finish_bookmark(redraw) && !redraw) { bookmark_drain_failed = true; bookmark_drain_message = message; }
+            }
+            return;
+        }
+        if (!bookmark_job->done() || (redraw && display.busy())) return;
+        finish_bookmark(redraw);
+    }
+    // A commit drained before a card handoff failed: the next persist reports it once, a later successful commit clears it.
+    bool bookmark_drain_failed = false;
+    std::string bookmark_drain_message;
+    // A failed commit that finished on a page without a notice line; poll_background shows it.
+    std::string bookmark_error;
+    /**
+     * Waits for a queued or running commit before card files are released or another card
+     * writer runs on this task. Draws nothing.
+     */
+    void drain_bookmark() {
+        if (!bookmark_job) return;
+        if (!bookmark_job->started()) {
+            stop_covers(); stop_raster(); stop_counting_job();
+            if (foreground_job && foreground_job->started()) foreground_job->wait();
+            if (save_job && save_job->started()) { save_job->wait(); poll_save(); }
+            poll_bookmark(false);
+        }
+        if (bookmark_job) {
+            bookmark_job->wait();
+            if (!finish_bookmark(false)) { bookmark_drain_failed = true; bookmark_drain_message = message; }
+        }
+    }
+    /** Serializes panel file access and reports a drained failure before another operation. */
+    bool bookmark_io_ready() {
+        drain_bookmark();
+        if (!bookmark_drain_failed) return true;
+        bookmark_drain_failed = false;
+        bookmark_error.clear();
+        error(bookmark_drain_message);
+        return false;
+    }
+    /** Adopts a finished commit; false when the requested change was not stored. */
+    bool finish_bookmark(bool redraw) {
+        auto job = std::move(bookmark_job);
+        const auto status = job->result.bookmark_status;
+        // A result for a book that is no longer open stays in that book's file only.
+        if (job->request.relative_path != book_path || job->request.identity.book_id != document.metadata().book_id)
+            return status == StoreStatus::Ok;
+        if (status == StoreStatus::Ok) bookmark_drain_failed = false;
+        if (status == StoreStatus::Ok || status == StoreStatus::ExternalChange) {
+            // Cached pages update the ribbon on reuse without discarding rendered images.
+            bookmarks = std::move(job->result.bookmarks);
+            ++bookmark_version;
+        }
+        if (status == StoreStatus::Ok) message = bookmark_adding ? "已加书签" : "已删除本页书签";
+        else if (status == StoreStatus::ExternalChange) message = "书签文件已在别处修改，已重新读取，请核对当前书签";
+        else message = bookmark_adding ? "书签未保存，请检查 TF 卡后重试" : "书签未删除，请检查 TF 卡后重试";
+        if (redraw) {
+            if (view == View::Tools) { draw_tools(); overlay(); }
+            else if (view == View::Contents && status == StoreStatus::Ok) { draw_contents(); overlay(); }
+            else if (view == View::Reading && !image_viewing && render_body(offset)) overlay();
+            // Other pages have no notice line; a failure becomes an error page on the next poll.
+            else if (status != StoreStatus::Ok) bookmark_error = message;
+        }
+        return status == StoreStatus::Ok;
+    }
     // A single configured root is presented as the library home instead of as a folder entry.
     std::string library_home_root;
     // The open folder is one of the configured library roots; its parent is the library.
@@ -635,9 +874,11 @@ struct ReaderApp::Impl final : DisplayBackend {
     void close_image_viewer() {
         viewer_original.reset();
         image_viewing = false; image_contrast_level = 0;
+        view = View::Reading;
+        // A bookmark committed while viewing changes the ribbon of the returned page.
+        if (body_canvas && body_bookmarked != bookmarked(page.start, page.end) && render_body(offset)) { overlay(); return; }
         if (body_canvas) canvas = *body_canvas;
         links = body_links;
-        view = View::Reading;
         overlay();
     }
     void draw_image_viewer(bool full = false) {
@@ -691,6 +932,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         body_canvas = canvas;
         body_spec = layout(settings, link_return ? 144 : 64);
         body_links = links;
+        body_bookmarked = bookmarked(page.start, page.end);
         abandon_content();
         release_counting(); clear_prefetch();
         ContentJob::Request request;
@@ -835,7 +1077,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (foreground_job->request.progressive && !allow_inline) return;
         if (!foreground_job->started()) {
             if (!content_loading && !inline_image_pending) { foreground_job.reset(); return; }
-            if (display.busy() || counting_job || raster_job || save_job || cover_job) return;
+            if (display.busy() || counting_job || raster_job || save_job || cover_job || bookmark_job) return;
             if (foreground_job->request.kind == ContentJob::Kind::Open && session.needs_save()) {
                 if (save_failed) { foreground_job.reset(); content_loading = false; error(kSaveFailed); }
                 else schedule_save();
@@ -1019,7 +1261,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     void poll_save() {
         if (!save_job) return;
         if (!save_job->started()) {
-            if (counting_job || raster_job || cover_job || (foreground_job && foreground_job->started() && !foreground_job->done())) return;
+            if (counting_job || raster_job || cover_job || (bookmark_job && bookmark_job->started()) ||
+                (foreground_job && foreground_job->started() && !foreground_job->done())) return;
             if (save_job->start()) return;
             save_job->result.progress.status = StoreStatus::IoError;
         } else if (!save_job->done()) return;
@@ -1043,6 +1286,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
     }
     void drain_save() {
+        drain_bookmark();
         if (!save_job) return;
         stop_covers(); stop_raster(); stop_counting_job();
         if (foreground_job && foreground_job->started()) foreground_job->wait();
@@ -1067,12 +1311,18 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (raster_job) raster_job->cancel();
         poll_save();
     }
+    /**
+     * Commits the presented position after draining background commits. false when the position,
+     * or a bookmark change drained here, was not stored; message then names what failed.
+     */
     bool persist() {
         drain_save();
         save_error_pending = false;
+        const bool bookmark_stored = !std::exchange(bookmark_drain_failed, false);
+        if (!bookmark_stored) message = bookmark_drain_message;
         auto request = session.request_save();
         if (!request)
-            return !session.needs_save();
+            return !session.needs_save() && bookmark_stored;
         const StageTimer timer{"progress_commit"};
         const auto result = store.save_progress(book_path, request->record);
         const bool okay =
@@ -1081,7 +1331,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         save_failed = !okay;
         if (!okay)
             message = kSaveFailed;
-        return okay;
+        return okay && bookmark_stored;
     }
     void text(const std::string &value, int x, int top, int size = 28, int max_width = 612,
               std::uint8_t gray = 1, bool bold = false) {
@@ -1342,10 +1592,13 @@ struct ReaderApp::Impl final : DisplayBackend {
         return total ? static_cast<int>(read * 100 / total) : 0;
     }
     /** Whole-book percentage of a page spanning [start, end) of the loaded chapter. */
-    std::string book_percent(std::size_t start, std::size_t end) const {
+    int book_percent_value(std::size_t start, std::size_t end) const {
         if (const auto current = current_page(start))
-            return std::to_string(static_cast<std::uint64_t>(current) * 100 / total_pages()) + "%";
-        return std::to_string(estimated_percent(end)) + "%";
+            return static_cast<int>(static_cast<std::uint64_t>(current) * 100 / total_pages());
+        return estimated_percent(end);
+    }
+    std::string book_percent(std::size_t start, std::size_t end) const {
+        return std::to_string(book_percent_value(start, end)) + "%";
     }
     std::string book_percent() const {
         return book_percent(page.start, page.end);
@@ -1384,7 +1637,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         text(panel ? "‹ 正文" : "‹ 书库", 28, 32, 28, 100);
         hits.push_back({0, 0, 128, 104, panel ? Back : Library});
         const bool unsaved = session.needs_save(), differs = remote_anchor.has_value();
-        const int right = unsaved || differs ? 496 : 660;
+        // The tool page adds the bookmark cell at the right end and moves the badge left of it.
+        const bool marking = view == View::Tools;
+        const int edge = marking ? bookmark_cell_left - 12 : 660;
+        const int right = unsaved || differs ? edge - 164 : edge;
         text(chapter_label(), 132, 14, 30, right - 132, 1, true);
         const auto percent = " · " + book_percent();
         const int percent_width = text_width(percent, 22);
@@ -1392,11 +1648,20 @@ struct ReaderApp::Impl final : DisplayBackend {
         text(document.metadata().title, 132, 60, 22, title_width, 3);
         text(percent, 132 + title_width, 60, 22, percent_width, 3);
         if (unsaved || differs) {
-            button(Sync, unsaved ? "尚未保存" : "位置不同 ›", 512, 26, 148, 54, true, 22);
+            button(Sync, unsaved ? "尚未保存" : "位置不同 ›", edge - 148, 26, 148, 54, true, 22);
             if (view == View::Sync) hits.pop_back();
+        }
+        if (marking) {
+            const bool present = !page_bookmarks().empty();
+            canvas.line(bookmark_cell_left, 16, bookmark_cell_left, 87, 12, 2);
+            bookmark_ribbon(bookmark_cell_left + 50, 14, 38, present);
+            center(present ? "删书签" : "加书签", bookmark_cell_left, 62, 684 - bookmark_cell_left, 20);
+            hits.push_back({bookmark_cell_left, 0, 684 - bookmark_cell_left, 104, BookmarkToggle});
         }
         canvas.line(0, 103, 683, 103, 1, 3);
     }
+    // Left edge of the bookmark toggle in the tool page header; the reading page marker shares its centre.
+    static constexpr int bookmark_cell_left = 584;
     static constexpr int panel_strip = 56;
     // The typography preview ends above the strip of the panel at 656.
     static constexpr int preview_bottom = 656 - panel_strip;
@@ -1964,6 +2229,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         load_fonts();
         clear_page_history();
         reset_pages();
+        load_bookmarks(loaded ? &loaded->bookmarks : nullptr);
+        contents_bookmarks = false;
         const auto restored =
             loaded ? loaded->progress : store.load_progress(path, document.metadata().book_id, revision_for(path, document.metadata()));
         session.open(document.metadata().book_id, revision_for(path, document.metadata()), writer, restored.record);
@@ -1976,6 +2243,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         message.clear();
         if (!configuration.diagnostics.empty())
             message = "设置文件无效，已回退；原文件未修改";
+        else if (!bookmarks_usable())
+            message = bookmarks.status == StoreStatus::IdentityMismatch ? "书签与当前原书不符，未使用；原文件已保留"
+                                                                        : "书签文件无法读取，已保留原文件；阅读进度不受影响";
         else if (font_fallback)
             message = builtin_body ? kBuiltinFontNotice : kFallbackFontNotice;
         if (restored.status != StoreStatus::Ok && restored.status != StoreStatus::Missing && restored.status != StoreStatus::Cleared)
@@ -2306,7 +2576,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     bool counting_due() const {
         return view == View::Reading && !image_viewing && has_book() && card_available && !usb_prepared &&
-               !display.busy() && !deferred && !save_job && !foreground_job && !pending_content && !raster_job &&
+               !display.busy() && !deferred && !save_job && !bookmark_job && !foreground_job && !pending_content && !raster_job &&
                (!pages_complete || (!pages_cache_disabled && (pages_cache_pending || pages_dirty || (async_content && font_identity.empty()))) || sleep_cover_due()) && !pages_failed &&
                (counting_blocked != chapter_index || std::chrono::steady_clock::now() >= counting_retry);
     }
@@ -2545,11 +2815,22 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         return graphics::render_page(canvas, body, planned);
     }
+    bool body_reusable(std::size_t start, const graphics::LayoutSpec& spec) const {
+        return body_canvas && start == page.start && same_layout(body_spec, spec);
+    }
     bool render_body(std::size_t start) {
         const StageTimer timer{"body_draw"};
         const auto spec = layout(settings, link_return ? 144 : 64);
-        if (body_canvas && start == page.start && same_layout(body_spec, spec)) {
+        if (body_reusable(start, spec)) {
             canvas = *body_canvas;
+            const bool marked = bookmarked(page.start, page.end);
+            if (body_bookmarked != marked) {
+                // The ribbon sits in the blank top margin, above text and image layout.
+                canvas.fill_rect(bookmark_cell_left + 38, 0, 24, 44, 15);
+                if (marked) bookmark_ribbon(bookmark_cell_left + 50, 0, 44, true);
+                *body_canvas = canvas;
+                body_bookmarked = marked;
+            }
             links = body_links;
             offset = page.start;
             footer();
@@ -2619,14 +2900,18 @@ struct ReaderApp::Impl final : DisplayBackend {
             canvas.line(0, 102, 683, 102, 1, 3);
             links.push_back({0, 0, 684, 104, LinkReturn});
         }
-        if (body_cache_room()) { body_canvas = canvas; body_spec = spec; body_links = links; }
+        if (bookmarked(page.start, page.end)) bookmark_ribbon(bookmark_cell_left + 50, 0, 44, true);
+        if (body_cache_room()) {
+            body_canvas = canvas; body_spec = spec; body_links = links;
+            body_bookmarked = bookmarked(page.start, page.end);
+        }
         else clear_body_cache();
         return true;
     }
     bool show_page(std::size_t start) {
         poll_raster();
         const auto spec = layout(settings, link_return ? 144 : 64);
-        const bool reused = body_canvas && start == page.start && same_layout(body_spec, spec);
+        const bool reused = body_reusable(start, spec);
         const bool hit = !next_chapter && next_page && next_bitmap && next_page->start == readable_offset(start) && same_layout(next_spec, spec);
         const StageTimer timer{hit ? "body_prepare_hit" : reused ? "body_prepare_reuse" : "body_prepare_miss", 0};
         if (display.busy())
@@ -2855,14 +3140,67 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         return total ? static_cast<int>(before * 100 / total) : -1;
     }
-    static constexpr int contents_top = 350;
+    static constexpr int contents_top = 350, contents_switch_height = 72, bookmark_row = 112;
+    static constexpr std::size_t bookmarks_per_screen =
+        (footer_zone - contents_top - 100 - contents_switch_height) / bookmark_row;
+    /** Selects the table of contents or the bookmark list below the panel tabs. */
+    void contents_switch(int top) {
+        canvas.fill_rect(0, top, 684, contents_switch_height, 15);
+        const auto count = bookmarks_usable() && !bookmarks.bookmarks.empty()
+                               ? " " + std::to_string(bookmarks.bookmarks.size()) : std::string();
+        const std::string names[] = {"目录", "书签" + count};
+        const int ids[] = {ContentsToc, ContentsBookmarks};
+        for (int i = 0; i < 2; ++i) {
+            const bool active = (i == 1) == contents_bookmarks;
+            const int x = i * 342;
+            center(names[i], x, top + 20, 342, 24, active ? 1 : 3, active);
+            if (active) canvas.fill_rect(x + 131, top + contents_switch_height - 8, 80, 4, 1);
+            hits.push_back({x, top, 342, contents_switch_height, ids[i]});
+        }
+        canvas.line(342, top + 16, 342, top + contents_switch_height - 17, 12, 2);
+        canvas.line(0, top + contents_switch_height - 1, 683, top + contents_switch_height - 1, 1, 2);
+    }
+    void draw_bookmarks(int list_top) {
+        constexpr int row = bookmark_row;
+        constexpr auto per_page = bookmarks_per_screen;
+        const auto &items = bookmarks.bookmarks;
+        const auto problem = bookmark_problem();
+        if (!problem.empty() || items.empty()) {
+            wrapped(problem.empty() ? "还没有书签。在正文工具页点右上角的“加书签”，可标记当前页。" : problem,
+                    36, list_top + 40, 612, 24, true, 3);
+            footer_bar("");
+            return;
+        }
+        const auto pages = (items.size() + per_page - 1) / per_page;
+        bookmark_page = std::min(bookmark_page, pages - 1);
+        const auto present = page_bookmarks();
+        int y = list_top;
+        for (auto i = bookmark_page * per_page; i < std::min(items.size(), (bookmark_page + 1) * per_page); ++i) {
+            const auto &item = items[i];
+            const bool selected = std::find(present.begin(), present.end(), i) != present.end();
+            const std::uint8_t ink = selected ? 15 : 1;
+            if (selected) canvas.fill_rect(0, y, 684, row - 1, 1);
+            const auto position = selected ? std::string("本页") : item.percent >= 0 ? std::to_string(item.percent) + "%" : std::string();
+            const int width = text_width(position, 22);
+            title_lines(item.chapter.empty() ? "书签 " + std::to_string(item.sequence) : item.chapter,
+                        36, y + 18, 600 - width - 24, 26, selected, 1, ink);
+            text(position, 648 - width, y + 20, 22, width, selected ? 15 : 3);
+            title_lines(item.excerpt.empty() ? "（本页没有文字）" : item.excerpt, 36, y + 64, 612, 22, false, 1, selected ? 15 : 3);
+            if (!selected) canvas.line(0, y + row - 1, 683, y + row - 1, 1, 2);
+            hits.push_back({0, y, 684, row, BookmarkBase + static_cast<int>(i)});
+            y += row;
+        }
+        footer_bar("", bookmark_page, pages);
+    }
     void draw_contents() {
         view = View::Contents;
         if (!panel_background(contents_top - panel_strip)) return;
         tabs(contents_top, Contents);
+        contents_switch(contents_top + 100);
+        const int list_top = contents_top + 100 + contents_switch_height, list_height = footer_zone - list_top;
+        if (contents_bookmarks) { draw_bookmarks(list_top); return; }
         const auto &toc = document.toc();
         const auto current = current_toc();
-        const int list_top = contents_top + 100, list_height = footer_zone - list_top;
         toc_visible.clear();
         toc_starts = {0};
         auto title_width = [&](std::size_t index) {
@@ -3128,6 +3466,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool wifi_enabled() const {
         // The radio session exclusively owns card access until its completion arrives.
         if (portal_live || network_worker_id) return true;
+        if (bookmark_job) return false;
         const auto cfg = store.load_settings();
         return cfg.diagnostics.empty() && cfg.settings.wifi_enabled;
     }
@@ -3136,6 +3475,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         hits.push_back({420, y - 12, 240, 52, WifiSettings});
     }
     void draw_wifi() {
+        if (!bookmark_io_ready()) return;
         view = View::WifiSettings;
         hits.clear(); canvas.clear(); header("Wi-Fi 开关", Back, "设置");
         const auto cfg = store.load_settings();
@@ -3145,6 +3485,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         footer_bar(cfg.diagnostics.empty() ? notice() : "设置文件无效，请检查 PicoPage/settings.toml。");
     }
     void draw_settings() {
+        if (!bookmark_io_ready()) return;
         view = View::Settings;
         hits.clear(); canvas.clear(); header("设置", Back, "书库");
         const auto cfg = store.load_settings();
@@ -3250,6 +3591,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         return total;
     }
     void draw_storage() {
+        if (!bookmark_io_ready()) return;
         view = View::StorageSettings;
         hits.clear(); canvas.clear(); header("存储与设备", Back, "设置");
         std::optional<std::uint64_t> books = 0;
@@ -3287,6 +3629,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         button(ClearCache, "清理全部缓存", 24, 1080, 636, 96);
     }
     void draw_input_settings() {
+        if (!bookmark_io_ready()) return;
         view = View::InputSettings;
         hits.clear(); canvas.clear(); header("输入与阅读", Back, "设置");
         const auto values = store.load_settings().settings;
@@ -3305,6 +3648,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
     }
     void draw_sync_settings() {
+        if (!bookmark_io_ready()) return;
         view = View::SyncSettings;
         hits.clear(); canvas.clear(); header("KOReader 同步", Back, "设置");
         sync::Config account;
@@ -3430,6 +3774,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         danger_button(ManageConfirm, remove ? "删除原书" : "清除进度", 354, 1080, 306);
     }
     void manage_book() {
+        if (!bookmark_io_ready()) return;
         if (detail_path == book_path) {
             cancel_sync();
             session.open("", "", writer);
@@ -3547,6 +3892,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         hits.push_back({24, y, 636, height, id});
     }
     void draw_import() {
+        if (!bookmark_io_ready()) return;
         view = View::Import;
         hits.clear();
         canvas.clear();
@@ -3725,6 +4071,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         draw_network_closing(); overlay();
     }
     void draw_sync() {
+        if (!bookmark_io_ready()) return;
         view = View::Sync;
         if (!has_book()) {
             hits.clear(); canvas.clear(); header("阅读同步", Back, "书库");
@@ -4150,6 +4497,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         overlay();
     }
     bool begin_settings_edit(bool global = false) {
+        if (!bookmark_io_ready()) return false;
         auto snapshot = store.settings_snapshot(global ? "" : book_path);
         if (!snapshot.config.diagnostics.empty()) {
             error("设置文件无效，原文件未修改。请检查后重新打开设置。");
@@ -4201,6 +4549,17 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         if (id == UsbExitConfirm) {
             usb_action = UsbTransferAction::Exit;
+            return;
+        }
+        if (id >= BookmarkBase) {
+            const auto index = static_cast<std::size_t>(id - BookmarkBase);
+            if (view != View::Contents || !bookmarks_usable() || index >= bookmarks.bookmarks.size()) return;
+            const auto target = bookmarks.bookmarks[index].anchor;
+            if (async_content) { clear_page_history(); begin_seek(target); return; }
+            std::uint32_t position;
+            if (!seek(target, position, "书签位置无法恢复，原书内容可能已更改")) return;
+            clear_page_history();
+            show_page(position);
             return;
         }
         if (id >= DetailBase) {
@@ -4327,6 +4686,18 @@ struct ReaderApp::Impl final : DisplayBackend {
             return;
         case PowerCancel:
             close_power_menu(); return;
+        case BookmarkToggle:
+            toggle_bookmark(); return;
+        case ContentsToc:
+        case ContentsBookmarks:
+            if (view != View::Contents) return;
+            contents_bookmarks = id == ContentsBookmarks;
+            if (contents_bookmarks) {
+                // Opens on the screen holding the first bookmark at or after the visible page.
+                const auto present = page_bookmarks();
+                bookmark_page = present.empty() ? 0 : present.front() / bookmarks_per_screen;
+            } else toc_locate_current = true;
+            draw_contents(); overlay(); return;
         case Back:
             back();
             return;
@@ -4462,6 +4833,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             draw_power();
             break;
         case PowerSave: {
+            if (!bookmark_io_ready()) return;
             std::string detail;
             if (store.apply_settings(edit_snapshot, draft, false, detail) != StoreStatus::Ok) {
                 error("休眠设置未保存。" + reason(detail) + "。"); return;
@@ -4476,6 +4848,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             message.clear(); draw_storage();
             break;
         case ClearCache:
+            if (!bookmark_io_ready()) return;
             abandon_content(); foreground_job.reset(); stop_covers(); stop_raster(); stop_counting_job();
             covers.clear(); sleep_cover_prepared = false;
             message = store.clear_cache() == StoreStatus::Ok ? "缓存已清理，原书与阅读记录保留" : "缓存未完全清理，请检查 TF 卡";
@@ -4493,6 +4866,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             auto values = edit_snapshot.config.settings;
             const std::string previous = values.library_view == "grid" ? "卡片" : "列表";
             values.library_view = values.library_view == "grid" ? "list" : "grid";
+            if (!bookmark_io_ready()) return;
             std::string detail;
             if (store.apply_settings(edit_snapshot, values, false, detail) == StoreStatus::Ok) {
                 settings.library_view = values.library_view;
@@ -4527,6 +4901,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             draw_import();
             break;
         case Sync:
+            if (!bookmark_io_ready()) return;
             refresh_badge_config();
             cancel_sync();
             sync_status.clear();
@@ -4589,6 +4964,10 @@ struct ReaderApp::Impl final : DisplayBackend {
                 else if (id == Next && (library_page + 1) * library_page_size() < entries.size())
                     ++library_page;
                 draw_library();
+            } else if (view == View::Contents && contents_bookmarks) {
+                if (id == Prev && bookmark_page) --bookmark_page;
+                else if (id == Next) ++bookmark_page;  // draw_bookmarks clamps to the last screen.
+                draw_contents();
             } else if (view == View::Contents) {
                 if (id == Prev && toc_page)
                     --toc_page;
@@ -4800,6 +5179,7 @@ struct ReaderApp::Impl final : DisplayBackend {
 };
 
 void ReaderApp::Impl::apply_typography() {
+    if (!bookmark_io_ready()) return;
     std::string detail;
     if (font_fallback) {
         error("所选字体不可用，排版未保存");
@@ -4842,6 +5222,7 @@ void ReaderApp::Impl::apply_refresh(int id) {
     save_refresh(values);
 }
 void ReaderApp::Impl::save_refresh(const ReaderSettings &values) {
+    if (!bookmark_io_ready()) return;
     std::string detail;
     if (store.apply_settings(edit_snapshot, values, !refresh_from_settings, detail) != StoreStatus::Ok) {
         error("刷新设置未保存。" + reason(detail) + "。");
@@ -4995,9 +5376,9 @@ void ReaderApp::stop_wifi() {
     if (impl_->view == View::Portal) impl_->portal_action = PortalAction::Stop;
 }
 bool ReaderApp::prepare_portal(bool upload, bool station) {
-    if (impl_->portal_live || impl_->network_worker_id || !wifi_enabled()) return false;
+    if (impl_->portal_live || impl_->network_worker_id) return false;
     if (impl_->content_loading || impl_->usb_prepared || impl_->display.busy() || impl_->active_network ||
-        !impl_->card_available || !impl_->persist()) return false;
+        !impl_->card_available || !impl_->persist() || !wifi_enabled()) return false;
     impl_->cancel_sync();
     impl_->clear_body_cache();
     impl_->stop_covers();
@@ -5095,7 +5476,7 @@ bool ReaderApp::prepare_power(PowerRequest request) {
     impl_->power_save_failed = !saved;
     impl_->power_progress_saved = saved;
     if (!saved && !request.without_save) {
-        impl_->message = "阅读位置或最近阅读记录未能保存到 TF 卡，仍要" +
+        impl_->message = "阅读位置、书签或最近阅读记录未能保存到 TF 卡，仍要" +
             std::string(request.action == PowerAction::Restart ? "重启吗？" : "关机吗？");
         impl_->draw_power_menu(); impl_->overlay(true); return false;
     }
@@ -5178,7 +5559,7 @@ void ReaderApp::save_progress() {
     if (impl_->network_worker_id || impl_->portal_live || impl_->usb_prepared || impl_->display.busy()) return;
     impl_->schedule_save();
 }
-bool ReaderApp::save_busy() const { return !!impl_->save_job; }
+bool ReaderApp::save_busy() const { return impl_->save_job || impl_->bookmark_job; }
 std::optional<BookPages> ReaderApp::book_pages() const {
     const auto page = impl_->has_book() ? impl_->current_page() : 0;
     return page ? std::optional<BookPages>{{page, impl_->total_pages()}} : std::nullopt;
@@ -5219,9 +5600,14 @@ void ReaderApp::poll_background(bool cancel) {
     if (impl_->view != View::Reading && !impl_->counting_job) impl_->counting_session.reset();
     impl_->poll_covers();
     impl_->poll_save();
+    impl_->poll_bookmark();
     if (!cancel) impl_->reclaim_caches();
     if (impl_->save_error_pending && impl_->view != View::PowerMenu && !impl_->display.busy() && !impl_->content_loading) {
         impl_->save_error_pending = false; impl_->error(impl_->message);
+    }
+    if (!impl_->bookmark_error.empty() && impl_->view != View::PowerMenu && impl_->view != View::PowerOff &&
+        !impl_->display.busy() && !impl_->content_loading) {
+        impl_->error(std::exchange(impl_->bookmark_error, std::string()));
     }
     if (!cancel || !impl_->content_loading) impl_->poll_content(!cancel);
     // Returning from a panel or viewer may restore a page whose image request was cancelled.

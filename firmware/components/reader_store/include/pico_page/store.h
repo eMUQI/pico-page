@@ -18,6 +18,55 @@ struct ProgressResult {
     std::string detail;
 };
 
+/** A reader-created position in one book. The anchor uses the progress.json format. */
+struct Bookmark {
+    /** Unique within the book and increasing in creation order; never reused. */
+    std::uint64_t sequence = 0;
+    Anchor anchor;
+    /** Chapter label and page-start text captured at creation, for display only. May be empty. */
+    std::string chapter, excerpt;
+    /** Whole-book percentage at creation, 0 through 100; -1 when unknown. Display only. */
+    int percent = -1;
+    /** Present only when the creating device had a trusted clock; never written otherwise. */
+    std::optional<std::string> created_at, time_source;
+};
+
+inline bool operator==(const Bookmark& a, const Bookmark& b) {
+    return a.sequence == b.sequence && a.anchor == b.anchor && a.chapter == b.chapter &&
+           a.excerpt == b.excerpt && a.percent == b.percent && a.created_at == b.created_at &&
+           a.time_source == b.time_source;
+}
+
+/** Size and CRC-32 of a file slot; detects changes made after loading without retaining its bytes. */
+struct SlotDigest {
+    std::uint64_t size = 0;
+    std::uint32_t crc32 = 0;
+};
+inline bool operator==(const SlotDigest& a, const SlotDigest& b) { return a.size == b.size && a.crc32 == b.crc32; }
+inline bool operator!=(const SlotDigest& a, const SlotDigest& b) { return !(a == b); }
+
+/**
+ * Bookmarks of one book as loaded from `<book>.picopage/bookmarks.json`.
+ * Ok and Missing carry a usable (possibly empty) list. IdentityMismatch means the file belongs
+ * to other content; its bookmarks are withheld, and the next save archives it first.
+ * Invalid, UnsupportedVersion, IoError and UnsafePath forbid saving until reloaded.
+ */
+struct BookmarkList {
+    StoreStatus status = StoreStatus::Missing;
+    std::vector<Bookmark> bookmarks;  // Sorted by sequence.
+    std::uint64_t next_sequence = 1;
+    /** Main and backup slots at load; nullopt for a missing slot. Compared again before any change. */
+    std::optional<SlotDigest> source, backup_source;
+    /** IdentityMismatch only: the book_id recorded in the file, used to name its archive. */
+    std::string foreign_book_id;
+    bool recovered_backup = false;
+    std::string detail;
+};
+
+/** Upper bounds that keep one bookmark file within a single bounded read. */
+constexpr std::size_t kMaxBookmarks = 100;
+constexpr std::size_t kBookmarkFileLimit = 64 * 1024;
+
 struct BookSnapshot {
     std::string path;
     std::uint64_t size = 0;
@@ -111,6 +160,30 @@ public:
      */
     ProgressResult save_progress(const std::string& book_path,
                                  const ReadingRecord& record) const;
+
+    /**
+     * Reads the bookmarks of a book whose identity the caller verified. The slots are read one
+     * after the other, so at most one kBookmarkFileLimit buffer and its cJSON tree are held at
+     * once; the result keeps only digests of the slots. A missing main slot
+     * recovers a valid backup; a malformed main slot is reported as Invalid and never replaced
+     * from the backup, so a hand-edited file is not silently discarded.
+     */
+    BookmarkList load_bookmarks(const std::string& book_path, const std::string& book_id,
+                                const std::string& content_revision) const;
+
+    /**
+     * Replaces the bookmark list after checking that both slots still match loaded's digests.
+     * Transiently holds the current main slot, the encoded list and their cJSON trees.
+     * When loaded reports IdentityMismatch, the foreign slots are first renamed, without
+     * replacing any file, to `bookmarks.<id prefix>.<n>.json` (and `.json.bak`) with the
+     * smallest free n. bookmarks must be sorted by unique sequence below next_sequence.
+     * On success committed holds the new state; on failure it is left unchanged and the
+     * caller reloads before retrying. ExternalChange reports a file modified since loading.
+     */
+    StoreStatus save_bookmarks(const std::string& book_path, const std::string& book_id,
+                               const std::string& content_revision, const BookmarkList& loaded,
+                               const std::vector<Bookmark>& bookmarks, std::uint64_t next_sequence,
+                               BookmarkList& committed) const;
 
     /**
      * Apply built-in defaults, global settings, then optional book overrides.

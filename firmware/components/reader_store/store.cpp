@@ -3,6 +3,7 @@
 
 #include "cJSON.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <charconv>
 #include <cmath>
@@ -183,6 +184,214 @@ std::string encode(const ReadingRecord& record) {
     std::string bytes(printed);
     cJSON_free(printed);
     return bytes;
+}
+
+bool display_text(const std::string& value, std::size_t maximum) {
+    return value.empty() || text_value(value, maximum);
+}
+
+/** Keys of object are distinct, all required ones are present and no others occur. */
+bool known_fields(const cJSON* object, std::initializer_list<const char*> required,
+                  std::initializer_list<const char*> optional) {
+    if (!cJSON_IsObject(object)) return false;
+    std::size_t found = 0;
+    for (auto* child = object->child; child; child = child->next) {
+        if (!child->string) return false;
+        bool is_required = false, is_optional = false;
+        for (const char* key : required) is_required = is_required || std::strcmp(child->string, key) == 0;
+        for (const char* key : optional) is_optional = is_optional || std::strcmp(child->string, key) == 0;
+        if (!is_required && !is_optional) return false;
+        for (auto* earlier = object->child; earlier != child; earlier = earlier->next) {
+            if (std::strcmp(earlier->string, child->string) == 0) return false;
+        }
+        if (is_required) ++found;
+    }
+    return found == required.size();
+}
+
+/** Decimal string of a nonzero 64-bit sequence; strings avoid the double precision of cJSON numbers. */
+bool sequence_field(const cJSON* object, const char* key, std::uint64_t& value) {
+    std::string digits;
+    if (!string_field(object, key, digits) || digits.empty() || digits.size() > 20 || digits.front() == '0') return false;
+    const auto parsed = std::from_chars(digits.data(), digits.data() + digits.size(), value);
+    return parsed.ec == std::errc{} && parsed.ptr == digits.data() + digits.size() && value > 0;
+}
+
+bool valid_bookmark(const Bookmark& bookmark) {
+    return bookmark.sequence > 0 && text_value(bookmark.anchor.resource) && text_value(bookmark.anchor.node) &&
+           display_text(bookmark.chapter, 512) && display_text(bookmark.excerpt, 512) &&
+           bookmark.percent >= -1 && bookmark.percent <= 100 &&
+           (!bookmark.created_at || text_value(*bookmark.created_at, 64)) &&
+           (!bookmark.time_source || text_value(*bookmark.time_source, 64)) &&
+           bookmark.created_at.has_value() == bookmark.time_source.has_value();
+}
+
+/** Sorted by strictly increasing sequence, every sequence below next_sequence, within the count bound. */
+bool valid_bookmarks(const std::vector<Bookmark>& bookmarks, std::uint64_t next_sequence) {
+    if (bookmarks.size() > kMaxBookmarks || next_sequence == 0) return false;
+    for (std::size_t i = 0; i < bookmarks.size(); ++i) {
+        if (!valid_bookmark(bookmarks[i]) || bookmarks[i].sequence >= next_sequence ||
+            (i && bookmarks[i - 1].sequence >= bookmarks[i].sequence)) return false;
+    }
+    return true;
+}
+
+/** True for a JSON \u0000 escape; an escaped backslash followed by literal "u0000" is ordinary text. */
+bool json_nul_escape(const std::string& bytes) {
+    for (auto at = bytes.find("u0000"); at != std::string::npos; at = bytes.find("u0000", at + 1)) {
+        std::size_t backslashes = 0;
+        while (backslashes < at && bytes[at - 1 - backslashes] == '\\') ++backslashes;
+        if (backslashes % 2 == 1) return true;
+    }
+    return false;
+}
+
+BookmarkList decode_bookmarks(const std::string& bytes, const std::string& book_id,
+                              const std::string& content_revision) {
+    BookmarkList result;
+    result.status = StoreStatus::Invalid;
+    result.detail = "invalid bookmark file";
+    if (bytes.find('\0') != std::string::npos || json_nul_escape(bytes)) return result;
+    Json object(cJSON_ParseWithLengthOpts(bytes.c_str(), bytes.size() + 1, nullptr, true), cJSON_Delete);
+    if (!object) return result;
+    const auto* schema = cJSON_GetObjectItemCaseSensitive(object.get(), "schema_version");
+    if (!cJSON_IsNumber(schema) || !std::isfinite(schema->valuedouble) ||
+        std::floor(schema->valuedouble) != schema->valuedouble) return result;
+    if (schema->valuedouble > 1) {
+        result.status = StoreStatus::UnsupportedVersion;
+        result.detail = "unsupported bookmark schema_version";
+        return result;
+    }
+    std::string identity, revision;
+    std::uint64_t next_sequence = 0;
+    const auto* items = cJSON_GetObjectItemCaseSensitive(object.get(), "bookmarks");
+    if (schema->valuedouble != 1 ||
+        !fields(object.get(), {"schema_version", "book_id", "content_revision", "next_sequence", "bookmarks"}) ||
+        !string_field(object.get(), "book_id", identity) || !text_value(identity, 256) ||
+        !string_field(object.get(), "content_revision", revision) || !text_value(revision, 256) ||
+        !sequence_field(object.get(), "next_sequence", next_sequence) || !cJSON_IsArray(items) ||
+        static_cast<std::size_t>(cJSON_GetArraySize(items)) > kMaxBookmarks) return result;
+    std::vector<Bookmark> bookmarks;
+    for (const auto* item = items->child; item; item = item->next) {
+        Bookmark bookmark;
+        const auto* anchor = cJSON_GetObjectItemCaseSensitive(item, "anchor");
+        if (!known_fields(item, {"sequence", "anchor", "chapter", "excerpt"}, {"percent", "created_at", "time_source"}) ||
+            !sequence_field(item, "sequence", bookmark.sequence) || !fields(anchor, {"resource", "node", "offset"}) ||
+            !string_field(anchor, "resource", bookmark.anchor.resource) ||
+            !string_field(anchor, "node", bookmark.anchor.node) ||
+            !string_field(item, "chapter", bookmark.chapter) || !string_field(item, "excerpt", bookmark.excerpt)) return result;
+        const auto* offset = cJSON_GetObjectItemCaseSensitive(anchor, "offset");
+        if (!cJSON_IsNumber(offset) || !std::isfinite(offset->valuedouble) || offset->valuedouble < 0 ||
+            offset->valuedouble > std::numeric_limits<std::uint32_t>::max() ||
+            std::floor(offset->valuedouble) != offset->valuedouble) return result;
+        bookmark.anchor.offset = static_cast<std::uint32_t>(offset->valuedouble);
+        if (const auto* percent = cJSON_GetObjectItemCaseSensitive(item, "percent")) {
+            if (!cJSON_IsNumber(percent) || !std::isfinite(percent->valuedouble) || percent->valuedouble < 0 ||
+                percent->valuedouble > 100 || std::floor(percent->valuedouble) != percent->valuedouble) return result;
+            bookmark.percent = static_cast<int>(percent->valuedouble);
+        }
+        const std::pair<const char*, std::optional<std::string>*> optional_fields[] = {
+            {"created_at", &bookmark.created_at}, {"time_source", &bookmark.time_source}};
+        for (const auto& optional : optional_fields) {
+            if (!cJSON_GetObjectItemCaseSensitive(item, optional.first)) continue;
+            std::string value;
+            if (!string_field(item, optional.first, value)) return result;
+            *optional.second = std::move(value);
+        }
+        bookmarks.push_back(std::move(bookmark));
+    }
+    std::sort(bookmarks.begin(), bookmarks.end(),
+              [](const Bookmark& a, const Bookmark& b) { return a.sequence < b.sequence; });
+    if (!valid_bookmarks(bookmarks, next_sequence)) return result;
+    if (identity != book_id || revision != content_revision) {
+        result.status = StoreStatus::IdentityMismatch;
+        result.foreign_book_id = identity;
+        result.detail = "bookmark book_id or content_revision differs";
+        return result;
+    }
+    result.status = StoreStatus::Ok;
+    result.bookmarks = std::move(bookmarks);
+    result.next_sequence = next_sequence;
+    result.detail.clear();
+    return result;
+}
+
+std::string encode_bookmarks(const std::string& book_id, const std::string& content_revision,
+                             const std::vector<Bookmark>& bookmarks, std::uint64_t next_sequence) {
+    Json object(cJSON_CreateObject(), cJSON_Delete);
+    if (!object || !cJSON_AddNumberToObject(object.get(), "schema_version", 1) ||
+        !cJSON_AddStringToObject(object.get(), "book_id", book_id.c_str()) ||
+        !cJSON_AddStringToObject(object.get(), "content_revision", content_revision.c_str()) ||
+        !cJSON_AddStringToObject(object.get(), "next_sequence", std::to_string(next_sequence).c_str())) return {};
+    cJSON* items = cJSON_AddArrayToObject(object.get(), "bookmarks");
+    if (!items) return {};
+    for (const auto& bookmark : bookmarks) {
+        cJSON* item = cJSON_CreateObject();
+        if (!item || !cJSON_AddItemToArray(items, item)) { cJSON_Delete(item); return {}; }
+        cJSON* anchor = nullptr;
+        if (!cJSON_AddStringToObject(item, "sequence", std::to_string(bookmark.sequence).c_str()) ||
+            !(anchor = cJSON_AddObjectToObject(item, "anchor")) ||
+            !cJSON_AddStringToObject(anchor, "resource", bookmark.anchor.resource.c_str()) ||
+            !cJSON_AddStringToObject(anchor, "node", bookmark.anchor.node.c_str()) ||
+            !cJSON_AddNumberToObject(anchor, "offset", bookmark.anchor.offset) ||
+            !cJSON_AddStringToObject(item, "chapter", bookmark.chapter.c_str()) ||
+            !cJSON_AddStringToObject(item, "excerpt", bookmark.excerpt.c_str()) ||
+            (bookmark.percent >= 0 && !cJSON_AddNumberToObject(item, "percent", bookmark.percent)) ||
+            (bookmark.created_at && !cJSON_AddStringToObject(item, "created_at", bookmark.created_at->c_str())) ||
+            (bookmark.time_source && !cJSON_AddStringToObject(item, "time_source", bookmark.time_source->c_str())))
+            return {};
+    }
+    // Indented output keeps the file readable for manual inspection on a computer.
+    char* printed = cJSON_Print(object.get());
+    if (!printed) return {};
+    std::string bytes(printed);
+    cJSON_free(printed);
+    return bytes;
+}
+
+/** Archive name component: up to 8 leading identity characters, restricted to a FAT-safe set. */
+std::string archive_prefix(const std::string& book_id) {
+    std::string prefix;
+    for (char ch : book_id) {
+        if (prefix.size() == 8) break;
+        const bool safe = (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+        prefix += safe ? ch : '_';
+    }
+    return prefix.empty() ? "unknown" : prefix;
+}
+
+/** Renames a regular file to a currently missing name; an existing destination is never replaced. */
+bool rename_to_new(const std::string& root, const std::string& from, const std::string& to) {
+    if (store_internal::safe_path(root, to) != StoreStatus::Missing) return false;
+    const auto source = root + "/" + from, destination = root + "/" + to;
+#ifdef ESP_PLATFORM
+#if defined(CONFIG_FATFS_VFS_RENAME_REPLACES_DESTINATION)
+    (void)source; (void)destination;
+    return false;
+#else
+    if (rename(source.c_str(), destination.c_str()) != 0) return false;
+#endif
+#else
+    // link() refuses an existing name atomically, unlike POSIX rename().
+    if (link(source.c_str(), destination.c_str()) != 0 || unlink(source.c_str()) != 0) return false;
+#endif
+    return sync_directory(root + "/" + to.substr(0, to.rfind('/')));
+}
+
+/** Reads one slot; Missing yields nullopt. Any other failure is returned. */
+StoreStatus read_slot(const std::string& root, const std::string& path, std::optional<std::string>& bytes) {
+    std::string contents;
+    const auto status = store_internal::read_file(root, path, kBookmarkFileLimit, contents);
+    bytes.reset();
+    if (status == StoreStatus::Ok) bytes = std::move(contents);
+    return status == StoreStatus::Missing ? StoreStatus::Ok : status;
+}
+
+std::uint32_t resource_crc(std::uint32_t crc, const void* data, std::size_t size);
+
+std::optional<SlotDigest> digest(const std::optional<std::string>& bytes) {
+    if (!bytes) return std::nullopt;
+    return SlotDigest{bytes->size(), resource_crc(0, bytes->data(), bytes->size())};
 }
 
 ProgressResult read_progress(const std::string& root, const std::string& path,
@@ -439,7 +648,8 @@ StoreStatus commit_file(const std::string& root, const std::string& path,
         const auto directory = path.substr(0, slash);
         const auto safe = safe_path(root, directory);
         if (safe == StoreStatus::Missing) {
-            if (mkdir((root + "/" + directory).c_str(), 0700) != 0) return failed("directory creation failed");
+            // A concurrent writer of another sidecar file may create the directory first.
+            if (mkdir((root + "/" + directory).c_str(), 0700) != 0 && errno != EEXIST) return failed("directory creation failed");
         } else if (safe != StoreStatus::Ok) {
             error = directory + ": unsafe or unreadable directory";
             return safe;
@@ -651,6 +861,116 @@ ProgressResult FileStore::save_progress(const std::string& book_path, const Read
     checked = read_progress(root_, path, record.book_id, record.content_revision);
     if (!checked.record || !(*checked.record == record)) return failure("published verification failed");
     return checked;
+}
+
+BookmarkList FileStore::load_bookmarks(const std::string& book_path, const std::string& book_id,
+                                       const std::string& content_revision) const {
+    BookmarkList result;
+    const auto safe = store_internal::safe_path(root_, book_path);
+    if (safe != StoreStatus::Ok) { result.status = safe; result.detail = book_path; return result; }
+    const auto path = book_path + ".picopage/bookmarks.json";
+    std::optional<std::string> main, backup;
+    auto status = read_slot(root_, path, main);
+    if (status != StoreStatus::Ok) { result.status = status; result.detail = path; return result; }
+    const auto main_digest = digest(main);
+    if (main) {
+        result = decode_bookmarks(*main, book_id, content_revision);
+        if (result.status != StoreStatus::Ok) result.detail = path + ": " + result.detail;
+        main.reset();
+    }
+    status = read_slot(root_, path + ".bak", backup);
+    if (status != StoreStatus::Ok) {
+        result = BookmarkList{};
+        result.status = status; result.detail = path + ".bak";
+        return result;
+    }
+    if (main_digest && backup && (result.status == StoreStatus::Ok || result.status == StoreStatus::IdentityMismatch)) {
+        // A newer firmware's backup would be replaced by the next commit; leave both slots untouched.
+        if (decode_bookmarks(*backup, book_id, content_revision).status == StoreStatus::UnsupportedVersion) {
+            result = BookmarkList{};
+            result.status = StoreStatus::UnsupportedVersion;
+            result.detail = path + ".bak: unsupported bookmark schema_version";
+        }
+    } else if (!main_digest && backup) {
+        // The main slot is absent only between backup publication and main publication, or
+        // after manual deletion. A backup that cannot be used blocks changes, so it is never
+        // superseded before the user inspects it.
+        result = decode_bookmarks(*backup, book_id, content_revision);
+        result.recovered_backup = result.status == StoreStatus::Ok;
+        result.detail = result.recovered_backup ? "recovered committed backup: " + path + ".bak"
+                                                : path + ".bak: " + result.detail;
+    }
+    result.source = main_digest;
+    result.backup_source = digest(backup);
+    return result;
+}
+
+StoreStatus FileStore::save_bookmarks(const std::string& book_path, const std::string& book_id,
+                                      const std::string& content_revision, const BookmarkList& loaded,
+                                      const std::vector<Bookmark>& bookmarks, std::uint64_t next_sequence,
+                                      BookmarkList& committed) const {
+    if (loaded.status != StoreStatus::Ok && loaded.status != StoreStatus::Missing &&
+        loaded.status != StoreStatus::IdentityMismatch) return loaded.status;
+    if (!text_value(book_id, 256) || !text_value(content_revision, 256) ||
+        !valid_bookmarks(bookmarks, next_sequence)) return StoreStatus::Invalid;
+    const auto bytes = encode_bookmarks(book_id, content_revision, bookmarks, next_sequence);
+    if (bytes.empty() || bytes.size() > kBookmarkFileLimit) return StoreStatus::Invalid;
+    const auto safe = store_internal::safe_path(root_, book_path);
+    if (safe != StoreStatus::Ok) return safe;
+    const auto directory = book_path + ".picopage";
+    const auto path = directory + "/bookmarks.json";
+    // A slot is archived when it does not describe the current content; a backup that
+    // matches it, or that cannot be parsed, stays for commit_file to supersede.
+    const auto foreign = [&](const std::optional<std::string>& slot) {
+        return slot && decode_bookmarks(*slot, book_id, content_revision).status == StoreStatus::IdentityMismatch;
+    };
+    std::optional<std::string> main;
+    bool archive_backup = false;
+    // The backup is released before the main slot is read, so only one slot buffer is held.
+    {
+        std::optional<std::string> backup;
+        auto status = read_slot(root_, path + ".bak", backup);
+        if (status != StoreStatus::Ok) return status;
+        if (digest(backup) != loaded.backup_source) return StoreStatus::ExternalChange;
+        archive_backup = loaded.status == StoreStatus::IdentityMismatch && foreign(backup);
+    }
+    auto status = read_slot(root_, path, main);
+    if (status != StoreStatus::Ok) return status;
+    if (digest(main) != loaded.source) return StoreStatus::ExternalChange;
+    // commit_file compares the current main slot with these bytes once more before replacing it.
+    auto expected = std::move(main);
+    auto remaining_backup = loaded.backup_source;
+    if (loaded.status == StoreStatus::IdentityMismatch) {
+        const bool archive_main = foreign(expected);
+        const auto stem = directory + "/bookmarks." + archive_prefix(loaded.foreign_book_id) + ".";
+        std::string target;
+        for (unsigned n = 1; n <= 999 && target.empty(); ++n) {
+            const auto candidate = stem + std::to_string(n) + ".json";
+            if (store_internal::safe_path(root_, candidate) == StoreStatus::Missing &&
+                store_internal::safe_path(root_, candidate + ".bak") == StoreStatus::Missing) target = candidate;
+        }
+        if (target.empty()) return StoreStatus::IoError;
+        if (archive_main) {
+            if (!rename_to_new(root_, path, target)) return StoreStatus::IoError;
+            expected.reset();
+        }
+        if (archive_backup) {
+            if (!rename_to_new(root_, path + ".bak", archive_main ? target + ".bak" : target)) return StoreStatus::IoError;
+            remaining_backup.reset();
+        }
+    }
+    std::string error;
+    status = store_internal::commit_file(root_, path, expected, bytes, kBookmarkFileLimit, error);
+    if (status != StoreStatus::Ok) return status;
+    BookmarkList result;
+    result.status = StoreStatus::Ok;
+    result.bookmarks = bookmarks;
+    result.next_sequence = next_sequence;
+    result.source = digest(bytes);
+    // commit_file keeps the replaced main slot as the backup; without one the old backup remains.
+    result.backup_source = expected ? digest(expected) : remaining_backup;
+    committed = std::move(result);
+    return StoreStatus::Ok;
 }
 
 StoreStatus FileStore::book_snapshot(const std::string& path, BookSnapshot& snapshot) const {

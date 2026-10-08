@@ -76,7 +76,16 @@ TF 根目录/
 实际可定位的 anchor、可选展示值/可信度；具体锚点编码在 G1 冻结。
 机器修订号只在明确作用域内比较，不把两台设备的计数直接排序。
 
-`bookmarks.json` 随书签功能实现（[功能路线图](roadmap.md) R9），清理缓存不删除。
+`bookmarks.json`（[功能路线图](roadmap.md) R9）：schema 1，字段为 `schema_version`、`book_id`、`content_revision`、
+`next_sequence` 和 `bookmarks` 数组。每条书签有 `sequence`、与 `progress.json` 同格式的 `anchor`、
+创建时的 `chapter` 与 `excerpt`，以及可选的 `percent`；`created_at` 与 `time_source` 只在有可信时间时成对出现。
+序号与 `next_sequence` 用十进制字符串保存，删除后不复用。文件缩进输出，便于在电脑上查看。
+提交前比较主文件和 `.bak` 是否与读取时一致，再按 tmp、回读、备份、发布的顺序写入。
+主文件缺失时从有效 `.bak` 恢复；主文件或此时的 `.bak` 损坏、schema 较新时不使用、不覆盖，也不允许修改；
+主文件有效或属于其他内容、而 `.bak` 为较新 schema 时，同样不允许修改。
+身份不符时不显示这些书签；为当前书第一次加书签时，先把旧文件改名为
+`bookmarks.<旧 book_id 前 8 位>.<n>.json`（旧备份为同名加 `.bak`），n 取不与已有文件冲突的最小值，再创建新文件。
+清理缓存、保存进度和“清除阅读记录”都不修改书签文件。
 `annotations.json`、collections 和完整历史界面后置；先留格式边界，不创建无用途空文件。
 没有 `.picopage/` 时在首次需要保存后惰性创建，而不是扫描全卡就生成大量空目录。
 只读/满卡允许显示可读内容，但明确不能保存，不能依赖隐藏内部进度伪装成功。

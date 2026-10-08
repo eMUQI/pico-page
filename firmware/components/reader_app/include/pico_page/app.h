@@ -123,7 +123,7 @@ class ReaderApp {
     bool fast_page_updates() const;
     /** Idle minutes before sleep from the global settings loaded at start or book open; 0 disables. */
     int auto_sleep_minutes() const;
-    /** Reloads global settings when idle; uses the admitted state while a network worker owns the card. */
+    /** Reloads global settings when idle; uses the admitted network state, and rejects access during a bookmark commit. */
     bool wifi_enabled() const;
     /** Requests cancellation on the application owner task without waiting for the worker. */
     void stop_wifi();
@@ -175,7 +175,7 @@ class ReaderApp {
     bool save_due() const;
     /** Commits the presented position now; a failure replaces the page with the error view. */
     void save_progress();
-    /** True while an immutable displayed-position snapshot is being committed. */
+    /** True while an immutable displayed-position snapshot or a bookmark list is being committed. */
     bool save_busy() const;
     /**
      * Page number of the visible page and the page total of the open book under the applied

@@ -43,7 +43,7 @@ struct PaginationSession {
 /** A single job owns its parser and font, or borrows them from a PaginationSession. Only done() permits access to its result. */
 class ContentJob {
 public:
-    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload };
+    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks };
     enum class Target { Start, End, Before, Anchor, Fragment };
     struct CoverSource {
         std::string path, cache_name, cache_header;
@@ -68,6 +68,10 @@ public:
         std::vector<SpineItem> spine;
         std::optional<ReadingRecord> record;
         std::shared_ptr<FileDigest> font_scan;
+        /** SaveBookmarks: the list as loaded, the replacement and its next sequence. */
+        std::optional<BookmarkList> bookmark_base;
+        std::vector<Bookmark> bookmarks;
+        std::uint64_t bookmark_next = 1;
         /** Pagination only. Without a session the job prepares and discards its own. */
         std::shared_ptr<PaginationSession> session;
         bool save_last_book = false, prefetch = false, cover_crop = false, preview = false;
@@ -93,6 +97,10 @@ public:
         std::size_t chapter_index = 0;
         ConfigResult configuration;
         ProgressResult progress;
+        /** SaveBookmarks: the commit status. */
+        StoreStatus bookmark_status = StoreStatus::IoError;
+        /** Open: loaded list. SaveBookmarks: committed list, or reloaded list after ExternalChange. */
+        BookmarkList bookmarks;
         bool last_book_saved = false, cache_finished = false;
         std::optional<PageCache> page_cache;
         off_t file_size = 0;

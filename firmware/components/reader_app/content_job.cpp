@@ -135,6 +135,17 @@ void ContentJob::run() {
             result.last_book_saved = store.save_last_book(request.relative_path, result.error) == StoreStatus::Ok;
         return;
     }
+    if (request.kind == Kind::SaveBookmarks) {
+        // Not cancellable: a started commit runs to its result so the owner learns what the card holds.
+        const StageTimer timer{"bookmark_commit"};
+        FileStore store(request.root);
+        if (!request.bookmark_base) { result.bookmark_status = StoreStatus::Invalid; return; }
+        result.bookmark_status = store.save_bookmarks(request.relative_path, request.identity.book_id, request.content_revision,
+                                                      *request.bookmark_base, request.bookmarks, request.bookmark_next, result.bookmarks);
+        if (result.bookmark_status == StoreStatus::ExternalChange)
+            result.bookmarks = store.load_bookmarks(request.relative_path, request.identity.book_id, request.content_revision);
+        return;
+    }
     if (stop()) return;
     if (request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite) {
         FileStore store(request.root);
@@ -329,6 +340,9 @@ void ContentJob::open_book() {
     result.configuration = store.load_settings(request.relative_path);
     result.progress = store.load_progress(request.relative_path, document.metadata().book_id,
         document.metadata().txt_gb18030 ? kTxtGb18030Revision : request.content_revision);
+    if (request.kind == Kind::Open && !stop())
+        result.bookmarks = store.load_bookmarks(request.relative_path, document.metadata().book_id,
+            document.metadata().txt_gb18030 ? kTxtGb18030Revision : request.content_revision);
     if (request.kind != Kind::Inspect && result.progress.status != StoreStatus::Ok && result.progress.status != StoreStatus::Missing &&
         result.progress.status != StoreStatus::Cleared) {
         result.error = "Reading progress cannot be read; original record preserved"; return;

@@ -81,13 +81,16 @@ struct Driver {
     }
     void present_at(int line) {
         if (!app.pending_frame()) { std::cerr << "No frame to present at line " << line << '\n'; std::abort(); }
-        while (app.pending_frame()) app.complete_frame(true);
-        if (app.save_due()) app.save_progress();
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-        while (app.save_busy()) {
-            app.poll_background();
-            assert(std::chrono::steady_clock::now() < deadline);
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        // A finished background commit may queue a further frame, as in the firmware loop.
+        while (app.pending_frame()) {
+            while (app.pending_frame()) app.complete_frame(true);
+            if (app.save_due()) app.save_progress();
+            while (app.save_busy()) {
+                app.poll_background();
+                assert(std::chrono::steady_clock::now() < deadline);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
         }
     }
     void complete_content() {
@@ -535,7 +538,7 @@ int main(int argc, char** argv) {
         driver.present();
         driver.tap(342, 500); driver.present();
         driver.tap(68, 1140); assert(app.view() == View::Contents); driver.present();
-        driver.tap(300, 450 + 92 + 46); assert(app.view() == View::Reading); driver.present();
+        driver.tap(300, 522 + 92 + 46); assert(app.view() == View::Reading); driver.present();
         const auto second = *app.saved_record();
         assert(second.anchor.resource.find("chapter2") != std::string::npos);
         // Turning back into a long chapter announces the layout and keeps the confirmed position meanwhile.
@@ -1159,13 +1162,13 @@ int main(int argc, char** argv) {
         const auto saved = *app.saved_record();
         driver.tap(342, 500); driver.present(); driver.tap(68, 1150); driver.present();
         const auto collapsed = app.canvas().pixels();
-        driver.tap(615, 496); driver.present();
+        driver.tap(615, 568); driver.present();
         assert(app.view() == View::Contents && app.canvas().pixels() != collapsed && *app.saved_record() == saved);
         driver.refresh();
-        driver.tap(615, 496); driver.present();
+        driver.tap(615, 568); driver.present();
         assert(app.canvas().pixels() == collapsed && *app.saved_record() == saved);
-        driver.tap(615, 496); driver.present();
-        driver.tap(200, 588); driver.present();
+        driver.tap(615, 568); driver.present();
+        driver.tap(200, 660); driver.present();
         assert(app.view() == View::Reading && app.saved_record()->anchor != saved.anchor);
     }
     {
@@ -1422,7 +1425,7 @@ int main(int argc, char** argv) {
             }
             driver.tap(342, 500); driver.present(); driver.tap(68, 1150); driver.present();
             assert(app.view() == View::Contents);
-            driver.tap(300, 588); driver.present();
+            driver.tap(300, 660); driver.present();
             assert(app.view() == View::Reading);
             late = app.saved_record()->anchor;
             late_page = app.book_pages()->page;
@@ -1785,7 +1788,7 @@ int main(int argc, char** argv) {
         assert(async.saved_record()->anchor == first);
         for (auto* d : {&ref_driver, &driver}) {
             d->tap(342, 500); d->present(); d->tap(68, 1140); d->present();
-            d->tap(300, 680); d->present(); d->complete_content();
+            d->tap(300, 752); d->present(); d->complete_content();
         }
         assert(async.saved_record()->anchor.resource.find("chapter2") != std::string::npos);
         same_body();
@@ -2168,6 +2171,408 @@ int main(int argc, char** argv) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         assert(app.canvas().pixels() != placeholders);
+    }
+    for (const bool async : {false, true}) {
+        // Bookmarks: the tool page toggles the visible page, the reading page shows the ribbon,
+        // and the contents panel lists and jumps to them in both content modes.
+        const auto root = card / (async ? "BookmarksAsync" : "BookmarksSync");
+        const std::string book = "Books/long.epub";
+        fs::create_directories(root / "PicoPage");
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "long-chapter.epub", root / book);
+        const auto marks = root / (book + ".picopage/bookmarks.json");
+        const auto progress = root / (book + ".picopage/progress.json");
+        FileStore store(root.string());
+        const auto ribbon = [](const ReaderApp& app) { return app.canvas().pixel(634, 10) == 1; };
+        const auto step = [](Driver& driver, Input key) {
+            driver.key(key);
+            if (driver.app.pending_frame()) driver.present();
+            driver.complete_content();
+        };
+        const auto tools = [](Driver& driver) {
+            driver.tap(342, 500); driver.present(); assert(driver.app.view() == View::Tools);
+        };
+        const auto bookmark_list = [&](Driver& driver) {
+            tools(driver);
+            driver.tap(68, 1150); driver.present(); assert(driver.app.view() == View::Contents);
+            driver.tap(500, 486); driver.present(); assert(driver.app.view() == View::Contents);
+        };
+        Anchor marked;
+        std::string id;
+        {
+            ReaderApp app(root.string(), "bookmarks", async, async); Driver driver{app};
+            assert(app.initialize()); driver.present(); opened(app, book); driver.present();
+            for (int i = 0; i < 3; ++i) step(driver, Input::K3);
+            assert(!ribbon(app) && !fs::exists(marks));
+            marked = app.saved_record()->anchor;
+            id = app.saved_record()->book_id;
+            const auto position = *app.saved_record();
+            const auto saved_progress = read(progress);
+            tools(driver);
+            driver.refresh();
+            driver.tap(634, 50); driver.present();
+            assert(app.view() == View::Tools && *app.saved_record() == position && read(progress) == saved_progress);
+            auto list = store.load_bookmarks(book, id, "epub-native-v1");
+            assert(list.status == StoreStatus::Ok && list.bookmarks.size() == 1 && list.next_sequence == 2);
+            assert(list.bookmarks[0].anchor == marked && !list.bookmarks[0].excerpt.empty());
+            assert(!list.bookmarks[0].chapter.empty() && list.bookmarks[0].percent >= 0 && !list.bookmarks[0].created_at);
+            driver.close(); driver.present();
+            assert(app.view() == View::Reading && ribbon(app));
+            step(driver, Input::K3); assert(!ribbon(app));
+            step(driver, Input::K1); assert(ribbon(app) && app.saved_record()->anchor == marked);
+            for (int i = 0; i < 4; ++i) step(driver, Input::K3);
+            assert(app.saved_record()->anchor != marked);
+
+            // The list marks nothing on another page and jumps to the presented bookmark position.
+            bookmark_list(driver);
+            driver.refresh();
+            driver.tap(300, 578);
+            if (app.pending_frame()) driver.present();
+            driver.complete_content();
+            assert(app.view() == View::Reading && app.saved_record()->anchor == marked && ribbon(app));
+
+            // A second tap on the toggle deletes the bookmarks of the visible page only.
+            step(driver, Input::K3);
+            tools(driver); driver.tap(634, 50); driver.present();
+            list = store.load_bookmarks(book, id, "epub-native-v1");
+            assert(list.bookmarks.size() == 2 && list.bookmarks[1].sequence == 2);
+            driver.close(); driver.present(); step(driver, Input::K1);
+            tools(driver); driver.tap(634, 50); driver.present();
+            list = store.load_bookmarks(book, id, "epub-native-v1");
+            assert(list.bookmarks.size() == 1 && list.bookmarks[0].sequence == 2 && list.next_sequence == 3);
+            driver.close(); driver.present(); assert(!ribbon(app));
+            tools(driver); driver.tap(634, 50); driver.present();
+            list = store.load_bookmarks(book, id, "epub-native-v1");
+            assert(list.bookmarks.size() == 2 && list.bookmarks[1].sequence == 3 && list.bookmarks[1].anchor == marked);
+            if (async) {
+                // The commit runs on a worker: the tool page reports it, a repeated tap is ignored,
+                // and the delayed progress save of a new page completes as well.
+                driver.close(); driver.present();
+                step(driver, Input::K3);  // The page of bookmark 2.
+                driver.key(Input::K3);
+                while (app.pending_frame()) app.complete_frame(true);
+                assert(app.save_due());
+                app.save_progress();
+                assert(app.save_busy());
+                const auto turned = app.saved_record();
+                driver.tap(342, 500);
+                while (app.pending_frame()) app.complete_frame(true);
+                assert(app.view() == View::Tools);
+                driver.tap(634, 50);
+                assert(app.status() == "正在保存书签…" && app.save_busy());
+                while (app.pending_frame()) app.complete_frame(true);
+                driver.tap(634, 50);
+                assert(!app.pending_frame() && app.save_busy());  // Ignored while the commit is pending.
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+                while (app.save_busy() || app.pending_frame()) {
+                    app.poll_background();
+                    while (app.pending_frame()) app.complete_frame(true);
+                    assert(std::chrono::steady_clock::now() < deadline);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                assert(app.status() == "已加书签" && app.view() == View::Tools);
+                list = store.load_bookmarks(book, id, "epub-native-v1");
+                assert(list.bookmarks.size() == 3 && list.bookmarks[2].sequence == 4);
+                const auto stored = store.load_progress(book, id, "epub-native-v1");
+                assert(stored.record && app.saved_record() && stored.record->anchor == app.saved_record()->anchor);
+                assert(!turned || turned->anchor != marked);
+                driver.tap(634, 50); driver.present();
+                assert(store.load_bookmarks(book, id, "epub-native-v1").bookmarks.size() == 2);
+                // A queued commit finishes before the card is handed to USB.
+                driver.tap(634, 50);
+                while (app.pending_frame()) app.complete_frame(true);
+                assert(app.save_busy() && app.prepare_usb_transfer() && !app.save_busy());
+                assert(store.load_bookmarks(book, id, "epub-native-v1").bookmarks.size() == 3);
+            }
+        }
+        if (async) {
+            // An image opened while a commit is queued keeps its return page; the page then shows the ribbon.
+            const auto viewer_root = card / "BookmarksViewer";
+            fs::create_directories(viewer_root / "PicoPage");
+            fs::create_directories(viewer_root / "Books");
+            fs::copy_file(fixtures / "image-flow.epub", viewer_root / "Books/images.epub");
+            ReaderApp app(viewer_root.string(), "bookmarks", true, true); Driver driver{app};
+            assert(app.initialize()); driver.present(); opened(app, "Books/images.epub"); driver.present();
+            assert(!ribbon(app));
+            tools(driver); driver.tap(634, 50);
+            while (app.pending_frame()) app.complete_frame(true);
+            driver.tap(342, 500);
+            while (app.pending_frame()) app.complete_frame(true);
+            assert(app.view() == View::Reading && app.save_busy());
+            const auto page_pixels = app.canvas().pixels();
+            driver.hold(120, 500);
+            assert(app.view() == View::Loading);
+            driver.present(); driver.complete_content();
+            assert(app.view() == View::Reading && app.canvas().pixels() != page_pixels && !app.save_busy());
+            driver.tap(100, 50); driver.present();
+            assert(app.view() == View::Reading && ribbon(app));
+            FileStore viewer_store(viewer_root.string());
+            assert(viewer_store.load_bookmarks("Books/images.epub", app.saved_record()->book_id, "epub-native-v1").bookmarks.size() == 1);
+        }
+        if (async) {
+            // A ribbon change redraws an image page; its resumed patch preserves the ribbon and saved position.
+            const auto image_root = card / "BookmarksProgressive";
+            fs::create_directories(image_root / "Books");
+            fs::copy_file(fixtures / "image-flow.epub", image_root / "Books/images.epub");
+            ReaderApp app(image_root.string(), "bookmark-image", true, true); Driver driver{app};
+            assert(app.initialize()); driver.present(); opened(app, "Books/images.epub");
+            while (app.pending_frame()) app.complete_frame(true);
+            app.save_progress();
+            const auto save_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+            while (app.save_busy()) {
+                app.poll_background(true);
+                assert(std::chrono::steady_clock::now() < save_deadline);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            const auto saved = app.saved_record();
+            assert(saved && !ribbon(app) && app.content_busy());
+            tools(driver); driver.tap(634, 50);
+            while (app.pending_frame()) app.complete_frame(true);
+            driver.close();
+            while (app.pending_frame()) app.complete_frame(true);
+            bool patched = false;
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+            while (app.save_busy() || app.content_busy() || app.pending_frame()) {
+                app.poll_background();
+                while (app.pending_frame()) {
+                    if (app.pending_frame()->region) {
+                        patched = true;
+                        assert(app.pending_frame()->purpose == FramePurpose::Overlay && ribbon(app));
+                    }
+                    app.complete_frame(true);
+                }
+                assert(app.saved_record() == saved && std::chrono::steady_clock::now() < deadline);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            assert(patched);
+            assert(ribbon(app));
+            assert(!app.save_due());
+            FileStore image_store(image_root.string());
+            const auto list = image_store.load_bookmarks("Books/images.epub", saved->book_id, "epub-native-v1");
+            assert(list.bookmarks.size() == 1 && list.bookmarks.front().anchor == saved->anchor);
+            const auto rendered = app.canvas().pixels();
+            const auto decodes = graphics::image_decode_count();
+            for (const bool marked : {false, true}) {
+                tools(driver); driver.tap(634, 50); driver.present();
+                driver.close(); driver.present();
+                assert(ribbon(app) == marked && app.saved_record() == saved && !app.content_busy());
+                assert(graphics::image_decode_count() == decodes);
+                // Only the ribbon and the notice/footer may change; every body pixel stays rendered.
+                assert(std::equal(rendered.begin() + 64 * 342, rendered.begin() + 1128 * 342,
+                                  app.canvas().pixels().begin() + 64 * 342));
+            }
+            ContentJob::Request request;
+            request.kind = ContentJob::Kind::Open;
+            request.root = image_root.string(); request.path = (image_root / "Books/images.epub").string();
+            request.relative_path = "Books/images.epub"; request.content_revision = "epub-native-v1";
+            ContentJob job(std::move(request));
+            assert(job.start()); job.wait();
+            assert(job.result.error.empty() && job.result.bookmarks.status == StoreStatus::Ok);
+            assert(job.result.bookmarks.bookmarks.size() == 1 && job.result.bookmarks.bookmarks.front().anchor == saved->anchor);
+        }
+        if (async) {
+            // A commit that fails while it is drained for a card handoff refuses the handoff and says why.
+            ReaderApp app(root.string(), "bookmarks", async, async); Driver driver{app};
+            assert(app.initialize()); driver.present(); opened(app, book); driver.present();
+            const auto before = read(marks);
+            tools(driver); driver.tap(634, 50);
+            while (app.pending_frame()) app.complete_frame(true);
+            assert(app.save_busy());
+            fs::remove(marks); fs::create_directory(marks);
+            assert(!app.prepare_usb_transfer() && !app.save_busy());
+            assert(app.status() == "书签未删除，请检查 TF 卡后重试" || app.status() == "书签未保存，请检查 TF 卡后重试" ||
+                   app.status() == "书签文件已在别处修改，已重新读取，请核对当前书签");
+            fs::remove(marks); write(marks, before);
+            assert(app.prepare_usb_transfer());
+        }
+        if (async) {
+            // A commit failing after the user moved to a page without a notice line shows an error page.
+            ReaderApp app(root.string(), "bookmarks", async, async); Driver driver{app};
+            assert(app.initialize()); driver.present(); opened(app, book); driver.present();
+            const auto before = read(marks);
+            tools(driver); driver.tap(634, 50);
+            while (app.pending_frame()) app.complete_frame(true);
+            fs::remove(marks); fs::create_directory(marks);
+            driver.tap(205, 1140);
+            while (app.pending_frame()) app.complete_frame(true);
+            assert(app.view() == View::Error && !app.save_busy());
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+            while (app.view() != View::Error) {
+                app.poll_background();
+                while (app.pending_frame()) app.complete_frame(true);
+                assert(std::chrono::steady_clock::now() < deadline);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            assert(app.status().find("书签") != std::string::npos);
+            fs::remove(marks); write(marks, before);
+        }
+        if (async) {
+            // A settings write on another panel waits for a queued commit instead of running beside it.
+            ReaderApp app(root.string(), "bookmarks", async, async); Driver driver{app};
+            assert(app.initialize()); driver.present(); opened(app, book); driver.present();
+            const auto count = store.load_bookmarks(book, id, "epub-native-v1").bookmarks.size();
+            const auto book_settings = root / (book + ".picopage/settings.toml");
+            const bool settings_existed = fs::exists(book_settings);
+            const auto settings_before = read(book_settings);
+            tools(driver); driver.tap(634, 50);
+            while (app.pending_frame()) app.complete_frame(true);
+            driver.tap(479, 1140);
+            while (app.pending_frame()) app.complete_frame(true);
+            assert(app.view() == View::Refresh && !app.save_busy());
+            driver.tap(300, 660);
+            assert(!app.save_busy() && store.load_bookmarks(book, id, "epub-native-v1").bookmarks.size() != count);
+            while (app.pending_frame()) app.complete_frame(true);
+            if (settings_existed) write(book_settings, settings_before); else fs::remove(book_settings);
+        }
+        if (async) {
+            // Entering a card-reading tab completes the commit before it reads configuration.
+            const auto marks_before = read(marks), backup_before = read(marks.string() + ".bak");
+            const std::pair<int, View> tabs[] = {{205, View::Typography}, {479, View::Refresh}, {342, View::Sync}};
+            for (const auto& tab : tabs) {
+                ReaderApp app(root.string(), "bookmark-panels", true, true); Driver driver{app};
+                assert(app.initialize()); driver.present(); opened(app, book); driver.present();
+                tools(driver); driver.tap(634, 50);
+                while (app.pending_frame()) app.complete_frame(true);
+                assert(app.save_busy());
+                driver.tap(tab.first, 1140);
+                assert(!app.save_busy() && app.view() == tab.second);
+                driver.present();
+            }
+            write(marks, marks_before); write(marks.string() + ".bak", backup_before);
+            // A pending failure must be shown before either tab can save a success notice.
+            for (const int tab : {205, 479}) {
+                ReaderApp app(root.string(), "bookmark-panel-failure", true, true); Driver driver{app};
+                assert(app.initialize()); driver.present(); opened(app, book); driver.present();
+                const auto settings_path = root / (book + ".picopage/settings.toml");
+                const auto settings_before = read(settings_path), marks_before = read(marks);
+                const auto temporary = fs::path(marks.string() + ".tmp");
+                fs::remove_all(temporary); fs::create_directory(temporary);
+                tools(driver); driver.tap(634, 50);
+                while (app.pending_frame()) app.complete_frame(true);
+                driver.tap(tab, 1140);
+                assert(app.view() == View::Error && !app.save_busy());
+                driver.present();
+                assert(app.status().find("书签未") == 0 && read(settings_path) == settings_before && read(marks) == marks_before);
+                fs::remove_all(temporary);
+            }
+            // TOC and bookmark-list views both expose a normally polled commit failure.
+            for (const bool show_bookmarks : {false, true}) {
+                ReaderApp app(root.string(), "bookmark-contents-failure", true, true); Driver driver{app};
+                assert(app.initialize()); driver.present(); opened(app, book); driver.present();
+                const auto temporary = fs::path(marks.string() + ".tmp");
+                fs::remove_all(temporary); fs::create_directory(temporary);
+                tools(driver); driver.tap(634, 50);
+                while (app.pending_frame()) app.complete_frame(true);
+                driver.tap(68, 1140);
+                while (app.pending_frame()) app.complete_frame(true);
+                assert(app.view() == View::Contents);
+                if (show_bookmarks) {
+                    driver.tap(500, 486);
+                    while (app.pending_frame()) app.complete_frame(true);
+                }
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+                while (app.view() != View::Error) {
+                    app.poll_background();
+                    while (app.pending_frame()) app.complete_frame(true);
+                    assert(std::chrono::steady_clock::now() < deadline);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                assert(app.status().find("书签未") == 0);
+                fs::remove_all(temporary);
+            }
+        }
+        {
+            // A reload can already contain the intended add or delete; never instruct another toggle.
+            const auto external_root = card / (async ? "BookmarkExternalAsync" : "BookmarkExternalSync");
+            fs::create_directories(external_root / "Books");
+            fs::copy_file(fixtures / "long-chapter.epub", external_root / book);
+            FileStore external(external_root.string());
+            for (const bool adding : {true, false}) {
+                ReaderApp app(external_root.string(), "bookmark-external", async, async); Driver driver{app};
+                assert(app.initialize()); driver.present(); opened(app, book); driver.present();
+                const auto identity = app.saved_record()->book_id;
+                auto base = external.load_bookmarks(book, identity, "epub-native-v1");
+                std::vector<Bookmark> replacement;
+                auto next = base.next_sequence;
+                if (adding) {
+                    Bookmark bookmark; bookmark.sequence = next++; bookmark.anchor = app.saved_record()->anchor;
+                    replacement.push_back(bookmark);
+                }
+                BookmarkList committed;
+                assert(external.save_bookmarks(book, identity, "epub-native-v1", base, replacement, next, committed) == StoreStatus::Ok);
+                tools(driver); driver.tap(634, 50); driver.present();
+                assert(app.status() == "书签文件已在别处修改，已重新读取，请核对当前书签");
+                assert(external.load_bookmarks(book, identity, "epub-native-v1").bookmarks.size() == (adding ? 1u : 0u));
+                driver.close(); driver.present();
+                assert(ribbon(app) == adding);
+            }
+        }
+        if (async) {
+            // A failure drained by the power menu is reported by the next handoff, unless a retry succeeds.
+            ReaderApp app(root.string(), "bookmarks", async, async); Driver driver{app};
+            assert(app.initialize()); driver.present(); opened(app, book); driver.present();
+            const auto before = read(marks);
+            tools(driver); driver.tap(634, 50);
+            while (app.pending_frame()) app.complete_frame(true);
+            fs::remove(marks); fs::create_directory(marks);
+            assert(app.show_power_menu()); driver.present();
+            driver.tap(100, 1100); driver.present();
+            fs::remove(marks); write(marks, before);
+            assert(app.view() == View::Tools);
+            driver.tap(634, 50); driver.present();
+            // The restored file differs from the state read during the failure: one reload, then the retry.
+            if (app.status() == "书签文件已在别处修改，已重新读取，请核对当前书签") { driver.tap(634, 50); driver.present(); }
+            assert(app.status() == "已删除本页书签" || app.status() == "已加书签");
+            assert(app.prepare_usb_transfer());
+        }
+        {
+            // A different font size lays out other pages; the bookmark still opens its paragraph.
+            write(root / (book + ".picopage/settings.toml"), "schema_version = 1\n[reader]\nfont_size_px = 30\n");
+            ReaderApp app(root.string(), "bookmarks", async, async); Driver driver{app};
+            assert(app.initialize()); driver.present(); opened(app, book); driver.present();
+            for (int i = 0; i < 6; ++i) step(driver, Input::K3);
+            bookmark_list(driver);
+            driver.tap(300, 578 + 112);
+            if (app.pending_frame()) driver.present();
+            driver.complete_content();
+            assert(app.view() == View::Reading && app.saved_record()->anchor == marked && ribbon(app));
+        }
+        const auto original = read(marks);
+        {
+            // A damaged file is kept and blocks changes; reading progress is still saved.
+            write(marks, "{damaged");
+            ReaderApp app(root.string(), "bookmarks", async, async); Driver driver{app};
+            assert(app.initialize()); driver.present(); opened(app, book);
+            assert(app.status() == "书签文件无法读取，已保留原文件；阅读进度不受影响");
+            driver.present();
+            bookmark_list(driver);
+            driver.tap(300, 578); assert(!app.pending_frame() && app.view() == View::Contents);
+            driver.close(); driver.present();
+            tools(driver); driver.tap(634, 50); driver.present();
+            assert(app.view() == View::Tools && read(marks) == "{damaged");
+            driver.close(); driver.present();
+            const auto before = read(progress);
+            step(driver, Input::K3);
+            assert(read(progress) != before && read(marks) == "{damaged");
+        }
+        {
+            // Bookmarks of other content are withheld; the first new bookmark archives that file.
+            auto foreign = original;
+            foreign.replace(foreign.find(id), id.size(), std::string(64, 'f'));
+            write(marks, foreign);
+            ReaderApp app(root.string(), "bookmarks", async, async); Driver driver{app};
+            assert(app.initialize()); driver.present(); opened(app, book);
+            assert(app.status() == "书签与当前原书不符，未使用；原文件已保留");
+            driver.present();
+            bookmark_list(driver);
+            driver.tap(300, 578); assert(!app.pending_frame() && app.view() == View::Contents);
+            driver.close(); driver.present();
+            assert(!ribbon(app));
+            tools(driver); driver.tap(634, 50); driver.present();
+            assert(read(root / (book + ".picopage/bookmarks.ffffffff.1.json")) == foreign);
+            const auto list = store.load_bookmarks(book, id, "epub-native-v1");
+            assert(list.status == StoreStatus::Ok && list.bookmarks.size() == 1 && list.bookmarks[0].sequence == 1);
+        }
     }
     fs::remove_all(card);
     std::cout << "reader app display, progress protection, typography, cover and stale network checks: passed\n";
