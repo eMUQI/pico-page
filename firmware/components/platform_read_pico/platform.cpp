@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <limits>
 
 #include "cst836u.h"
 #include "driver/gpio.h"
@@ -289,20 +290,22 @@ void sample_touch(void*) {
         }
         cst836u_touch_t sample{};
         xSemaphoreTake(touch_lock, portMAX_DELAY);
+        // Publish the sampled event before sleep can acquire the controller boundary.
         const auto result = cst836u_read(touch, &sample);
-        xSemaphoreGive(touch_lock);
         const auto now = esp_timer_get_time();
         if (suppress_touch.exchange(false)) cancel(now);
         if (result != ESP_OK) {
             if (!failing) ESP_LOGW(tag, "Touch/key read: %s", esp_err_to_name(result));
             failing = true;
             cancel(now);
+            xSemaphoreGive(touch_lock);
             continue;
         }
         failing = false;
         if (sample.touched) fast = settle_samples;
         if (suppressed) {
             if (!sample.touched) suppressed = false;
+            xSemaphoreGive(touch_lock);
             continue;
         }
         if (sample.count > 1) {
@@ -312,6 +315,7 @@ void sample_touch(void*) {
                 const auto kind = hit_test(sample.x, sample.y);
                 if (kind == EventKind::None) {
                     suppressed = true;
+                    xSemaphoreGive(touch_lock);
                     continue;
                 }
                 active = {kind, EventPhase::Begin, ++sequence, sample.x, sample.y, now};
@@ -330,6 +334,7 @@ void sample_touch(void*) {
             emit(EventPhase::End, now);
             active = {};
         }
+        xSemaphoreGive(touch_lock);
     }
 }
 
@@ -652,6 +657,11 @@ bool sleep(std::string& error) {
     rails_deadline = 0;
     // The sampler must not address the controller between standby and its reset on wake.
     xSemaphoreTake(touch_lock, portMAX_DELAY);
+    if (input_waiting_before(std::numeric_limits<std::int64_t>::max())) {
+        xSemaphoreGive(touch_lock);
+        error = "Sleep cancelled by queued input";
+        return false;
+    }
     auto result = cst836u_set_mode(touch, CST836U_MODE_DEEPSLEEP);
     if (result != ESP_OK) {
         xSemaphoreGive(touch_lock);
@@ -670,6 +680,10 @@ bool sleep(std::string& error) {
         bool short_press = false;
         bool wake_press = false;
         if (!pmu_events(short_press, wake_press, error)) break;
+        if (short_press || wake_press) {
+            error = "Sleep cancelled by power key";
+            break;
+        }
         bool idle = false;
         if (!wake_lines_idle(irq, idle, error)) break;
         if (idle && !(read_pico_pmu_get()->key_state & 1)) {

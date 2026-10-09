@@ -1994,7 +1994,9 @@ int main(int argc, char** argv) {
             assert(std::chrono::steady_clock::now() < content_deadline);
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         } while (app.content_busy() || app.pending_frame());
-        assert(app.save_due() && std::string(app.background_state()) != "sleep-cover");
+        assert(app.save_due() && !app.background_due());
+        app.background_step();
+        assert(!app.background_due());
         app.save_progress();
         while (app.save_busy()) {
             app.poll_background();

@@ -320,7 +320,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         prefetch_done = raster_disabled = false;
     }
     bool prefetch_due() const {
-        return !sleep_cover_deadline && view == View::Reading && !image_viewing && has_book() && card_available && !usb_prepared &&
+        return !sleep_cover_deadline && !session.needs_save() && view == View::Reading && !image_viewing && has_book() && card_available && !usb_prepared &&
                !display.busy() && !deferred && !save_job && !bookmark_job && !foreground_job && !pending_content && !prefetch_done;
     }
     void prepare_next(const std::function<bool()>& stop) {
@@ -1292,7 +1292,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::chrono::steady_clock::time_point sleep_cover_retry{};
     void defer_sleep_cover() { sleep_cover_retry = std::chrono::steady_clock::now() + std::chrono::seconds(5); }
     bool sleep_cover_due() const {
-        return async_content && background_content_ready() && !session.needs_save() && !txt_name(book_path) &&
+        return async_content && background_content_ready() && !txt_name(book_path) &&
                settings.sleep_screen == "cover" && !sleep_cover_prepared &&
                std::chrono::steady_clock::now() >= sleep_cover_retry;
     }
@@ -2627,7 +2627,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         return usage;
     }
     void reclaim_caches() {
-        if (view != View::Reading || display.busy() || content_loading) return;
+        if (view != View::Reading || display.busy() || content_loading ||
+            (counting_job && counting_job->request.kind == ContentJob::Kind::SleepCover)) return;
         const auto pressure = [&] {
             if (cache_usage().retained > cache_target) return true;
 #ifdef ESP_PLATFORM
@@ -2668,7 +2669,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
     }
     bool background_content_ready() const {
-        return !sleep_cover_deadline && view == View::Reading && !image_viewing && has_book() && card_available && !usb_prepared &&
+        return !sleep_cover_deadline && !session.needs_save() && view == View::Reading && !image_viewing && has_book() && card_available && !usb_prepared &&
                !display.busy() && !deferred && !save_job && !bookmark_job && !foreground_job && !pending_content &&
                !raster_job && !cover_job && !pending_covers;
     }
