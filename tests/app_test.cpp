@@ -243,6 +243,9 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     const auto toggle = [&](int x) {
         driver.tap(x, 1160);
         assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Overlay);
+        assert(app.pending_frame()->refresh == RefreshIntent::Content && app.pending_frame()->region);
+        const auto region = *app.pending_frame()->region;
+        assert(region.x == 0 && region.y == 1128 && region.width == 684 && region.height == 88);
         const auto frame = app.pending_frame()->token;
         const auto pixels = app.canvas().pixels();
         driver.tap(x == 600 ? 36 : 600, 1160);
@@ -270,7 +273,9 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     driver.queued(Input::TouchCenter, true, 36, 1160);
     driver.queued(Input::TouchCenter, true, 600, 1160);
     assert(!app.pending_frame() && app.canvas().pixels() == pixels);
-    driver.refresh(); unchanged();
+    driver.key(Input::K2);
+    assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean && !app.pending_frame()->region);
+    driver.present(); unchanged();
 
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     while (app.background_due()) {
@@ -299,6 +304,15 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     toggle(600);
     assert(footer_pixels(app, 540, 684) == battery);
     unchanged();
+
+    driver.tap(36, 1160);
+    assert(app.pending_frame() && app.pending_frame()->region);
+    app.complete_frame(false);
+    assert(app.view() == View::Error && app.saved_record() == saved);
+    assert(app.status() == "屏幕局部更新失败。返回将恢复已确认位置。");
+    assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean && !app.pending_frame()->region);
+    assert(read(root / "Books/book.epub.picopage/progress.json") == progress);
+    driver.present();
 }
 
 int main(int argc, char** argv) {
