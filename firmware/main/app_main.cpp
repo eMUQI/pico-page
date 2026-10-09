@@ -929,7 +929,7 @@ extern "C" void app_main() {
         }
         if (pico_page::console::transfer_active()) app->invalidate_identity_cache();
         const auto idle = esp_timer_get_time() - last_activity;
-        if (!usb_mode && app->view() != pico_page::View::PowerMenu && app->view() != pico_page::View::PowerOff &&
+        if (!usb_mode && !sleep_requested && app->view() != pico_page::View::PowerMenu && app->view() != pico_page::View::PowerOff &&
             idle >= idle_save_us && !physical_source && !app->pending_frame() &&
             app->save_due()) {
             app->save_progress();
