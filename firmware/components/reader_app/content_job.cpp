@@ -10,6 +10,7 @@
 #ifdef ESP_PLATFORM
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #else
@@ -20,6 +21,7 @@ namespace pico_page {
 namespace {
 #ifdef ESP_PLATFORM
 constexpr unsigned content_stack_bytes = 32768;
+QueueHandle_t content_requests = nullptr;
 void log_worker_memory(const char* phase, ContentJob::Kind kind) {
     constexpr auto internal = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
     ESP_LOGI("content_worker", "phase=%s kind=%d stack_bytes=%u internal_free=%u internal_largest=%u internal_min=%u psram_free=%u psram_largest=%u psram_min=%u",
@@ -122,30 +124,54 @@ graphics::Page plan_content(graphics::Font& font, const Chapter& source, std::si
 }
 ContentJob::ContentJob(Request value) : request(std::move(value)) {}
 ContentJob::~ContentJob() { cancel(); wait(); }
+#ifdef ESP_PLATFORM
+ContentJob::StartFailure ContentJob::prepare_worker() {
+    if (content_requests) return StartFailure::None;
+    auto queue = xQueueCreate(1, sizeof(ContentJob*));
+    if (!queue) return StartFailure::InternalMemory;
+    const auto created = xTaskCreate([](void* opaque) {
+        const auto requests = static_cast<QueueHandle_t>(opaque);
+        for (;;) {
+            ContentJob* job = nullptr;
+            if (xQueueReceive(requests, &job, portMAX_DELAY) != pdTRUE) continue;
+            job->run();
+            ESP_LOGI("content_worker", "stack_free=%u kind=%d psram_free=%u psram_min=%u", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)),
+                     static_cast<int>(job->request.kind), static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+                     static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM)));
+            // Publishing completion relinquishes the job; its owner may immediately destroy it.
+            job->done_.store(true, std::memory_order_release);
+        }
+    }, "content_worker", content_stack_bytes, queue, 1, nullptr);
+    if (created != pdPASS) {
+        vQueueDelete(queue);
+        return heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < content_stack_bytes
+            ? StartFailure::InternalMemory : StartFailure::TaskCreate;
+    }
+    content_requests = queue;
+    return StartFailure::None;
+}
+#endif
 bool ContentJob::start() {
     if (started_) return false;
     start_failure_ = StartFailure::None;
 #ifdef ESP_PLATFORM
     const bool mapping = request.kind == Kind::MapUpload || request.kind == Kind::MapDownload;
     if (mapping) log_worker_memory("start", request.kind);
+    // Optional work retains the same headroom after accounting for the already reserved stack.
+    const auto required_internal = 32U * 1024 + (content_requests ? 0 : content_stack_bytes);
     if ((request.kind == Kind::Pagination || request.kind == Kind::FontIdentity || request.kind == Kind::LibraryCovers ||
          request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite || request.kind == Kind::SleepCover || request.prefetch) &&
-        heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < 64U * 1024) {
+        heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < required_internal) {
         start_failure_ = StartFailure::InternalMemory;
         return false;
     }
-    started_ = xTaskCreate([](void* opaque) {
-        auto* job = static_cast<ContentJob*>(opaque);
-        job->run();
-        ESP_LOGI("content_worker", "stack_free=%u kind=%d psram_free=%u psram_min=%u", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)),
-                 static_cast<int>(job->request.kind), static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
-                 static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM)));
-        job->done_.store(true, std::memory_order_release);
-        vTaskDelete(nullptr);
-    }, "content_worker", content_stack_bytes, this, 1, nullptr) == pdPASS;
+    start_failure_ = prepare_worker();
+    if (start_failure_ == StartFailure::None) {
+        auto* job = this;
+        started_ = xQueueSend(content_requests, &job, 0) == pdTRUE;
+        if (!started_) start_failure_ = StartFailure::TaskCreate;
+    }
     if (!started_) {
-        start_failure_ = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < content_stack_bytes
-            ? StartFailure::InternalMemory : StartFailure::TaskCreate;
         log_worker_memory("create_failed", request.kind);
     }
 #else

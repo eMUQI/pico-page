@@ -112,6 +112,15 @@ public:
     ~ContentJob();
     ContentJob(const ContentJob&) = delete;
     ContentJob& operator=(const ContentJob&) = delete;
+#ifdef ESP_PLATFORM
+    /**
+     * Reserve one firmware-lifetime internal stack before networking starts. Call only on the
+     * application owner task, as for start(). The worker sleeps when idle and borrows at most
+     * one running job and one queued job; each owner must retain its job until done().
+     * Failure leaves no worker resources allocated; start() can retry initialization.
+     */
+    static StartFailure prepare_worker();
+#endif
     bool start();
     StartFailure start_failure() const { return start_failure_; }
 #ifndef ESP_PLATFORM
