@@ -20,6 +20,7 @@
 #include <ctime>
 #include <memory>
 #include <limits>
+#include <utility>
 
 namespace {
 constexpr auto tag = "pico_page";
@@ -622,12 +623,19 @@ extern "C" void app_main() {
     std::uint64_t input_sequence = 0, physical_sequence = 0, physical_source = 0;
     pico_page::platform::ReleasedTap released_tap;
     std::int64_t last_activity = esp_timer_get_time();
+    pico_page::platform::Event sleep_input;
     const auto sleep_now = [&] {
         const bool ready = app->prepare_sleep();
         if (!ready && app->sleep_pending()) return false;
         if (ready && present(*app)) {
-            if (!pico_page::platform::sleep(error))
+            // Presentation can outlast a new input; poll both the input queue and PMU before suspension.
+            const bool polled = pico_page::platform::poll(sleep_input, error);
+            if (!polled) ESP_LOGW(tag, "Sleep input check failed: %s", error.c_str());
+            if (polled && sleep_input.kind == pico_page::platform::EventKind::None &&
+                !pico_page::platform::sleep(error))
                 ESP_LOGW(tag, "Sleep failed: %s", error.c_str());
+            // A second short press cancels this request; other input follows the normal dispatcher.
+            if (sleep_input.kind == pico_page::platform::EventKind::Power) sleep_input = {};
             app->wake();
             present(*app);
         }
@@ -811,8 +819,8 @@ extern "C" void app_main() {
             !pico_page::console::transfer_active()) {
             sleep_requested = !sleep_now();
         }
-        pico_page::platform::Event event;
-        if (!pico_page::platform::poll(event, error))
+        auto event = std::exchange(sleep_input, pico_page::platform::Event{});
+        if (event.kind == pico_page::platform::EventKind::None && !pico_page::platform::poll(event, error))
             ESP_LOGW(tag, "Input read failed: %s", error.c_str());
         using pico_page::platform::EventKind;
         if (event.kind != EventKind::None || pico_page::console::transfer_active()) {

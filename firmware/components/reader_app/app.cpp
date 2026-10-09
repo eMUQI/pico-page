@@ -1292,7 +1292,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::chrono::steady_clock::time_point sleep_cover_retry{};
     void defer_sleep_cover() { sleep_cover_retry = std::chrono::steady_clock::now() + std::chrono::seconds(5); }
     bool sleep_cover_due() const {
-        return async_content && background_content_ready() && !txt_name(book_path) &&
+        return async_content && background_content_ready() && !session.needs_save() && !txt_name(book_path) &&
                settings.sleep_screen == "cover" && !sleep_cover_prepared &&
                std::chrono::steady_clock::now() >= sleep_cover_retry;
     }

@@ -1986,8 +1986,22 @@ int main(int argc, char** argv) {
         fs::create_directories(root / "Books");
         fs::copy_file(fixtures / "image-cover.epub", root / "Books/cover.epub");
         ReaderApp app(root.string(), "sleep-adopt", true, true); Driver driver{app};
-        assert(app.initialize()); driver.present(); opened(app, "Books/cover.epub"); driver.present();
-        driver.complete_content();
+        assert(app.initialize()); driver.present(); opened(app, "Books/cover.epub");
+        const auto content_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        do {
+            if (app.pending_frame()) app.complete_frame(true);
+            app.poll_background();
+            assert(std::chrono::steady_clock::now() < content_deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        } while (app.content_busy() || app.pending_frame());
+        assert(app.save_due() && std::string(app.background_state()) != "sleep-cover");
+        app.save_progress();
+        while (app.save_busy()) {
+            app.poll_background();
+            assert(std::chrono::steady_clock::now() < content_deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(!app.save_due() && std::string(app.background_state()) == "sleep-cover");
         const auto decodes = graphics::image_decode_count();
         const auto pixels = app.canvas().pixels();
         app.background_step();
