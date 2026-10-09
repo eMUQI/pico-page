@@ -45,6 +45,15 @@ def generate(directory: Path) -> None:
     entries["EPUB/cover.png"] = bytes.fromhex("89504e470d0a1a0a0000000d494844520000000200000002080600000072b60d2400000006624b474400ff00ff00ffa0bda7930000001549444154789c63606060f80f020cff19408881010048c906fa001f0d6c0000000049454e44ae426082")
     entries["EPUB/large.png"] = b"\x89PNG\r\n\x1a\n" + bytes(range(256)) * 8192
     write_fixture(directory / "image-cover.epub", entries)
+    for kind in ("missing", "oversized", "unsupported"):
+        broken = dict(entries)
+        if kind == "missing":
+            del broken["EPUB/cover.png"]
+        elif kind == "oversized":
+            broken["EPUB/cover.png"] = entries["EPUB/large.png"]
+        else:
+            broken["EPUB/cover.png"] = b"GIF89a unsupported cover"
+        write_fixture(directory / (kind + "-image-cover.epub"), broken)
     for kind in ("epub3", "epub2", "guide", "unsafe"):
         declared = dict(entries)
         declared["EPUB/chapter1.xhtml"] = fixture_entries()["EPUB/chapter1.xhtml"]

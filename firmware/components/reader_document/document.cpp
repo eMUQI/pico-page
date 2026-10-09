@@ -1356,7 +1356,13 @@ bool EpubDocument::read_image(const std::string& resource, std::vector<std::uint
             return count;
         }, &output, 0);
     if (!extracted || output.cancelled || (stop && stop())) {
-        bytes.clear(); return fail(error, output.cancelled || (stop && stop()) ? "Image load cancelled" : "Invalid compressed EPUB image");
+        bytes.clear();
+        if (output.cancelled || (stop && stop())) return fail(error, "Image load cancelled");
+        const auto zip_error = mz_zip_get_last_error(&impl_->zip);
+        if (zip_error == MZ_ZIP_FILE_READ_FAILED || zip_error == MZ_ZIP_FILE_SEEK_FAILED)
+            return fail(error, "Cannot read EPUB image");
+        if (zip_error == MZ_ZIP_ALLOC_FAILED) return fail(error, "Image allocation unavailable");
+        return fail(error, "Invalid compressed EPUB image");
     }
     const bool png = bytes.size() >= 8 && std::memcmp(bytes.data(), "\x89PNG\r\n\x1a\n", 8) == 0;
     const bool jpeg = bytes.size() >= 3 && bytes[0] == 0xff && bytes[1] == 0xd8 && bytes[2] == 0xff;

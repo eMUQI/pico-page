@@ -859,8 +859,13 @@ extern "C" void app_main() {
             present(*app);
         } else if (event.kind == EventKind::Power) {
             if (usb_mode || app->view() == pico_page::View::PowerMenu || app->view() == pico_page::View::PowerOff) continue;
-            sleep_requested = true;
-            app->stop_wifi();
+            if (app->sleep_pending()) {
+                app->cancel_sleep();
+                sleep_requested = false;
+            } else {
+                sleep_requested = true;
+                app->stop_wifi();
+            }
         } else if (event.kind != EventKind::None) {
             ESP_LOGI(tag, "Input: seq=%llu kind=%d phase=%d x=%d y=%d",
                      static_cast<unsigned long long>(event.sequence), static_cast<int>(event.kind),

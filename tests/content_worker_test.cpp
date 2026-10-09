@@ -174,6 +174,13 @@ int main(int argc, char** argv) {
         ContentJob absent(cover); assert(absent.start()); finish(absent);
         assert(absent.result.cache_finished && !absent.result.image);
         assert(fs::file_size(root / "PicoPage/cache/covers/no-cover") == cover.cache_header.size());
+        for (const auto* kind : {"missing", "oversized", "unsupported"}) {
+            cover.path = (fs::path(argv[1]).parent_path() / (std::string(kind) + "-image-cover.epub")).string();
+            cover.cache_name = std::string("covers/") + kind;
+            ContentJob invalid(cover); assert(invalid.start()); finish(invalid);
+            assert(invalid.result.cache_finished && !invalid.result.image);
+            assert(fs::file_size(root / "PicoPage/cache" / cover.cache_name) == cover.cache_header.size());
+        }
         fs::remove_all(root);
     }
     assert(creations == 1 && allocations == 1);

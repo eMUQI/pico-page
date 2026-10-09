@@ -5799,6 +5799,7 @@ void ReaderApp::cancel_sleep() {
     if (impl_->counting_job) impl_->counting_job->cancel();
 }
 bool ReaderApp::prepare_sleep() {
+    bool cover_attempted = false;
     if (impl_->sleep_cover_deadline) {
         impl_->poll_counting_job();
         if (impl_->counting_job) {
@@ -5808,25 +5809,31 @@ bool ReaderApp::prepare_sleep() {
             return false;
         }
         impl_->sleep_cover_deadline.reset();
-    } else {
-        invalidate_identity_cache();
-        if (impl_->network_worker_id || impl_->portal_live || impl_->usb_prepared || impl_->view == View::Portal || impl_->view == View::PowerMenu || impl_->view == View::PowerOff) return false;
-        if (impl_->display.busy() || impl_->active_network || !impl_->persist())
+        cover_attempted = true;
+    }
+    if (impl_->network_worker_id || impl_->portal_live || impl_->usb_prepared || impl_->view == View::Portal || impl_->view == View::PowerMenu || impl_->view == View::PowerOff) return false;
+    if (impl_->display.busy() || impl_->active_network) return false;
+    if (impl_->counting_job && impl_->counting_job->request.kind == ContentJob::Kind::SleepCover) {
+        // Adopt the in-flight cover before cleanup can join its worker on the application task.
+        impl_->sleep_cover_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        return false;
+    }
+    invalidate_identity_cache();
+    if (!impl_->persist()) return false;
+    if (impl_->has_book() && !impl_->session.visible_record()) return false;
+    impl_->remember_position();
+    impl_->save_pages();
+    impl_->clear_body_cache();
+    impl_->clear_prefetch();
+    impl_->release_counting();
+    impl_->resume_to_library = impl_->view == View::Library || !impl_->has_book();
+    if (!cover_attempted && impl_->async_content && impl_->has_book() && !txt_name(impl_->book_path) &&
+        impl_->settings.sleep_screen == "cover" && !impl_->sleep_cover_prepared &&
+        std::chrono::steady_clock::now() >= impl_->sleep_cover_retry) {
+        impl_->prepare_sleep_cover();
+        if (impl_->counting_job) {
+            impl_->sleep_cover_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
             return false;
-        if (impl_->has_book() && !impl_->session.visible_record()) return false;
-        impl_->remember_position();
-        impl_->save_pages();
-        impl_->clear_body_cache();
-        impl_->clear_prefetch();
-        impl_->release_counting();
-        impl_->resume_to_library = impl_->view == View::Library || !impl_->has_book();
-        if (impl_->async_content && impl_->has_book() && !txt_name(impl_->book_path) &&
-            impl_->settings.sleep_screen == "cover" && !impl_->sleep_cover_prepared) {
-            impl_->prepare_sleep_cover();
-            if (impl_->counting_job) {
-                impl_->sleep_cover_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-                return false;
-            }
         }
     }
     const auto sync_state = impl_->sync_badge();

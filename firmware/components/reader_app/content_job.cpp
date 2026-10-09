@@ -411,7 +411,9 @@ void ContentJob::prepare_cover() {
         result.cache_finished = store.save_cache(request.cache_name, bytes) == StoreStatus::Ok;
         if (request.kind != Kind::SleepCover) result.image = std::move(image);
     } else if ((read && error.find("allocation") == std::string::npos && error.find("memory") == std::string::npos) ||
-               error == "EPUB has no supported cover") {
+               error == "EPUB has no supported cover" || error == "Invalid internal image path" ||
+               error == "Missing EPUB image" || error == "EPUB image exceeds 2 MiB limit" ||
+               error == "Image format is not PNG or JPEG" || error == "Invalid compressed EPUB image") {
         // Read failures may be transient; only a confirmed unusable cover gets a negative entry.
         result.cache_finished = store.save_cache(request.cache_name, request.cache_header) == StoreStatus::Ok;
     }

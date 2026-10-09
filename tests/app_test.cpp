@@ -1982,6 +1982,24 @@ int main(int argc, char** argv) {
         assert(graphics::image_decode_count() == prepared_decodes);
     }
     {
+        const auto root = card / "SleepAdopt";
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "image-cover.epub", root / "Books/cover.epub");
+        ReaderApp app(root.string(), "sleep-adopt", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/cover.epub"); driver.present();
+        driver.complete_content();
+        const auto decodes = graphics::image_decode_count();
+        const auto pixels = app.canvas().pixels();
+        app.background_step();
+        ContentJob::fail_starts_for_test(ContentJob::Kind::SleepCover, 1, ContentJob::StartFailure::TaskCreate);
+        assert(!app.prepare_sleep() && app.sleep_pending());
+        ContentJob::fail_starts_for_test(ContentJob::Kind::SleepCover, 0, ContentJob::StartFailure::TaskCreate);
+        assert(app.canvas().pixels() == pixels && !app.pending_frame());
+        assert(sleep_frame(app)); driver.present();
+        assert(graphics::image_decode_count() == decodes + 1);
+        assert(app.canvas().pixel(50, 100) == 0 && app.canvas().pixel(50, 900) == 5);
+    }
+    {
         const auto root = card / "SleepHandoff";
         fs::create_directories(root / "Books");
         fs::copy_file(fixtures / "image-cover.epub", root / "Books/cover.epub");
@@ -2003,6 +2021,10 @@ int main(int argc, char** argv) {
             assert(std::chrono::steady_clock::now() < deadline);
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
+        const auto retry_decodes = graphics::image_decode_count();
+        assert(app.prepare_sleep() && !app.sleep_pending()); driver.present();
+        assert(graphics::image_decode_count() == retry_decodes);
+        app.wake(); driver.present(); driver.complete_content();
         ContentJob::fail_starts_for_test(ContentJob::Kind::SleepCover, 1, ContentJob::StartFailure::InternalMemory);
         assert(app.prepare_sleep() && !app.sleep_pending()); driver.present();
         assert(app.view() == View::Sleeping && *app.saved_record() == saved);
