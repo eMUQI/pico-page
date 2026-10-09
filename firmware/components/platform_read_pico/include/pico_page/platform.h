@@ -66,6 +66,7 @@ bool stop_usb_storage(std::string& error);
  * The caller owns packed and keeps it immutable until this function returns.
  * full_clean always drives physical clearing, including for unchanged pixels.
  * region limits gray updates in portrait coordinates when the baseline is valid.
+ * A line-queue underrun with healthy power gets one full-clean retry before returning.
  * false means that the physical display state is no longer a valid baseline.
  */
 bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,

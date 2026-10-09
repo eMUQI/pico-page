@@ -89,3 +89,13 @@ Apache-2.0；同时核对了 `docs/en/COPYRIGHT.rst` 与以下非统一许可路
 本项目整体许可证仍待决定，本轮只在本地构建。
 条款依据：[Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0)、
 [LGPL-3.0-or-later 文本](https://spdx.org/licenses/LGPL-3.0-or-later.html)。
+
+## EPD 欠载诊断适配（2026-10-09）
+
+仍锁定 `5f3406deec33304de8801046db583dec7c49e55b`，不修改下载目录。
+构建将 `epdiy` 复制至 `build/pico_bsp/epdiy`，应用
+`firmware/patches/epdiy-underrun-diagnostics.patch`：在已有欠载分支增加 4 个原子计数/行号字段，
+区分无效生产者、空队列和扫描未消费完；ISR 只记录数值，汇合生产者后由调用任务输出日志。
+新增同步 `epd_clear_checked()` 返回清屏扫描的累计错误，避免后续绘制重置错误而误认清屏成功。
+诊断与检查接口不改变波形、预填、时钟或调度。原 LGPL-3.0-or-later 许可和分发义务保留，
+源码补丁与锁定来源一并保留；组件版本未变，依赖锁只更新构建路径变化对应的 manifest hash。

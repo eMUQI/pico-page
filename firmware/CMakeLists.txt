@@ -32,7 +32,16 @@ if(NOT patch_result EQUAL 0)
     message(FATAL_ERROR "Cannot apply checked SD ownership patch")
 endif()
 list(APPEND EXTRA_COMPONENT_DIRS "${READ_PICO_ADAPTED}/read_pico")
-foreach(component read_pico_pmu epdiy e0470_epaper_waveform
+file(REMOVE_RECURSE "${READ_PICO_ADAPTED}/epdiy")
+file(COPY "${READ_PICO_SOURCE}/components/epdiy" DESTINATION "${READ_PICO_ADAPTED}")
+execute_process(COMMAND git apply --unsafe-paths
+    "${CMAKE_CURRENT_LIST_DIR}/patches/epdiy-underrun-diagnostics.patch"
+    WORKING_DIRECTORY "${READ_PICO_ADAPTED}/epdiy" RESULT_VARIABLE epdiy_patch_result)
+if(NOT epdiy_patch_result EQUAL 0)
+    message(FATAL_ERROR "Cannot apply EPD underrun diagnostics patch")
+endif()
+list(APPEND EXTRA_COMPONENT_DIRS "${READ_PICO_ADAPTED}/epdiy")
+foreach(component read_pico_pmu e0470_epaper_waveform
                   cst836u sc7a20h fca9555 sy7636a pwm_audio)
     list(APPEND EXTRA_COMPONENT_DIRS "${READ_PICO_SOURCE}/components/${component}")
 endforeach()

@@ -905,7 +905,8 @@ extern "C" void app_main() {
             }
         }
         if (!usb_mode && pico_page::console::poll(*app, pico_page::platform::card_root(), input_sequence,
-                                     !network_busy && !sleep_requested && !physical_source)) {
+                                     !network_busy && !sleep_requested && !physical_source,
+                                     !sleep_requested && !physical_source)) {
             last_activity = esp_timer_get_time();
             pico_page::platform::set_performance(true);
         }
