@@ -1075,6 +1075,14 @@ StoreStatus FileStore::save_private(const std::string& name, const std::string& 
                                        bytes, 8192, error, true);
 }
 
+StoreStatus FileStore::remove_private(const std::string& name) const {
+    if (name != "network.toml" && name != "sync.toml") return StoreStatus::UnsafePath;
+    const auto path = "PicoPage/" + name;
+    const auto safe = store_internal::safe_path(root_, path);
+    if (safe != StoreStatus::Ok) return safe;
+    return unlink((root_ + "/" + path).c_str()) == 0 && sync_directory(root_ + "/PicoPage") ? StoreStatus::Ok : StoreStatus::IoError;
+}
+
 StoreStatus FileStore::save_cache(const std::string& name, const std::string& bytes) const {
     const auto path = "PicoPage/cache/" + name;
     if (!store_internal::relative_path(path)) return StoreStatus::UnsafePath;

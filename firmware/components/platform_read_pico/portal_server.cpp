@@ -20,9 +20,6 @@
 namespace pico_page::platform {
 namespace {
 httpd_handle_t server = nullptr;
-PortalHandler portal_handler = nullptr;
-void* portal_context = nullptr;
-std::size_t portal_body_limit = 0;
 UploadServer upload_session;
 std::string upload_token, upload_path;
 std::atomic_bool resolver_running{false};
@@ -202,33 +199,8 @@ esp_err_t address_required(httpd_req_t* request, httpd_err_code_t) {
     return httpd_resp_send(request, page, HTTPD_RESP_USE_STRLEN);
 }
 
-esp_err_t serve(httpd_req_t* request) {
-    const bool submitted = request->method == HTTP_POST;
-    std::string body;
-    if (submitted) {
-        if (request->content_len > portal_body_limit) {
-            httpd_resp_send_err(request, HTTPD_413_CONTENT_TOO_LARGE, nullptr);
-            return ESP_FAIL;  // The unread body makes the connection unusable.
-        }
-        body.resize(request->content_len);
-        std::size_t received = 0;
-        while (received < body.size()) {
-            const int count = httpd_req_recv(request, body.data() + received, body.size() - received);
-            if (count == HTTPD_SOCK_ERR_TIMEOUT) continue;
-            if (count <= 0) return ESP_FAIL;
-            received += static_cast<std::size_t>(count);
-        }
-    }
-    const auto page = portal_handler(portal_context, submitted, body);
-    // A submitted body carries passwords.
-    for (auto& byte : body) static_cast<volatile char&>(byte) = 0;
-    httpd_resp_set_type(request, "text/html; charset=utf-8");
-    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
-    return httpd_resp_send(request, page.data(), static_cast<ssize_t>(page.size()));
-}
-
 // Phones probe a well-known address after joining a network. Sending every unknown address to
-// the setup page is what makes them offer the page as the network's sign-in page.
+// the transfer page is what makes them offer the page as the network's sign-in page.
 esp_err_t redirect(httpd_req_t* request, httpd_err_code_t) {
     httpd_resp_set_status(request, "303 See Other");
     httpd_resp_set_hdr(request, "Location", "http://192.168.4.1/");
@@ -327,22 +299,6 @@ bool start_server(const std::vector<httpd_uri_t>& handlers, httpd_err_handler_fu
     return true;
 }
 } // namespace
-
-bool start_portal_server(PortalHandler handler, void* context, std::size_t body_limit, std::string& error) {
-    stop_portal_server();
-    portal_handler = handler;
-    portal_context = context;
-    portal_body_limit = body_limit;
-    httpd_uri_t page{}, save{};
-    page.uri = "/";
-    page.method = HTTP_GET;
-    page.handler = serve;
-    save.uri = "/save";
-    save.method = HTTP_POST;
-    save.handler = serve;
-    return start_server({page, save}, redirect, true, error);
-}
-
 
 bool start_upload_server(const UploadServer& session, std::string& error) {
     stop_portal_server();

@@ -138,10 +138,11 @@ struct ConnectFailure {
     int reason = 0;
 };
 
-/** A network found by a scan; rssi in dBm. ssid holds the raw broadcast bytes. */
+/** A network found by a scan; rssi in dBm. ssid holds the raw broadcast bytes. open means no password. */
 struct NearbyNetwork {
     std::string ssid;
     int rssi = 0;
+    bool open = false;
 };
 
 /**
@@ -188,21 +189,6 @@ bool start_access_point(const std::string& ssid, const std::string& password,
 
 /** Stops Wi-Fi, including an access point, and releases the driver, interfaces and session. */
 void disconnect_network();
-
-/**
- * Produces the HTML answer to GET / (submitted false, empty body) or POST /save. It runs on
- * the HTTP server task and must not block for long.
- */
-using PortalHandler = std::string (*)(void* context, bool submitted, const std::string& body);
-
-/**
- * Serves handler over plain HTTP on port 80 to at most three connections; POST bodies above
- * body_limit bytes are refused. Requests for any other path are redirected to the page, and a
- * name service on UDP port 53 answers every host name with the access point address, so a
- * phone that has just joined presents the page as the network's sign-in page. Call after
- * start_access_point(). context must outlive stop_portal_server().
- */
-bool start_portal_server(PortalHandler handler, void* context, std::size_t body_limit, std::string& error);
 
 /** Book upload over the transfer page; see start_upload_server(). */
 struct UploadServer {

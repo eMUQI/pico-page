@@ -38,20 +38,21 @@ enum class View {
     PowerMenu,
     PowerOff,
     NetworkClosing,
-    Help
+    Help,
+    TextEntry
 };
 enum class PowerAction { None, Shutdown, Restart };
 struct PowerRequest { PowerAction action = PowerAction::None; bool without_save = false; };
 enum class UsbTransferAction { None, Start, Exit };
-/** Upload runs over the device access point; UploadStation over the explicitly selected saved network. */
-enum class PortalAction { None, Start, Stop, Upload, UploadStation };
-enum class PortalPhase { Starting, Waiting, JoiningWifi, CheckingAccount, Saved, Failed, Closed, Receiving };
-/** One state of a phone setup session, reported by the task that owns the radio. */
+/** Upload runs over the device access point; UploadStation over a saved network. */
+enum class PortalAction { None, Stop, Upload, UploadStation };
+enum class PortalPhase { Starting, Waiting, Closed, Receiving };
+/** One state of a book upload session, reported by the task that owns the radio. */
 struct PortalStatus {
     PortalPhase phase = PortalPhase::Starting;
-    /** The device's own access point and setup page address; empty until the access point is up. */
+    /** The device's own access point and upload page address; empty until the access point is up. */
     std::string access_ssid, access_password, url;
-    /** JoiningWifi: the network name. Saved, Failed and Closed: a sentence for the user, or empty. */
+    /** Closed: a sentence for the user, or empty. */
     std::string detail;
     /** Upload over a saved network: its name; the access point fields are then empty. */
     std::string network;
@@ -72,11 +73,23 @@ struct WifiStatus {
     std::string ssid, detail;
     bool manual = false;
 };
+/** Why a station link was not established; None also covers failures after the link is up. */
+enum class LinkFailure { None, NotNearby, Password, Other };
+/**
+ * Networks a worker may join. With automatic it scans and tries the listed networks that are in
+ * range, strongest first, until one connects; otherwise it joins only the single listed network.
+ * A station link that is already up is used as it is.
+ */
+struct WifiTargets {
+    std::vector<provision::WifiCredentials> networks;
+    bool automatic = false;
+};
 struct WifiOperation {
-    enum class Kind { Connect, Scan };
+    /** Connect keeps the link until cancelled is set; Join verifies new credentials and releases the link. */
+    enum class Kind { Connect, Scan, Join };
     Kind kind = Kind::Connect;
     std::uint64_t id = 0;
-    provision::WifiCredentials target;
+    WifiTargets targets;
     network::Hold cancelled;
 };
 struct NetworkOperation {
@@ -84,7 +97,7 @@ struct NetworkOperation {
     sync::HttpRequest request;
     std::shared_ptr<std::atomic_bool> cancelled;
     network::Hold session = {};
-    provision::WifiCredentials target = {};
+    WifiTargets targets = {};
 };
 struct AppInput {
     InputEvent event;
@@ -147,7 +160,8 @@ class ReaderApp {
     void stop_wifi();
     /** Manual connection/scanning carries credentials, never borrowed card objects. */
     std::optional<WifiOperation> take_wifi_request();
-    void complete_wifi(std::uint64_t id, const std::vector<provision::NearbyWifi>& nearby, const std::string& error);
+    void complete_wifi(std::uint64_t id, const std::vector<provision::NearbyWifi>& nearby, const std::string& error,
+                       LinkFailure failure = LinkFailure::None);
     void show_wifi(const WifiStatus& status);
     /** True while the portal or its read-only Wi-Fi status page is visible. */
     bool portal_visible() const;
@@ -162,19 +176,20 @@ class ReaderApp {
     /** Generation attached to worker status and completion for the current portal request. */
     std::uint64_t portal_generation() const;
     /**
-     * Saves confirmed progress, ends sync work and shows the starting state of a phone setup
-     * session, or of book upload when upload is true; station selects upload over a saved
-     * network instead of the device access point. Stops background card jobs before returning.
-     * false when the display or network is busy, the card is absent or the save fails.
+     * Saves confirmed progress, ends sync work and shows the starting state of a book upload
+     * session; station selects upload over a saved network instead of the device access point.
+     * Stops background card jobs before returning. false when the display or network is busy,
+     * the card is absent or the save fails.
      */
-    bool prepare_portal(bool upload = false, bool station = false);
+    bool prepare_portal(bool station = false);
+    /** Networks for an upload session over a saved network, read before the session owns the card. */
+    WifiTargets upload_targets() const;
     /**
      * Draws a state tagged with the request generation. Closed confirms that the worker has
      * stopped accessing the card and radio; only then can the requested next page read settings.
      * Closed leaves that page, or the page
-     * that requested the session, for settings or the refreshed library after upload. An upload
-     * session that closes before its first Waiting state returns to the network page with the
-     * closing sentence.
+     * that requested the session, or the refreshed library after upload. A session that closes
+     * before its first Waiting state returns to the network page with the closing sentence.
      */
     void show_portal(const PortalStatus &status);
     bool prepare_sleep();
@@ -236,7 +251,9 @@ class ReaderApp {
     std::optional<NetworkOperation> take_network_request();
     /** Marshal completion after worker resource release; matching cancelled work unlocks deferred navigation, old IDs are discarded. */
     void complete_network(std::uint64_t id, int status, const std::string &body,
-                          const std::string &error);
+                          const std::string &error, LinkFailure failure = LinkFailure::None);
+    /** True while the on-screen keyboard is shown; every tap made during a refresh is then kept, in order. */
+    bool keyboard_visible() const;
 
   private:
     struct Impl;
