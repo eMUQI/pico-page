@@ -177,7 +177,15 @@ class ReaderApp {
      * closing sentence.
      */
     void show_portal(const PortalStatus &status);
+    /**
+     * Saves progress and prepares a sleep frame. false with sleep_pending() means the cover
+     * worker is still handing back resources; call again from the event loop. Other false
+     * results reject sleep. Present a successful frame before suspending storage or hardware.
+     */
     bool prepare_sleep();
+    bool sleep_pending() const;
+    /** Cancels a pending sleep request without destroying the running cover worker. */
+    void cancel_sleep();
     /** Opens a modal menu without changing the underlying page or its draft. Busy tasks must finish first. */
     bool show_power_menu();
     /** Displays why the menu is unavailable while preserving the current task and controls. */
