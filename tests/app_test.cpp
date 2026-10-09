@@ -1,6 +1,7 @@
 #include "../firmware/components/reader_app/content_cache.h"
 #include "../firmware/components/reader_app/content_job.h"
 #include "../firmware/components/reader_app/help_content.h"
+#include "../firmware/components/reader_app/reading_footer.h"
 #include "pico_page/app.h"
 #include "pico_page/document.h"
 #include "pico_page/store.h"
@@ -15,6 +16,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -211,11 +213,114 @@ static void help_test(const fs::path& root, const fs::path& fixtures, bool async
     if (!with_book) assert(!fs::exists(root));
 }
 
+static std::vector<std::uint8_t> footer_pixels(const ReaderApp& app, int left, int right) {
+    std::vector<std::uint8_t> pixels;
+    for (int y = 1128; y < 1216; ++y)
+        for (int x = left; x < right; ++x) pixels.push_back(app.canvas().pixel(x, y));
+    return pixels;
+}
+
+static void footer_test(const fs::path& root, const fs::path& fixtures, bool asynchronous) {
+    fs::create_directories(root / "Books");
+    fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
+    ReaderApp app(root.string(), "footer-test", true, asynchronous); Driver driver{app};
+    assert(app.initialize()); driver.present();
+    app.set_battery(75);
+    opened(app, "Books/book.epub"); driver.present();
+    // Dismiss any first-open notice, then return to the default page-count mode.
+    for (int i = 0; i < 3; ++i) { driver.tap(36, 1160); driver.present(); }
+    const auto saved = app.saved_record();
+    const auto progress = read(root / "Books/book.epub.picopage/progress.json");
+    const auto body = app.canvas().pixels();
+    const auto battery = footer_pixels(app, 540, 684);
+    const auto page_waiting = footer_pixels(app, 0, 540);
+    const auto unchanged = [&]() {
+        assert(app.view() == View::Reading && app.saved_record() == saved && !app.save_due());
+        assert(read(root / "Books/book.epub.picopage/progress.json") == progress);
+        assert(std::equal(body.begin(), body.begin() + 1128 * app.canvas().stride(), app.canvas().pixels().begin()));
+        assert(!app.take_network_request());
+    };
+    const auto toggle = [&](int x) {
+        driver.tap(x, 1160);
+        assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Overlay);
+        const auto frame = app.pending_frame()->token;
+        const auto pixels = app.canvas().pixels();
+        driver.tap(x == 600 ? 36 : 600, 1160);
+        assert(app.pending_frame()->token == frame && app.canvas().pixels() == pixels);
+        driver.present(); unchanged();
+    };
+    toggle(36);
+    const auto chapters = footer_pixels(app, 0, 540);
+    assert(chapters != page_waiting && footer_pixels(app, 540, 684) == battery);
+    toggle(600);
+    assert(footer_pixels(app, 0, 540) == chapters && footer_pixels(app, 540, 684) != battery);
+    toggle(600);
+    assert(footer_pixels(app, 0, 540) == chapters && footer_pixels(app, 540, 684) == battery);
+    toggle(539);
+    const auto estimated = footer_pixels(app, 0, 540);
+    assert(estimated != chapters && footer_pixels(app, 540, 684) == battery);
+    toggle(540);
+    assert(footer_pixels(app, 0, 540) == estimated);
+    toggle(600);
+    toggle(36);
+    assert(footer_pixels(app, 0, 540) == page_waiting && footer_pixels(app, 540, 684) == battery);
+    const auto pixels = app.canvas().pixels();
+    driver.drag(600, 1160, {530, 1150, 610, 1180});
+    driver.drag(100, 1160, {90, 1120, 110, 1180});
+    driver.queued(Input::TouchCenter, true, 36, 1160);
+    driver.queued(Input::TouchCenter, true, 600, 1160);
+    assert(!app.pending_frame() && app.canvas().pixels() == pixels);
+    driver.refresh(); unchanged();
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (app.background_due()) {
+        app.background_step(); app.poll_background();
+        assert(!app.pending_frame() && std::chrono::steady_clock::now() < deadline);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    const auto counted = app.book_pages();
+    assert(counted && counted->total > 0 && app.canvas().pixels() == pixels);
+    toggle(36); toggle(36);
+    // Check the rendered text against the known page fraction, including its fractional digits.
+    const auto value = reading_footer::percent(static_cast<double>(counted->page) / counted->total);
+    graphics::Canvas expected;
+    graphics::Font font; assert(font.open_fallback() && font.size(24));
+    int x = 36;
+    for (const auto scalar : graphics::decode_utf8(value)) {
+        font.draw(expected, scalar, x, 1156 + font.metrics().ascender, 3);
+        x += font.advance(scalar);
+    }
+    for (int y = 1128; y < 1216; ++y)
+        for (int column = 0; column < 540; ++column)
+            assert(app.canvas().pixel(column, y) == expected.pixel(column, y));
+    toggle(600);
+    toggle(36);
+    assert(footer_pixels(app, 0, 540) != page_waiting);
+    toggle(600);
+    assert(footer_pixels(app, 540, 684) == battery);
+    unchanged();
+}
+
 int main(int argc, char** argv) {
     assert(argc == 3);
     char temporary[] = "/tmp/pico-app-XXXXXX";
     const char* directory = mkdtemp(temporary); assert(directory);
     const fs::path card(directory), fixtures(argv[1]);
+    assert(reading_footer::percent(0) == "0.00%");
+    assert(reading_footer::percent(.05) == "5.00%");
+    assert(reading_footer::percent(.2137) == "21.37%");
+    assert(reading_footer::percent(1.0 / 3) == "33.33%");
+    assert(reading_footer::percent(2.0 / 3) == "66.67%");
+    assert(reading_footer::percent(1) == "100.00%");
+    assert(reading_footer::percent(-1) == "0.00%" && reading_footer::percent(2) == "100.00%");
+    assert(reading_footer::percent(std::numeric_limits<double>::quiet_NaN()) == "—");
+    assert(reading_footer::clock(0, 480) == "—");
+    assert(reading_footer::clock(provision::clock_floor - 1, 480) == "—");
+    assert(reading_footer::clock(provision::clock_floor, 480) == "08:00");
+    assert(reading_footer::clock(provision::clock_floor + 86340, 480) == "07:59");
+    assert(reading_footer::clock(provision::clock_floor, -300) == "19:00");
+    footer_test(card / "FooterSync", fixtures, false);
+    footer_test(card / "FooterAsync", fixtures, true);
     help_test(card / "HelpNoCard", fixtures, false, false);
     help_test(card / "HelpSync", fixtures, false, true);
     help_test(card / "HelpAsync", fixtures, true, true);

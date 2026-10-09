@@ -1,6 +1,7 @@
 #include "content_cache.h"
 #include "content_job.h"
 #include "help_content.h"
+#include "reading_footer.h"
 #include "pico_page/stage_timer.h"
 #include "pico_page/app.h"
 #include "pico_page/document.h"
@@ -783,7 +784,9 @@ struct ReaderApp::Impl final : DisplayBackend {
     // The open folder is one of the configured library roots; its parent is the library.
     bool folder_root = false;
     bool library_directory_unavailable = false;
-    bool footer_chapters = false, refresh_from_settings = false, import_from_settings = false;
+    reading_footer::Position footer_position = reading_footer::Position::Pages;
+    reading_footer::Device footer_device = reading_footer::Device::Battery;
+    bool refresh_from_settings = false, import_from_settings = false;
     std::string detail_path, detail_position, detail_error;
     BookSnapshot management_snapshot;
     bool delete_original = false, drawing_error = false;
@@ -1601,7 +1604,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         return static_cast<std::uint32_t>(before + std::max<std::ptrdiff_t>(1, within));
     }
     /** Position weighted by the uncompressed size of each linear chapter; used until pages are counted. */
-    int estimated_percent(std::size_t end) const {
+    std::pair<std::uint64_t, std::uint64_t> estimated_position(std::size_t end) const {
         const auto &spine = document.spine();
         std::uint64_t read = 0, total = 0;
         for (std::size_t i = 0; i < spine.size(); ++i) {
@@ -1629,13 +1632,18 @@ struct ReaderApp::Impl final : DisplayBackend {
                 read += spine[i].bytes * within / (parts * chapter.text.size());
             }
         }
-        return total ? static_cast<int>(read * 100 / total) : 0;
+        return {read, total};
+    }
+    double estimated_fraction(std::size_t end) const {
+        const auto [read, total] = estimated_position(end);
+        return total ? static_cast<double>(read) / total : 0;
     }
     /** Whole-book percentage of a page spanning [start, end) of the loaded chapter. */
     int book_percent_value(std::size_t start, std::size_t end) const {
         if (const auto current = current_page(start))
             return static_cast<int>(static_cast<std::uint64_t>(current) * 100 / total_pages());
-        return estimated_percent(end);
+        const auto [read, total] = estimated_position(end);
+        return total ? static_cast<int>(read * 100 / total) : 0;
     }
     std::string book_percent(std::size_t start, std::size_t end) const {
         return std::to_string(book_percent_value(start, end)) + "%";
@@ -1650,10 +1658,22 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (pages_complete) return "共 " + std::to_string(total_pages()) + " 页 · " + book_percent(start, end);
         return book_percent(start, end);
     }
-    std::string book_progress() const {
-        const auto position = book_position(page.start, page.end);
-        if (pages_complete || pages_failed) return position;
-        return position + (counting_blocked == chapter_index ? " · 等待统计页数" : " · 正在统计页数");
+    std::string footer_position_text() const {
+        switch (footer_position) {
+        case reading_footer::Position::Chapters:
+            return "第 " + std::to_string(chapter_index + 1) + " 章 / 共 " + std::to_string(document.spine().size()) + " 章";
+        case reading_footer::Position::Percent:
+            if (const auto current = current_page())
+                return reading_footer::percent(static_cast<double>(current) / total_pages());
+            return reading_footer::percent(estimated_fraction(page.end)) + " · 估算";
+        case reading_footer::Position::Pages:
+            if (const auto current = current_page())
+                return std::to_string(current) + " / " + std::to_string(total_pages());
+            if (pages_complete) return "共 " + std::to_string(total_pages()) + " 页";
+            if (pages_failed) return "页数未知";
+            return counting_blocked == chapter_index ? "等待统计页数" : "正在统计页数";
+        }
+        return {};
     }
     std::string sync_badge() const {
         if (txt_name(book_path)) return "仅本地";
@@ -2416,13 +2436,17 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void footer() {
         canvas.fill_rect(0, footer_top, 684, 88, 15);
-        const auto position = footer_chapters ? "第 " + std::to_string(chapter_index + 1) + " 章 / 共 " +
-            std::to_string(document.spine().size()) + " 章" : book_progress();
-        text(notice().empty() ? position : message, 36, 1156, 24, 476, 3);
-        outline(556, 1165, 32, 17, 2);
-        canvas.fill_rect(588, 1170, 3, 7, 1);
-        if (battery_percent) canvas.fill_rect(560, 1169, *battery_percent * 24 / 100, 9, 3);
-        text(battery_percent ? std::to_string(*battery_percent) + "%" : "—", 600, 1156, 24, 80, 3);
+        text(notice().empty() ? footer_position_text() : message, 36, 1156, 24, 476, 3);
+        if (footer_device == reading_footer::Device::Clock) {
+            // The device clock is calibrated by the existing on-demand network flow.
+            center(reading_footer::clock(std::time(nullptr), 8 * 60), reading_footer::device_left, 1156,
+                   684 - reading_footer::device_left, 24, 3);
+        } else {
+            outline(556, 1165, 32, 17, 2);
+            canvas.fill_rect(588, 1170, 3, 7, 1);
+            if (battery_percent) canvas.fill_rect(560, 1169, *battery_percent * 24 / 100, 9, 3);
+            text(battery_percent ? std::to_string(*battery_percent) + "%" : "—", 600, 1156, 24, 80, 3);
+        }
     }
     std::size_t readable_offset(std::size_t start) const {
         return pico_page::readable_offset(chapter, start);
@@ -5315,7 +5339,21 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (input.touch) {
             if (view == View::Reading) {
                 if (input.y >= footer_top) {
-                    footer_chapters = !footer_chapters;
+                    const bool device = input.x >= reading_footer::device_left;
+                    if (input.touch_bounds &&
+                        (input.touch_bounds->min_y < footer_top ||
+                         (input.touch_bounds->min_x >= reading_footer::device_left) != device ||
+                         (input.touch_bounds->max_x >= reading_footer::device_left) != device)) return;
+                    if (device) {
+                        footer_device = footer_device == reading_footer::Device::Battery
+                                            ? reading_footer::Device::Clock : reading_footer::Device::Battery;
+                    } else {
+                        switch (footer_position) {
+                        case reading_footer::Position::Pages: footer_position = reading_footer::Position::Chapters; break;
+                        case reading_footer::Position::Chapters: footer_position = reading_footer::Position::Percent; break;
+                        case reading_footer::Position::Percent: footer_position = reading_footer::Position::Pages; break;
+                        }
+                    }
                     footer(); overlay(); return;
                 }
                 for (const auto &link : links)
