@@ -42,6 +42,21 @@ int main() {
         input.accept({EventKind::K2, EventPhase::Begin, 4});
         input.accept({EventKind::InputReset});
         CHECK(!input.active() && !input.held());
+        input.begin();
+        input.accept({EventKind::K2, EventPhase::Begin, 5});
+        input.accept({EventKind::K2, EventPhase::End, 5});
+        input.accept({EventKind::Power});
+        CHECK(input.power() && !input.tap() && !input.held());
+        input.accept({EventKind::Power});
+        CHECK(!input.power());
+        input.accept({EventKind::Power});
+        input.accept({EventKind::Touch, EventPhase::Begin, 6});
+        CHECK(!input.power() && input.held());
+        input.accept({EventKind::Power});
+        input.accept({EventKind::PowerLong});
+        CHECK(input.menu() && !input.power() && !input.held());
+        input.clear();
+        CHECK(!input.active() && !input.power());
     }
     {
         CHECK((RefreshRegion{0, 0, 684, 1216}.fits(684, 1216)));

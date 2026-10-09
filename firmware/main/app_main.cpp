@@ -863,6 +863,9 @@ extern "C" void app_main() {
                     if (resume_input.menu()) {
                         resume_input.clear();
                         event.kind = EventKind::PowerLong;
+                    } else if (resume_input.power()) {
+                        resume_input.clear();
+                        event.kind = EventKind::Power;
                     } else if (resume_input.tap()) {
                         const auto tap = *resume_input.tap();
                         const auto end = resume_input.end();
