@@ -722,14 +722,15 @@ bool sleep(std::string& error, bool& entered_sleep) {
         bool idle = false;
         if (!wake_lines_idle(irq, idle, error)) break;
         if (idle && !(read_pico_pmu_get()->key_state & 1)) {
-            if (has_pending_touch()) {
-                error = "Sleep cancelled by touch interrupt";
-                break;
-            }
             result = gpio_wakeup_enable(irq, GPIO_INTR_LOW_LEVEL);
             if (result == ESP_OK) result = esp_sleep_enable_gpio_wakeup();
             if (result != ESP_OK) break;
             while (result == ESP_OK) {
+                // Wake-source setup and non-power wake handling may deliver a pending IRQ.
+                if (has_pending_touch() || cst836u_int_asserted(touch)) {
+                    error = "Sleep cancelled by touch interrupt";
+                    break;
+                }
                 result = esp_light_sleep_start();
                 if (result != ESP_OK) break;
                 entered_sleep = true;
