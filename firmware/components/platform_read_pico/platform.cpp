@@ -553,8 +553,9 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
     if (clear) {
         // Physical black/white pulses establish a new baseline independently
         // of the previous frame, including when all target pixels are equal.
-        epd_clear();
-        draw_result = epd_hl_update_screen_from_white(&display, MODE_GC16, status.temperature_c);
+        draw_result = epd_clear_checked();
+        if (draw_result == EPD_DRAW_SUCCESS)
+            draw_result = epd_hl_update_screen_from_white(&display, MODE_GC16, status.temperature_c);
     } else if (page_waveform == PageWaveform::Gray8) {
         epd_hl_waveform(&display, &E0470_GRAY8_WAVEFORM);
         draw_result = update();
@@ -562,8 +563,20 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
     } else {
         draw_result = update();
     }
+    bool power_good = panel_status(status, error);
+    if (draw_result == EPD_DRAW_EMPTY_LINE_QUEUE && power_good) {
+        // The driver has joined its producers and detached scan callbacks before returning.
+        // Rebuild the physical baseline once, preserving the immutable target framebuffer.
+        ESP_LOGW(tag, "display_recovery attempt=1 error=%u", static_cast<unsigned>(draw_result));
+        read_pico_epd_set_pclk(12);
+        epd_set_leading_skip(false);
+        draw_result = epd_clear_checked();
+        if (draw_result == EPD_DRAW_SUCCESS)
+            draw_result = epd_hl_update_screen_from_white(&display, MODE_GC16, status.temperature_c);
+        power_good = panel_status(status, error);
+        ESP_LOGW(tag, "display_recovery result=%u power_good=%d", static_cast<unsigned>(draw_result), power_good);
+    }
     timing.draw_us = esp_timer_get_time() - drawing;
-    const bool power_good = panel_status(status, error);
     if (draw_result != EPD_DRAW_SUCCESS || !power_good) {
         if (draw_result != EPD_DRAW_SUCCESS) {
             error = "Panel waveform failed: " + std::to_string(static_cast<unsigned>(draw_result));

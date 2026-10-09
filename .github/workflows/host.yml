@@ -10,9 +10,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: sudo apt-get update && sudo apt-get install -y libsdl2-dev libssl-dev libcurl4-openssl-dev pkg-config
+      - run: sudo apt-get update && sudo apt-get install -y clang libsdl2-dev libssl-dev libcurl4-openssl-dev pkg-config
       - run: python3 tools/setup_fonts.py
       - run: cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug
       - run: cmake --build build/host --parallel 2
       - run: ctest --test-dir build/host --output-on-failure
+      - name: Configure sanitizers
+        run: >-
+          cmake -S . -B build/sanitized -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          '-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer'
+          '-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer'
+          '-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined'
+      - run: cmake --build build/sanitized --parallel 2
+      - name: Test ASan, UBSan and LSan
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1
+        run: |
+          ctest --test-dir build/sanitized -N
+          ctest --test-dir build/sanitized --output-on-failure
       - run: python3 tools/check_handoff.py

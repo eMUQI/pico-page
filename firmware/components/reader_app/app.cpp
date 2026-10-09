@@ -4266,7 +4266,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         text(chapter_label() + " · " + book_percent(), 36, 740, 22, 185, 3);
         text("服务器", 248, 634, 24, 185, 3);
         text(server_state, 248, 682, 28, 185, 1, true);
-        if (active_network) text(wifi_status.phase == WifiPhase::Connecting ? "连接目标网络" : wifi_status.phase == WifiPhase::Clock ? "校准时间" : uploading ? "提交已存版本" : "读取远端记录", 248, 740, 22, 190, 3);
+        if (active_network) text(uploading ? "提交已存版本" : "读取远端记录", 248, 740, 22, 190, 3);
         text("远端记录", 476, 634, 24, 185, 3);
         text(remote_state, 476, 682, 28, 185, 1, true);
         title_lines(sync_status.empty() ? (sync_badge() == "待核实" ? "上次上传结果未确认，请重新检查远端。" : "先读取远端位置，再决定是否上传。") : sync_status,
@@ -5543,7 +5543,7 @@ void ReaderApp::complete_frame(bool success) {
         } else if (impl_->view == View::PowerMenu && impl_->power_return_canvas) {
             impl_->close_power_menu();
         } else if (frame.region) impl_->error("屏幕局部更新失败。返回将恢复已确认位置。");
-        else impl_->error("屏幕更新失败，当前页未保存。返回将恢复已确认位置。");
+        else impl_->error("屏幕更新失败。返回将恢复已确认位置。");
     }
 }
 View ReaderApp::view() const {
@@ -5635,7 +5635,7 @@ void ReaderApp::show_wifi(const WifiStatus& status) {
     if (status.phase == WifiPhase::Connected) impl_->pending_wifi_record = status.ssid;
     if (status.phase == WifiPhase::Offline && impl_->wifi_notice == "正在结束…") impl_->wifi_notice.clear();
     if (impl_->view == View::WifiSettings) { impl_->draw_wifi(); impl_->overlay(); }
-    else if (impl_->view == View::Sync && impl_->active_network) { impl_->draw_sync(); impl_->overlay(); }
+    // Sync retains one busy frame until completion; network phase notifications must not drive the panel during TLS.
 }
 bool ReaderApp::portal_visible() const {
     return impl_->portal_live && (impl_->view == View::Portal || impl_->view == View::WifiSettings);

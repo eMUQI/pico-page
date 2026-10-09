@@ -10,7 +10,7 @@
 | PapyriX cache/content | bigbag/papyrix-reader | 待查 | 查分支关系与依赖 | 无 | 按需参考 |
 | EPub-InkPlate | turgu1/EPub-InkPlate | 待查 | 查字体/IDF/显示依赖 | 无 | 调度和 IDF 实现参考 |
 | epdiy 与板级波形 | 官方 BSP 的 `components/epdiy` / `e0470_epaper_waveform` | 同官方 BSP commit | LGPL-3.0-or-later / Apache-2.0 分别核查 | 无 | 已编译；硬件刷新未验证 |
-| tomlc17 | cktan/tomlc17 | `8a4564e0b257b010c24c973d4353e0c1ebf33f80` | MIT；C17；32 KiB 输入上限，UTF-8 校验；不支持无损写回 | Xtensa `PRIx32` 打印格式修正 | 纳入 reader_store，仅解析配置 |
+| tomlc17 | cktan/tomlc17 | `8a4564e0b257b010c24c973d4353e0c1ebf33f80` | MIT；C17；32 KiB 输入上限，UTF-8 校验；不支持无损写回 | Xtensa `PRIx32` 打印格式修正；内存页大小使用 `offsetof`，避免空指针成员访问 | 纳入 reader_store，仅解析配置 |
 | cJSON | DaveGamble/cJSON v1.7.19 | `c859b25da02955fef659d658b8f324b5cde87be3` | MIT；16 KiB 输入及 16 层嵌套上限；大修订号用字符串 | 源码无修改 | 纳入 reader_store，进度 JSON |
 | FreeType | freetype/freetype | `526ec5c47b9ebccc4754c85ac0c0cdf7c85a5e9b` | FTL、MIT 及 Adobe CFF 附加条款 | 模块/选项配置 | 固定下载到 .local，纳入 reader_graphics |
 | JPEGDEC 渐进式缩略图 | bitbank2/JPEGDEC；CrossPoint 的三个修复补丁 | `86282979224c8a32fd51e091ed5a35b0c699a52b`；补丁源 `43694c9018d26446ab30cce2fa65ee608355ae50` | Apache-2.0；补丁保留来源 MIT 声明；不引入 Arduino 或其他阅读器应用代码 | 修复未对齐读取及未定义移位，禁用 SIMD，保持位读取器宽度 | 纳入 reader_graphics，仅渐进式 DC 预览；[来源、补丁与分发义务](../firmware/components/reader_graphics/third_party/jpegdec/README.md) |

@@ -14,10 +14,12 @@
    回复采用独立有界缓冲，一次入队整行，避免日志 VFS 逐字节尽力发送造成回复不完整。
 2. 所有显示调用完成后、`app.complete_frame()` 之前，调用
    `console::frame_completed(frame, actual_result)`。结果必须来自真实平台调用。
-3. 每轮主循环调用 `console::poll(app, card_root, input_sequence, actions_allowed)`。
+3. 每轮主循环调用 `console::poll(app, card_root, input_sequence, actions_allowed, input_allowed)`。
    物理输入与诊断输入共用一个递增序号；物理释放和取消沿用对应按下的序号。
-4. 有网络工作或物理触摸尚未结束时，可传入 `actions_allowed=false`，拒绝新的诊断输入及开始导入。
-   `status`、目录列表与屏幕分块仍可读取。挂载不可用时传入空 `card_root`。
+4. 有网络工作、休眠请求或物理触摸尚未结束时，传入 `actions_allowed=false`，拒绝直接开书和开始导入。
+   仅网络工作忙且无物理接触/休眠请求时，另传 `input_allowed=true`，允许 `key/tap/hold` 走实体输入相同的应用路由，
+   用于验证 K2 和取消；在途显示帧及资源导入仍拒绝输入。`status`、目录列表与屏幕分块仍可读取。
+   挂载不可用时传入空 `card_root`。
 5. `console::transfer_active()` 为真时，暂缓新的物理输入、网络分派与休眠。
    已被吞下的物理接触持续吞到释放；断卡事件仍需处理。已有导入的 data/commit/abort
    不依赖 `actions_allowed`，否则事务会被自己的保护条件阻塞。

@@ -15,12 +15,14 @@ bool shutdown(std::string &error);
  * Processes at most one bounded command on the application task. card_root is
  * null for an unavailable card. All application input sources must use the same
  * increasing input_sequence; a physical End/Cancel retains its Begin sequence.
- * Set actions_allowed=false while another owner prevents navigation or card use.
+ * Set actions_allowed=false while another owner prevents direct book opening or card use.
+ * input_allowed permits only key/tap/hold during network work, matching physical input;
+ * pending frames and imports still reject them. Keep it false during sleep or a physical contact.
  * This function never confirms a frame or enters hardware sleep.
  * Returns true when a complete command line was received, which counts as activity.
  */
 bool poll(ReaderApp &app, const char *card_root, std::uint64_t &input_sequence,
-          bool actions_allowed = true);
+          bool actions_allowed = true, bool input_allowed = false);
 
 /** Records an actual platform result before ReaderApp::complete_frame mutates its canvas. */
 void frame_completed(const Frame &frame, bool success);

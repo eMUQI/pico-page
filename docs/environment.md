@@ -124,12 +124,21 @@ cmake --build build/sanitized --parallel 4
 ctest --test-dir build/sanitized --output-on-failure
 ```
 
+ASan/UBSan 通过不等于已检查内存泄漏。LLVM 官方支持 macOS 上的 LSan，但必须核对实际编译器和运行时：
+本机系统 AppleClang 21 的运行时在 `ASAN_OPTIONS=detect_leaks=1` 下明确报
+`AddressSanitizer: detect_leaks is not supported on this platform`。这是当前工具链的限制，不能概括为 macOS 不支持。
+默认 macOS 命令仅记录 ASan/UBSan 结果；具备 LSan 的工具链应显式使用
+`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1`，不通过关闭泄漏检查冒充完整通过。
+现有 Linux CI 使用独立 Clang sanitizer 构建并保留上述选项，运行相同的完整 CTest。
+依据：[LLVM AddressSanitizer 文档](https://clang.llvm.org/docs/AddressSanitizer.html#memory-leak-detection)、
+[LeakSanitizer 支持平台](https://clang.llvm.org/docs/LeakSanitizer.html#supported-platforms)。
+
 CTest 保存实际日志于 `build/host/Testing/Temporary/LastTest.log` 与
-`build/sanitized/Testing/Temporary/LastTest.log`。host 针对 POSIX 文件 API，当前仅本机 macOS 实测；
-Linux CI 已配置但未运行。全新 sanitizer 编译产生六处未修改 cJSON 的 macOS `sprintf` 弃用警告，
+`build/sanitized/Testing/Temporary/LastTest.log`。host 针对 POSIX 文件 API；macOS 本机与 Linux CI 的结果分别记录。
+此前 macOS 全新 sanitizer 编译产生六处未修改 cJSON 的 `sprintf` 弃用警告，
 没有把这些警告描述成零警告构建。
 验收结果与范围由 [开发状态](development-status.md) 记录。
-最新 host CTest 与 ASan/UBSan CTest 各 9/9 通过；交接检查 284 项通过，49 个原设计文件保持原样。
+早期环境验证为 host CTest 与 ASan/UBSan CTest 各 9/9、交接检查 284 项；不能代替当前批次的测试数量和结果。
 `python3 tools/check_handoff.py` 仍只检查交接资料，不能替代 C++ 测试、固件构建或真机验证。
 
 ## 2026-10-06 · 可运行初版环境增量

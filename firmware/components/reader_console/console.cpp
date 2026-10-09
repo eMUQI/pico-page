@@ -249,7 +249,7 @@ void list(std::uint32_t id, const char *root, std::string_view arguments) {
           more);
 }
 
-void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool actions_allowed) {
+void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool actions_allowed, bool input_allowed) {
     std::string_view input(line.data(), used), word;
     std::uint32_t id = 0;
     if (!token(input, word) || word != "PP" || !token(input, word) || !number(word, id) || !id ||
@@ -395,7 +395,8 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
               static_cast<unsigned>(count), data.c_str());
         return;
     }
-    if (!actions_allowed || app.pending_frame() || transfer) {
+    const bool input_command = word == "key" || word == "tap" || word == "hold";
+    if ((!actions_allowed && !(input_allowed && input_command)) || app.pending_frame() || transfer) {
         error(id, "busy");
         return;
     }
@@ -481,7 +482,7 @@ bool shutdown(std::string &error) {
 }
 
 bool poll(ReaderApp &app, const char *card_root, std::uint64_t &input_sequence,
-          bool actions_allowed) {
+          bool actions_allowed, bool input_allowed) {
     if (!owner || owner != xTaskGetCurrentTaskHandle())
         return false;
     if (transfer && (!card_root || esp_timer_get_time() - transfer_activity > 30'000'000)) {
@@ -507,7 +508,7 @@ bool poll(ReaderApp &app, const char *card_root, std::uint64_t &input_sequence,
                 transfer.reset();
                 error(0, "invalid_or_oversized_line");
             } else if (used)
-                execute(app, card_root, input_sequence, actions_allowed);
+                execute(app, card_root, input_sequence, actions_allowed, input_allowed);
             used = 0;
             discard = false;
             return true;
@@ -543,7 +544,7 @@ bool initialize(std::string &error) {
     return true;
 }
 bool shutdown(std::string &error) { error.clear(); return true; }
-bool poll(ReaderApp &, const char *, std::uint64_t &, bool) {
+bool poll(ReaderApp &, const char *, std::uint64_t &, bool, bool) {
     return false;
 }
 void frame_completed(const Frame &, bool) {}

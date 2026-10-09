@@ -992,6 +992,17 @@ int main(int argc, char** argv) {
         assert(!app.pending_frame());
         driver.sync_view(); const auto query = driver.check_remote();
         assert(query.target.ssid == "home" && network::live(query.session));
+        const auto busy_pixels = app.canvas().pixels();
+        const auto busy_saved = app.saved_record();
+        for (const auto phase : {WifiPhase::Connecting, WifiPhase::Clock, WifiPhase::Request}) {
+            app.show_wifi({static_cast<std::uint64_t>(phase) + 10, phase, "home", "", true});
+            assert(!app.pending_frame() && app.canvas().pixels() == busy_pixels);
+            assert(app.saved_record() == busy_saved && network::live(query.session));
+        }
+        driver.key(Input::K2);
+        assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean);
+        driver.present();
+        assert(network::live(query.session) && !query.cancelled->load());
         app.complete_network(query.id, 200, "{}", ""); driver.present();
         assert(network::live(query.session) && network::live(manual->cancelled));
         driver.tap(342, 960); driver.present(); driver.tap(500, 1120); driver.present(); driver.complete_content();
@@ -1039,9 +1050,22 @@ int main(int argc, char** argv) {
         app.complete_network(draining.id, 200, "{}", "");
         assert(!app.pending_frame() && app.saved_record() == offline_position);
         driver.sync_view();
+        const auto display_failed = driver.check_remote();
+        const auto saved_before_failure = app.saved_record();
+        driver.key(Input::K2);
+        assert(app.pending_frame());
+        app.complete_frame(false); driver.present();
+        assert(app.view() == View::Error && app.saved_record() == saved_before_failure);
+        assert(display_failed.cancelled->load() && !network::live(display_failed.session));
+        assert(app.status() == "屏幕更新失败。返回将恢复已确认位置。");
+        app.complete_network(display_failed.id, 200, "{}", "");
+        assert(!app.pending_frame());
+        assert(app.view() == View::Error && app.saved_record() == saved_before_failure);
+        driver.tap(300, 1120); driver.present(); driver.complete_content();
+        driver.sync_view();
         // Failed results survive unrelated touches; selecting a saved target is explicit.
         driver.tap(342, 1170); driver.present(); assert(app.view() == View::WifiSettings);
-        app.show_wifi({3, WifiPhase::Offline, "", "目标网络没有取得 IP 地址。", false}); driver.present();
+        app.show_wifi({20, WifiPhase::Offline, "", "目标网络没有取得 IP 地址。", false}); driver.present();
         const auto failed = app.canvas().pixels();
         driver.tap(680, 600); assert(!app.pending_frame() && app.canvas().pixels() == failed);
         app.show_wifi({2, WifiPhase::Connected, "old", "", true}); assert(!app.pending_frame());
