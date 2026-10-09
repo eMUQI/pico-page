@@ -23,6 +23,8 @@ namespace pico_page::platform {
 namespace {
 constexpr EventBits_t has_address = 1;
 constexpr EventBits_t connection_failed = 2;
+constexpr EventBits_t scan_complete = 4;
+constexpr EventBits_t associated = 8;
 constexpr std::size_t response_limit = 32768;
 constexpr std::size_t request_limit = 16384;
 TaskHandle_t network_owner = nullptr;
@@ -53,8 +55,12 @@ void network_event(void*, esp_event_base_t base, std::int32_t id, void* data) {
     if (!events) return;
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         disconnect_reason = static_cast<wifi_event_sta_disconnected_t*>(data)->reason;
-        xEventGroupClearBits(events, has_address);
+        xEventGroupClearBits(events, has_address | associated);
         xEventGroupSetBits(events, connection_failed);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
+        xEventGroupSetBits(events, associated);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
+        xEventGroupSetBits(events, scan_complete);
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         xEventGroupSetBits(events, has_address);
     }
@@ -133,15 +139,26 @@ void abandon_station() {
 }
 
 /** Scans once on the running driver; networks receives distinct names, strongest first. */
-void scan(std::vector<NearbyNetwork>& networks) {
+bool scan(std::vector<NearbyNetwork>& networks, std::string& error, const std::atomic_bool* cancelled) {
     networks.clear();
     wifi_scan_config_t configuration{};
-    if (esp_wifi_scan_start(&configuration, true) != ESP_OK) return;
+    xEventGroupClearBits(events, scan_complete);
+    const auto result = esp_wifi_scan_start(&configuration, false);
+    if (result != ESP_OK) return fail(error, "Wi-Fi scan", result);
+    const auto deadline = esp_timer_get_time() + 10'000'000;
+    while (!(xEventGroupWaitBits(events, scan_complete, pdFALSE, pdFALSE, pdMS_TO_TICKS(100)) & scan_complete)) {
+        if ((cancelled && cancelled->load()) || esp_timer_get_time() >= deadline) {
+            esp_wifi_scan_stop(); esp_wifi_clear_ap_list();
+            error = cancelled && cancelled->load() ? "操作已取消。" : "搜索网络超时，请重试。";
+            return false;
+        }
+    }
     std::uint16_t count = 20;
     std::vector<wifi_ap_record_t> records(count);
     if (esp_wifi_scan_get_ap_records(&count, records.data()) != ESP_OK) {
         esp_wifi_clear_ap_list();
-        count = 0;
+        error = "无法读取网络搜索结果，请重试。";
+        return false;
     }
     for (std::uint16_t index = 0; index < count; ++index) {
         const auto* raw = reinterpret_cast<const char*>(records[index].ssid);
@@ -154,6 +171,7 @@ void scan(std::vector<NearbyNetwork>& networks) {
     }
     std::stable_sort(networks.begin(), networks.end(),
                      [](const NearbyNetwork& a, const NearbyNetwork& b) { return a.rssi > b.rssi; });
+    return true;
 }
 
 /** True when Wi-Fi runs and belongs to the calling task. */
@@ -185,7 +203,7 @@ void disconnect_network() {
 }
 
 bool start_access_point(const std::string& ssid, const std::string& password,
-                        std::vector<NearbyNetwork>& networks, std::string& error) {
+                        std::vector<NearbyNetwork>& networks, std::string& error, const std::atomic_bool* cancelled) {
     error.clear();
     networks.clear();
     if (network_owner && network_owner != xTaskGetCurrentTaskHandle()) {
@@ -214,11 +232,21 @@ bool start_access_point(const std::string& ssid, const std::string& password,
     }
     access_point = true;
     // Scanning leaves the access point channel for a moment, so it runs once, before a phone joins.
-    scan(networks);
+    const bool scanned = scan(networks, error, cancelled);
+    if (cancelled && cancelled->load()) {
+        error = "操作已取消。";
+        return false;
+    }
+    // Nearby networks are optional for manual setup and hotspot file transfer.
+    if (!scanned) {
+        ESP_LOGW("pico_network", "Hotspot scan unavailable: %s", error.c_str());
+        networks.clear();
+        error.clear();
+    }
     return true;
 }
 
-bool scan_networks(std::vector<NearbyNetwork>& networks, std::string& error) {
+bool scan_networks(std::vector<NearbyNetwork>& networks, std::string& error, const std::atomic_bool* cancelled) {
     error.clear();
     networks.clear();
     if (network_owner && network_owner != xTaskGetCurrentTaskHandle()) {
@@ -234,12 +262,11 @@ bool scan_networks(std::vector<NearbyNetwork>& networks, std::string& error) {
             return fail(error, "Wi-Fi initialization", result);
         }
     }
-    scan(networks);
-    return true;
+    return scan(networks, error, cancelled);
 }
 
 bool connect_network(const std::string& ssid, const std::string& password, std::string& error,
-                     ConnectFailure* failure, bool clock) {
+                     ConnectFailure* failure, bool clock, const std::atomic_bool* cancelled) {
     error.clear();
     ConnectFailure ignored;
     auto& outcome = failure ? *failure : ignored;
@@ -268,7 +295,7 @@ bool connect_network(const std::string& ssid, const std::string& password, std::
         xEventGroupClearBits(events, connection_failed);
         esp_wifi_disconnect();
         if (linked) xEventGroupWaitBits(events, connection_failed, pdFALSE, pdFALSE, pdMS_TO_TICKS(2000));
-        xEventGroupClearBits(events, has_address | connection_failed);
+        xEventGroupClearBits(events, has_address | associated | connection_failed);
     } else {
         disconnect_network();
         network_owner = xTaskGetCurrentTaskHandle();
@@ -282,28 +309,33 @@ bool connect_network(const std::string& ssid, const std::string& password, std::
         abandon_station();
         return fail(error, "Wi-Fi initialization", result);
     }
-    const auto bits = xEventGroupWaitBits(events, has_address | connection_failed, pdFALSE, pdFALSE, pdMS_TO_TICKS(20000));
+    EventBits_t bits = 0;
+    const auto deadline = esp_timer_get_time() + 20'000'000;
+    do {
+        if (cancelled && cancelled->load()) { abandon_station(); error = "操作已取消。"; return false; }
+        bits = xEventGroupWaitBits(events, has_address | connection_failed, pdFALSE, pdFALSE, pdMS_TO_TICKS(100));
+    } while (!(bits & (has_address | connection_failed)) && esp_timer_get_time() < deadline);
     if (!(bits & has_address) || (bits & connection_failed)) {
         if (bits & connection_failed) {
             outcome = {ConnectFailure::Stage::Link, disconnect_reason};
             error = "Wi-Fi disconnected (driver reason " + std::to_string(disconnect_reason) + ")";
         } else {
-            outcome.stage = ConnectFailure::Stage::Address;
-            error = "Wi-Fi address acquisition timed out";
+            outcome.stage = (xEventGroupGetBits(events) & associated) ? ConnectFailure::Stage::Address : ConnectFailure::Stage::Link;
+            error = outcome.stage == ConnectFailure::Stage::Address ? "Wi-Fi address acquisition timed out" : "Wi-Fi association timed out";
         }
         abandon_station();
         return false;
     }
     outcome.stage = ConnectFailure::Stage::None;
     connected = true;
-    if (clock && !synchronize_clock(error, &outcome)) {
+    if (clock && !synchronize_clock(error, &outcome, cancelled)) {
         abandon_station();
         return false;
     }
     return true;
 }
 
-bool synchronize_clock(std::string& error, ConnectFailure* failure) {
+bool synchronize_clock(std::string& error, ConnectFailure* failure, const std::atomic_bool* cancelled) {
     error.clear();
     ConnectFailure ignored;
     auto& outcome = failure ? *failure : ignored;
@@ -318,7 +350,11 @@ bool synchronize_clock(std::string& error, ConnectFailure* failure) {
         esp_sntp_config_t time_configuration = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
         if (esp_netif_sntp_init(&time_configuration) == ESP_OK) sntp_initialized = true;
     }
-    if (sntp_initialized) esp_netif_sntp_sync_wait(pdMS_TO_TICKS(10000));
+    const auto deadline = esp_timer_get_time() + 10'000'000;
+    while (sntp_initialized && std::time(nullptr) < 1704067200 && esp_timer_get_time() < deadline) {
+        if (cancelled && cancelled->load()) { error = "操作已取消。"; return false; }
+        esp_netif_sntp_sync_wait(pdMS_TO_TICKS(100));
+    }
     if (std::time(nullptr) < 1704067200) {
         error = "A valid clock is required for TLS; time synchronization failed";
         return false;

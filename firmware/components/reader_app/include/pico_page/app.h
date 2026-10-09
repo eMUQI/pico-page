@@ -2,6 +2,8 @@
 #include "pico_page/core.h"
 #include "pico_page/graphics.h"
 #include "pico_page/sync.h"
+#include "pico_page/provision.h"
+#include "pico_page/network_session.h"
 #include <memory>
 #include <functional>
 #include <atomic>
@@ -41,9 +43,9 @@ enum class View {
 enum class PowerAction { None, Shutdown, Restart };
 struct PowerRequest { PowerAction action = PowerAction::None; bool without_save = false; };
 enum class UsbTransferAction { None, Start, Exit };
-/** Upload runs over the device access point; UploadStation over the best nearby saved network. */
+/** Upload runs over the device access point; UploadStation over the explicitly selected saved network. */
 enum class PortalAction { None, Start, Stop, Upload, UploadStation };
-enum class PortalPhase { Starting, Waiting, JoiningWifi, CheckingAccount, Saved, Failed, Closed };
+enum class PortalPhase { Starting, Waiting, JoiningWifi, CheckingAccount, Saved, Failed, Closed, Receiving };
 /** One state of a phone setup session, reported by the task that owns the radio. */
 struct PortalStatus {
     PortalPhase phase = PortalPhase::Starting;
@@ -63,10 +65,26 @@ struct BookPages {
     std::uint32_t page;   // 1-based, counted from the first linear chapter.
     std::uint32_t total;
 };
+enum class WifiPhase { Offline, Connecting, Connected, Clock, Request, Hotspot, Closing, Failed };
+struct WifiStatus {
+    std::uint64_t sequence = 0;
+    WifiPhase phase = WifiPhase::Offline;
+    std::string ssid, detail;
+    bool manual = false;
+};
+struct WifiOperation {
+    enum class Kind { Connect, Scan };
+    Kind kind = Kind::Connect;
+    std::uint64_t id = 0;
+    provision::WifiCredentials target;
+    network::Hold cancelled;
+};
 struct NetworkOperation {
     std::uint64_t id;
     sync::HttpRequest request;
     std::shared_ptr<std::atomic_bool> cancelled;
+    network::Hold session = {};
+    provision::WifiCredentials target = {};
 };
 struct AppInput {
     InputEvent event;
@@ -105,7 +123,7 @@ class ReaderApp {
     /** Drops all verified identities before storage can change outside this application. */
     void invalidate_identity_cache();
     bool initialize();
-    /** Refuses while a network worker owns the card; asynchronous content completes through polling/presentation. */
+    /** Refuses during active sync or portal work; cancelled HTTP may drain while local reading resumes. */
     bool open_book(const std::string &relative_path);
     /** Updates the latest battery reading for the next render; nullopt means unknown. */
     void set_battery(std::optional<int> percent);
@@ -127,6 +145,12 @@ class ReaderApp {
     bool wifi_enabled() const;
     /** Requests cancellation on the application owner task without waiting for the worker. */
     void stop_wifi();
+    /** Manual connection/scanning carries credentials, never borrowed card objects. */
+    std::optional<WifiOperation> take_wifi_request();
+    void complete_wifi(std::uint64_t id, const std::vector<provision::NearbyWifi>& nearby, const std::string& error);
+    void show_wifi(const WifiStatus& status);
+    /** True while the portal or its read-only Wi-Fi status page is visible. */
+    bool portal_visible() const;
     /** Consumes one explicit UI request; the main loop arbitrates device ownership. */
     UsbTransferAction take_usb_transfer_action();
     /** Saves confirmed progress and releases card files; false forbids USB handoff. */

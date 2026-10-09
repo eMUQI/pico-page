@@ -166,6 +166,11 @@ struct Host {
         return true;
     }
     void poll_network() {
+        if (const auto wifi = app.take_wifi_request()) {
+            network::release(wifi->cancelled);
+            app.complete_wifi(wifi->id, {}, "桌面预览不操作设备 Wi-Fi，请在真机连接。" );
+            flush();
+        }
         if (network.valid() &&
             network.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
             auto response = network.get();

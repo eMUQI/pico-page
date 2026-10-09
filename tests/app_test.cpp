@@ -46,6 +46,8 @@ static void opened(ReaderApp& app, const std::string& book) {
 }
 // Reports the calling line when an expected frame is missing.
 #define present() present_at(__LINE__)
+#define check_remote() check_remote_at(__LINE__)
+#define sync_view() sync_view_at(__LINE__)
 struct Driver {
     ReaderApp& app;
     std::uint64_t sequence = 0;
@@ -132,13 +134,16 @@ struct Driver {
         status.generation = app.portal_generation();
         app.show_portal(status);
     }
-    void sync_view() {
-        tap(342, 500); assert(app.view() == View::Tools); present();
+    void sync_view_at(int line) {
+        tap(342, 500);
+        if (app.view() != View::Tools) std::cerr << "Missing tools at line " << line << " view=" << static_cast<int>(app.view()) << "\n";
+        assert(app.view() == View::Tools); present();
         tap(342, 1140); assert(app.view() == View::Sync); present();
     }
-    NetworkOperation check_remote() {
+    NetworkOperation check_remote_at(int line) {
         tap(342, 960); present();
         auto request = app.take_network_request();
+        if (!request) std::cerr << "Missing sync request at line " << line << "\n";
         assert(request && request->request.method == "GET");
         return *request;
     }
@@ -842,7 +847,94 @@ int main(int argc, char** argv) {
         assert(*app.saved_record() == image_record && app.canvas().pixel(120, 500) == 5);
     }
     const std::string sync_config = "schema_version = 1\ndom_version = 20260812\nendpoint = \"https://example.invalid\"\nusername = \"test-user\"\nuserkey = \"test-only-placeholder\"\ndevice_id = \"app-test\"\n";
+    write(card / "PicoPage/network.toml", "schema_version=2\n[[wifi]]\nssid=\"home\"\npassword=\"password\"\n");
     write(card / "PicoPage/sync.toml", sync_config);
+    for (const bool async : {false, true}) {
+        const auto root = card / (async ? "WifiLifecycleAsync" : "WifiLifecycleSync");
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
+        write(root / "PicoPage/sync.toml", sync_config);
+        write(root / "PicoPage/network.toml", "schema_version=2\nselected_ssid=\"home\"\n[[wifi]]\nssid=\"home\"\npassword=\"password\"\n[[wifi]]\nssid=\"phone\"\npassword=\"phone-password\"\n");
+        ReaderApp app(root.string(), "wifi-lifecycle", true, async); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        assert(app.wifi_enabled() && !app.take_wifi_request() && !app.take_network_request());
+        driver.tap(600, 50); driver.present(); driver.tap(300, 180); driver.present();
+        driver.tap(520, 460); driver.present();
+        driver.tap(300, 450); driver.present();
+        auto manual = app.take_wifi_request();
+        assert(manual && manual->kind == WifiOperation::Kind::Connect && manual->target.ssid == "home");
+        app.show_wifi({1, WifiPhase::Connecting, "home", "", false}); driver.present();
+        // A connection carries no card objects; local reading works before it finishes.
+        opened(app, "Books/book.epub"); driver.present();
+        driver.key(Input::K3); driver.present(); driver.complete_content();
+        assert(!manual->cancelled->load());
+        app.complete_wifi(manual->id, {}, "");
+        app.show_wifi({2, WifiPhase::Connected, "home", "", true});
+        assert(!app.pending_frame());
+        driver.sync_view(); const auto query = driver.check_remote();
+        assert(query.target.ssid == "home" && network::live(query.session));
+        app.complete_network(query.id, 200, "{}", ""); driver.present();
+        assert(network::live(query.session) && network::live(manual->cancelled));
+        driver.tap(342, 960); driver.present(); driver.tap(500, 1120); driver.present(); driver.complete_content();
+        const auto upload = app.take_network_request();
+        assert(upload && upload->request.method == "PUT" && upload->session == query.session);
+        app.complete_network(upload->id, 200, "{}", ""); driver.present();
+        assert(!network::live(query.session) && network::live(manual->cancelled));
+        // An expired decision forces another GET, never a blind PUT.
+        driver.close(); driver.present(); driver.complete_content(); driver.sync_view(); const auto expired = driver.check_remote();
+        app.complete_network(expired.id, 200, "{}", ""); driver.present();
+        network::release(expired.session);
+        driver.tap(342, 960); driver.present();
+        auto refreshed = app.take_network_request();
+        assert(refreshed && refreshed->request.method == "GET" && refreshed->session != expired.session);
+        app.complete_network(refreshed->id, 200, "{}", ""); driver.present();
+        // A target edited between GET and PUT ends the transaction instead of changing networks.
+        std::string selection_error;
+        assert(provision::save_selected_network(root.string(), "phone", selection_error));
+        driver.tap(342, 960); driver.present(); driver.tap(500, 1120); driver.present(); driver.complete_content();
+        assert(!app.take_network_request() && !network::live(refreshed->session));
+        assert(provision::save_selected_network(root.string(), "home", selection_error));
+        driver.close(); driver.present(); driver.complete_content();
+        assert(app.prepare_sleep()); driver.present();
+        assert(!network::live(manual->cancelled) && !network::live(refreshed->session));
+        app.wake(); driver.present(); driver.complete_content();
+        assert(!app.take_wifi_request() && !app.take_network_request());
+        // A forbidden radio requires an explicit, local confirmation that resumes the GET.
+        write(root / "PicoPage/settings.toml", "schema_version=1\n[network]\nwifi_enabled=false\n");
+        driver.sync_view(); driver.tap(342, 960); driver.present();
+        assert(!app.take_network_request() && !app.wifi_enabled());
+        driver.tap(342, 550); driver.present();
+        assert(!app.take_network_request() && !app.wifi_enabled());
+        driver.tap(342, 960); driver.present(); driver.tap(342, 425); driver.present();
+        auto allowed = app.take_network_request();
+        assert(allowed && app.wifi_enabled() && allowed->request.method == "GET");
+        app.complete_network(allowed->id, 0, "", "目标网络没有取得 IP 地址。"); driver.present();
+        assert(!network::live(allowed->session));
+        const auto draining = driver.check_remote();
+        driver.tap(342, 1075); driver.present();
+        assert(draining.cancelled->load() && !network::live(draining.session));
+        driver.tap(342, 1120); driver.present(); driver.complete_content();
+        assert(app.view() == View::Reading);
+        driver.key(Input::K3); driver.present(); driver.complete_content();
+        const auto offline_position = app.saved_record();
+        app.complete_network(draining.id, 200, "{}", "");
+        assert(!app.pending_frame() && app.saved_record() == offline_position);
+        driver.sync_view();
+        // Failed results survive unrelated touches; selecting a saved target is explicit.
+        driver.tap(342, 1170); driver.present(); assert(app.view() == View::WifiSettings);
+        app.show_wifi({3, WifiPhase::Offline, "", "目标网络没有取得 IP 地址。", false}); driver.present();
+        const auto failed = app.canvas().pixels();
+        driver.tap(680, 600); assert(!app.pending_frame() && app.canvas().pixels() == failed);
+        app.show_wifi({2, WifiPhase::Connected, "old", "", true}); assert(!app.pending_frame());
+        driver.tap(300, 680); driver.present(); driver.tap(300, 350); driver.present();
+        driver.tap(300, 540); driver.present();
+        auto selected = app.take_wifi_request();
+        assert(selected && selected->target.ssid == "phone");
+        std::optional<provision::SavedWifi> target; std::string error;
+        assert(provision::load_selected_network(root.string(), target, error) && target->ssid == "phone");
+        app.complete_wifi(selected->id, {}, "找不到所选网络。"); driver.present();
+        app.stop_wifi(); assert(selected->cancelled->load());
+    }
     {
         const auto path = card / "PicoPage/settings.toml";
         const bool existed = fs::exists(path);
@@ -857,9 +949,22 @@ int main(int argc, char** argv) {
             driver.tap(300, 180); driver.present(); assert(app.view() == View::Import);
             driver.tap(520, 460); driver.present(); assert(app.view() == View::WifiSettings);
             driver.refresh();
-            driver.tap(300, 180); driver.present(); assert(app.wifi_enabled());
+            driver.tap(300, 300); driver.present(); assert(app.wifi_enabled());
             assert(read(path).find("wifi_enabled=true # retain") != std::string::npos);
             assert(read(card / "PicoPage/sync.toml") == accounts);
+            const auto enabled_settings = read(path);
+            const auto enabled_screen = app.canvas().pixels();
+            // A failed write keeps the permission and replaces the visible success notice.
+            assert(fs::create_directory(path.string() + ".tmp"));
+            driver.tap(300, 300); driver.present();
+            assert(app.view() == View::WifiSettings && app.wifi_enabled());
+            assert(read(path) == enabled_settings && app.canvas().pixels() != enabled_screen);
+            const auto failed_screen = app.canvas().pixels();
+            driver.tap(680, 600);
+            assert(!app.pending_frame() && app.canvas().pixels() == failed_screen);
+            assert(fs::remove(path.string() + ".tmp"));
+            driver.tap(300, 300); driver.present(); assert(!app.wifi_enabled());
+            driver.tap(300, 300); driver.present(); assert(app.wifi_enabled());
             driver.close(); driver.present();
             driver.tap(300, 180); driver.present();
             // The top-right edge of the network row must not hit the switch above it.
@@ -871,9 +976,12 @@ int main(int argc, char** argv) {
             std::string import_error;
             auto in_flight = FileStore(card.string()).begin_import("Books/wifi-inflight.epub", 1, 0, import_error);
             assert(in_flight && app.wifi_enabled() && !app.prepare_portal());
-            driver.tap(520, 44); driver.present(); assert(app.view() == View::Portal);
-            assert(app.take_portal_action() == PortalAction::Stop);
-            driver.tap(60, 50); assert(!app.pending_frame() && app.view() == View::Portal);
+            driver.tap(520, 44); driver.present(); assert(app.view() == View::WifiSettings);
+            assert(app.take_portal_action() == PortalAction::None && app.portal_visible());
+            driver.tap(60, 50); driver.present(); assert(app.view() == View::Portal);
+            driver.tap(520, 44); driver.present();
+            driver.tap(300, 930); driver.present();
+            assert(app.take_portal_action() == PortalAction::Stop && app.view() == View::Portal);
             driver.refresh();
             assert(read(path).find("'invalid'") != std::string::npos);
             assert(in_flight->cancel(import_error) == StoreStatus::Ok);
@@ -902,7 +1010,7 @@ int main(int argc, char** argv) {
             driver.portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); driver.present();
             driver.tap(300, 180); driver.present();
             driver.tap(520, 460); driver.present();
-            driver.tap(300, 180); driver.present(); assert(!app.wifi_enabled());
+            driver.tap(300, 300); driver.present(); assert(!app.wifi_enabled());
             write(path, "schema_version=1\n[network]\nwifi_enabled=true\n");
             opened(app, "Books/book.epub"); driver.present();
             driver.sync_view();
@@ -1821,6 +1929,7 @@ int main(int argc, char** argv) {
         assert(async.saved_record()->anchor == origin);
     }
     {
+        fs::remove(card / "PicoPage/network.toml");
         // Phone setup: both entry points only request a session, the page keeps K2 and ignores
         // every control but its own, and a closed session returns to the settings list.
         ReaderApp app(card.string()); Driver driver{app};
@@ -2117,12 +2226,14 @@ int main(int argc, char** argv) {
             assert(app.status().find("已保存") != std::string::npos);
         }
     }
+    write(card / "PicoPage/network.toml", "schema_version=2\n[[wifi]]\nssid=\"home\"\npassword=\"password\"\n");
     // Save failure is before sync teardown: returning preserves both candidate and upload actions.
     for (const bool upload : {false, true}) {
         const auto home = card / (upload ? "PowerSyncUpload" : "PowerSyncCandidate");
         fs::create_directories(home / "Books");
         fs::copy_file(fixtures / "valid.epub", home / "Books/book.epub");
         write(home / "PicoPage/sync.toml", sync_config);
+        write(home / "PicoPage/network.toml", read(card / "PicoPage/network.toml"));
         ReaderApp app(home.string()); Driver driver{app};
         assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
         driver.key(Input::K3); driver.present();

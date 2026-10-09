@@ -82,6 +82,14 @@ constexpr Refusal write_failed{"507 Insufficient Storage", "写入失败，请�
 constexpr Refusal commit_failed{"500 Internal Server Error", "保存或校验失败，请在书库核对后重试。已有同名文件不会被覆盖。"};
 
 esp_err_t upload(httpd_req_t* request) {
+    struct Activity {
+        Activity() {
+            if (upload_session.activity) upload_session.activity(upload_session.context, true);
+        }
+        ~Activity() {
+            if (upload_session.activity) upload_session.activity(upload_session.context, false);
+        }
+    } activity;
     std::unique_ptr<FileImport> transaction;
     auto fail = [&](Refusal refusal) {
         std::string cleanup_error;
@@ -334,6 +342,7 @@ bool start_portal_server(PortalHandler handler, void* context, std::size_t body_
     save.handler = serve;
     return start_server({page, save}, redirect, true, error);
 }
+
 
 bool start_upload_server(const UploadServer& session, std::string& error) {
     stop_portal_server();

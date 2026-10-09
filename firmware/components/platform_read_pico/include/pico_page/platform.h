@@ -154,20 +154,20 @@ struct NearbyNetwork {
  * running and releases a station-only session.
  */
 bool connect_network(const std::string& ssid, const std::string& password, std::string& error,
-                     ConnectFailure* failure = nullptr, bool clock = true);
+                     ConnectFailure* failure = nullptr, bool clock = true, const std::atomic_bool* cancelled = nullptr);
 
 /**
  * Sets the system clock over SNTP after connect_network(). Blocks for up to 10 s. false when
  * no link is up or the clock is still before 2024; the link stays up either way.
  */
-bool synchronize_clock(std::string& error, ConnectFailure* failure = nullptr);
+bool synchronize_clock(std::string& error, ConnectFailure* failure = nullptr, const std::atomic_bool* cancelled = nullptr);
 
 /**
  * Starts the station interface when Wi-Fi is not running, then scans once. networks receives up
  * to 20 distinct names, strongest first. The calling task becomes the session owner until
  * disconnect_network(); the station stays started so connect_network() can follow directly.
  */
-bool scan_networks(std::vector<NearbyNetwork>& networks, std::string& error);
+bool scan_networks(std::vector<NearbyNetwork>& networks, std::string& error, const std::atomic_bool* cancelled = nullptr);
 
 /** Dotted IPv4 address of the joined station link, or empty without one. */
 std::string station_address();
@@ -183,7 +183,7 @@ bool station_connected();
  * and briefly drop its stations, when connect_network() joins a network on another channel.
  */
 bool start_access_point(const std::string& ssid, const std::string& password,
-                        std::vector<NearbyNetwork>& networks, std::string& error);
+                        std::vector<NearbyNetwork>& networks, std::string& error, const std::atomic_bool* cancelled = nullptr);
 
 /** Stops Wi-Fi, including an access point, and releases the driver, interfaces and session. */
 void disconnect_network();
@@ -220,6 +220,10 @@ struct UploadServer {
     /** Called on the server task after each file is committed and verified; may be null. */
     void (*saved)(void* context, const std::string& name) = nullptr;
     void* context = nullptr;
+    /** Every upload/check handler starts with true and ends with false, after file cleanup.
+     * Called on the single server task, including failed requests; may be null.
+     */
+    void (*activity)(void* context, bool active) = nullptr;
 };
 
 /**

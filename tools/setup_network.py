@@ -62,8 +62,12 @@ def _networks_from_text(text):
         current = tomllib.loads(text)
     except ValueError:
         raise ValueError(invalid) from None
-    if set(current) - {"schema_version", "wifi"}:
+    if set(current) - {"schema_version", "wifi", "selected_ssid"}:
         raise ValueError(invalid)
+    if "selected_ssid" in current:
+        selected = current["selected_ssid"]
+        if not isinstance(selected, str) or len(selected.encode()) > 32 or any(ord(c) < 32 or ord(c) == 127 for c in selected):
+            raise ValueError(invalid)
     version, wifi = current.get("schema_version"), current.get("wifi")
     if type(version) is not int:
         raise ValueError(invalid)
@@ -206,6 +210,13 @@ def edited_wifi_toml(source, ssid, password):
             edited += newline
         edited += (newline + "[[wifi]]" + newline + "ssid = " + _quote(ssid) + newline +
                    "password = " + _quote(password) + newline)
+    if "selected_ssid" not in tomllib.loads(source):
+        selected = current[-1]["ssid"] if current else ssid
+        match = re.search(r"(?m)^\s*schema_version[^\n]*(?:\n|$)", edited)
+        if not match:
+            raise ValueError(unsupported)
+        offset = match.end()
+        edited = edited[:offset].rstrip("\n") + "\nselected_ssid = " + _quote(selected) + "\n" + edited[offset:]
     if _networks_from_text(edited) != desired:
         raise ValueError(unsupported)
     return edited

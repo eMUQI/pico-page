@@ -26,6 +26,16 @@ class SetupNetworkTest(unittest.TestCase):
             self.card = Path(temp.name)
         (self.card / "PicoPage").mkdir(parents=True, exist_ok=True)
 
+    def test_explicit_selection_survives_edits(self):
+        source = 'schema_version=2\nselected_ssid="home" # target\n[[wifi]]\nssid="home"\npassword="password"\n'
+        edited = tool.edited_wifi_toml(source, "phone", "phone-password")
+        self.assertEqual(tomllib.loads(edited)["selected_ssid"], "home")
+        self.assertIn('selected_ssid="home" # target', edited)
+        edited = tool.edited_wifi_toml(edited, "home", "new-password")
+        self.assertEqual(tomllib.loads(edited)["selected_ssid"], "home")
+        legacy = source.replace('selected_ssid="home" # target\n', '')
+        self.assertEqual(tomllib.loads(tool.edited_wifi_toml(legacy, "phone", "password"))["selected_ssid"], "home")
+
     def test_sync_file_round_trips_and_keeps_device_identity(self):
         path = self.card / "PicoPage/sync.toml"
         tool.write(path, tool.sync_toml("https://sync.example.invalid/", USERNAME,
@@ -68,7 +78,7 @@ class SetupNetworkTest(unittest.TestCase):
         path.write_text("# original\nschema_version = 1 # keep\n[wifi] # keep\n"
                         "ssid = 'legacy'\npassword = 'old-password' # keep\n", encoding="utf-8")
         original, edited = tool.prepared_wifi_edit(path, "legacy", "new-password")
-        self.assertIn("schema_version = 2 # keep\n[[wifi]] # keep", edited)
+        self.assertIn("schema_version = 2 # keep\nselected_ssid = \"legacy\"\n[[wifi]] # keep", edited)
         self.assertIn("password = \"new-password\" # keep", edited)
         self.assertEqual(tomllib.loads(edited)["wifi"][0]["password"], "new-password")
         path.unlink()

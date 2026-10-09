@@ -1,5 +1,6 @@
 #include "pico_page/provision.h"
 #include "pico_page/store.h"
+#include "pico_page/network_session.h"
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -92,13 +93,6 @@ int main() {
     assert(provision::remove_network(saved, "n4") && !provision::remove_network(saved, "n4") && saved.size() == 4);
     assert(provision::add_network(saved, {"n6", "password"}, 0) && saved.back().last_connected == 0);
 
-    // Connection order: nearby saved networks by signal; without any, the final entry alone.
-    const std::vector<provision::NearbyWifi> nearby{{"stranger", -30}, {"n3", -70}, {"office", -50}};
-    auto order = provision::connection_order(saved, nearby);
-    assert(order.size() == 2 && order[0].ssid == "office" && order[1].ssid == "n3");
-    order = provision::connection_order(saved, {});
-    assert(order.size() == 1 && order[0].ssid == "n6");
-    assert(provision::connection_order({}, nearby).empty());
     assert(provision::last_network(saved)->ssid == "n6" && !provision::last_network({}));
     assert(provision::record_connection(saved, "n3", 100) && provision::last_network(saved)->ssid == "n3");
     assert(!provision::record_connection(saved, "missing", now));
@@ -178,9 +172,85 @@ int main() {
            loaded.back().ssid == "phone-hotspot" && loaded.back().password == "password1" &&
            loaded.back().last_connected == 0);
     assert(read(network_file).find("last_connected") == std::string::npos);
-    auto offline_order = provision::connection_order(loaded, {});
-    assert(offline_order.size() == 1 && offline_order[0].ssid == "phone-hotspot");
+    std::optional<provision::SavedWifi> selected;
+    assert(provision::load_selected_network(root, selected, error) && selected && selected->ssid == "first");
+    assert(provision::save_selected_network(root, "phone-hotspot", error));
+    assert(provision::load_selected_network(root, selected, error) && selected && selected->ssid == "phone-hotspot");
     assert(read(card / "PicoPage/sync.toml") == account_bytes);
+
+    // Explicit selection survives connection history, phone edits and stronger alternatives.
+    assert(provision::save_connection(root, "first", now, error));
+    assert(provision::load_selected_network(root, selected, error) && selected->ssid == "phone-hotspot");
+    assert(provision::save_network_edit(root, {"stronger", "password2"}, false, 0, error));
+    assert(provision::load_selected_network(root, selected, error) && selected->ssid == "phone-hotspot");
+    const auto pinned = read(network_file);
+    assert(!provision::save_selected_network(root, "not-saved", error) && read(network_file) == pinned);
+    assert(provision::save_network_edit(root, {"phone-hotspot", ""}, true, 0, error));
+    assert(provision::load_selected_network(root, selected, error) && !selected);
+    assert(read(network_file).find("selected_ssid = \"\"") != std::string::npos);
+    // Phone additions and password updates do not undo an explicit cleared choice.
+    assert(provision::save_network_edit(root, {"phone-hotspot", "password1"}, false, 0, error));
+    assert(provision::load_selected_network(root, selected, error) && !selected);
+    assert(provision::save_network_edit(root, {"first", "password2"}, false, 0, error));
+    assert(provision::load_selected_network(root, selected, error) && !selected);
+    assert(provision::save_selected_network(root, "first", error));
+    assert(provision::save_network_edit(root, {"phone-hotspot", "password1"}, false, 0, error));
+    assert(provision::load_selected_network(root, selected, error) && selected->ssid == "first");
+
+    // The legacy choice is frozen before a successful connection can reorder the entries.
+    assert(store.save_private("network.toml", annotated, error) == StoreStatus::Ok);
+    assert(provision::load_selected_network(root, selected, error) && selected->ssid == "office");
+    assert(provision::save_connection(root, "home", now + day, error));
+    assert(provision::load_selected_network(root, selected, error) && selected->ssid == "office");
+    assert(provision::save_selected_network(root, "home", error));
+    assert(read(network_file).find("# office note") != std::string::npos);
+    assert(store.save_private("network.toml", "selected_ssid = \"gone\"\nschema_version=2\n[[wifi]]\nssid=\"home\"\npassword=\"password\"\n", error) == StoreStatus::Ok);
+    assert(!provision::load_selected_network(root, selected, error) && !selected);
+    assert(store.save_private("network.toml", pinned, error) == StoreStatus::Ok);
+
+    // Request completion retains a business transaction; decision timeout never drops a manual hold.
+    network::Holds holds;
+    auto transaction = std::make_shared<std::atomic_bool>(false);
+    holds.await_decision(transaction, 100);
+    assert(holds.retained());
+    holds.expire(100 + network::Holds::decision_us - 1);
+    assert(network::live(transaction));
+    auto manual = std::make_shared<std::atomic_bool>(false);
+    holds.manual = manual;
+    holds.expire(100 + network::Holds::decision_us);
+    assert(!network::live(transaction) && network::live(manual) && holds.retained());
+    auto next = std::make_shared<std::atomic_bool>(false);
+    holds.await_decision(next, 1000);
+    network::release(transaction); // A late cancellation belongs only to the old session.
+    assert(network::live(next));
+    network::release(manual);
+    assert(holds.retained());
+    network::release(next);
+    assert(!holds.retained());
+    holds.manual = std::make_shared<std::atomic_bool>(false);
+    holds.manual_suspended = true; // AP closure retains intent without restarting STA.
+    assert(!holds.retained() && network::live(holds.manual));
+    holds.stop(); // Sleep also discards the suspended intent.
+    assert(!holds.retained() && !network::live(holds.manual));
+    network::Holds reboot;
+    assert(!reboot.retained());
+
+    constexpr std::int64_t idle_limit = 600'000'000;
+    network::IdleTimer idle;
+    idle.update(false, 0);
+    assert(!idle.expired(idle_limit - 1, idle_limit));
+    assert(idle.expired(idle_limit, idle_limit));
+    // A complete short /check or upload between two worker polls resets the deadline.
+    idle.update(true, idle_limit - 100'000);
+    idle.update(false, idle_limit - 50'000);
+    assert(!idle.expired(idle_limit + 100'000, idle_limit));
+    assert(!idle.expired(2 * idle_limit - 50'001, idle_limit));
+    assert(idle.expired(2 * idle_limit - 50'000, idle_limit));
+    idle.update(true, 2 * idle_limit);
+    assert(!idle.expired(4 * idle_limit, idle_limit));
+    idle.update(false, 4 * idle_limit);
+    assert(!idle.expired(5 * idle_limit - 1, idle_limit));
+    assert(idle.expired(5 * idle_limit, idle_limit));
 
     // A failed offline edit preserves both files and can be retried after storage recovers.
     const auto before_failed_save = read(network_file);

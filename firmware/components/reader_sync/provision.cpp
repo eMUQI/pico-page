@@ -107,7 +107,7 @@ bool parse_network_bytes(const std::string& bytes, std::vector<SavedWifi>& netwo
     const auto schema = toml_get(parsed.toptab, "schema_version");
     const auto wifi = toml_get(parsed.toptab, "wifi");
     std::vector<SavedWifi> candidate;
-    bool shaped = parsed.ok && only_keys(parsed.toptab, {"schema_version", "wifi"}) && schema.type == TOML_INT64;
+    bool shaped = parsed.ok && only_keys(parsed.toptab, {"schema_version", "wifi", "selected_ssid"}) && schema.type == TOML_INT64;
     if (shaped && schema.u.int64 == 1) {
         candidate.emplace_back();
         shaped = read_entry(wifi, false, candidate.back());
@@ -120,6 +120,10 @@ bool parse_network_bytes(const std::string& bytes, std::vector<SavedWifi>& netwo
         }
     } else
         shaped = shaped && schema.u.int64 == 2 && wifi.type == TOML_UNKNOWN;
+    const auto selected = toml_get(parsed.toptab, "selected_ssid");
+    shaped = shaped && (selected.type == TOML_UNKNOWN ||
+        (selected.type == TOML_STRING && selected.u.str.len <= 32 &&
+         printable(std::string(selected.u.str.ptr, selected.u.str.len))));
     toml_free(parsed);
     if (!shaped) {
         for (auto& entry : candidate) std::fill(entry.password.begin(), entry.password.end(), '\0');
@@ -336,6 +340,33 @@ bool edit_network_source(const std::string& source, bool missing, const WifiCred
     toml_free(parsed);
     if (!edited && error.empty()) error = "network.toml syntax cannot be preserved for this edit";
     return edited;
+}
+
+/** Missing selection uses the legacy fallback until the first compared edit freezes it. */
+std::string selected_name(const std::string& source, const std::vector<SavedWifi>& saved,
+                          bool* explicit_selection = nullptr) {
+    auto parsed = toml_parse(source.data(), static_cast<int>(source.size()));
+    const auto value = toml_get(parsed.toptab, "selected_ssid");
+    if (explicit_selection) *explicit_selection = value.type == TOML_STRING;
+    std::string name = value.type == TOML_STRING ? std::string(value.u.str.ptr, value.u.str.len)
+        : saved.empty() ? "" : saved.back().ssid;
+    toml_free(parsed);
+    return name;
+}
+bool select_source(std::string& source, const std::string& ssid) {
+    auto parsed = toml_parse(source.data(), static_cast<int>(source.size()));
+    const auto value = toml_get(parsed.toptab, "selected_ssid");
+    bool okay = parsed.ok;
+    if (okay && value.type == TOML_UNKNOWN) {
+        const auto schema = toml_get(parsed.toptab, "schema_version");
+        const auto line = line_offset(source, schema.lineno);
+        const auto end = line == std::string::npos ? std::string::npos : source.find('\n', line);
+        if (end == std::string::npos) { source += "\nselected_ssid = " + quoted(ssid) + "\n"; }
+        else source.insert(end + 1, "selected_ssid = " + quoted(ssid) + "\n");
+    }
+    else if (okay) okay = replace_string_value(source, value, ssid);
+    toml_free(parsed);
+    return okay && source.size() <= 4096;
 }
 
 /** A form field that only an account submission carries. */
@@ -621,6 +652,37 @@ bool load_networks(const std::string& card_root, std::vector<SavedWifi>& network
     return shaped;
 }
 
+bool load_selected_network(const std::string& root, std::optional<SavedWifi>& selected, std::string& error) {
+    selected.reset();
+    std::string source;
+    const auto status = store_internal::read_file(root, "PicoPage/network.toml", 4096, source);
+    if (status == StoreStatus::Missing) { error.clear(); return true; }
+    std::vector<SavedWifi> saved;
+    if (status != StoreStatus::Ok || !parse_network_bytes(source, saved, error)) {
+        if (error.empty()) error = "Cannot read local PicoPage/network.toml";
+        return false;
+    }
+    const auto name = selected_name(source, saved);
+    const auto found = std::find_if(saved.begin(), saved.end(), [&](const SavedWifi& wifi) { return wifi.ssid == name; });
+    if (found != saved.end()) selected = *found;
+    else if (!name.empty()) { error = "Selected Wi-Fi is no longer saved"; return false; }
+    error.clear();
+    return true;
+}
+bool save_selected_network(const std::string& root, const std::string& ssid, std::string& error) {
+    std::string source;
+    std::vector<SavedWifi> saved;
+    if (store_internal::read_file(root, "PicoPage/network.toml", 4096, source) != StoreStatus::Ok ||
+        !parse_network_bytes(source, saved, error)) return false;
+    if (std::none_of(saved.begin(), saved.end(), [&](const SavedWifi& wifi) { return wifi.ssid == ssid; })) {
+        error = "Selected Wi-Fi is not saved"; return false;
+    }
+    auto updated = source;
+    if (!select_source(updated, ssid)) { error = "Cannot preserve network selection syntax"; return false; }
+    return store_internal::commit_file(root, "PicoPage/network.toml", std::optional<std::string>{source},
+        updated, 4096, error, true) == StoreStatus::Ok;
+}
+
 std::string network_toml(const std::vector<SavedWifi>& networks) {
     std::string out = "schema_version = 2\n";
     for (const auto& entry : networks) {
@@ -634,18 +696,6 @@ std::string sync_toml(const sync::Config& config) {
     return "schema_version = 1\nendpoint = " + quoted(config.endpoint) + "\nusername = " + quoted(config.username) +
            "\nuserkey = " + quoted(config.userkey) + "\ndevice_id = " + quoted(config.device_id) +
            "\ndom_version = " + std::to_string(config.dom_version) + "\n";
-}
-
-std::vector<SavedWifi> connection_order(const std::vector<SavedWifi>& saved, const std::vector<NearbyWifi>& nearby) {
-    std::vector<std::pair<int, const SavedWifi*>> seen;
-    for (const auto& entry : saved)
-        if (const auto* item = find_nearby(nearby, entry.ssid)) seen.emplace_back(item->rssi, &entry);
-    std::stable_sort(seen.begin(), seen.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
-    std::vector<SavedWifi> order;
-    for (const auto& item : seen) order.push_back(*item.second);
-    if (order.empty())
-        if (const auto* last = last_network(saved)) order.push_back(*last);
-    return order;
 }
 
 const SavedWifi* last_network(const std::vector<SavedWifi>& saved) {
@@ -683,12 +733,14 @@ bool save_connection(const std::string& card_root, const std::string& ssid, std:
         error = "Connected Wi-Fi is absent from PicoPage/network.toml";
         return false;
     }
+    const auto target = selected_name(source, saved);
     if (!record_connection(saved, ssid, now)) {
         error.clear();
         return true;
     }
     std::string updated;
-    if (!edit_connection_source(source, saved, updated)) {
+    if (!edit_connection_source(source, saved, updated) ||
+        !select_source(updated, target)) {
         error = "PicoPage/network.toml syntax cannot be preserved for a connection update";
         return false;
     }
@@ -707,6 +759,13 @@ bool save_network_edit(const std::string& card_root, const WifiCredentials& wifi
     std::string updated;
     if (!edit_network_source(source, status == StoreStatus::Missing, wifi, remove, now, updated, error))
         return false;
+    std::vector<SavedWifi> original;
+    if (status != StoreStatus::Missing && !parse_network_bytes(source, original, error)) return false;
+    bool explicit_selection = false;
+    auto target = selected_name(source, original, &explicit_selection);
+    if (remove && target == wifi.ssid) target.clear();
+    else if (!remove && target.empty() && !explicit_selection) target = wifi.ssid;
+    if (!select_source(updated, target)) { error = "Cannot preserve network selection syntax"; return false; }
     const auto expected = status == StoreStatus::Missing ? std::optional<std::string>{}
                                                           : std::optional<std::string>{source};
     return store_internal::commit_file(card_root, "PicoPage/network.toml", expected, updated,

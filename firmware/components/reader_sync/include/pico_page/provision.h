@@ -52,22 +52,22 @@ bool valid_wifi(const WifiCredentials& credentials);
  * Reads PicoPage/network.toml, at most 4 KiB. A missing file yields an empty list. Schema 2
  * holds up to saved_limit [[wifi]] entries with distinct names, each with ssid, password and an
  * optional last_connected; schema 1 holds one [wifi] table and is read as one entry without a
- * connection time. false for any other content; diagnostics never contain the file contents.
+ * connection time. Optional root selected_ssid pins the target independently of ordering. false for any other content; diagnostics never contain the file contents.
  */
 bool load_networks(const std::string& card_root, std::vector<SavedWifi>& networks, std::string& error);
+
+/** Loads only the explicit target, or the legacy final entry when no selection was stored.
+ * An empty selection requires user choice; a missing target never falls back to another SSID.
+ */
+bool load_selected_network(const std::string& root, std::optional<SavedWifi>& selected, std::string& error);
+/** Persists an explicit target using a compared, lossless edit of network.toml. */
+bool save_selected_network(const std::string& root, const std::string& ssid, std::string& error);
 
 /** Schema 2 file contents for at most saved_limit valid entries with distinct names; the final entry is the fallback network. */
 std::string network_toml(const std::vector<SavedWifi>& networks);
 std::string sync_toml(const sync::Config& config);
 
-/**
- * Saved networks in the order to try: those seen nearby, strongest first. When none was seen,
- * only the configured fallback, so a failed scan or a hidden network still gets one try.
- */
-std::vector<SavedWifi> connection_order(const std::vector<SavedWifi>& saved,
-                                        const std::vector<NearbyWifi>& nearby);
-
-/** The final entry is the configured fallback; successful connections move their entry there. */
+/** The final entry is the last added or connected network; never use it as live connection state. */
 const SavedWifi* last_network(const std::vector<SavedWifi>& saved);
 
 /**
