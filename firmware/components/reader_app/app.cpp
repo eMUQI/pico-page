@@ -1114,8 +1114,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (mapping && std::chrono::steady_clock::now() < mapping_start_retry) return;
             if (!foreground_job->start()) {
                 if (mapping) {
-                    // Self-deleted FreeRTOS tasks release their stacks in Idle. Retry on later
-                    // polls without blocking input; persistent exhaustion still has a fixed limit.
+                    // Initialization or a full worker queue may recover on a later poll.
+                    // Retries remain bounded and do not block input or repeat HTTP requests.
                     if (++mapping_start_attempts < 3) {
                         mapping_start_retry = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
                         return;
@@ -5472,6 +5472,10 @@ ReaderApp::ReaderApp(std::string root, std::string writer, bool controlled_stora
 void ReaderApp::invalidate_identity_cache() { impl_->drain_save(); impl_->abandon_content(); impl_->foreground_job.reset(); impl_->stop_covers(); impl_->stop_raster(); impl_->stop_counting_job(); impl_->identities.clear(); impl_->font_identity.clear(); impl_->font_scan.reset(); impl_->effective_font.clear(); }
 ReaderApp::~ReaderApp() { network::release(impl_->manual_hold); impl_->cancel_sync(); impl_->drain_save(); }
 bool ReaderApp::initialize() {
+#ifdef ESP_PLATFORM
+    if (impl_->async_content && ContentJob::prepare_worker() != ContentJob::StartFailure::None)
+        ESP_LOGW("reader_app", "Content worker reservation failed; content requests will retry");
+#endif
     return impl_->initialize();
 }
 bool ReaderApp::open_book(const std::string &path) {
