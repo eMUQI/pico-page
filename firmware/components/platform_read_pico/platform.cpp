@@ -75,8 +75,26 @@ constexpr TickType_t idle_sample_period = pdMS_TO_TICKS(50);
 constexpr int settle_samples = 40;
 TaskHandle_t sampler = nullptr;
 std::atomic<std::uint32_t> input_overflows{0};
+// Remains set until the sampler starts a controller read under touch_lock.
+portMUX_TYPE touch_pending_lock = portMUX_INITIALIZER_UNLOCKED;
+bool touch_pending = true;
+
+void set_touch_pending(bool pending) {
+    portENTER_CRITICAL(&touch_pending_lock);
+    touch_pending = pending;
+    portEXIT_CRITICAL(&touch_pending_lock);
+}
+bool has_pending_touch() {
+    portENTER_CRITICAL(&touch_pending_lock);
+    const bool pending = touch_pending;
+    portEXIT_CRITICAL(&touch_pending_lock);
+    return pending;
+}
 
 void IRAM_ATTR touch_interrupt(void*) {
+    portENTER_CRITICAL_ISR(&touch_pending_lock);
+    touch_pending = true;
+    portEXIT_CRITICAL_ISR(&touch_pending_lock);
     BaseType_t woken = pdFALSE;
     vTaskNotifyGiveFromISR(sampler, &woken);
     if (woken) portYIELD_FROM_ISR();
@@ -292,10 +310,12 @@ void sample_touch(void*) {
         cst836u_touch_t sample{};
         xSemaphoreTake(touch_lock, portMAX_DELAY);
         // Publish the sampled event before sleep can acquire the controller boundary.
+        set_touch_pending(false);
         const auto result = cst836u_read(touch, &sample);
         const auto now = esp_timer_get_time();
         if (suppress_touch.exchange(false)) cancel(now);
         if (result != ESP_OK) {
+            set_touch_pending(true);
             if (!failing) ESP_LOGW(tag, "Touch/key read: %s", esp_err_to_name(result));
             failing = true;
             cancel(now);
@@ -663,9 +683,10 @@ bool sleep(std::string& error, bool& entered_sleep) {
     rails_deadline = 0;
     // The sampler must not address the controller between standby and its reset on wake.
     xSemaphoreTake(touch_lock, portMAX_DELAY);
-    if (input_waiting_before(std::numeric_limits<std::int64_t>::max())) {
+    if (input_waiting_before(std::numeric_limits<std::int64_t>::max()) ||
+        has_pending_touch() || cst836u_int_asserted(touch)) {
         xSemaphoreGive(touch_lock);
-        error = "Sleep cancelled by queued input";
+        error = "Sleep cancelled by pending touch input";
         return false;
     }
     auto result = cst836u_set_mode(touch, CST836U_MODE_DEEPSLEEP);
@@ -683,6 +704,11 @@ bool sleep(std::string& error, bool& entered_sleep) {
     bool slept = false;
     const auto idle_deadline = esp_timer_get_time() + 2'000'000;
     while (result == ESP_OK && esp_timer_get_time() < idle_deadline) {
+        // An interrupt during the standby command still cancels the handoff.
+        if (has_pending_touch()) {
+            error = "Sleep cancelled by touch interrupt";
+            break;
+        }
         bool short_press = false;
         bool wake_press = false;
         bool long_press = false;
@@ -696,6 +722,10 @@ bool sleep(std::string& error, bool& entered_sleep) {
         bool idle = false;
         if (!wake_lines_idle(irq, idle, error)) break;
         if (idle && !(read_pico_pmu_get()->key_state & 1)) {
+            if (has_pending_touch()) {
+                error = "Sleep cancelled by touch interrupt";
+                break;
+            }
             result = gpio_wakeup_enable(irq, GPIO_INTR_LOW_LEVEL);
             if (result == ESP_OK) result = esp_sleep_enable_gpio_wakeup();
             if (result != ESP_OK) break;
@@ -716,8 +746,10 @@ bool sleep(std::string& error, bool& entered_sleep) {
     gpio_wakeup_disable(irq);
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
     const auto touch_result = cst836u_wake(touch);
-    suppress_touch = true;
-    xQueueReset(touch_events);
+    if (entered_sleep) {
+        suppress_touch = true;
+        xQueueReset(touch_events);
+    }
     xSemaphoreGive(touch_lock);
     suppress_power = entered_sleep;
     if (entered_sleep) power_ignore_until = esp_timer_get_time() + 300'000;
