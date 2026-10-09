@@ -12,9 +12,36 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#else
+#include <system_error>
 #endif
 
 namespace pico_page {
+namespace {
+#ifdef ESP_PLATFORM
+constexpr unsigned content_stack_bytes = 32768;
+void log_worker_memory(const char* phase, ContentJob::Kind kind) {
+    constexpr auto internal = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    ESP_LOGI("content_worker", "phase=%s kind=%d stack_bytes=%u internal_free=%u internal_largest=%u internal_min=%u psram_free=%u psram_largest=%u psram_min=%u",
+             phase, static_cast<int>(kind), content_stack_bytes,
+             static_cast<unsigned>(heap_caps_get_free_size(internal)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(internal)),
+             static_cast<unsigned>(heap_caps_get_minimum_free_size(internal)),
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)),
+             static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM)));
+}
+#else
+thread_local ContentJob::Kind failed_kind = ContentJob::Kind::MapDownload;
+thread_local unsigned failed_starts = 0;
+thread_local ContentJob::StartFailure injected_failure = ContentJob::StartFailure::TaskCreate;
+#endif
+} // namespace
+#ifndef ESP_PLATFORM
+void ContentJob::fail_starts_for_test(Kind kind, unsigned count, StartFailure failure) {
+    failed_kind = kind; failed_starts = count; injected_failure = failure;
+}
+#endif
 std::size_t readable_offset(const Chapter& source, std::size_t start) {
     // Inserted block separators have no source anchor for a saved page start.
     Anchor anchor;
@@ -97,10 +124,16 @@ ContentJob::ContentJob(Request value) : request(std::move(value)) {}
 ContentJob::~ContentJob() { cancel(); wait(); }
 bool ContentJob::start() {
     if (started_) return false;
+    start_failure_ = StartFailure::None;
 #ifdef ESP_PLATFORM
+    const bool mapping = request.kind == Kind::MapUpload || request.kind == Kind::MapDownload;
+    if (mapping) log_worker_memory("start", request.kind);
     if ((request.kind == Kind::Pagination || request.kind == Kind::FontIdentity || request.kind == Kind::LibraryCovers ||
          request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite || request.kind == Kind::SleepCover || request.prefetch) &&
-        heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < 64U * 1024) return false;
+        heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < 64U * 1024) {
+        start_failure_ = StartFailure::InternalMemory;
+        return false;
+    }
     started_ = xTaskCreate([](void* opaque) {
         auto* job = static_cast<ContentJob*>(opaque);
         job->run();
@@ -109,9 +142,21 @@ bool ContentJob::start() {
                  static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM)));
         job->done_.store(true, std::memory_order_release);
         vTaskDelete(nullptr);
-    }, "content_worker", 32768, this, 1, nullptr) == pdPASS;
+    }, "content_worker", content_stack_bytes, this, 1, nullptr) == pdPASS;
+    if (!started_) {
+        start_failure_ = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < content_stack_bytes
+            ? StartFailure::InternalMemory : StartFailure::TaskCreate;
+        log_worker_memory("create_failed", request.kind);
+    }
 #else
-    thread_ = std::thread([this] { run(); done_.store(true, std::memory_order_release); });
+    if (failed_starts && request.kind == failed_kind) {
+        --failed_starts; start_failure_ = injected_failure; return false;
+    }
+    try {
+        thread_ = std::thread([this] { run(); done_.store(true, std::memory_order_release); });
+    } catch (const std::system_error&) {
+        start_failure_ = StartFailure::TaskCreate; return false;
+    }
     started_ = true;
 #endif
     return started_;

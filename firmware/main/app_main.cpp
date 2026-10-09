@@ -521,7 +521,14 @@ void network_worker(void *) {
             }
             if (!retained_station()) release_radio(holds.manual_suspended ? "手动连接已暂停，点击连接 Wi-Fi 可恢复。" : "");
             else if (platform::station_connected()) publish_wifi(pico_page::WifiPhase::Connected, station_target.ssid);
-            ESP_LOGI("network_worker", "stack_free=%u", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+            ESP_LOGI("network_worker", "phase=request_done stack_free=%u http_status=%d failed=%d wifi_connected=%d internal_free=%u internal_largest=%u internal_min=%u psram_free=%u psram_largest=%u",
+                     static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)), job->status, !job->error.empty(),
+                     platform::station_connected(),
+                     static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                     static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                     static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                     static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+                     static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
             xQueueSend(responses, &job, portMAX_DELAY);
         }
         holds.expire(esp_timer_get_time());

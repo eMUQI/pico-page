@@ -45,6 +45,7 @@ class ContentJob {
 public:
     enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks };
     enum class Target { Start, End, Before, Anchor, Fragment };
+    enum class StartFailure { None, InternalMemory, TaskCreate };
     struct CoverSource {
         std::string path, cache_name, cache_header;
         off_t size = 0;
@@ -112,6 +113,11 @@ public:
     ContentJob(const ContentJob&) = delete;
     ContentJob& operator=(const ContentJob&) = delete;
     bool start();
+    StartFailure start_failure() const { return start_failure_; }
+#ifndef ESP_PLATFORM
+    /** Fail the next count starts of kind on the calling host thread; count=0 clears injection. */
+    static void fail_starts_for_test(Kind kind, unsigned count, StartFailure failure);
+#endif
     bool started() const { return started_; }
     void cancel() { cancelled_.store(true, std::memory_order_relaxed); }
     bool done() const { return done_.load(std::memory_order_acquire); }
@@ -129,6 +135,7 @@ private:
     void library_covers();
     std::atomic<bool> cancelled_{false}, done_{false};
     bool started_ = false;
+    StartFailure start_failure_ = StartFailure::None;
 #ifndef ESP_PLATFORM
     std::thread thread_;
 #endif

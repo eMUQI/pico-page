@@ -844,6 +844,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     std::unique_ptr<ContentJob> counting_job;
     std::unique_ptr<ContentJob> foreground_job;
+    unsigned mapping_start_attempts = 0;
+    std::chrono::steady_clock::time_point mapping_start_retry{};
     std::optional<ContentJob::Request> pending_content;
     std::unique_ptr<graphics::Canvas> prepared_image;
     std::vector<std::size_t> prepared_image_failures;
@@ -1091,6 +1093,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!foreground_job && pending_content) {
             foreground_job = std::make_unique<ContentJob>(std::move(*pending_content));
             pending_content.reset();
+            mapping_start_attempts = 0;
+            mapping_start_retry = {};
         }
         if (!foreground_job) return;
         if (foreground_job->request.progressive && !allow_inline) return;
@@ -1102,7 +1106,24 @@ struct ReaderApp::Impl final : DisplayBackend {
                 else schedule_save();
                 return;
             }
+            const bool mapping = foreground_job->request.kind == ContentJob::Kind::MapDownload ||
+                                 foreground_job->request.kind == ContentJob::Kind::MapUpload;
+            if (mapping && std::chrono::steady_clock::now() < mapping_start_retry) return;
             if (!foreground_job->start()) {
+                if (mapping) {
+                    // Self-deleted FreeRTOS tasks release their stacks in Idle. Retry on later
+                    // polls without blocking input; persistent exhaustion still has a fixed limit.
+                    if (++mapping_start_attempts < 3) {
+                        mapping_start_retry = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+                        return;
+                    }
+                    const bool memory = foreground_job->start_failure() == ContentJob::StartFailure::InternalMemory;
+                    foreground_job.reset(); content_loading = false;
+                    cancel_sync(); remote_state = "未确认";
+                    sync_status = memory ? "内部内存不足，无法启动位置准备。请重新检查，本机位置未改动。"
+                                         : "位置准备任务创建失败。请重新检查，本机位置未改动。";
+                    draw_sync(); overlay(); return;
+                }
                 if (foreground_job->request.progressive) {
                     foreground_job->result.error = "Image worker unavailable";
                     complete_inline_image(*foreground_job); foreground_job.reset(); return;
@@ -4302,6 +4323,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         request.generation = foreground_generation;
         pending_content = std::move(request); content_loading = true;
         // The panel itself shows the work and its cancel control.
+#ifdef ESP_PLATFORM
+        ESP_LOGI("reader_sync", "mapping kind=%s", kind == ContentJob::Kind::MapDownload ? "download" : "upload");
+#endif
         sync_status = "正在准备位置…";
         draw_sync();
         if (view != View::Sync) { abandon_content(); return; }
@@ -4433,6 +4457,12 @@ struct ReaderApp::Impl final : DisplayBackend {
             sync_checked = false;
         } else {
             const auto remote = sync::parse_remote(status, bytes);
+#ifdef ESP_PLATFORM
+            const char* remote_status = remote.status == sync::RemoteStatus::Found ? "Found" :
+                remote.status == sync::RemoteStatus::NoRecord ? "NoRecord" :
+                remote.status == sync::RemoteStatus::Unauthorized ? "Unauthorized" : "Error";
+            ESP_LOGI("reader_sync", "http_status=%d remote_status=%s", status, remote_status);
+#endif
             server_state = "已连接";
             if (remote.status == sync::RemoteStatus::NoRecord) {
                 uncertain_record.reset(); acknowledged_record.reset();
