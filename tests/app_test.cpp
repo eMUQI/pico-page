@@ -2973,16 +2973,15 @@ int main(int argc, char** argv) {
             ReaderApp app(root.string(), "bookmarks", async, async); Driver driver{app};
             assert(app.initialize()); driver.present(); opened(app, book); driver.present();
             const auto before = read(marks);
+            const auto temporary = fs::path(marks.string() + ".tmp");
+            fs::remove_all(temporary); fs::create_directory(temporary);
             tools(driver); driver.tap(634, 50);
             while (app.pending_frame()) app.complete_frame(true);
-            fs::remove(marks); fs::create_directory(marks);
             assert(app.show_power_menu()); driver.present();
             driver.tap(100, 1100); driver.present();
-            fs::remove(marks); write(marks, before);
-            assert(app.view() == View::Tools);
+            fs::remove_all(temporary);
+            assert(read(marks) == before && app.view() == View::Tools);
             driver.tap(634, 50); driver.present();
-            // The restored file differs from the state read during the failure: one reload, then the retry.
-            if (app.status() == "书签文件已在别处修改，已重新读取，请核对当前书签") { driver.tap(634, 50); driver.present(); }
             assert(app.status() == "已删除本页书签" || app.status() == "已加书签");
             assert(app.prepare_usb_transfer());
         }
