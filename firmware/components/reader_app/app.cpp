@@ -5354,7 +5354,10 @@ struct ReaderApp::Impl final : DisplayBackend {
                         case reading_footer::Position::Percent: footer_position = reading_footer::Position::Pages; break;
                         }
                     }
-                    footer(); overlay(); return;
+                    footer();
+                    display.present({{"ui", 0, 0, ++ui_sequence}, {}, FramePurpose::Overlay,
+                                     RefreshIntent::Content, RefreshRegion{0, footer_top, 684, 1216 - footer_top}});
+                    return;
                 }
                 for (const auto &link : links)
                     if (link.contains(input.x, input.y)) {
@@ -5539,7 +5542,7 @@ void ReaderApp::complete_frame(bool success) {
             impl_->draw_usb(); impl_->overlay(true);
         } else if (impl_->view == View::PowerMenu && impl_->power_return_canvas) {
             impl_->close_power_menu();
-        } else if (frame.region) impl_->error("图片更新失败。返回将恢复已确认位置。");
+        } else if (frame.region) impl_->error("屏幕局部更新失败。返回将恢复已确认位置。");
         else impl_->error("屏幕更新失败，当前页未保存。返回将恢复已确认位置。");
     }
 }
