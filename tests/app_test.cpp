@@ -6,6 +6,7 @@
 #include "pico_page/document.h"
 #include "pico_page/store.h"
 #include "pico_page/provision.h"
+#include "../firmware/components/platform_read_pico/include/pico_page/sleep_input.h"
 
 #include <algorithm>
 #include <chrono>
@@ -1036,6 +1037,24 @@ int main(int argc, char** argv) {
         assert(!app.take_network_request() && !network::live(refreshed->session));
         assert(provision::save_selected_network(root.string(), "home", selection_error));
         driver.close(); driver.present(); driver.complete_content();
+        for (const bool after_frame : {false, true}) {
+            app.stop_wifi(true);
+            assert(!network::live(manual->cancelled));
+            // Cancellation restores the original target even if the selected network changed meanwhile.
+            assert(provision::save_selected_network(root.string(), "phone", selection_error));
+            if (after_frame) {
+                assert(sleep_frame(app)); driver.present();
+                app.wake(false); driver.present(); driver.complete_content();
+            } else app.cancel_sleep();
+            auto restored = app.take_wifi_request();
+            assert(restored && restored->target.ssid == "home" && restored->cancelled != manual->cancelled);
+            assert(network::live(restored->cancelled));
+            app.complete_wifi(restored->id, {}, "");
+            manual = restored;
+            app.cancel_sleep();
+            assert(!app.take_wifi_request());
+        }
+        app.stop_wifi(true);
         assert(sleep_frame(app)); driver.present();
         assert(!network::live(manual->cancelled) && !network::live(refreshed->session));
         app.wake(); driver.present(); driver.complete_content();
@@ -1092,7 +1111,12 @@ int main(int argc, char** argv) {
         std::optional<provision::SavedWifi> target; std::string error;
         assert(provision::load_selected_network(root.string(), target, error) && target->ssid == "phone");
         app.complete_wifi(selected->id, {}, "找不到所选网络。"); driver.present();
-        app.stop_wifi(); assert(selected->cancelled->load());
+        app.complete_wifi(selected->id, {}, "");
+        assert(app.prepare_portal()); driver.present();
+        driver.portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); driver.present();
+        app.stop_wifi(true); assert(selected->cancelled->load());
+        app.cancel_sleep();
+        assert(!app.take_wifi_request());
     }
     // Each instance models reopening after a restart. Empty records never schedule mapping;
     // transient and sustained task-start failures must preserve the committed progress bytes.
@@ -1948,6 +1972,39 @@ int main(int argc, char** argv) {
             assert(!replaced.book_pages());
         }
         write(font_path, original_font); fs::last_write_time(font_path, font_time);
+    }
+    {
+        using namespace pico_page::platform;
+        const auto root = card / "SleepInput";
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
+        ReaderApp app(root.string(), "sleep-input", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+        driver.complete_content();
+        for (const auto kind : {EventKind::K3, EventKind::K2, EventKind::Touch}) {
+            const auto saved = *app.saved_record();
+            const auto pixels = app.canvas().pixels();
+            assert(sleep_frame(app)); driver.present();
+            app.wake(false);
+            assert(app.view() == View::Loading);
+            SleepInput input;
+            input.begin();
+            input.accept({kind, EventPhase::Begin, 1, 342, 500});
+            input.accept({kind, EventPhase::End, 1, 342, 500});
+            driver.present(); driver.complete_content();
+            assert(input.tap() && app.view() == View::Reading && *app.saved_record() == saved);
+            // Reopening may update footer counts; the confirmed body must remain identical.
+            assert(std::equal(pixels.begin(), pixels.begin() + 1128 * app.canvas().stride(), app.canvas().pixels().begin()));
+            const auto restored_pixels = app.canvas().pixels();
+            if (kind == EventKind::Touch) driver.tap(input.tap()->x, input.tap()->y);
+            else driver.key(kind == EventKind::K3 ? Input::K3 : Input::K2);
+            if (kind == EventKind::K2)
+                assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean);
+            driver.present(); driver.complete_content();
+            if (kind == EventKind::K3) assert(app.saved_record()->anchor != saved.anchor);
+            else if (kind == EventKind::Touch) assert(app.view() == View::Tools);
+            else assert(*app.saved_record() == saved && app.canvas().pixels() == restored_pixels);
+        }
     }
     {
         const auto root = card / "SleepWorker";

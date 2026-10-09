@@ -473,6 +473,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     UsbTransferAction usb_action = UsbTransferAction::None;
     WifiStatus wifi_status;
     network::Hold manual_hold, sync_hold;
+    std::optional<provision::WifiCredentials> manual_target, sleep_wifi_target;
     provision::WifiCredentials sync_target;
     std::optional<WifiOperation> wifi_request;
     std::uint64_t wifi_sequence = 0, wifi_worker = 0;
@@ -3638,6 +3639,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         wifi_worker = ++wifi_sequence;
         wifi_request = WifiOperation{scan ? WifiOperation::Kind::Scan : WifiOperation::Kind::Connect,
             wifi_worker, selected ? static_cast<provision::WifiCredentials>(*selected) : provision::WifiCredentials{}, manual_hold};
+        manual_target = scan ? std::nullopt : std::optional<provision::WifiCredentials>{wifi_request->target};
         wifi_notice = scan ? "正在搜索附近网络…" : "正在连接“" + selected->ssid + "”…";
         wifi_manage = scan; wifi_choice.clear();
         draw_wifi(); overlay();
@@ -5621,7 +5623,10 @@ PortalAction ReaderApp::take_portal_action() {
 }
 std::uint64_t ReaderApp::portal_generation() const { return impl_->portal_generation; }
 bool ReaderApp::wifi_enabled() const { return impl_->card_available && impl_->wifi_enabled(); }
-void ReaderApp::stop_wifi() {
+void ReaderApp::stop_wifi(bool for_sleep) {
+    if (!for_sleep) impl_->sleep_wifi_target.reset();
+    else if (network::live(impl_->manual_hold) && impl_->manual_target)
+        impl_->sleep_wifi_target = impl_->manual_target;
     network::release(impl_->manual_hold);
     network::release(impl_->sync_hold);
     if (impl_->wifi_request) { impl_->wifi_request.reset(); impl_->wifi_worker = 0; }
@@ -5678,6 +5683,7 @@ bool ReaderApp::prepare_portal(bool upload, bool station) {
     impl_->portal_open_wifi = false;
     impl_->portal_upload = upload;
     impl_->portal_station = upload && station;
+    if (!impl_->portal_station) impl_->manual_target.reset();
     impl_->portal_started = false;
     impl_->portal = {};
     impl_->portal_closing = false;
@@ -5795,9 +5801,17 @@ void ReaderApp::show_power_off_help() {
 }
 bool ReaderApp::sleep_pending() const { return impl_->sleep_cover_deadline.has_value(); }
 void ReaderApp::cancel_sleep() {
-    if (!impl_->sleep_cover_deadline) return;
-    impl_->sleep_cover_deadline.reset();
-    if (impl_->counting_job) impl_->counting_job->cancel();
+    if (impl_->sleep_cover_deadline) {
+        impl_->sleep_cover_deadline.reset();
+        if (impl_->counting_job) impl_->counting_job->cancel();
+    }
+    if (const auto target = std::exchange(impl_->sleep_wifi_target, std::nullopt);
+        target && impl_->card_available && impl_->wifi_enabled() && !impl_->usb_prepared && !impl_->portal_live) {
+        // A released hold cannot be reused: the worker may already have completed its teardown.
+        impl_->manual_hold = std::make_shared<std::atomic_bool>(false);
+        impl_->wifi_worker = ++impl_->wifi_sequence;
+        impl_->wifi_request = WifiOperation{WifiOperation::Kind::Connect, impl_->wifi_worker, *target, impl_->manual_hold};
+    }
 }
 bool ReaderApp::prepare_sleep() {
     bool cover_attempted = false;
@@ -5845,13 +5859,15 @@ bool ReaderApp::prepare_sleep() {
     impl_->overlay(true);
     return true;
 }
-void ReaderApp::wake() {
+void ReaderApp::wake(bool slept) {
     if (impl_->display.busy())
         return;
     impl_->wifi_status.phase = WifiPhase::Offline;
     impl_->wifi_status.manual = false;
     impl_->wifi_status.ssid.clear(); impl_->wifi_status.detail.clear();
     impl_->wifi_notice.clear();
+    if (slept) impl_->sleep_wifi_target.reset();
+    else cancel_sleep();
     if (!impl_->resume_to_library && impl_->has_book()) {
         if (impl_->async_content) impl_->open(impl_->book_path);
         else impl_->recover_body();

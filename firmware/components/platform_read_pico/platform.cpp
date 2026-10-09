@@ -49,6 +49,7 @@ bool baseline_valid = false;
 bool mounted = false;
 bool usb_owns_card = false;
 bool suppress_power = true;
+bool pending_power_long = false;
 PowerKey power_key;
 int panel_vcom = 0;
 std::int64_t rails_deadline = 0;
@@ -619,6 +620,10 @@ bool poll(Event& event, std::string& error) {
             return true;
         }
     }
+    if (std::exchange(pending_power_long, false)) {
+        system_event(EventKind::PowerLong, event);
+        return true;
+    }
     if (now - last_pmu_poll >= 200'000) {
         last_pmu_poll = now;
         bool short_press = false;
@@ -650,7 +655,8 @@ bool input_waiting_before(std::int64_t time_us) {
     return touch_events && xQueuePeek(touch_events, &next, 0) == pdTRUE && next.time_us < time_us;
 }
 
-bool sleep(std::string& error) {
+bool sleep(std::string& error, bool& entered_sleep) {
+    entered_sleep = false;
     error.clear();
     if (!on_owner(error) || !ready) return false;
     epd_poweroff();
@@ -679,8 +685,11 @@ bool sleep(std::string& error) {
     while (result == ESP_OK && esp_timer_get_time() < idle_deadline) {
         bool short_press = false;
         bool wake_press = false;
-        if (!pmu_events(short_press, wake_press, error)) break;
-        if (short_press || wake_press) {
+        bool long_press = false;
+        if (!pmu_events(short_press, wake_press, error, &long_press)) break;
+        if (short_press || wake_press || long_press) {
+            pending_power_long = long_press;
+            power_key.cancel_sleep_press();
             error = "Sleep cancelled by power key";
             break;
         }
@@ -693,6 +702,7 @@ bool sleep(std::string& error) {
             while (result == ESP_OK) {
                 result = esp_light_sleep_start();
                 if (result != ESP_OK) break;
+                entered_sleep = true;
                 if (!settle_wake_interrupt(irq, wake_press, error)) break;
                 if (wake_press) {
                     slept = true;
@@ -709,8 +719,8 @@ bool sleep(std::string& error) {
     suppress_touch = true;
     xQueueReset(touch_events);
     xSemaphoreGive(touch_lock);
-    suppress_power = true;
-    power_ignore_until = esp_timer_get_time() + 300'000;
+    suppress_power = entered_sleep;
+    if (entered_sleep) power_ignore_until = esp_timer_get_time() + 300'000;
     if (touch_result != ESP_OK) return failure(error, "Touch resume", touch_result);
     if (result != ESP_OK) return failure(error, "Light sleep", result);
     if (!slept && error.empty()) error = "Power key or wake interrupt did not become idle";

@@ -143,8 +143,9 @@ class ReaderApp {
     int auto_sleep_minutes() const;
     /** Reloads global settings when idle; uses the admitted network state, and rejects access during a bookmark commit. */
     bool wifi_enabled() const;
-    /** Requests cancellation on the application owner task without waiting for the worker. */
-    void stop_wifi();
+    /** Cancels network work on the application owner without waiting for the worker.
+     * for_sleep retains the manual target for a cancelled sleep attempt. */
+    void stop_wifi(bool for_sleep = false);
     /** Manual connection/scanning carries credentials, never borrowed card objects. */
     std::optional<WifiOperation> take_wifi_request();
     void complete_wifi(std::uint64_t id, const std::vector<provision::NearbyWifi>& nearby, const std::string& error);
@@ -184,7 +185,7 @@ class ReaderApp {
      */
     bool prepare_sleep();
     bool sleep_pending() const;
-    /** Cancels a pending sleep request without destroying the running cover worker. */
+    /** Cancels sleep and restores its manual Wi-Fi intent without destroying a running cover worker. */
     void cancel_sleep();
     /** Opens a modal menu without changing the underlying page or its draft. Busy tasks must finish first. */
     bool show_power_menu();
@@ -198,7 +199,8 @@ class ReaderApp {
     bool close_power_files();
     /** Draws terminal hardware-off instructions using fallback fonts; never resumes reading. */
     void show_power_off_help();
-    void wake();
+    /** Resumes reading or the library; slept=false also restores the cancelled manual Wi-Fi intent. */
+    void wake(bool slept = true);
     void card_removed();
     /**
      * True when a presented position awaits its first save attempt. Saving is left to the
