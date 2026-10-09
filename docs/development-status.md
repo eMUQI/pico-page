@@ -3217,7 +3217,7 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
   8256/2080/11172/9864 字节。修复普通查询中一次自然恢复的 draw 为 1642 ms；这些最大值不是驱动硬时限。
 - 回归：现有 WifiLifecycle 同步与异步模式覆盖阶段无绘制、K2、最终显示失败、取消和晚回包隔离。
   `cmake --build build/host --parallel 4` 与完整 CTest **14/14**（15.23 秒）；ASan/UBSan 完整 CTest
-  **14/14**（42.56 秒），使用 halt_on_error；本机不支持 LSan，不声称泄漏检测通过。
+  **14/14**（42.56 秒），使用 halt_on_error；当前系统 AppleClang 运行时不支持 LSan，未运行泄漏检测。
   最后补充的清屏检查和控制台 ESP 路径由标准 `sh tools/build_firmware.sh` 覆盖，ESP-IDF 6.1-dirty。
 - 最终应用 **3,398,288 字节**，SHA-256 `e5766c81b48896aa9684744d700ec498509ff141001d5fd8383b00813352c6cf`。
   当次读回设备分区及 otadata 确认 OTA0，只写 `0x10000` 应用，esptool `Hash of data verified`。
@@ -3242,3 +3242,21 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
   开发状态中此前未提交的上传诊断、页脚烧录与 Wi-Fi UI 审核记录保留在工作区，不混入本次提交。
 - 沿用同一实现已完成的 host、sanitizer、固件和真机验证；本次交接检查 387 项及差异检查通过。
   个人书籍、设备日志、截图、备份和固件均未提交。PR 创建后检查远端 CI；本次不合并。
+
+
+## 2026-10-09 · PR #26 review 与 LSan 工具链核对
+
+- LLVM 官方支持 macOS 上的 LSan；此前“本机不支持 LSan”表述不准确，更正为当前系统 AppleClang 运行时不支持。
+  `build/sanitized` 实际使用 `/usr/bin/cc`、`/usr/bin/c++`，版本 AppleClang 21.0.0、目标 arm64 Darwin；
+  `otool -L` 显示加载 `libclang_rt.asan_osx_dynamic.dylib`。
+  本次以 `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1` 执行既有 core_test，
+  立即报 `AddressSanitizer: detect_leaks is not supported on this platform`，退出 134。没有将其计为测试通过。
+- 不替换本机工具链；现有 Ubuntu CI 增加独立 Clang ASan/UBSan 构建，以显式 `detect_leaks=1` 运行完整 CTest。
+  本批不改固件，不重复烧录；新增 CI 结果待远端运行确认。
+- Review 的 P1 假定每个清屏脉冲都会经过 `epd_draw_base()` 重置错误；核对锁定 BSP 后，此调用链不成立。
+  实际为 `epd_clear_checked → epd_clear → epd_clear_area → epd_clear_area_cycles → epd_push_pixels → epd_push_pixels_lcd`；
+  后者不重置 error，完成回调仅按位累积错误；`epd_draw_base` 的重置属于另一条绘制路径。
+- 对构建副本的上述原函数及完成回调做隔离探针，仅模拟硬件/RTOS 依赖；分别在 78 个清屏脉冲中的每一个
+  注入提前结束，所有情况经过余下成功脉冲后仍返回 1024；下一次无故障清屏正确返回 0。
+  这证明当前错误累积逻辑，并非新一轮硬件验收。P1 判定为误报，不为它增加重复累积实现。
+  原始探针和日志留在忽略目录 `.local/pr26-review/`，原有未提交开发记录继续保留。
