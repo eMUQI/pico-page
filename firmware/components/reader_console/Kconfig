@@ -8,4 +8,25 @@ config PICO_PAGE_DIAGNOSTIC_CONSOLE
         resource import and current framebuffer export over the local USB Serial JTAG console. Commands
         run on the application task and use the normal reader APIs. This is
         an unauthenticated development interface; disable it for normal builds.
+config PICO_PAGE_PERF_METRICS
+    bool "Collect bounded operation metrics without hot-path serial output"
+    default n
+    help
+        Counts all instrumented operation outcomes and inclusive durations.
+        No background task. Inspect with a debugger or the optional console.
+config PICO_PAGE_TRACE_EVENTS
+    bool "Collect correlated operation events"
+    depends on PICO_PAGE_DIAGNOSTIC_CONSOLE
+    select PICO_PAGE_PERF_METRICS
+    default n
+    help
+        Adds a 64-event buffer drained by explicit trace commands. Task context
+        only; full buffers drop new events and increment the dropped counter.
+config PICO_PAGE_LEGACY_PERF_LOG
+    bool "Enable threshold-filtered legacy stage logs (perturbs timing)"
+    depends on PICO_PAGE_DIAGNOSTIC_CONSOLE && !PICO_PAGE_PERF_METRICS
+    default n
+    help
+        Compatibility with summarize_reader_perf.py. Never use these filtered
+        stage samples as a complete latency distribution.
 endmenu

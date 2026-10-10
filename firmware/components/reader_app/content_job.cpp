@@ -24,7 +24,7 @@ constexpr unsigned content_stack_bytes = 32768;
 QueueHandle_t content_requests = nullptr;
 void log_worker_memory(const char* phase, ContentJob::Kind kind) {
     constexpr auto internal = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
-    ESP_LOGI("content_worker", "phase=%s kind=%d stack_bytes=%u internal_free=%u internal_largest=%u internal_min=%u psram_free=%u psram_largest=%u psram_min=%u",
+    ESP_LOGW("content_worker", "phase=%s kind=%d stack_bytes=%u internal_free=%u internal_largest=%u internal_min=%u psram_free=%u psram_largest=%u psram_min=%u",
              phase, static_cast<int>(kind), content_stack_bytes,
              static_cast<unsigned>(heap_caps_get_free_size(internal)),
              static_cast<unsigned>(heap_caps_get_largest_free_block(internal)),
@@ -135,9 +135,6 @@ ContentJob::StartFailure ContentJob::prepare_worker() {
             ContentJob* job = nullptr;
             if (xQueueReceive(requests, &job, portMAX_DELAY) != pdTRUE) continue;
             job->run();
-            ESP_LOGI("content_worker", "stack_free=%u kind=%d psram_free=%u psram_min=%u", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)),
-                     static_cast<int>(job->request.kind), static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
-                     static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM)));
             // Publishing completion relinquishes the job; its owner may immediately destroy it.
             job->done_.store(true, std::memory_order_release);
         }
@@ -153,10 +150,18 @@ ContentJob::StartFailure ContentJob::prepare_worker() {
 #endif
 bool ContentJob::start() {
     if (started_) return false;
+    PP_DIAGNOSTIC(
+        measurement_ = diagnostics::begin(diagnostics::Kind::Content,
+            {0, 0, 0, request.generation, static_cast<std::uint32_t>(request.kind)});
+        struct StartGuard {
+            ContentJob& job;
+            ~StartGuard() {
+                if (!job.started_) diagnostics::end(job.measurement_, diagnostics::Outcome::Failure);
+            }
+        } guard{*this};
+    )
     start_failure_ = StartFailure::None;
 #ifdef ESP_PLATFORM
-    const bool mapping = request.kind == Kind::MapUpload || request.kind == Kind::MapDownload;
-    if (mapping) log_worker_memory("start", request.kind);
     // Optional work retains the same headroom after accounting for the already reserved stack.
     const auto required_internal = 32U * 1024 + (content_requests ? 0 : content_stack_bytes);
     if ((request.kind == Kind::Pagination || request.kind == Kind::FontIdentity || request.kind == Kind::LibraryCovers ||
@@ -195,7 +200,19 @@ void ContentJob::wait() {
     if (thread_.joinable()) thread_.join();
 #endif
 }
+#ifdef CONFIG_PICO_PAGE_PERF_METRICS
 void ContentJob::run() {
+    execute();
+    const bool failed = !result.error.empty() || !result.failed_images.empty() ||
+        (request.kind == Kind::SaveProgress && result.progress.status != StoreStatus::Ok) ||
+        (request.kind == Kind::SaveBookmarks && result.bookmark_status != StoreStatus::Ok);
+    diagnostics::end(measurement_, cancelled_.load() ? diagnostics::Outcome::Cancelled :
+        failed ? diagnostics::Outcome::Failure : diagnostics::Outcome::Success);
+}
+void ContentJob::execute() {
+#else
+void ContentJob::run() {
+#endif
     result.offset = request.offset;
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
     if (request.kind == Kind::SaveProgress) {

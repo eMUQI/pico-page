@@ -102,3 +102,23 @@ target_link_libraries(sync_test PRIVATE reader_sync)
 target_compile_options(sync_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME sync COMMAND sync_test ${document_fixtures}/valid.epub ${tool_card})
 set_tests_properties(sync PROPERTIES FIXTURES_REQUIRED tool_card)
+
+# Build the same recorder with all three compile-time configurations.
+find_package(Threads REQUIRED)
+foreach(mode release performance diagnostic)
+    add_executable(diagnostics_${mode}_test tests/diagnostics_test.cpp
+        firmware/components/reader_core/diagnostics.cpp)
+    target_include_directories(diagnostics_${mode}_test PRIVATE firmware/components/reader_core/include)
+    target_compile_features(diagnostics_${mode}_test PRIVATE cxx_std_17)
+    target_link_libraries(diagnostics_${mode}_test PRIVATE Threads::Threads)
+    target_compile_options(diagnostics_${mode}_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+    if(NOT mode STREQUAL "release")
+        target_compile_definitions(diagnostics_${mode}_test PRIVATE CONFIG_PICO_PAGE_PERF_METRICS=1)
+    endif()
+    if(mode STREQUAL "diagnostic")
+        target_compile_definitions(diagnostics_${mode}_test PRIVATE CONFIG_PICO_PAGE_TRACE_EVENTS=1)
+    endif()
+    add_test(NAME diagnostics_${mode} COMMAND diagnostics_${mode}_test)
+endforeach()
+add_test(NAME device_workbench COMMAND ${Python3_EXECUTABLE} -m unittest discover
+    -s ${CMAKE_CURRENT_SOURCE_DIR}/tests -p test_device_workbench.py -v)

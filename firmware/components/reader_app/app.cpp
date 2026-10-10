@@ -4966,7 +4966,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         request.generation = foreground_generation;
         pending_content = std::move(request); content_loading = true;
         // The panel itself shows the work and its cancel control.
-#ifdef ESP_PLATFORM
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
         ESP_LOGI("reader_sync", "mapping kind=%s", kind == ContentJob::Kind::MapDownload ? "download" : "upload");
 #endif
         draw_sync();
@@ -5091,7 +5091,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             sync_checked = false;
         } else {
             const auto remote = sync::parse_remote(status, bytes);
-#ifdef ESP_PLATFORM
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
             const char* remote_status = remote.status == sync::RemoteStatus::Found ? "Found" :
                 remote.status == sync::RemoteStatus::NoRecord ? "NoRecord" :
                 remote.status == sync::RemoteStatus::Unauthorized ? "Unauthorized" : "Error";

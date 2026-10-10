@@ -19,7 +19,7 @@ bool shutdown(std::string &error);
  * input_allowed permits only key/tap/hold during network work, matching physical input;
  * pending frames and imports still reject them. Keep it false during sleep or a physical contact.
  * This function never confirms a frame or enters hardware sleep.
- * Returns true when a complete command line was received, which counts as activity.
+ * Returns activity only for commands that can change state; observations do not reset idle saving.
  */
 bool poll(ReaderApp &app, const char *card_root, std::uint64_t &input_sequence,
           bool actions_allowed = true, bool input_allowed = false);

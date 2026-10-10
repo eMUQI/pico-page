@@ -1,5 +1,6 @@
 #pragma once
 
+#include "pico_page/diagnostics.h"
 #include <chrono>
 #include <cstdint>
 #ifdef ESP_PLATFORM
@@ -11,9 +12,11 @@ namespace pico_page {
 struct StageTimer {
     const char* stage;
     std::int64_t min_us = 20'000;
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
     std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+#endif
     ~StageTimer() {
-#ifdef ESP_PLATFORM
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
         const auto us = std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - start).count();
         if (us >= min_us)

@@ -703,6 +703,7 @@ struct ChapterParser {
 
 namespace {
 struct ZipTiming {
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
     using Clock = std::chrono::steady_clock;
     Clock::time_point started = Clock::now(), checked = started;
     std::int64_t read_us = 0, read_max_us = 0, xml_us = 0, xml_max_us = 0, checkpoint_max_us = 0;
@@ -722,6 +723,9 @@ struct ZipTiming {
             static_cast<long long>(std::max<std::int64_t>(0, total - read_us - xml_us)), static_cast<long long>(checkpoint_max_us));
 #endif
     }
+#else
+    void checkpoint() {}
+#endif
 };
 }
 
@@ -760,14 +764,18 @@ struct EpubDocument::Impl {
     ZipTiming* read_timing = nullptr;
     static std::size_t read(void* opaque, mz_uint64 offset, void* buffer, std::size_t size) {
         auto* self = static_cast<Impl*>(opaque);
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
         const auto started = ZipTiming::Clock::now();
+#endif
         const auto count = offset <= kMaxBook && std::fseek(self->file, static_cast<long>(offset), SEEK_SET) == 0
             ? std::fread(buffer, 1, size, self->file) : 0;
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
         if (self->read_timing) {
             const auto us = ZipTiming::elapsed(started);
             self->read_timing->read_us += us;
             self->read_timing->read_max_us = std::max(self->read_timing->read_max_us, us);
         }
+#endif
         return count;
     }
     bool load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
@@ -803,10 +811,14 @@ struct EpubDocument::Impl {
                     return 0;
                 }
                 const auto size = std::min<std::size_t>(4096, count - offset);
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
                 const auto started = ZipTiming::Clock::now();
+#endif
                 const bool parsed = feed.xml.feed(static_cast<const char*>(data) + offset, size, false);
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
                 const auto us = ZipTiming::elapsed(started);
                 feed.timing.xml_us += us; feed.timing.xml_max_us = std::max(feed.timing.xml_max_us, us);
+#endif
                 if (!parsed) return 0;
                 offset += size;
             }
@@ -818,10 +830,14 @@ struct EpubDocument::Impl {
             return fail(error, kChapterCancelled);
         }
         if (!extracted) return fail(error, xml.error.empty() ? "Invalid compressed EPUB resource: " + path : xml.error + ": " + path);
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
         const auto started = ZipTiming::Clock::now();
+#endif
         const bool finished = xml.feed("", 0, true);
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
         const auto us = ZipTiming::elapsed(started);
         timing.xml_us += us; timing.xml_max_us = std::max(timing.xml_max_us, us);
+#endif
         if (!finished) return fail(error, xml.error + ": " + path);
         return true;
     }

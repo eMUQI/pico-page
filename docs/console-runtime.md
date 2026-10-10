@@ -4,6 +4,8 @@
 
 本接口只用于受控设备验证。`CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE` 默认为 `n`，仅在 USB Serial JTAG 被选为控制台时可启用；普通固件保持关闭。启用后，连接 USB 的本地程序可以操作阅读界面，没有账户认证。组件已接入固件主循环并安装。状态、目录、资源导入/取消和完整字体及书籍导入均已在设备验证；本轮用于实际阅读操作与画布导出。
 
+新增构建模式、metrics/trace 协议、持续采集和结果格式见 [诊断工作台](diagnostic-workbench.md)。观察命令不计入用户活动，持续采集不重置停留保存的空闲计时。
+
 ## 主循环接入
 
 1. 在应用任务调用 `console::initialize(error)`。它安装带 8 KiB 接收、2 KiB 发送缓冲的官方 USB 驱动，将现有控制台绑定到该驱动。协议使用 `usb_serial_jtag_read_bytes(..., 0)` 非阻塞读取；回复采用独立有界缓冲，一次入队整行，避免日志 VFS 逐字节尽力发送造成回复不完整。
@@ -34,7 +36,7 @@
 | `PP 11 commit` | 校验、同步、读回并发布；无论成功或失败都结束事务 |
 | `PP 12 abort` | 取消活动导入，只清理本事务创建的临时文件 |
 
-普通回复以 `PP <id> OK ...` 或 `PP <id> ERROR <code>` 开始。协议发送缓冲为 1536 字节，每行前补 LF，避免与其他日志的半行拼接。格式化截断或入队失败会增加 `tx_failures`，不会把截断行当作完整回复。命令回复的驱动等待参数为 1000 ms；内部锁和队列各可等待一次。主动发送的 `READY` 和 `FRAME` 通知使用零等待，缓冲区满时丢弃并增加 `tx_failures`，不阻塞阅读。
+普通回复以 `PP <id> OK ...` 或 `PP <id> ERROR <code>` 开始。协议发送缓冲为 1536 字节，每行前补 LF，避免与其他日志的半行拼接。格式化截断或入队失败会增加 `tx_failures`，不会把截断行当作完整回复。一般命令回复的驱动等待参数为 1000 ms；内部锁和队列各可等待一次。新增 metrics/trace（含 trace_start/trace_stop 返回的 metrics）整次响应共用 20 ms 传输等待预算，详见 [诊断工作台](diagnostic-workbench.md)。主动发送的 `READY` 和 `FRAME` 通知使用零等待，缓冲区满时丢弃并增加 `tx_failures`，不阻塞阅读。
 目录项为 `PP <id> ENTRY kind=dir|file bytes=... name_hex=...`；名称采用 UTF-8 字节的十六进制，
 避免文件名被解释为控制字符。目录每页最多 32 项，起始项不超过 4096，不递归遍历。
 
