@@ -4433,3 +4433,5 @@ D14 核对：原代码只识别 K1/K3 与正文侧区点按，未识别非触摸
 构建产物 `build/firmware-diagnostic/pico_page.bin`：3,413,856 字节，SHA-256 `7d424e51264571150cfe40249b40e83953e51c260a7017e25d506f9768a57c6b`。
 
 交接检查 446 项、diff 检查通过；本机日志为 `/tmp/textturn-merge-*.log`。PR 首版 `507c0b8` 的远端 host 检查通过；整合提交的 CI 与 review 另行核对，不用首版结果代替。未连接、复位或烧录设备；真机未测范围与上一批一致。
+
+PR #50 自查修正：epdiy 按波形描述符地址缓存前导保持相，而 A/B/C 原地重建共用描述符，切换后可能复用旧的首动作相号。实验效果关闭该跳相优化，确保文字表执行完整 37 相；默认 GL16/Gray8 保持原行为。水波纹单拍原本不参与跳相。修正后标准与 Diagnostic 固件均重新构建通过，交接与 diff 检查通过；真实屏幕仍未测。日志为 `/tmp/textturn-review-firmware.log` 与 `/tmp/textturn-review-diagnostic.log`。

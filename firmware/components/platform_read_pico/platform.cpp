@@ -621,7 +621,10 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
     }
     const bool clear = full_clean || !baseline_valid;
     baseline_valid = false;
-    epd_set_leading_skip(!clear);
+    // The driver caches first-active phases by table address; experimental tables
+    // are rebuilt in place and must retain their complete phase sequence.
+    epd_set_leading_skip(!clear && (page_waveform == PageWaveform::Gray16 ||
+                                  page_waveform == PageWaveform::Gray8));
     EpdDrawError draw_result;
     // epd_hl_update_area applies EPD_ROT_INVERTED_PORTRAIT, matching copy_portrait.
     const auto update = [&] {
