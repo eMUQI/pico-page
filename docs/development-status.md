@@ -2,7 +2,7 @@
 
 ## 当前摘要（2026-10-11）
 
-分支 `fix/workload-font-size` 的 `c9d6a49` 已完成本地评审：自动场景的 workload 标识加入字号，防止起始字号不同的运行被误判为可比较。Python 工作台测试 36/36，CTest 工作台入口 1/1，441 项交接检查通过；补充比较验证确认不同字号、不同 anchor 和缺少字号的旧标识均不可比较。PR #51 的 `983f568` 已通过两次 Linux CI，Codex review 完成且无问题；main `f61c089` 整合后的结果另行核对。本批未构建或烧录固件，未新增真机验收证据。
+PR #51 的工作负载字号标识修正已完成本地评审，分支已整合 main `f61c089`。自动场景生成 workload 时加入字号，比较入口另要求有效的正整数字号，防止两份缺少字号的旧报告误判为可比。Python 工作台测试 36/36、CTest 对应入口和 446 项交接检查通过；最新评审修正提交仍需重新核对 CI 与 review。本批未构建或烧录固件，未新增真机验收证据。
 
 文字转页 A/B/C、水波纹与屏幕选择入口已通过 PR #50 合并到 main `f61c089`。默认关闭、本次启动有效，只作用于正文非清屏更新；原档位、全刷和恢复路径保留。最小 epdiy 补丁只改构建副本，官方锁定与下载原件不变。整合后 host Debug、开启埋点的 ASan/UBSan 各 20/20（原 18 项，新增 2 项），标准与 Diagnostic 固件构建通过，交接检查 446 项。未连接或烧录设备。效果、残影、灰度、真实耗时与资源峰值均待真机。
 
@@ -4453,3 +4453,10 @@ PR #50 自查修正：epdiy 按波形描述符地址缓存前导保持相，而 
 PR #51 的 `983f568` 已通过 push 与 pull_request 两次 Linux CI，覆盖完整 host、ASan/UBSan/LSan 和交接检查；Codex review 对该提交完成，返回赞同反应，没有评审或行内问题。合并前 main 新增 PR #50，导致开发状态摘要与追加记录冲突。本批将 main `f61c089` 合入分支，保留双方记录，并把 PR #50 的当前摘要更新为已合并；工作台工具和测试没有冲突，也未修改固件逻辑。
 
 整合后本地重跑 `python3 -m unittest discover -s tests -p test_device_workbench.py`，36/36 通过；`python3 tools/check_handoff.py` 为 446 项通过；`git diff --check` 通过。未重复本地完整 host、sanitizer 或固件构建，未连接或烧录设备。新提交必须重新通过 CI 和 review 后才合并，不能使用整合前的结果代替。
+
+
+## 2026-10-11 · PR #51 评审修正：拒绝旧报告字号缺失
+
+Codex 对 `5fa458a` 的评审指出：原提交只使新报告携带字号，两份旧自动场景报告的标识仍可能相同，`compare()` 会错误返回可比较。本批在比较入口同时检查两份 `image-sync` 或 `reading-flow` 报告，要求 workload 以有效正整数 `font_px` 字段结束；缺失、空值、零、负数或无效字符均拒绝。刷新场景沿用其既有标识规则。只改主机工具与文档，没有新增设备 I/O、任务、等待或固件内存开销。
+
+扩展现有 `test_compare_conditions`，覆盖两份旧报告、旧报告与新报告、有效相同字号和不同字号；新增断言在修正前复现失败，修正后通过。`python3 -m unittest discover -s tests -p test_device_workbench.py` 为 36/36；`ctest --test-dir build/host -R '^device_workbench$' --output-on-failure` 为 1/1；交接检查为 446 项，PR 相对 main 的 diff 检查通过。未新增测试框架，未运行固件构建或真机验证；新提交仍须通过 CI 与重新评审后合并。

@@ -670,6 +670,20 @@ class WorkbenchTest(unittest.TestCase):
         changed["analysis"]["composition"] = {"2:0:1": 1}
         other.write_text(json.dumps(changed))
         self.assertFalse(compare(path, other)["comparable"])
+        for mode in ("reading-flow", "image-sync"):
+            automatic = json.loads(json.dumps(base))
+            automatic["metadata"].update(mode=mode, workload=mode + ":page=7/12:anchor=8dccb332:font_px=46")
+            path.write_text(json.dumps(automatic))
+            self.assertTrue(compare(path, path)["comparable"])
+            for suffix in ("", ":font_px=None", ":font_px=0", ":font_px=-1", ":font_px=46junk"):
+                automatic["metadata"]["workload"] = mode + ":page=7/12:anchor=8dccb332" + suffix
+                other.write_text(json.dumps(automatic))
+                self.assertFalse(compare(other, other)["comparable"])
+                self.assertFalse(compare(path, other)["comparable"])
+            automatic["metadata"]["workload"] = mode + ":page=7/12:anchor=8dccb332:font_px=48"
+            other.write_text(json.dumps(automatic))
+            self.assertFalse(compare(path, other)["comparable"])
+        path.write_text(json.dumps(base))
         base["metadata"]["hardware"] = "Different board"
         other.write_text(json.dumps(base))
         self.assertFalse(compare(path, other)["comparable"])
