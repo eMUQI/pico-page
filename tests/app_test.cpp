@@ -1298,12 +1298,30 @@ int main(int argc, char** argv) {
         app.complete_network(refreshed->id, 200, "{}", ""); driver.present();
         driver.close(); driver.present(); driver.complete_content();
         std::string selection_error;
-        for (const bool after_frame : {false, true}) {
+        enum class CancelAt { Request, CoverWait, LockFrame };
+        for (const auto at : {CancelAt::Request, CancelAt::CoverWait, CancelAt::LockFrame}) {
+            // Only the asynchronous configuration prepares the cover on the content worker.
+            if (at == CancelAt::CoverWait && !async) continue;
             app.stop_wifi(true);
             assert(!network::live(manual->cancelled));
             // Cancellation restores the original target even if the selected network changed meanwhile.
             assert(provision::save_selected_network(root.string(), "phone", selection_error));
-            if (after_frame) {
+            if (at == CancelAt::CoverWait) {
+                assert(!app.prepare_sleep() && app.sleep_pending());
+                // The menu request waits for the cancelled cover worker; the restored connection stays queued behind it.
+                assert(app.show_power_menu() && app.view() == View::Reading && !app.take_wifi_request());
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+                while (app.view() != View::PowerMenu) {
+                    app.poll_background();
+                    assert(!app.take_wifi_request());
+                    assert(std::chrono::steady_clock::now() < deadline);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                driver.present();
+                assert(!app.take_wifi_request());
+                driver.tap(100, 1100); driver.present();
+                assert(app.view() == View::Reading);
+            } else if (at == CancelAt::LockFrame) {
                 assert(sleep_frame(app)); driver.present();
                 app.wake(false); driver.present(); driver.complete_content();
                 assert(app.show_power_menu()); driver.present();

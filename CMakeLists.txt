@@ -4,6 +4,7 @@ project(pico_page_host LANGUAGES C CXX)
 include(CTest)
 add_executable(power_key_test tests/power_key_test.cpp)
 target_include_directories(power_key_test PRIVATE firmware/components/platform_read_pico/include)
+target_compile_features(power_key_test PRIVATE cxx_std_17)
 target_compile_options(power_key_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME power_key COMMAND power_key_test)
 add_subdirectory(firmware/components/reader_core)
@@ -55,16 +56,11 @@ target_compile_options(graphics_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME graphics COMMAND graphics_test)
 
 set(document_fixtures ${CMAKE_CURRENT_BINARY_DIR}/document-fixtures)
-add_custom_command(OUTPUT ${document_fixtures}/valid.epub
-    ${document_fixtures}/multi-part.epub ${document_fixtures}/multi-part-link.epub
-    ${document_fixtures}/image-cover.epub ${document_fixtures}/missing-image-cover.epub
-    ${document_fixtures}/oversized-image-cover.epub ${document_fixtures}/unsupported-image-cover.epub
+# The generator writes every fixture in one run and owns their names. Running it on each build restores
+# a missing or stale file without a second list of outputs here.
+add_custom_target(document_fixtures_target
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/make_document_fixtures.py ${document_fixtures}
-    DEPENDS tests/make_document_fixtures.py tests/make_epub_fixture.py)
-add_custom_target(document_fixtures_target DEPENDS ${document_fixtures}/valid.epub
-    ${document_fixtures}/multi-part.epub ${document_fixtures}/multi-part-link.epub
-    ${document_fixtures}/image-cover.epub ${document_fixtures}/missing-image-cover.epub
-    ${document_fixtures}/oversized-image-cover.epub ${document_fixtures}/unsupported-image-cover.epub)
+    VERBATIM)
 add_dependencies(content_worker_test document_fixtures_target)
 add_executable(document_test tests/document_test.cpp)
 add_dependencies(document_test document_fixtures_target)

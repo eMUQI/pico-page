@@ -1,5 +1,11 @@
 # 开发状态
 
+2026-10-10 Issue #30 阶段 A 收尾已提交为 PR #34（分支 `fix/issue-30-stage-a`，基于 main `995421f`；代码提交 `2c45058`、`7281719`），未合并：逐条回退 PR #29 的修复核对回归覆盖，
+补上“等待封面 worker 交还期间不派发 Wi-Fi 重连”的 host 回归；样本生成改为每次构建运行一次生成器，不再维护不完整的输出清单；
+`power_key_test` 显式要求 C++17，修正 macOS 全新配置失败。未改固件源码。host Debug 与 ASan/UBSan 各 14/14；
+远端两个 host CI 通过；首轮自动 review 的 1 条意见（缺少开发记录）针对文档提交之前的 `7281719`，已由 `4e69ae8` 满足。
+未做固件构建、未烧录，A1 的主循环派发次序与 A2 的实体长按时序仍待真机验证。详情见本日“Issue #30 阶段 A 收尾”记录。
+
 2026-10-10 `feat/website` 官网发布前设计已优化：以「读自己的书，接着读下去」为主线重写首页文案与信息层级，重新导出六张原创示例书的实际 host 界面图，修正手机端预览切换与按键说明权重。网页构建、六种宽度的布局及切换检查通过；浏览器安装保留禁用占位。本批按用户要求整理到本地分支；未推送、未部署，未修改固件与共享核心。详情见本日「官网发布前设计优化」记录。
 
 2026-10-10 新增项目网页初稿，现位于 `web/`（Astro 7.3.4 静态站，结构与 QuotaFrame 的 `web/` 一致），本机 `npm run build` 通过并用 Chrome 无头模式查看渲染，未提交、未部署。未改固件与共享代码。详情见本日“项目网页初稿”记录。
@@ -3960,3 +3966,40 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
   生成 1 个页面；`dist/index.html` 的 1280 px 整页截图与迁移前逐字节一致。未加英文路由、文档页和浏览器烧录，CI 未加网站构建。
   `tools/check_handoff.py` 的排除目录新增 `node_modules`：安装依赖后它扫描到 `web/node_modules/` 内第三方 Markdown 的失效链接而失败（148 项），
   排除后恢复通过。该目录已被 Git 忽略，CI 中不存在。
+
+## 2026-10-10 · Issue #30 阶段 A 收尾
+
+- 范围：只核对并补齐 Issue #30 阶段 A（A1–A3）。Issue 基线为 `20107e6`，其后合并的 PR #29（`f25852c`）已修改三条对应代码；
+  本批不重复修复，只验证覆盖并处理剩余缺口。改动文件：`CMakeLists.txt`、`tests/app_test.cpp`；未改 `firmware/` 下源码。
+- 核对方法：在 host 上逐条回退 PR #29 的修复，再运行 `core`、`app` 测试，确认测试会失败后恢复源码。
+  - `take_wifi_request()` 去掉 PowerMenu/PowerOff 视图条件：`app` 失败（已覆盖）。
+  - `SleepInput::due()` 恒返回空：`core`、`app` 失败（已覆盖）。
+  - `can_long_press_at()` 去掉书库条目分支：`app` 失败（已覆盖）。
+  - `take_wifi_request()` 去掉 `power_menu_wait` 条件：`core`、`app` 仍通过，即该保护此前没有回归。
+- 变更 1（A1）：`tests/app_test.cpp` 的 Wi-Fi 生命周期测试把取消休眠的时机由两种扩为三种，新增“封面 worker 等待期间长按电源”：
+  手动 STA → 请求休眠 → 封面任务在途 → `show_power_menu()` 进入资源等待 → 断言等待期间、菜单显示期间都取不到 Wi-Fi 请求，
+  关闭菜单后恢复原手动目标。回退 `power_menu_wait` 条件后该断言失败。仅异步配置执行（同步配置不在 worker 上准备封面）。
+- 变更 2（A3）：生成器一次写出 31 个样本，原规则只声明其中 7 个；单独删除未声明的 `styled.epub`、`long-chapter.epub` 后重建不会恢复，
+  `document`、`app` 失败（已在旧规则上复现）。现改为 `document_fixtures_target` 每次构建运行一次生成器（本机约 0.2 秒），
+  不再在 CMake 中维护第二份输出清单；只有一条规则调用生成器，不存在并行覆盖。样本只被测试在运行时读取，重新生成不触发编译或链接。
+- 变更 3：按文档命令全新配置时，macOS（AppleClang）下 `power_key_test` 因未指定 C++ 标准而编译失败；
+  已有构建目录的缓存中带 `CMAKE_CXX_STANDARD=17`，所以此前未暴露。该目标是唯一不链接任何组件的测试，现显式声明 `cxx_std_17`。
+- 命令/环境：macOS，AppleClang（`/usr/bin/c++`），Unix Makefiles；本机没有 Ninja，未在 Ninja 上验证。
+  `cmake -S . -B build/a3-check -DCMAKE_BUILD_TYPE=Debug`、`cmake --build … --parallel 4`、`ctest`；
+  `build/host` 与 `build/sanitized`（`-fsanitize=address,undefined`）增量构建后完整 CTest；`python3 tools/check_handoff.py`；`git diff --check`。
+- 结果：
+  - A3 三种场景（新规则，全新目录）：全新构建 14/14；无变化重建 0 个编译/链接步骤、14/14；
+    删除 `image-cover.epub`、三个损坏封面样本、`styled.epub`、`long-chapter.epub`、`malformed.epub` 并把 `valid.epub` 改写为无效内容后重建，
+    样本全部恢复、0 个编译/链接步骤、14/14。
+  - host Debug 14/14；ASan/UBSan 14/14；两者 CTest 注册项均为 14（含 `wifi_upload_page`，本机有 Node）。本机 macOS 未运行 LSan。
+- 未测项：未做固件构建（本批未改固件源码和 ESP_PLATFORM 分支）；未烧录，未连接设备。
+  - A1：主循环中 `resume_input.active()` 对 Wi-Fi/网络派发的限制位于 `app_main.cpp`，host 不编译该文件，没有 host 回归；
+    “慢开书 + 手动 STA + 锁屏后长按电源”需按 PW05 真机验证。
+  - A2：保留触摸的到期判定和书库/图片可长按判定有 host 回归；恢复输入在主循环中的执行次数、实际松手不重复触发需按 PW05 真机验证。
+  - 本记录写入时，PR #34 的远端 CI（Linux）与 review 结果尚未取得。
+- 观察（留给阶段 C，不在本批修改）：A1 的派发次序保护分布在应用（`take_wifi_request()`）和主循环（`resume_input.active()`）两处，
+  后者无法在 host 测试；取消休眠后的保留意图若由应用侧统一持有，可在 host 上覆盖完整次序。
+- 下一步：跟进 PR #34 的远端 CI 与 review；随后按 Issue #30 第 5 节实施“按需休眠封面”的小改动。真机项待用户统一验收。
+- 追加（同日）：PR #34 在 `4e69ae8` 上的远端 host 工作流的 push 与 pull_request 两次运行（Linux，各含 host Debug 与 ASan/UBSan/LSan 步骤）通过。自动 review 审阅的是 `7281719`，
+  提出 1 条 P1：本批未更新 `docs/development-status.md`。该意见成立于被审阅的提交；记录因需要 PR 编号而在开 PR 后单独提交为 `4e69ae8`，
+  内容已包含变更、命令/环境、结果、未测项和下一步，无需再改代码。已回复并请求对最新提交复审。
