@@ -2,26 +2,28 @@
 """Continuous, private evidence capture for the existing local PP diagnostic protocol."""
 import argparse
 from collections import Counter, defaultdict
-import hashlib
 import html
 import json
 import math
 from pathlib import Path
 import re
 import select
-import subprocess
 import sys
 import threading
 import time
 
 from device_console import Console, open_serial
+from firmware_provenance import artifacts, source_state
 
 OUTCOMES = ("success", "failure", "cancelled", "timeout")
 REQUIRED_CONDITIONS = ("hardware", "tf", "books_sha256", "cache", "network")
 
 
 def fields(value):
-    return dict(part.split("=", 1) for part in value.split() if "=" in part)
+    parsed = dict(part.split("=", 1) for part in value.split() if "=" in part)
+    if value.startswith("OK accepted "):
+        parsed["accepted"] = "1"
+    return parsed
 
 
 def write_json(path, value):
@@ -169,6 +171,13 @@ class Session(Console):
                 return state
         self.gap("trace_drain_budget_exhausted")
 
+    def cutoff(self):
+        state, _ = self.request("trace_stop")
+        if state.get("stopped") != "1":
+            raise RuntimeError("Device did not freeze the capture")
+        self.event("cutoff", sequence=int(state["sequence"]))
+        self.drain()
+
     def close(self):
         self.stop.set()
         self.thread.join(timeout=3)
@@ -229,6 +238,8 @@ def analyze(output):
     last_queued = 0
     last_device_sequence = None
     dropped_baseline = tx_baseline = 0
+    cutoff = None
+    composition = Counter()
     with (Path(output) / "events.jsonl").open() as stream:
         for line in stream:
             event = json.loads(line)
@@ -239,12 +250,16 @@ def analyze(output):
                 counts.clear()
                 samples.clear()
                 metric_active.clear()
+                composition.clear()
+                cutoff = None
                 last_seq = event["sequence"]
                 event_count = failures = 0
                 gaps = [g for g in gaps if g not in ("device_trace_dropped", "device_tx_failures",
                         "trace_sequence_gap", "operation_start_missing", "device_restart_or_reinitialize")]
                 dropped_baseline = event["dropped"]
                 tx_baseline = event["tx_failures"]
+            if event["type"] == "cutoff":
+                cutoff = event["sequence"]
             if event["type"] == "gap":
                 gaps.append(event["reason"])
             if event["type"] == "command_timeout":
@@ -290,7 +305,12 @@ def analyze(output):
                     gaps.append("operation_context_changed")
                 result = int(f["result"])
                 counts[OUTCOMES[result]] += 1
+                composition[f'{f["kind"]}:{f["detail"]}:{result}'] += 1
                 samples[f["kind"]].append(int(f["duration_us"]))
+    if cutoff is None:
+        gaps.append("device_cutoff_missing")
+    elif last_device_sequence != cutoff or last_seq != cutoff:
+        gaps.append("device_cutoff_not_drained")
     if last_queued:
         gaps.append("undrained_events_at_end")
     if last_device_sequence is not None and last_seq is not None and last_device_sequence != last_seq:
@@ -307,7 +327,7 @@ def analyze(output):
     completed = sum(counts[k] for k in OUTCOMES)
     return dict(counts={k: counts[k] for k in (*OUTCOMES, "unfinished", "command_failure", "command_timeout")},
                 gaps=sorted(set(gaps)), distributions=distributions, events=event_count,
-                frame_failures=failures, failure_rate=counts["failure"] / completed if completed else None)
+                composition=dict(composition), frame_failures=failures, failure_rate=counts["failure"] / completed if completed else None)
 
 
 def finalize(output, metadata, result):
@@ -349,22 +369,26 @@ def finalize(output, metadata, result):
 
 def metadata_for(args):
     metadata = json.loads(args.metadata.read_text()) if args.metadata else {}
-    metadata["source_commit"] = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-    metadata["source_dirty"] = bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip())
+    current = source_state()
+    metadata["checkout_source"] = current
     metadata["host_platform"] = sys.platform
     metadata["mode"] = args.mode
-    artifacts = {}
-    if args.firmware:
-        for name in ("pico_page.bin", "pico_page.elf", "sdkconfig"):
-            path = args.firmware / name
-            if path.is_file():
-                artifacts[name] = hashlib.sha256(path.read_bytes()).hexdigest()
-        config = args.firmware / "sdkconfig"
-        if config.exists():
-            metadata["effective_sdkconfig"] = config.read_text()
-    metadata["artifacts_sha256"] = artifacts
+    metadata["workload"] = "refresh-v1:K2x1" if args.mode == "refresh" else None
+    hashes, config = artifacts(args.firmware) if args.firmware else ({}, None)
+    metadata["artifacts_sha256"] = hashes
+    if config and config.is_file():
+        metadata["effective_sdkconfig"] = config.read_text()
     metadata["missing"] = [k for k in REQUIRED_CONDITIONS if not metadata.get(k)]
-    metadata["missing"] += [k for k in ("pico_page.bin", "pico_page.elf", "sdkconfig") if k not in artifacts]
+    metadata["missing"] += [k for k in ("pico_page.bin", "pico_page.elf", "sdkconfig") if k not in hashes]
+    manifest = args.firmware / "provenance.json" if args.firmware else None
+    provenance = json.loads(manifest.read_text()) if manifest and manifest.is_file() else {}
+    for key in ("source_commit", "source_dirty", "source_sha256"):
+        metadata[key] = provenance.get(key)
+    metadata["provenance_verified"] = bool(provenance and provenance.get("schema") == 1
+        and provenance.get("artifacts_sha256") == hashes
+        and all(provenance.get(k) == v for k, v in current.items()))
+    if not metadata["provenance_verified"]:
+        metadata["missing"].append("build_source_provenance")
     if not metadata.get("device_build_verified"):
         metadata["missing"].append("device_build_verified")
     return metadata
@@ -372,7 +396,7 @@ def metadata_for(args):
 
 def compare(first, second):
     left, right = (json.loads(Path(p).read_text()) for p in (first, second))
-    keys = (*REQUIRED_CONDITIONS, "source_dirty", "effective_sdkconfig", "mode")
+    keys = (*REQUIRED_CONDITIONS, "source_dirty", "effective_sdkconfig", "mode", "workload")
     # Mode flags may differ for Release/Performance A/B; all other configuration must match.
     def conditions(run):
         m = run["metadata"].copy()
@@ -381,14 +405,21 @@ def compare(first, second):
         m["effective_sdkconfig"] = "\n".join(line for line in m.get("effective_sdkconfig", "").splitlines()
                                                if not any(flag in line for flag in mode_flags))
         return {k: m.get(k) for k in keys}
-    comparable = (conditions(left) == conditions(right) and not left["metadata"].get("missing")
+    comparable = (bool(left["metadata"].get("workload"))
+                  and left["metadata"].get("provenance_verified") is True
+                  and right["metadata"].get("provenance_verified") is True
+                  and bool(left["analysis"].get("composition"))
+                  and left["analysis"].get("composition") == right["analysis"].get("composition")
+                  and conditions(left) == conditions(right) and not left["metadata"].get("missing")
                   and not right["metadata"].get("missing") and not left["analysis"]["gaps"] and not right["analysis"]["gaps"]
                   and bool(left["analysis"]["distributions"]) and bool(right["analysis"]["distributions"])
                   and bool(left["metadata"].get("source_commit")) and bool(right["metadata"].get("source_commit"))
                   and left["metadata"].get("source_dirty") is False and right["metadata"].get("source_dirty") is False)
     return dict(comparable=comparable, reason="Conditions match" if comparable else "Conditions or evidence differ; do not infer a performance change",
                 source_commits=[left["metadata"].get("source_commit"), right["metadata"].get("source_commit")],
-                same_source=left["metadata"].get("source_commit") == right["metadata"].get("source_commit"),
+                same_source=bool(left["metadata"].get("provenance_verified") and right["metadata"].get("provenance_verified")
+                    and left["metadata"].get("source_sha256")
+                    and left["metadata"].get("source_sha256") == right["metadata"].get("source_sha256")),
                 first=left["analysis"], second=right["analysis"])
 
 
@@ -416,7 +447,7 @@ def main():
         session = Session(open_serial(args.port), args.output, args.timeout)
         session.event("start", mode=args.mode)
         session.request("status")
-        baseline = session.drain()
+        baseline, _ = session.request("trace_start")
         if baseline is None:
             raise RuntimeError("Cannot establish trace baseline")
         session.event("baseline", dropped=int(baseline["dropped"]), tx_failures=int(baseline["tx_failures"]),
@@ -434,8 +465,7 @@ def main():
                     if command.startswith("mark"):
                         session.mark(command[4:].strip())
                 session.drain()
-        session.drain()
-        session.request("metrics")
+        session.cutoff()
     except AssertionError as exc:
         result = dict(status="fail", reason=str(exc))
     except TimeoutError as exc:

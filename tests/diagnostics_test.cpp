@@ -40,6 +40,26 @@ int main() {
 #ifdef CONFIG_PICO_PAGE_TRACE_EVENTS
     assert(recorder.snapshot().metrics[1].active == 70);
 #endif
+#ifdef CONFIG_PICO_PAGE_TRACE_EVENTS
+    recorder.start();
+    const auto unfinished = recorder.begin(Kind::Content, {}, 1000, 8);
+    recorder.stop();
+    const auto frozen = recorder.snapshot();
+    assert(frozen.stopped && frozen.metrics[3].active == 1);
+    const auto ignored = recorder.begin(Kind::Frame, {}, 1010, 7);
+    recorder.end(unfinished, Outcome::Success, 1020, 8);
+    assert(ignored.id == 0 && recorder.snapshot().sequence == frozen.sequence);
+    recorder.start();
+    recorder.end(unfinished, Outcome::Success, 1030, 8);
+    recorder.end(ignored, Outcome::Success, 1030, 8);
+    assert(recorder.snapshot().sequence == 0 && recorder.snapshot().metrics[3].active == 0);
+    const auto fresh = recorder.begin(Kind::Frame, {}, 1040, 7);
+    recorder.end(fresh, Outcome::Success, 1050, 7);
+    recorder.stop();
+    assert(recorder.pop(event) && event.operation == fresh.id);
+    assert(recorder.pop(event) && !event.begin && event.sequence == 2);
+    assert(!recorder.pop(event));
+#endif
     std::vector<std::thread> writers;
     for (unsigned i = 0; i < 4; ++i) writers.emplace_back([] {
         for (unsigned j = 0; j < 1000; ++j) {

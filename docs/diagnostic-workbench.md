@@ -47,9 +47,11 @@ sh tools/build_firmware.sh diagnostic
 
 - `PP <id> metrics`：4 行 ENTRY 聚合计数和一行 OK，后者含 schema=1、queued、dropped、sequence、tx_failures、internal_min、psram_min。
 - `PP <id> trace`：取出最多 8 个事件作为 ENTRY，OK 返回上述队列/丢失状态。耗时与输出发生在显式命令处理时，不在事件写入路径中。
+- `PP <id> trace_start`：在记录器临界区中开始新窗口，清空旧计数和事件；此前的任务 token 不计入新窗口。`trace_stop` 在同一临界区冻结事件与计数并返回含 `stopped=1` 的 metrics。仍在执行的业务任务正常继续，但在截止点计为 unfinished；后续操作不进入该窗口。主机收到截止序号后排空到该序号，才结束采集。
+- metrics 与 trace 的整次响应共用 20 ms 传输等待预算；计入 IDF 驱动对 TX 互斥锁和环形缓冲的两次等待。超出后非阻塞发送，失败计入 tx_failures；该预算不包含任务被抢占和格式化的墙钟时间。
 - status 新增 content_busy、save_busy、save_due。pending=0 只说明无待呈现帧。
 
-`status/metrics/trace/screen/ls/file` 是观察命令，不重置主循环空闲计时；否则连续采集会阻止延迟保存、分页和休眠。它们仍可能占用串口和 CRC 计算时间，Diagnostic 性能不等同于 Performance。保留原 `PP 0 FRAME` 主动通知和所有已有导入安全限制。trace 导出失败仍通过 tx_failures 和序号缺口暴露，不能悄悄丢失后显示通过。
+`status/metrics/trace/trace_start/trace_stop/screen/ls/file` 是观察命令，不重置主循环空闲计时；否则连续采集会阻止延迟保存、分页和休眠。它们仍可能占用串口和 CRC 计算时间，Diagnostic 性能不等同于 Performance。保留原 `PP 0 FRAME` 主动通知和所有已有导入安全限制。trace 导出失败仍通过 tx_failures 和序号缺口暴露，不能悄悄丢失后显示通过。
 
 ## 持续采集与人工标记
 
@@ -74,9 +76,9 @@ metadata 示例中的值必须由操作者填写，不要填入账号或密码�
 }
 ```
 
-`device_build_verified` 只能在确认设备实际安装了所记录镜像后填写 true；本工具只计算本地 ELF/bin/sdkconfig 摘要，不证明设备与其相同。run.json 同时记录源码 commit、dirty 状态、生效配置全文和模式。缺少素材/硬件/网络条件或固件摘要时，自动断言成功也会降为 inconclusive。
+`device_build_verified` 只能在确认设备实际安装了所记录镜像后填写 true；本工具核对构建入口生成的 `provenance.json`，其中包含构建前后的源码内容摘要、commit、dirty 状态及 ELF/bin/sdkconfig 摘要；来源缺失、产物被替换或当前源码不匹配时降为 inconclusive。单凭本地摘要不能证明设备安装状态。run.json 同时保留构建来源、当前 checkout、生效配置全文和模式。缺少素材/硬件/网络条件或固件摘要时，自动断言成功也会降为 inconclusive。
 
-开始后单一读取线程持续保留原始字节。命令写入串行化，回复按 ID 分发，主动 FRAME 和普通日志都留存。沿用 `device_console.py` 的 RTS/DTR 无复位顺序，并使用串口独占锁；命令超时不关闭重开串口。输入 `mark 简短说明` 标记问题，`end` 结束；输出包含每个标记前后 10 秒的事件窗口。初次 trace 排空后的 dropped/tx_failures 作为基线，之前的原始字节仍保留；测量窗口内新增丢失或计数回退均是缺口。从窗口开始前延续的操作若缺少 begin，会标记不可判定。
+开始后单一读取线程持续保留原始字节。命令写入串行化，回复按 ID 分发，主动 FRAME 和普通日志都留存。沿用 `device_console.py` 的 RTS/DTR 无复位顺序，并使用串口独占锁；命令超时不关闭重开串口。输入 `mark 简短说明` 标记问题，`end` 结束；输出包含每个标记前后 10 秒的事件窗口。trace_start 回复中的 dropped/tx_failures 作为基线，之前的原始字节仍保留；测量窗口内新增丢失或计数回退均是缺口。窗口开始前已经启动的操作不进入本窗口；若收到缺少 begin 的终态，标记不可判定。结束时必须收到设备截止回复并排空尾部，否则不可判定。
 
 断连或读取错误会唤醒等待命令并以 infra_error 结束；不自动重连或复位。重新连接后需启动一个新结果目录，并在 metadata 中写 previous_run 关联前一轮；两轮之间是证据缺口，不能拼成连续通过。超长行和尾部半行也会记录 gap，原始字节不丢弃。
 
@@ -100,7 +102,7 @@ python3 tools/device_workbench.py --port /dev/ttyACM0 \
 python3 tools/device_workbench.py --compare .local/runs/base/run.json .local/runs/new/run.json
 ```
 
-比较检查测试条件、dirty 状态和除四个诊断开关外的 sdkconfig；不一致、缺字段、无样本或有证据缺口会提示不可比。保留两边源码 commit 和原始统计，并用 same_source 区分同源码配置 A/B 与跨版本比较；不会把跨版本差异直接归因于诊断开关。
+比较要求已核验的构建来源、固定脚本身份（当前为 `refresh-v1:K2x1`）以及相同 kind/detail/终态样本数量；自由人工操作没有固定工作负载，不能标为可比。另检查测试条件、dirty 状态和除四个诊断开关外的 sdkconfig；不一致、缺字段、无样本或有证据缺口会提示不可比。保留两边源码 commit 和原始统计，并用 same_source 区分同源码配置 A/B 与跨版本比较；不会把跨版本差异直接归因于诊断开关。
 
 原始日志可能含路径、服务地址等隐私。结果默认放在已忽略的 `.local/` 下；不要将真实日志、书籍内容、账号或完整 sdkconfig 未经检查提交仓库。
 

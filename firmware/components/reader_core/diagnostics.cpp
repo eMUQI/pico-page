@@ -11,6 +11,9 @@
 
 namespace pico_page::diagnostics {
 Token Recorder::begin(Kind kind, Context context, std::uint64_t now, std::uintptr_t task) {
+#if defined(CONFIG_PICO_PAGE_TRACE_EVENTS) && CONFIG_PICO_PAGE_TRACE_EVENTS
+    if (state_.stopped) return {};
+#endif
     Token token{++next_operation_, now, kind, context};
     auto& metric = state_.metrics[static_cast<unsigned>(kind)];
     ++metric.started;
@@ -19,6 +22,9 @@ Token Recorder::begin(Kind kind, Context context, std::uint64_t now, std::uintpt
     return token;
 }
 void Recorder::end(Token token, Outcome outcome, std::uint64_t now, std::uintptr_t task) {
+#if defined(CONFIG_PICO_PAGE_TRACE_EVENTS) && CONFIG_PICO_PAGE_TRACE_EVENTS
+    if (state_.stopped || token.id < first_operation_) return;
+#endif
     auto& metric = state_.metrics[static_cast<unsigned>(token.kind)];
     --metric.active;
     ++metric.outcomes[static_cast<unsigned>(outcome)];
@@ -37,6 +43,14 @@ void Recorder::record(Event event) {
 #endif
 }
 Snapshot Recorder::snapshot() const { return state_; }
+#if defined(CONFIG_PICO_PAGE_TRACE_EVENTS) && CONFIG_PICO_PAGE_TRACE_EVENTS
+void Recorder::start() {
+    state_ = {};
+    head_ = 0;
+    first_operation_ = next_operation_ + 1;
+}
+void Recorder::stop() { state_.stopped = true; }
+#endif
 bool Recorder::pop(Event& event) {
 #if defined(CONFIG_PICO_PAGE_TRACE_EVENTS) && CONFIG_PICO_PAGE_TRACE_EVENTS
     if (!state_.queued) return false;
@@ -79,5 +93,9 @@ void end(Token token, Outcome outcome) {
 }
 Snapshot snapshot() { Lock lock; return recorder.snapshot(); }
 bool pop(Event& event) { Lock lock; return recorder.pop(event); }
+#if defined(CONFIG_PICO_PAGE_TRACE_EVENTS) && CONFIG_PICO_PAGE_TRACE_EVENTS
+void start() { Lock lock; recorder.start(); }
+void stop() { Lock lock; recorder.stop(); }
+#endif
 } // namespace pico_page::diagnostics
 #endif

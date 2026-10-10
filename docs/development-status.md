@@ -1,5 +1,7 @@
 # 开发状态
 
+2026-10-10 PR #38 的五项评审意见已在本地修正；host Debug 与开启埋点的 ASan/UBSan 各 18/18，四个固件构建入口通过。诊断固件已烧录至实测 ota_0 并通过写入摘要校验；合成 EPUB 的真实 K2 工作台回归通过，另确认截止后业务继续刷新而记录器保持冻结。未推送或合并；屏幕与实体输入、Release/Performance 真机 A/B 及阶段 C 场景待验收。详情见本日「PR #38 评审修正与真机工作台验证」记录。
+
 2026-10-10 Issue #37 首批 A+B 候选已完成：Release/Performance/Diagnostic 编译隔离、有界操作计数与事件、持续串口采集、人工标记及 K2 全刷状态回归。host Debug 与开启埋点的 ASan/UBSan/LSan 各 18/18，三种固件模式和原标准入口均构建通过；Release ELF 无诊断记录器/调用符号。未烧录，实机开销及图片/同步交叠场景未验收。用法见 [诊断工作台](diagnostic-workbench.md)，证据见本日记录。
 
 2026-10-10 PR #36 的四条 P2 意见已修正：章节名共用空名称回退及 128 字节显示上限，百分比精度依据统计完成状态，详细 UI 规范同步。验证结果见本日「PR #36 评审修正」记录；未烧录。
@@ -4135,3 +4137,19 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
 首次新增 CMake 测试配置发现 Threads 导入目标作用域不对，已在根测试区显式查找；开启埋点的 worker 测试首次编译发现测试命名空间缺失，已修正。上表均为修正后的实际结果，没有删除/降低原用例或用跳过代替通过。
 
 未测/后续：没有硬件，尚未验证三模式同条件 A/B 时延、低水位/余栈、真实串口吞吐、实体快速输入、屏幕效果、休眠/USB 重连。当前最小自动场景是 K2 状态不变；图片确实用于当前画布的事件、图片与同步交叠、连续翻页/改字号/重开恢复按 Issue C 后续小 PR 落实，不能把本次驱动确认当作这些业务验收。断连后需新建采集轮次并保留证据缺口，不自动复位设备。PR 使用 `Refs #37`，不提前关闭 issue。
+
+
+## 2026-10-10 · PR #38 评审修正与真机工作台验证
+
+- 分支与范围：在原 checkout 从干净的 main 切至 `feat/diagnostic-workbench`，基于 PR #38 head `abddab530b94ffb6bcbf53f092931548b54a7fff`。五项评审意见均核对属实并本地修正；没有扩展阶段 C，也没有提交、推送或合并。
+- 采集截止：新增 `trace_start/trace_stop`。在既有跨核记录器锁内重置或冻结固定状态；停止时保留 active 作为 unfinished，冻结后的业务仍正常运行。新窗口以操作 ID 下界拒绝旧 token，主机收到设备截止序号后排空到该序号才可通过；缺少截止或尾部未排空均不可判定。
+- 串口与资源：metrics/trace 整次响应共享 20 ms 传输等待预算，并计入当前 IDF 驱动在 TX 互斥锁和环形缓冲上的两次等待；超时后零等待尝试，失败计数保留。此预算不包括格式化和被抢占时间，不是整条应用调用的墙钟保证。仍在主应用任务执行，没有新增任务、栈、业务锁或缓存；记录器临界区不做 I/O、分配或格式化。ELF 中记录器静态占用 Performance 288 B、Diagnostic 5,936 B；Release 无 diagnostics 符号。未测实际临界区微秒开销与 USB 停读压力。
+- 构建来源：构建入口在成功前后核对源码内容摘要，写入包含 commit、dirty、源码内容及 bin/ELF/sdkconfig 摘要的 `provenance.json`。工作台从该文件获取构建来源，拒绝把旧产物标成当前 checkout；缺失、不匹配或产物被替换均不可判定。EIM 的 `idf.py` shell 函数不能被子 shell 继承，入口现按已有 `IDF_PATH` 加入 tools 路径，未更换全局工具链。
+- 协议与比较：兼容真机 `OK accepted pending=...` 回复，回归替身使用相同文本。比较仅接受有构建来源、固定脚本身份及相同 kind/detail/终态样本组成的记录；自由人工操作不标为可比，脏源码仍不作为性能基线。
+- 本机检查：macOS arm64、AppleClang 21；`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、构建、`ctest -N` 与完整 CTest 18/18，包含 Node 页面入口。`build/sanitized` 开启 `PICO_PAGE_HOST_TRACE_EVENTS=ON`，使用 ASan/UBSan，完整 CTest 18/18；本轮未运行 LSan，不能沿用 PR 原先的 Linux 结果。Python 工作台回归 21/21，覆盖截止排空、旧快照假绿、旧来源/产物以及不同场景拒绝比较。保留第三方未使用函数与 Homebrew dylib 最低系统版本的既有警告。
+- 固件检查：复用 ESP-IDF 6.1 commit `fff9895c82d744c7237be8847347bdd1b07c6643`，保留其既有链接脚本修改；BSP 为 `5f3406deec33304de8801046db583dec7c49e55b`。`sh tools/build_firmware.sh` 及 release/performance/diagnostic 三模式均通过，模式构建通过 EIM 激活环境调用；核对实际 sdkconfig.h 和 ELF。初次直接激活后调用子脚本未找到 idf.py，修正上述入口后成功。构建日志保留既有组件私有 include 告警；交接检查 423 项及 `git diff --check` 通过。
+- 烧录：用户本轮明确允许烧录。先读设备 status，原正文已保存修订 60、无待刷新；设备为 `/dev/cu.usbmodem1101`，MAC `14:c1:9f:d0:18:b8`，ESP32-S3 rev0.2。读回真实分区表与 otadata，CRC 验证 sequence 1/state 2，确认 ota_0=`0x10000`/4 MiB。仅写诊断应用 3,403,376 字节，SHA-256 `168bdc8929a18cb4fc385a50059ed8d25228ce67a212e5a830fc67dbeb2c0feb`，25.5 秒完成，`Hash of data verified`。未改 bootloader、分区、NVS、otadata、校准或已有书籍。首次复位后无诊断回复，第二次受控复位后书库 `card=1 frame=1 frame_ok=1`。
+- 真机工作台：通过已有安全导入新增 `Books/Workbench-PR38-20261010.epub`，来源为 `build/host/document-fixtures/valid.epub`，发布后读回 CRC；不覆盖用户文件。K2 回归的采集持续 38.47 秒，共 1,636 条命令、915,321 原始串口字节，截图按分块协议完成 CRC 校验。页码 1/11、保存修订 1 和画布 CRC `45deafb6` 不变，帧 3→4，ManualRefresh/FullClean/驱动成功；操作 1 次成功、0 失败/取消/超时/未完成，dropped 与 tx_failures 均为 0，无证据缺口。结果为 pass，范围仅应用与驱动。单样本帧耗时 1,663,605 µs，不能据此推断延迟分布或开销百分比。
+- 截止补测：报告结束后再通过正常 K2 路由刷新，实际帧 4→5，但冻结的 sequence=2、queued=0、stopped=1 保持不变。设备停在合成测试书，未执行网络或同步操作。采样的内部 RAM 历史最低剩余 56,256 B、PSRAM 3,979,328 B；应用最低余栈 8,176 B、输入 2,080 B，仅为本轮现场，不代表所有场景峰值。
+- 私有证据：安装元数据、校验、状态与截止补测位于 `.local/device/install/pr38-20261010/`；完整工作台报告、原始流、事件及画布位于 `.local/runs/pr38-k2-20261010-01/`。源码为本地未提交候选，报告同时保留内容摘要；TF 型号未记录，不将本轮作为跨设备性能基线。
+- 下一步：阶段 C 两组高风险场景（正文图片与同步/取消/返回交叠；连续翻页、改字号、重开恢复）仍待实现；需要同条件 Release/Performance 真机 A/B、USB 停读/断连、真实网络超时分类和长期资源趋势验证。物理屏幕、残影、实体按键/触摸、功耗、休眠/USB 交接和实际 KOReader 往返未在本批验收。

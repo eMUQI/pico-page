@@ -36,7 +36,7 @@
 | `PP 11 commit` | 校验、同步、读回并发布；无论成功或失败都结束事务 |
 | `PP 12 abort` | 取消活动导入，只清理本事务创建的临时文件 |
 
-普通回复以 `PP <id> OK ...` 或 `PP <id> ERROR <code>` 开始。协议发送缓冲为 1536 字节，每行前补 LF，避免与其他日志的半行拼接。格式化截断或入队失败会增加 `tx_failures`，不会把截断行当作完整回复。命令回复的驱动等待参数为 1000 ms；内部锁和队列各可等待一次。主动发送的 `READY` 和 `FRAME` 通知使用零等待，缓冲区满时丢弃并增加 `tx_failures`，不阻塞阅读。
+普通回复以 `PP <id> OK ...` 或 `PP <id> ERROR <code>` 开始。协议发送缓冲为 1536 字节，每行前补 LF，避免与其他日志的半行拼接。格式化截断或入队失败会增加 `tx_failures`，不会把截断行当作完整回复。一般命令回复的驱动等待参数为 1000 ms；内部锁和队列各可等待一次。新增 metrics/trace（含 trace_start/trace_stop 返回的 metrics）整次响应共用 20 ms 传输等待预算，详见 [诊断工作台](diagnostic-workbench.md)。主动发送的 `READY` 和 `FRAME` 通知使用零等待，缓冲区满时丢弃并增加 `tx_failures`，不阻塞阅读。
 目录项为 `PP <id> ENTRY kind=dir|file bytes=... name_hex=...`；名称采用 UTF-8 字节的十六进制，
 避免文件名被解释为控制字符。目录每页最多 32 项，起始项不超过 4096，不递归遍历。
 

@@ -41,6 +41,7 @@ struct Snapshot {
     std::array<Metric, static_cast<unsigned>(Kind::Count)> metrics{};
     std::uint64_t sequence = 0, dropped = 0;
     std::size_t queued = 0;
+    bool stopped = false;
 };
 /** Fixed storage; caller serializes access. Each token must end exactly once. */
 class Recorder {
@@ -49,6 +50,12 @@ public:
     void end(Token token, Outcome outcome, std::uint64_t now_us, std::uintptr_t task);
     Snapshot snapshot() const;
     bool pop(Event& event);
+#if defined(CONFIG_PICO_PAGE_TRACE_EVENTS) && CONFIG_PICO_PAGE_TRACE_EVENTS
+    /** Start a fresh capture; tokens from previous captures cannot finish in it. */
+    void start();
+    /** Freeze events and counters atomically; active operations remain unfinished. */
+    void stop();
+#endif
 private:
     void record(Event event);
     Snapshot state_{};
@@ -57,6 +64,7 @@ private:
     static constexpr std::size_t capacity = 64;
     std::array<Event, capacity> events_{};
     std::size_t head_ = 0;
+    std::uint64_t first_operation_ = 1;
 #endif
 };
 #if defined(CONFIG_PICO_PAGE_PERF_METRICS) && CONFIG_PICO_PAGE_PERF_METRICS
@@ -67,5 +75,9 @@ Token begin(Kind kind, Context context = {});
 void end(Token token, Outcome outcome);
 Snapshot snapshot();
 bool pop(Event& event);
+#if defined(CONFIG_PICO_PAGE_TRACE_EVENTS) && CONFIG_PICO_PAGE_TRACE_EVENTS
+void start();
+void stop();
+#endif
 #endif
 } // namespace pico_page::diagnostics

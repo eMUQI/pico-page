@@ -1,3 +1,4 @@
+import argparse
 import json
 from pathlib import Path
 import queue
@@ -6,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from device_workbench import Session, analyze, compare, finalize, refresh_check, refresh_scenario
+from device_workbench import Session, analyze, compare, finalize, refresh_check, refresh_scenario, metadata_for
 
 
 class Serial:
@@ -60,6 +61,10 @@ class WorkbenchTest(unittest.TestCase):
     def start(self, serial=None, timeout=.1):
         self.session = Session(serial or Serial(), self.output, timeout)
         return self.session
+
+    def cutoff(self, sequence):
+        self.session._line(f"PP 50 OK stopped=1 queued=0 sequence={sequence} dropped=0 tx_failures=0")
+        self.session.event("cutoff", sequence=sequence)
 
     def finish(self):
         self.session.close()
@@ -127,6 +132,7 @@ class WorkbenchTest(unittest.TestCase):
         session = self.start()
         session._line(trace(1).strip())
         session._line(trace(2, begin=0, result=1).strip())
+        self.cutoff(2)
         summary = self.finish()
         self.assertFalse(summary["gaps"])
         self.assertEqual(summary["distributions"]["0"]["p95_us"], 100)
@@ -183,7 +189,7 @@ class WorkbenchTest(unittest.TestCase):
             elif verb == "key K2":
                 frame += 1
                 port.feed(f"PP 0 FRAME number={frame} success=1 purpose=2 clean=1\n".encode())
-                value = "accepted=1"
+                value = "accepted pending=1"
             else:
                 self.fail(verb)
             port.feed(f"PP {ident} OK {value}\n".encode())
@@ -202,6 +208,8 @@ class WorkbenchTest(unittest.TestCase):
         session._line(trace(12).strip())
         session._line(trace(13, begin=0).strip())
         session._line("PP 2 OK dropped=4 tx_failures=2")
+        session._line("PP 3 OK stopped=1 queued=0 sequence=13 dropped=4 tx_failures=2")
+        session.event("cutoff", sequence=13)
         self.finish()
         self.assertFalse(analyze(self.output)["gaps"])
 
@@ -221,7 +229,7 @@ class WorkbenchTest(unittest.TestCase):
             elif verb == "trace":
                 value = "schema=1 queued=0 dropped=0"
             elif verb == "key K2":
-                value = "accepted=1"
+                value = "accepted pending=1"
             else:
                 self.fail(verb)
             port.feed(f"PP {ident} OK {value}\n".encode())
@@ -256,17 +264,72 @@ class WorkbenchTest(unittest.TestCase):
         path.write_text(json.dumps(base))
         # Empty sample runs are not a latency comparison.
         self.assertFalse(compare(path, path)["comparable"])
-        base["metadata"].update(source_commit="base", effective_sdkconfig="CONFIG_PM_ENABLE=y")
+        base["metadata"].update(source_commit="base", source_sha256="basehash", provenance_verified=True,
+                                workload="refresh-v1:K2x1", effective_sdkconfig="CONFIG_PM_ENABLE=y")
+        base["analysis"].update(gaps=[], composition={"0:2:0": 2})
         base["analysis"]["distributions"] = {"0": {"n": 2, "p95_us": 100}}
         path.write_text(json.dumps(base))
         other = self.output / "other.json"
         base["metadata"]["source_commit"] = "candidate"
+        base["metadata"]["source_sha256"] = "candidatehash"
         other.write_text(json.dumps(base))
         self.assertTrue(compare(path, other)["comparable"])
         self.assertFalse(compare(path, other)["same_source"])
+        for key, value in (("workload", None), ("workload", "different-script"), ("provenance_verified", False)):
+            changed = json.loads(json.dumps(base))
+            changed["metadata"][key] = value
+            other.write_text(json.dumps(changed))
+            self.assertFalse(compare(path, other)["comparable"])
+        changed = json.loads(json.dumps(base))
+        changed["analysis"]["composition"] = {"2:0:1": 1}
+        other.write_text(json.dumps(changed))
+        self.assertFalse(compare(path, other)["comparable"])
         base["metadata"]["hardware"] = "Different board"
         other.write_text(json.dumps(base))
         self.assertFalse(compare(path, other)["comparable"])
+
+    def test_cutoff_freezes_then_drains_tail(self):
+        def reply(port, command):
+            _, ident, verb = command
+            if verb == "trace_stop":
+                port.feed(f"PP {ident} ENTRY kind=0 active=0\nPP {ident} OK stopped=1 queued=2 sequence=2 dropped=0 tx_failures=0\n".encode())
+            elif verb == "trace":
+                port.feed((trace(1).replace("PP 1", f"PP {ident}") + trace(2, begin=0).replace("PP 1", f"PP {ident}") +
+                           f"PP {ident} OK schema=1 stopped=1 queued=0 sequence=2 dropped=0 tx_failures=0\n").encode())
+            else:
+                self.fail(verb)
+        session = self.start(Serial(reply))
+        session.cutoff()
+        self.assertFalse(self.finish()["gaps"])
+
+    def test_quiet_metrics_without_device_cutoff_is_inconclusive(self):
+        session = self.start()
+        session._line(trace(1).strip())
+        session._line(trace(2, begin=0).strip())
+        session._line("PP 2 ENTRY kind=0 active=0")
+        session._line("PP 2 OK queued=0 sequence=2 dropped=0 tx_failures=0")
+        self.assertIn("device_cutoff_missing", self.finish()["gaps"])
+
+    def test_build_provenance_rejects_stale_binary_and_source(self):
+        from firmware_provenance import artifacts
+        build = Path(self.temp.name) / "firmware"
+        build.mkdir()
+        for name in ("pico_page.bin", "pico_page.elf", "sdkconfig"):
+            (build / name).write_bytes(b"built artifact")
+        source = dict(source_commit="commit", source_dirty=False, source_sha256="source")
+        manifest = dict(schema=1, **source, artifacts_sha256=artifacts(build)[0])
+        args = argparse.Namespace(metadata=None, firmware=build, mode="refresh")
+        with patch("device_workbench.source_state", return_value=source):
+            self.assertIn("build_source_provenance", metadata_for(args)["missing"])
+            (build / "provenance.json").write_text(json.dumps(manifest))
+            self.assertTrue(metadata_for(args)["provenance_verified"])
+            (build / "pico_page.bin").write_bytes(b"other build")
+            self.assertFalse(metadata_for(args)["provenance_verified"])
+            (build / "pico_page.bin").write_bytes(b"built artifact")
+        with patch("device_workbench.source_state", return_value=dict(source, source_sha256="modified")):
+            result = metadata_for(args)
+            self.assertFalse(result["provenance_verified"])
+            self.assertEqual(result["source_sha256"], "source")
 
 
 if __name__ == "__main__":
