@@ -122,3 +122,16 @@ foreach(mode release performance diagnostic)
 endforeach()
 add_test(NAME device_workbench COMMAND ${Python3_EXECUTABLE} -m unittest discover
     -s ${CMAKE_CURRENT_SOURCE_DIR}/tests -p test_device_workbench.py -v)
+
+add_executable(text_turn_waveform_test tests/text_turn_waveform_test.cpp
+    firmware/components/platform_read_pico/text_turn_waveform.cpp)
+target_include_directories(text_turn_waveform_test PRIVATE firmware/components/platform_read_pico/include)
+target_compile_features(text_turn_waveform_test PRIVATE cxx_std_17)
+target_compile_options(text_turn_waveform_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME text_turn_waveform COMMAND text_turn_waveform_test)
+
+add_executable(ripple_test tests/ripple_test.cpp firmware/components/platform_read_pico/ripple.cpp)
+target_include_directories(ripple_test PRIVATE tests/ripple_stubs firmware/components/platform_read_pico/include)
+target_link_libraries(ripple_test PRIVATE reader_core)
+target_compile_options(ripple_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME ripple COMMAND ripple_test)

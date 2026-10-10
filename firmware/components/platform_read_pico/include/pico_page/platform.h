@@ -103,10 +103,21 @@ void set_performance(bool high);
 enum class PageWaveform {
     Gray16,     // Default GL16, 37 phases.
     Gray8,      // 8-level GL16, 30 phases; faster, with more ghosting between full refreshes.
+    Ripple,
+    TextTurnA, TextTurnB, TextTurnC, // Diagnostic candidates, 37 phases; optical behavior unverified.
 };
 
 /** Selects the waveform for subsequent non-clearing present() calls. */
 void set_page_waveform(PageWaveform waveform);
+
+/**
+ * Selects a volatile diagnostic override on the application task between presents.
+ * Gray16 disables the override; TextTurnA/B/C and Ripple are otherwise accepted.
+ * Failure leaves the previous selection intact. Does not refresh or save settings.
+ */
+bool set_page_effect_waveform(PageWaveform waveform, std::string& error);
+/** Application-task query; Gray16 means use the configured refresh profile. */
+PageWaveform page_effect_waveform();
 
 /** Durations of the most recent present(), in microseconds. */
 struct PresentTiming {

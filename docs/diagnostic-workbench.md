@@ -57,6 +57,8 @@ sh tools/build_firmware.sh diagnostic
 
 `status/metrics/trace/trace_start/trace_stop/screen/ls/file` 是观察命令，不重置主循环空闲计时；否则连续采集会阻止延迟保存、分页和休眠。它们仍可能占用串口和 CRC 计算时间，Diagnostic 性能不等同于 Performance。保留原 `PP 0 FRAME` 主动通知和所有已有导入安全限制。trace 导出失败仍通过 tx_failures 和序号缺口暴露，不能悄悄丢失后显示通过。
 
+翻页候选通过现有 `device_console.py waveform default|A|B|C|ripple` 或设备「翻页效果」页选择。它是改变选择的命令，不属于观察命令；忙态拒绝。单串口所有权不变，切换与工作台采集分开进行，不同时打开两个串口客户端。详见 [候选对比步骤](console-runtime.md#翻页效果候选对比)。
+
 ## 持续采集与人工标记
 
 先准备独立的测试卡目录，素材优先使用 host 构建生成的 `build/host/document-fixtures/`；不要覆盖用户书籍或配置。安装候选固件需单独核对真实设备与分区，本工具不刷机。关闭其他串口程序，再运行（需 pyserial；当前 CLI 面向 Linux/macOS）：
@@ -106,7 +108,7 @@ python3 tools/device_workbench.py --port /dev/ttyACM0 \
 python3 tools/device_workbench.py --compare .local/runs/base/run.json .local/runs/new/run.json
 ```
 
-比较要求两轮结果均为 pass、已核验的构建来源、固定脚本身份（`refresh-v1:K2x1`，自动场景另含书籍路径、起始页和起始位置的 anchor，例如 `reading-flow-v1:rounds=3,turns=4:book=…:page=7/12:anchor=8dccb332`）以及相同 kind/detail/终态样本数量；自由人工操作没有固定工作负载，不能标为可比。另检查测试条件、dirty 状态和除四个诊断开关外的 sdkconfig；不一致、缺字段、无样本或有证据缺口会提示不可比。保留两边源码 commit 和原始统计，并用 same_source 区分同源码配置 A/B 与跨版本比较；不会把跨版本差异直接归因于诊断开关。
+比较要求两轮结果均为 pass、已核验的构建来源、固定脚本身份（`refresh-v1:K2x1`，自动场景另含书籍路径、起始页、起始位置的 anchor 和起始字号，例如 `reading-flow-v1:rounds=3,turns=4:book=…:page=7/12:anchor=8dccb332:font_px=46`）以及相同 kind/detail/终态样本数量；自动场景的 workload 必须包含有效的正整数 `font_px` 后缀；两份旧报告即使标识相同，缺少字号时也不能标为可比。自由人工操作没有固定工作负载，不能标为可比。另检查测试条件、dirty 状态和除四个诊断开关外的 sdkconfig；不一致、缺字段、无样本或有证据缺口会提示不可比。保留两边源码 commit 和原始统计，并用 same_source 区分同源码配置 A/B 与跨版本比较；不会把跨版本差异直接归因于诊断开关。
 
 原始日志可能含路径、服务地址等隐私。结果默认放在已忽略的 `.local/` 下；不要将真实日志、书籍内容、账号或完整 sdkconfig 未经检查提交仓库。
 

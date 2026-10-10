@@ -9,6 +9,9 @@
 
 #include "pico_page/platform.h"
 #include "pico_page/power_key.h"
+#include "pico_page/text_turn_waveform.h"
+#include "esp_attr.h"
+#include "ripple.h"
 
 #include <algorithm>
 #include <atomic>
@@ -106,6 +109,15 @@ esp_pm_lock_handle_t performance_lock = nullptr;
 bool performance_high = false;
 PageWaveform page_waveform = PageWaveform::Gray16;
 PresentTiming timing{};
+PageWaveform selected_effect = PageWaveform::Gray16;
+// Rebuilt only by the application task between synchronous display transactions.
+DRAM_ATTR std::uint8_t text_turn_lut[E0470_GL16_FRAMES * waveform_phase_bytes];
+EpdWaveformPhases text_turn_phases{};
+const EpdWaveformPhases* text_turn_ranges[] = {&text_turn_phases};
+const EpdWaveformMode text_turn_mode{MODE_GL16, 1, text_turn_ranges};
+const EpdWaveformMode* text_turn_modes[] = {&text_turn_mode};
+EpdWaveform text_turn_table{1, 1, text_turn_modes, nullptr};
+static_assert(sizeof(text_turn_lut) == 2368);
 
 bool failure(std::string& error, const char* operation, esp_err_t result) {
     error = std::string(operation) + ": " + esp_err_to_name(result);
@@ -479,6 +491,45 @@ bool initialize(std::string& error) {
 
 bool panel_ready() { return display_ready; }
 void set_page_waveform(PageWaveform waveform) { page_waveform = waveform; }
+PageWaveform page_effect_waveform() { return selected_effect; }
+bool set_page_effect_waveform(PageWaveform waveform, std::string& error) {
+    error.clear();
+    if (!on_owner(error)) return false;
+    if (waveform == PageWaveform::Ripple) {
+        if (!display_ready || !prepare_ripple()) {
+            error = "Ripple phase tables unavailable";
+            return false;
+        }
+    } else if (waveform != PageWaveform::Gray16) {
+        if (waveform != PageWaveform::TextTurnA && waveform != PageWaveform::TextTurnB &&
+            waveform != PageWaveform::TextTurnC) {
+            error = "Invalid text-turn variant";
+            return false;
+        }
+        const auto* source = display_ready ? e0470_waveform_phases(&E0470_WAVEFORM, MODE_GL16) : nullptr;
+        if (!source || !source->luts || source->phases != E0470_GL16_FRAMES ||
+            E0470_WAVEFORM.num_temp_ranges != 1) {
+            error = "Text-turn source GL16 unavailable";
+            return false;
+        }
+        const TextTurnOptions options{true, waveform != PageWaveform::TextTurnA,
+                                      waveform == PageWaveform::TextTurnC};
+        if (!build_text_turn_waveform(source->luts, sizeof(text_turn_lut), source->phases,
+                                      options, text_turn_lut, sizeof(text_turn_lut))) {
+            error = "Text-turn LUT generation failed";
+            return false;
+        }
+        text_turn_phases = *source;
+        text_turn_phases.luts = text_turn_lut;
+        text_turn_table.temp_intervals = E0470_WAVEFORM.temp_intervals;
+    }
+    if (waveform != PageWaveform::Ripple) release_ripple();
+    selected_effect = waveform;
+    ESP_LOGI(tag, "page_effect=%s", waveform == PageWaveform::Gray16 ? "default" :
+             waveform == PageWaveform::Ripple ? "ripple" :
+             waveform == PageWaveform::TextTurnA ? "A" : waveform == PageWaveform::TextTurnB ? "B" : "C");
+    return true;
+}
 PresentTiming present_timing() { return timing; }
 const char* card_root() { return mounted ? "/sdcard" : nullptr; }
 const std::string& card_error() { return mount_error; }
@@ -570,7 +621,10 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
     }
     const bool clear = full_clean || !baseline_valid;
     baseline_valid = false;
-    epd_set_leading_skip(!clear);
+    // The driver caches first-active phases by table address; experimental tables
+    // are rebuilt in place and must retain their complete phase sequence.
+    epd_set_leading_skip(!clear && (page_waveform == PageWaveform::Gray16 ||
+                                  page_waveform == PageWaveform::Gray8));
     EpdDrawError draw_result;
     // epd_hl_update_area applies EPD_ROT_INVERTED_PORTRAIT, matching copy_portrait.
     const auto update = [&] {
@@ -584,6 +638,12 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
         draw_result = epd_clear_checked();
         if (draw_result == EPD_DRAW_SUCCESS)
             draw_result = epd_hl_update_screen_from_white(&display, MODE_GC16, status.temperature_c);
+    } else if (page_waveform == PageWaveform::Ripple && selected_effect == PageWaveform::Ripple) {
+        draw_result = present_ripple(display, status.temperature_c);
+    } else if (page_waveform == selected_effect && selected_effect != PageWaveform::Gray16) {
+        epd_hl_waveform(&display, &text_turn_table);
+        draw_result = update();
+        epd_hl_waveform(&display, &E0470_WAVEFORM);
     } else if (page_waveform == PageWaveform::Gray8) {
         epd_hl_waveform(&display, &E0470_GRAY8_WAVEFORM);
         draw_result = update();

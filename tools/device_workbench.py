@@ -769,6 +769,11 @@ def metadata_for(args):
     return metadata
 
 
+def workload_place(state):
+    """Return the scenario position and font size as a workload suffix."""
+    return ":page={page}/{pages}:anchor={anchor}:font_px={font_px}".format(**{k: state.get(k) for k in ("page", "pages", "anchor", "font_px")})
+
+
 def compare(first, second):
     left, right = (json.loads(Path(p).read_text()) for p in (first, second))
     keys = (*REQUIRED_CONDITIONS, "source_dirty", "effective_sdkconfig", "mode", "workload")
@@ -780,9 +785,13 @@ def compare(first, second):
         m["effective_sdkconfig"] = "\n".join(line for line in m.get("effective_sdkconfig", "").splitlines()
                                                if not any(flag in line for flag in mode_flags))
         return {k: m.get(k) for k in keys}
+    # Automatic workloads require a recorded font size to establish comparable typography.
     # A run that failed or could not be judged did not complete the workload it names.
     comparable = (left.get("result", {}).get("status") == right.get("result", {}).get("status") == "pass"
                   and bool(left["metadata"].get("workload"))
+                  and all(m.get("mode") not in ("image-sync", "reading-flow")
+                          or (isinstance(m.get("workload"), str) and re.search(r":font_px=[1-9][0-9]*\Z", m["workload"]))
+                          for m in (left["metadata"], right["metadata"]))
                   and left["metadata"].get("provenance_verified") is True
                   and right["metadata"].get("provenance_verified") is True
                   and bool(left["analysis"].get("composition"))
@@ -862,10 +871,10 @@ def main():
                 session.drain()
             if args.mode == "image-network":
                 result = image_observation(session)
-        # Runs are comparable only for the same book and page range; the start is known once the scenario has run.
+        # The comparison identity uses the page state returned by the completed scenario.
         place = result.get("start") or result.get("after")
         if args.mode in ("image-sync", "reading-flow") and place:
-            metadata["workload"] += f":page={place.get('page')}/{place.get('pages')}:anchor={place.get('anchor')}"
+            metadata["workload"] += workload_place(place)
         session.cutoff()
     except AssertionError as exc:
         result = dict(status="fail", reason=str(exc))
