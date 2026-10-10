@@ -100,7 +100,9 @@ class WorkbenchTest(unittest.TestCase):
         run = finalize(self.output, dict(mode="image-network"), observation)
         self.assertEqual(run["result"]["status"], "fail")
         self.assertEqual(run["result"]["assertion"], observation)
-        # Evidence gaps still leave the run undecided, and a skipped precondition is not a failure.
+        # Missing run conditions or evidence gaps still leave the run undecided; a skipped precondition is not a failure.
+        self.assertEqual(finalize(self.output, dict(mode="image-network", missing=["device_build_verified"]),
+                                  observation)["result"]["status"], "inconclusive")
         self.output = Path(self.temp.name) / "gap"
         session = self.start()
         session._line(trace(1).strip())

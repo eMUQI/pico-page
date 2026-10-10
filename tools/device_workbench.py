@@ -406,10 +406,11 @@ def finalize(output, metadata, result):
         result = dict(status="infra_error", reason="Cannot parse complete structured evidence")
     failed = analysis["counts"] and (analysis["counts"]["failure"] or analysis["counts"]["timeout"]
                                      or analysis["counts"]["command_failure"] or analysis["frame_failures"])
-    if result["status"] == "pass" and (analysis["gaps"] or not analysis["events"] or metadata.get("missing")):
+    incomplete = analysis["gaps"] or not analysis["events"] or metadata.get("missing")
+    if result["status"] == "pass" and incomplete:
         result = dict(status="inconclusive", reason="Incomplete evidence or run conditions", assertion=result)
-    elif result["status"] in ("pass", "inconclusive") and failed and not analysis["gaps"]:
-        # A recorded failure in complete evidence outranks an observation that could not be judged.
+    elif result["status"] in ("pass", "inconclusive") and failed and not incomplete:
+        # A recorded failure in complete evidence and conditions outranks an observation that could not be judged.
         result = dict(status="fail", reason="Failure observed during the run", assertion=result)
     if metadata.get("mode") == "image-network":
         result = image_network_check(analysis, result)
