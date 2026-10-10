@@ -19,6 +19,10 @@
 
 namespace pico_page {
 namespace {
+#ifdef CONFIG_PICO_PAGE_PERF_METRICS
+// Added to a Content event's detail when the job is an optional prefetch, whose refusal or failure only lowers the cache hit rate.
+constexpr std::uint32_t kDiagnosticPrefetch = 256;
+#endif
 #ifdef ESP_PLATFORM
 constexpr unsigned content_stack_bytes = 32768;
 QueueHandle_t content_requests = nullptr;
@@ -153,7 +157,7 @@ bool ContentJob::start() {
     PP_DIAGNOSTIC(
         measurement_ = diagnostics::begin(diagnostics::Kind::Content,
             {request.diagnostic_session, request.diagnostic_layout, 0, request.generation,
-             static_cast<std::uint32_t>(request.kind)});
+             static_cast<std::uint32_t>(request.kind) | (request.prefetch ? kDiagnosticPrefetch : 0U)});
         struct StartGuard {
             ContentJob& job;
             ~StartGuard() {

@@ -16,6 +16,14 @@ from device_console import Console, open_serial
 from firmware_provenance import artifacts, source_state
 
 OUTCOMES = ("success", "failure", "cancelled", "timeout")
+PREFETCH = 256  # Content detail flag: optional work whose failure only lowers the cache hit rate
+
+# Control centres in the 684 x 1216 layout that reader_app draws at this revision. Every tap is followed
+# by a check of the resulting view, so a layout change ends the run instead of tapping something else.
+READING_BODY, HEADER_BACK = (342, 500), (40, 40)
+TOOL_TYPOGRAPHY, TOOL_SYNC = (205, 1150), (342, 1150)
+SYNC_CHECK, SYNC_CANCEL, CONTINUE_OFFLINE = (342, 996), (342, 1096), (342, 1128)
+FONT_SIZE, MINUS, PLUS, APPLY = (261, 824), (96, 948), (588, 948), (499, 1136)
 REQUIRED_CONDITIONS = ("hardware", "tf", "books_sha256", "cache", "network")
 
 
@@ -53,6 +61,7 @@ class Session(Console):
         self.failure = None
         self.stop = threading.Event()
         self.gaps = []
+        self.trace = []
         self.offset = 0
         self.thread = threading.Thread(target=self._read, name="serial-reader", daemon=True)
         self.thread.start()
@@ -164,9 +173,10 @@ class Session(Console):
 
     def drain(self, max_batches=16):
         for _ in range(max_batches):
-            state, _ = self.request("trace")
+            state, entries = self.request("trace")
             if state.get("schema") != "1":
                 raise RuntimeError("Unsupported trace schema")
+            self.trace += [fields(entry) for entry in entries]
             if int(state["queued"]) == 0:
                 return state
         self.gap("trace_drain_budget_exhausted")
@@ -226,6 +236,146 @@ def refresh_scenario(session):
     raise TimeoutError("K2 frame was not independently confirmed")
 
 
+QUIET = ("pending", "content_busy", "save_busy", "save_due")
+
+
+def settled(state):
+    """A displayed, saved reading page with no content, save or frame work outstanding."""
+    return state.get("view") == "reading" and state.get("saved") == "1" and all(state.get(k) == "0" for k in QUIET)
+
+
+def wait_for(session, accept, what, timeout=None):
+    """Polls status and drains the trace until accept(state); the awaited state names the timeout."""
+    deadline = time.monotonic() + (timeout or session.timeout)
+    while True:
+        state, _ = session.request("status")
+        session.drain()
+        if accept(state):
+            return state
+        if time.monotonic() >= deadline:
+            raise TimeoutError(what)
+
+
+def act(session, command, accept, what, timeout=None):
+    """Sends one input through the normal route once no frame is pending, then waits for its effect.
+
+    The device refuses input while a frame is pending. A background frame can start between the
+    check and the command, so that refusal is retried; the busy guard itself is never bypassed.
+    """
+    for _ in range(5):
+        wait_for(session, lambda state: state.get("pending") == "0", "no pending frame before " + command, timeout)
+        try:
+            session.request(command)
+            return wait_for(session, accept, what, timeout)
+        except RuntimeError as exc:
+            if str(exc) != "ERROR busy":
+                raise
+    raise TimeoutError("device stayed busy for " + command)
+
+
+def tap(session, point, view, timeout=None):
+    return act(session, "tap %d %d" % point, lambda state: state.get("view") == view and state.get("pending") == "0",
+               "view " + view, timeout)
+
+
+def turn(session, key, step):
+    """One page turn; the frame must complete and the page number must move by exactly one."""
+    before, _ = session.request("status")
+    after = act(session, "key " + key, lambda state: state.get("pending") == "0" and state.get("view") == "reading"
+                and int(state["frame"]) > int(before["frame"]), key + " frame")
+    if after.get("frame_ok") != "1" or int(after["page"]) != int(before["page"]) + step:
+        raise AssertionError(f"{key} moved page {before['page']} to {after['page']} or its frame failed")
+    return after
+
+
+def memory(state):
+    return {k: int(state[k]) for k in ("internal", "largest_internal", "psram", "largest_psram")}
+
+
+def trend_check(samples, internal_limit=4096):
+    """Steady-state internal RAM after later rounds must not fall below the first round by more than the limit."""
+    drop = samples[0]["internal"] - min(sample["internal"] for sample in samples)
+    if drop > internal_limit:
+        raise AssertionError(f"internal RAM fell {drop} B across rounds")
+    return drop
+
+
+def reading_flow(session, book, rounds, turns):
+    """Scenario 2: sequential page turns, a typography change and its reversal, then reopening the book.
+
+    Injected input cannot test the retained follow-up turn of rapid physical presses, because the
+    console refuses input while a frame is pending; that part stays a manual acceptance item.
+    """
+    long_wait = max(session.timeout, 60)
+    start, _ = session.request("status")
+    if start.get("view") != "reading":
+        return dict(status="skip", reason="Open the test book before starting")
+    start = wait_for(session, lambda s: settled(s) and int(s["pages"]) > 0, "saved idle page with a page count", long_wait)
+    if int(start["page"]) + turns > int(start["pages"]):
+        return dict(status="skip", reason="Start at least --turns pages before the end of the book")
+    samples = []
+    for _ in range(rounds):
+        for _ in range(turns):
+            turn(session, "K3", 1)
+        forward = wait_for(session, settled, "forward position saved", long_wait)
+        if int(forward["revision"]) <= int(start["revision"]):
+            raise AssertionError("page turns were displayed but the saved revision did not advance")
+        for _ in range(turns):
+            turn(session, "K1", -1)
+        back = wait_for(session, settled, "start position saved again", long_wait)
+        if int(back["revision"]) <= int(forward["revision"]):
+            raise AssertionError("returning to the start page was not saved")
+        for button in (PLUS, MINUS):
+            tap(session, READING_BODY, "tools")
+            tap(session, TOOL_TYPOGRAPHY, "typography", long_wait)
+            tap(session, FONT_SIZE, "typography")
+            tap(session, button, "typography", long_wait)
+            tap(session, APPLY, "reading", long_wait)
+            wait_for(session, lambda s: settled(s) and int(s["pages"]) > 0, "repagination after typography change", long_wait)
+        restored = wait_for(session, lambda s: settled(s) and int(s["pages"]) > 0, "restored typography", long_wait)
+        if (restored["page"], restored["pages"]) != (start["page"], start["pages"]):
+            raise AssertionError(f"reverting the font size left page {restored['page']}/{restored['pages']}, "
+                                 f"expected {start['page']}/{start['pages']}")
+        tap(session, READING_BODY, "tools")
+        tap(session, HEADER_BACK, "library", long_wait)
+        act(session, "open " + book, lambda s: s.get("view") == "reading" and s.get("pending") == "0", "book reopened", long_wait)
+        reopened = wait_for(session, lambda s: settled(s) and int(s["pages"]) > 0, "reopened page settled", long_wait)
+        if reopened["page"] != start["page"] or reopened["revision"] != restored["revision"]:
+            raise AssertionError(f"reopening showed page {reopened['page']} revision {reopened['revision']}, "
+                                 f"expected page {start['page']} revision {restored['revision']}")
+        samples.append(memory(reopened))
+    return dict(status="pass", scope="injected_input_app_state_and_driver_only", rounds=rounds, turns=turns,
+                start=start, after=reopened, memory=samples, internal_drop=trend_check(samples))
+
+
+def image_sync(session, book):
+    """Scenario 1: cancel a sync check during its HTTPS phase so that the request still runs while
+    the reading page decodes its image, then require the image chain and an unchanged position."""
+    long_wait = max(session.timeout, 60)
+    act(session, "open " + book, lambda s: s.get("view") == "reading" and s.get("pending") == "0", "book opened", long_wait)
+    before = wait_for(session, settled, "saved idle image page", long_wait)
+    tap(session, READING_BODY, "tools")
+    tap(session, TOOL_SYNC, "sync", long_wait)
+    seen = len(session.trace)
+    act(session, "tap %d %d" % SYNC_CHECK, lambda s: s.get("pending") == "0", "sync check accepted", long_wait)
+    def https_started(_):
+        return any(e.get("kind") == "5" and e.get("detail") == "3" and e.get("begin") == "1" for e in session.trace[seen:])
+    def request_ended(_):
+        return any(e.get("kind") == "2" and e.get("begin") == "0" for e in session.trace[seen:])
+    wait_for(session, lambda s: https_started(s) or request_ended(s), "HTTPS phase of the sync check", long_wait)
+    if not https_started(None):
+        return dict(status="inconclusive", reason="The sync request ended before its HTTPS phase", before=before)
+    closing = act(session, "tap %d %d" % SYNC_CANCEL, lambda s: s.get("pending") == "0"
+                  and s.get("view") in ("network_closing", "sync"), "sync cancelled", long_wait)
+    tap(session, CONTINUE_OFFLINE if closing["view"] == "network_closing" else HEADER_BACK, "reading", long_wait)
+    after = wait_for(session, settled, "image page saved and idle", long_wait)
+    if any(before[k] != after[k] for k in ("page", "revision")):
+        raise AssertionError(f"the cancelled sync check moved page {before['page']} revision {before['revision']} "
+                             f"to page {after['page']} revision {after['revision']}")
+    observation = image_observation(session)
+    return dict(observation, before=before) if observation["status"] == "pass" else observation
+
+
 def percentile(samples, p):
     return sorted(samples)[max(0, math.ceil(len(samples) * p) - 1)]
 
@@ -257,6 +407,15 @@ def image_evidence(operations):
                            decoded_images=int(patch["detail"]), network_ops=overlap,
                            network_stages=[op["op"] for op in phases], confirmed=confirmed))
     return chains
+
+
+def stale_image_patches(operations):
+    """Image patches adopted after a frame of a newer book session or layout had been presented."""
+    frames = [op for op in operations if op["kind"] == "0" and int(op["session"]) > 0]
+    return [patch["op"] for patch in operations if patch["kind"] == "4" and any(
+        int(frame["time_us"]) <= patch["start_us"]
+        and (int(frame["session"]), int(frame["layout"])) > (int(patch["session"]), int(patch["layout"]))
+        for frame in frames)]
 
 
 def image_network_check(analysis, observation):
@@ -327,7 +486,9 @@ def analyze(output):
                 counts["command_timeout"] += 1
             f = event.get("fields", {})
             if event["type"] == "reply":
-                if event["line"].startswith("ERROR "):
+                if event["line"] == "ERROR busy":
+                    counts["busy"] += 1  # the device refused an input while a frame was pending; not a fault
+                elif event["line"].startswith("ERROR "):
                     counts["command_failure"] += 1
                 if "dropped" in f and int(f["dropped"]) != dropped_baseline:
                     gaps.append("device_trace_dropped")
@@ -369,7 +530,8 @@ def analyze(output):
                 else:
                     operations.append(dict(f, start_us=int(start["time_us"])))
                 result = int(f["result"])
-                counts[OUTCOMES[result]] += 1
+                optional = f["kind"] == "3" and int(f["detail"]) & PREFETCH
+                counts["optional_failure" if optional and result == 1 else OUTCOMES[result]] += 1
                 composition[f'{f["kind"]}:{f["detail"]}:{result}'] += 1
                 samples[f["kind"]].append(int(f["duration_us"]))
     if cutoff is None:
@@ -390,10 +552,11 @@ def analyze(output):
                                    p95_us=None if gaps else percentile(values, .95),
                                    p99_us=None if gaps else percentile(values, .99))
     completed = sum(counts[k] for k in OUTCOMES)
-    return dict(counts={k: counts[k] for k in (*OUTCOMES, "unfinished", "command_failure", "command_timeout")},
+    return dict(counts={k: counts[k] for k in (*OUTCOMES, "optional_failure", "unfinished", "command_failure",
+                                               "command_timeout", "busy")},
                 gaps=sorted(set(gaps)), distributions=distributions, events=event_count,
                 composition=dict(composition), frame_failures=failures,
-                image_chains=image_evidence(operations),
+                image_chains=image_evidence(operations), stale_image_patches=stale_image_patches(operations),
                 failure_rate=counts["failure"] / completed if completed else None)
 
 
@@ -411,7 +574,9 @@ def finalize(output, metadata, result):
     elif result["status"] in ("pass", "inconclusive") and failed and not analysis["gaps"]:
         # A recorded failure in complete evidence outranks an observation that could not be judged.
         result = dict(status="fail", reason="Failure observed during the run", assertion=result)
-    if metadata.get("mode") == "image-network":
+    if result["status"] != "infra_error" and analysis.get("stale_image_patches"):
+        result = dict(status="fail", reason="An image from an earlier session or layout was adopted", assertion=result)
+    if metadata.get("mode") in ("image-network", "image-sync"):
         result = image_network_check(analysis, result)
     run = dict(schema=1, metadata=metadata, result=result, analysis=analysis)
     write_json(output / "run.json", run)
@@ -444,7 +609,8 @@ def metadata_for(args):
     metadata["checkout_source"] = current
     metadata["host_platform"] = sys.platform
     metadata["mode"] = args.mode
-    metadata["workload"] = "refresh-v1:K2x1" if args.mode == "refresh" else None
+    metadata["workload"] = {"refresh": "refresh-v1:K2x1", "image-sync": "image-sync-v1:cancel-in-https",
+                            "reading-flow": "reading-flow-v1:rounds=%s,turns=%s" % (getattr(args, "rounds", None), getattr(args, "turns", None))}.get(args.mode)
     hashes, config = artifacts(args.firmware) if args.firmware else ({}, None)
     metadata["artifacts_sha256"] = hashes
     if config and config.is_file():
@@ -502,13 +668,18 @@ def main():
     parser.add_argument("--metadata", type=Path, help="Private JSON: hardware, tf, books_sha256, cache, network, device_build_verified")
     parser.add_argument("--firmware", type=Path, help="Build directory containing bin, ELF and effective sdkconfig")
     parser.add_argument("--timeout", type=float, default=15)
-    parser.add_argument("--mode", choices=("manual", "refresh", "image-network"), default="manual")
+    parser.add_argument("--mode", choices=("manual", "refresh", "image-network", "image-sync", "reading-flow"), default="manual")
+    parser.add_argument("--book", help="Card-relative path of the synthetic test EPUB that the automatic scenarios open")
+    parser.add_argument("--rounds", type=int, default=3, help="reading-flow rounds")
+    parser.add_argument("--turns", type=int, default=5, help="reading-flow page turns per direction")
     args = parser.parse_args()
     if args.compare:
         print(json.dumps(compare(*args.compare), ensure_ascii=False, indent=2))
         return 0
     if not args.port or not args.output or args.timeout <= 0:
         parser.error("--port, --output and a positive --timeout are required")
+    if args.mode in ("image-sync", "reading-flow") and (not args.book or args.rounds < 1 or args.turns < 1):
+        parser.error("--book and positive --rounds/--turns are required for automatic scenarios")
     if args.output.exists():
         parser.error("--output must be a new private directory")
     metadata = metadata_for(args)
@@ -525,6 +696,10 @@ def main():
                       sequence=int(baseline["sequence"]))
         if args.mode == "refresh":
             result = refresh_scenario(session)
+        elif args.mode == "image-sync":
+            result = image_sync(session, args.book)
+        elif args.mode == "reading-flow":
+            result = reading_flow(session, args.book, args.rounds, args.turns)
         else:
             print("Recording. Enter 'mark short description' to mark a problem; 'end' to finish.")
             if args.mode == "image-network":

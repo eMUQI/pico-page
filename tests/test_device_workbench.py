@@ -8,7 +8,9 @@ import unittest
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from device_workbench import (Session, analyze, compare, finalize, refresh_check, refresh_scenario,
-                              metadata_for, image_observation)
+                              metadata_for, image_observation, image_sync, reading_flow, trend_check,
+                              stale_image_patches, READING_BODY, HEADER_BACK, TOOL_TYPOGRAPHY, TOOL_SYNC,
+                              SYNC_CHECK, SYNC_CANCEL, CONTINUE_OFFLINE, FONT_SIZE, MINUS, PLUS, APPLY)
 
 
 class Serial:
@@ -48,7 +50,142 @@ def trace(seq, op=1, begin=1, result=0):
     return f"PP 1 ENTRY seq={seq} time_us={seq * 100} op={op} duration_us=100 task=7 kind=0 begin={begin} result={result} session=1 layout=2 frame=3 request=4 detail=0\n"
 
 
+class Reader:
+    """Scripted stand-in for the diagnostic console: views, page state and queued trace entries."""
+    def __init__(self, **faults):
+        self.state = dict(view="reading", pending=0, content_busy=0, save_busy=0, save_due=0, saved=1, revision=10,
+                          page=4, pages=20, frame=1, frame_ok=1, crc32="abcd", internal=90000, largest_internal=31744,
+                          psram=4000000, largest_psram=3000000)
+        self.faults, self.font, self.draft, self.busy, self.sequence, self.entries, self.taps = faults, 0, 0, 0, 0, [], []
+
+    def emit(self, op, kind, begin, time_us, result=0, frame=0, request=0, detail=0, session=1, layout=1):
+        self.sequence += 1
+        self.entries.append(f"ENTRY seq={self.sequence} time_us={time_us} op={op} duration_us=10 task=7 kind={kind} "
+                            f"begin={begin} result={result} session={session} layout={layout} frame={frame} "
+                            f"request={request} detail={detail}")
+
+    def tap(self, point):
+        s, view = self.state, self.state["view"]
+        self.taps.append(point)
+        if (view, point) == ("reading", READING_BODY): s["view"] = "tools"
+        elif (view, point) == ("tools", TOOL_TYPOGRAPHY): s["view"], self.draft = "typography", self.font
+        elif (view, point) == ("tools", TOOL_SYNC): s["view"] = "sync"
+        elif (view, point) == ("tools", HEADER_BACK): s["view"] = "library"
+        elif (view, point) == ("typography", PLUS): self.draft += 1
+        elif (view, point) == ("typography", MINUS): self.draft -= 1
+        elif (view, point) == ("typography", APPLY):
+            self.font = self.draft
+            s.update(view="reading", pages=20 - 4 * self.font, page=4 - self.font + self.faults.get("drift", 0) * (self.font == 0))
+        elif (view, point) == ("sync", SYNC_CHECK):
+            self.emit(2, 2, 1, 100, request=8)
+            if not self.faults.get("no_https"):
+                self.emit(3, 5, 1, 110, request=8, detail=3)
+            else:
+                self.emit(2, 2, 0, 120, result=1, request=8)
+        elif (view, point) == ("sync", SYNC_CANCEL): s["view"] = "network_closing"
+        elif (view, point) == ("network_closing", CONTINUE_OFFLINE):
+            s.update(view="reading", frame=21, revision=s["revision"] + self.faults.get("moved", 0))  # 22 once this tap is counted
+            # The image decodes while the cancelled request is still inside its HTTPS phase.
+            self.emit(4, 3, 1, 200, request=4, detail=2); self.emit(3, 5, 0, 260, result=2, request=8, detail=3)
+            self.emit(2, 2, 0, 270, result=2, request=8); self.emit(4, 3, 0, 300, request=4, detail=2)
+            self.emit(5, 4, 1, 310, frame=9, request=4, detail=1); self.emit(5, 4, 0, 320, frame=9, request=4, detail=1)
+            self.emit(6, 0, 1, 330, frame=22, request=9, detail=1); self.emit(6, 0, 0, 400, frame=22, request=9, detail=1)
+        elif (view, point) == ("typography", FONT_SIZE): pass
+        else: raise AssertionError((view, point))
+        s["frame"] += 1
+
+    def __call__(self, port, command):
+        _, ident, verb = command
+        s, value = self.state, "accepted"
+        if verb == "status":
+            value = " ".join(f"{k}={v}" for k, v in s.items())
+        elif verb == "trace":
+            batch, self.entries = self.entries[:8], self.entries[8:]
+            for entry in batch: port.feed(f"PP {ident} {entry}\n".encode())
+            value = f"schema=1 queued={len(self.entries)} sequence={self.sequence} dropped=0 tx_failures=0"
+        elif self.busy:
+            self.busy -= 1
+            port.feed(f"PP {ident} ERROR busy\n".encode())
+            return
+        elif verb in ("key K3", "key K1"):
+            step = 1 if verb == "key K3" else -1
+            s.update(page=s["page"] + step * (1 + self.faults.pop("skip", 0)), frame=s["frame"] + 1,
+                     revision=s["revision"] + (0 if self.faults.get("unsaved") else 1))
+        elif verb.startswith("tap "):
+            self.tap(tuple(map(int, verb.split()[1:])))
+        elif verb.startswith("open "):
+            s.update(view="reading", frame=s["frame"] + 1, internal=s["internal"] - self.faults.get("leak", 0))
+        else:
+            raise AssertionError(verb)
+        port.feed(f"PP {ident} OK {value}\n".encode())
+
+
 class WorkbenchTest(unittest.TestCase):
+    def test_reading_flow_checks_turns_typography_reopen_and_memory(self):
+        reader = Reader()
+        reader.busy = 1  # the first input is refused once and retried through the same route
+        result = reading_flow(self.start(Serial(reader)), "Books/t.epub", 2, 3)
+        self.assertEqual((result["status"], result["rounds"], len(result["memory"]), result["internal_drop"]), ("pass", 2, 2, 0))
+        self.assertEqual(reader.state["page"], 4)
+        self.assertEqual(reader.font, 0)
+        self.assertEqual(reader.taps.count(PLUS), 2)
+        self.assertEqual(self.finish()["counts"]["busy"], 1)
+
+    def test_reading_flow_rejects_skips_unsaved_turns_drift_and_leaks(self):
+        for fault, message in ((dict(skip=1), "moved page"), (dict(unsaved=1), "revision did not advance"),
+                               (dict(drift=1), "reverting the font size"), (dict(leak=5000), "internal RAM fell")):
+            with self.subTest(fault=fault):
+                self.output = Path(self.temp.name) / ("run-" + str(len(list(Path(self.temp.name).iterdir()))))
+                with self.assertRaisesRegex(AssertionError, message):
+                    reading_flow(self.start(Serial(Reader(**fault))), "Books/t.epub", 2, 2)
+                self.finish()
+        self.output = Path(self.temp.name) / "library"
+        reader = Reader()
+        reader.state["view"] = "library"
+        self.assertEqual(reading_flow(self.start(Serial(reader)), "Books/t.epub", 1, 1)["status"], "skip")
+        self.assertEqual(trend_check([dict(internal=9000), dict(internal=5000), dict(internal=9000)]), 4000)
+
+    def test_image_sync_cancels_in_https_and_requires_chain_and_position(self):
+        reader = Reader()
+        session = self.start(Serial(reader))
+        with patch.object(session, "capture"):
+            observation = image_sync(session, "Books/t.epub")
+        self.assertEqual(observation["status"], "pass")
+        self.assertEqual(reader.taps[-3:], [SYNC_CHECK, SYNC_CANCEL, CONTINUE_OFFLINE])
+        session._line(f"PP 50 OK stopped=1 queued=0 sequence={reader.sequence} dropped=0 tx_failures=0")
+        session.event("cutoff", sequence=reader.sequence)
+        self.finish()
+        run = finalize(self.output, dict(mode="image-sync"), observation)
+        self.assertEqual(run["result"]["status"], "pass")
+        self.assertEqual(run["result"]["evidence"][0]["network_stages"], ["3"])
+
+    def test_image_sync_position_change_fails_and_early_end_is_inconclusive(self):
+        with self.assertRaisesRegex(AssertionError, "moved page"):
+            session = self.start(Serial(Reader(moved=1)))
+            with patch.object(session, "capture"):
+                image_sync(session, "Books/t.epub")
+        self.finish()
+        self.output = Path(self.temp.name) / "early"
+        self.assertEqual(image_sync(self.start(Serial(Reader(no_https=1))), "Books/t.epub")["status"], "inconclusive")
+
+    def test_stale_image_patch_after_newer_session_frame_fails(self):
+        frame = dict(kind="0", session="2", layout="1", time_us="100", start_us=50, op="7")
+        patch_op = dict(kind="4", session="1", layout="1", time_us="130", start_us=120, op="8")
+        self.assertEqual(stale_image_patches([frame, patch_op]), ["8"])
+        self.assertEqual(stale_image_patches([dict(frame, session="1"), patch_op]), [])
+        self.assertEqual(stale_image_patches([dict(frame, time_us="125"), patch_op]), [])
+
+    def test_optional_prefetch_failure_does_not_fail_the_run(self):
+        session = self.start()
+        for seq, (op, begin, result, detail) in enumerate(((1, 1, 0, 258), (1, 0, 1, 258), (2, 1, 0, 2), (2, 0, 0, 2)), 1):
+            session._line(f"PP 1 ENTRY seq={seq} time_us={seq * 10} op={op} duration_us=10 task=7 kind=3 begin={begin} "
+                          f"result={result} session=0 layout=0 frame=0 request=4 detail={detail}")
+        self.cutoff(4)
+        self.finish()
+        run = finalize(self.output, {}, dict(status="pass"))
+        self.assertEqual((run["analysis"]["counts"]["optional_failure"], run["analysis"]["counts"]["failure"]), (1, 0))
+        self.assertEqual(run["result"]["status"], "pass")
+
     def image_trace(self, *, overlap=True, content_result=0, patch_result=0, frame_result=0,
                     decoded=1, generation=4, frame_request=9, network_result=0, stage=None):
         session = self.start()
@@ -198,10 +335,14 @@ class WorkbenchTest(unittest.TestCase):
         self.assertIn("command_timeout", result["gaps"])
 
     def test_error_is_not_success(self):
-        session = self.start(Serial(lambda p, _: p.feed(b"PP 1 ERROR busy\n")))
+        session = self.start(Serial(lambda p, c: p.feed(f"PP {c[1]} ERROR {'busy' if c[1] == '1' else 'invalid_key'}\n".encode())))
         with self.assertRaisesRegex(RuntimeError, "busy"):
             session.request("key K2")
-        self.assertEqual(self.finish()["counts"]["command_failure"], 1)
+        with self.assertRaisesRegex(RuntimeError, "invalid_key"):
+            session.request("key K9")
+        counts = self.finish()["counts"]
+        # A refused input while a frame is pending is the device's guard, reported apart from command faults.
+        self.assertEqual((counts["busy"], counts["command_failure"]), (1, 1))
 
     def test_disconnect_wakes_request(self):
         session = self.start(Serial(lambda p, _: p.feed(OSError("USB disconnected"))))
