@@ -61,7 +61,7 @@ class Session(Console):
         self.failure = None
         self.stop = threading.Event()
         self.gaps = []
-        self.trace = []
+        self.trace = None  # parsed trace entries, kept only while an automatic scenario asks for them
         self.offset = 0
         self.thread = threading.Thread(target=self._read, name="serial-reader", daemon=True)
         self.thread.start()
@@ -176,7 +176,8 @@ class Session(Console):
             state, entries = self.request("trace")
             if state.get("schema") != "1":
                 raise RuntimeError("Unsupported trace schema")
-            self.trace += [fields(entry) for entry in entries]
+            if self.trace is not None:
+                self.trace += [fields(entry) for entry in entries]
             if int(state["queued"]) == 0:
                 return state
         self.gap("trace_drain_budget_exhausted")
@@ -287,13 +288,25 @@ def tap(session, point, view, timeout=None):
                "view " + view, timeout)
 
 
+class Unsuitable(Exception):
+    """The starting state cannot support the scenario's assertions; the run is undecided, not failed."""
+
+
 def turn(session, key, step):
-    """One page turn; the frame must complete and the page number must move by exactly one."""
+    """One page turn; the frame must complete and the page number must move by exactly one.
+
+    A page shown from a restored or linked position can span two counted pages, so its number may
+    repeat or skip once. That start is unsuitable for exact page assertions; any other movement fails.
+    """
     before, _ = session.request("status")
     after = act(session, "key " + key, lambda state: state.get("pending") == "0" and state.get("view") == "reading"
                 and int(state["frame"]) > int(before["frame"]), key + " frame")
-    if after.get("frame_ok") != "1" or int(after["page"]) != int(before["page"]) + step:
+    moved = (int(after["page"]) - int(before["page"])) * step
+    if after.get("frame_ok") != "1" or moved not in (0, 1, 2):
         raise AssertionError(f"{key} moved page {before['page']} to {after['page']} or its frame failed")
+    if moved != 1:
+        raise Unsuitable(f"{key} showed page {after['page']} after {before['page']}: the position is not aligned with "
+                         "a counted page; start from a page reached by turning")
     return after
 
 
@@ -316,12 +329,18 @@ def reading_flow(session, book, rounds, turns):
     console refuses input while a frame is pending; that part stays a manual acceptance item.
     """
     long_wait = max(session.timeout, LONG_WAIT)
-    start, _ = session.request("status")
-    if start.get("view") != "reading":
-        return dict(status="skip", reason="Open the test book before starting")
-    start = wait_for(session, lambda s: settled(s) and int(s["pages"]) > 0, "saved idle page with a page count", long_wait)
+    # Open the named book so that every round, and the workload identity, refer to the same material.
+    act(session, "open " + book, lambda s: s.get("view") == "reading" and s.get("pending") == "0", "book opened", long_wait)
+    start = wait_for(session, lambda s: quiescent(s) and int(s["pages"]) > 0, "saved idle page with a page count", long_wait)
     if int(start["page"]) + turns > int(start["pages"]):
-        return dict(status="skip", reason="Start at least --turns pages before the end of the book")
+        return dict(status="skip", reason="The saved position is fewer than --turns pages before the end of the book")
+    try:
+        return rounds_of_reading(session, book, rounds, turns, start, long_wait)
+    except Unsuitable as exc:
+        return dict(status="inconclusive", reason=str(exc), start=start)
+
+
+def rounds_of_reading(session, book, rounds, turns, start, long_wait):
     def saved_after(previous, what):
         # The save follows a dwell; a position that is displayed but never saved is a failure, not a timeout.
         try:
@@ -392,6 +411,7 @@ def image_sync(session, book):
     saved revision that none of the three steps changed.
     """
     long_wait = max(session.timeout, LONG_WAIT)
+    session.trace = []  # bounded by this scenario's fixed sequence of steps
     opened = lambda s: s.get("view") == "reading" and s.get("pending") == "0" and s.get("saved") == "1"
     before = act(session, "open " + book, opened, "book opened at its saved position", long_wait)
 
@@ -449,6 +469,8 @@ def image_sync(session, book):
                   and s.get("view") in ("network_closing", "sync"), "sync cancelled", long_wait)
     tap(session, CONTINUE_OFFLINE if closing["view"] == "network_closing" else HEADER_BACK, "reading", long_wait)
     unchanged("the cancelled sync check")
+    # The image can finish before the cancelled request has unwound; its end must be inside the capture.
+    wait_for(session, lambda s: not open_operations(session.trace[mark:]), "cancelled sync request finished", long_wait)
     observation = image_observation(session)
     return dict(observation, before=before, sync_answer=answer) if observation["status"] == "pass" else observation
 
@@ -527,7 +549,7 @@ def image_observation(session):
 
 def analyze(output):
     """Conservative offline analysis. Missing starts/ends or drops invalidate percentiles."""
-    active, counts, samples = {}, Counter(), defaultdict(list)
+    active, counts, optional, samples = {}, Counter(), Counter(), defaultdict(list)
     gaps, last_seq, metric_active, failures = [], None, {}, 0
     event_count = 0
     last_queued = 0
@@ -544,6 +566,7 @@ def analyze(output):
                 # this measurement window. Active operations will need a new start event.
                 active.clear()
                 counts.clear()
+                optional.clear()
                 samples.clear()
                 metric_active.clear()
                 composition.clear()
@@ -607,8 +630,9 @@ def analyze(output):
                 else:
                     operations.append(dict(f, start_us=int(start["time_us"])))
                 result = int(f["result"])
-                optional = f["kind"] == "3" and int(f["detail"]) & PREFETCH
-                counts["optional_failure" if optional and result == 1 else OUTCOMES[result]] += 1
+                # Optional prefetches are tallied apart, so that neither their failures nor their
+                # successes move the verdict or the failure rate of the mandatory operations.
+                (optional if f["kind"] == "3" and int(f["detail"]) & PREFETCH else counts)[OUTCOMES[result]] += 1
                 composition[f'{f["kind"]}:{f["detail"]}:{result}'] += 1
                 samples[f["kind"]].append(int(f["duration_us"]))
     if cutoff is None:
@@ -629,8 +653,8 @@ def analyze(output):
                                    p95_us=None if gaps else percentile(values, .95),
                                    p99_us=None if gaps else percentile(values, .99))
     completed = sum(counts[k] for k in OUTCOMES)
-    return dict(counts={k: counts[k] for k in (*OUTCOMES, "optional_failure", "unfinished", "command_failure",
-                                               "command_timeout", "busy")},
+    return dict(counts={k: counts[k] for k in (*OUTCOMES, "unfinished", "command_failure", "command_timeout", "busy")},
+                optional={k: optional[k] for k in OUTCOMES},
                 gaps=sorted(set(gaps)), distributions=distributions, events=event_count,
                 composition=dict(composition), frame_failures=failures,
                 image_chains=image_evidence(operations), stale_image_patches=stale_image_patches(operations),

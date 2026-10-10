@@ -167,7 +167,7 @@ class WorkbenchTest(unittest.TestCase):
         self.assertEqual(self.finish()["counts"]["busy"], 1)
 
     def test_reading_flow_rejects_skips_unsaved_turns_drift_and_leaks(self):
-        for fault, message in ((dict(skip=1), "moved page"), (dict(unsaved=1), "saved revision did not advance"),
+        for fault, message in ((dict(skip=2), "moved page"), (dict(unsaved=1), "saved revision did not advance"),
                                (dict(drift=1), "reverting the font size"), (dict(leak=5000), "internal RAM fell")):
             with self.subTest(fault=fault):
                 self.output = Path(self.temp.name) / ("run-" + str(len(list(Path(self.temp.name).iterdir()))))
@@ -184,10 +184,24 @@ class WorkbenchTest(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "neither font-size step"):
             reading_flow(self.start(Serial(Reader(largest=0, smallest=0))), "Books/t.epub", 1, 1)
         self.finish()
+        # A page number that repeats or skips once marks a start that is not aligned with a counted page.
+        self.output = Path(self.temp.name) / "unaligned"
+        result = reading_flow(self.start(Serial(Reader(skip=1))), "Books/t.epub", 1, 1)
+        self.assertEqual(result["status"], "inconclusive")
+        self.assertIn("not aligned with a counted page", result["reason"])
+        self.finish()
+        # The scenario opens the named book itself, wherever the device was; too close to the end is a skip.
         self.output = Path(self.temp.name) / "library"
         reader = Reader()
         reader.state["view"] = "library"
+        self.assertEqual(reading_flow(self.start(Serial(reader)), "Books/t.epub", 1, 1)["status"], "pass")
+        self.assertEqual(reader.opens, 2)
+        self.finish()
+        self.output = Path(self.temp.name) / "end"
+        reader = Reader()
+        reader.state["page"] = 20
         self.assertEqual(reading_flow(self.start(Serial(reader)), "Books/t.epub", 1, 1)["status"], "skip")
+        self.finish()
         self.assertEqual(trend_check([dict(internal=9000), dict(internal=5000), dict(internal=9000)]), 4000)
 
     def test_image_sync_cancels_in_https_and_requires_chain_and_position(self):
@@ -264,7 +278,9 @@ class WorkbenchTest(unittest.TestCase):
         self.cutoff(4)
         self.finish()
         run = finalize(self.output, {}, dict(status="pass"))
-        self.assertEqual((run["analysis"]["counts"]["optional_failure"], run["analysis"]["counts"]["failure"]), (1, 0))
+        # Optional prefetches stay out of the mandatory counters and of the failure rate, whatever their outcome.
+        self.assertEqual((run["analysis"]["optional"]["failure"], run["analysis"]["counts"]["failure"]), (1, 0))
+        self.assertEqual((run["analysis"]["counts"]["success"], run["analysis"]["failure_rate"]), (1, 0))
         self.assertEqual(run["result"]["status"], "pass")
 
     def image_trace(self, *, overlap=True, content_result=0, patch_result=0, frame_result=0,
