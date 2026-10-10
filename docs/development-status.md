@@ -2,6 +2,8 @@
 
 ## 当前摘要（2026-10-11）
 
+分支 `fix/workload-font-size` 的 `c9d6a49` 已完成本地评审：自动场景的 workload 标识加入字号，防止起始字号不同的运行被误判为可比较。Python 工作台测试 36/36，CTest 工作台入口 1/1，441 项交接检查通过；补充比较验证确认不同字号、不同 anchor 和缺少字号的旧标识均不可比较。本批只检查主机工具，未构建或烧录固件，未新增真机验收证据。
+
 左右轻扫翻屏/翻页已完成本地候选，基于 `718f376`，分支 `feat/swipe-pagination`。松手按 60 px、700 ms 和约 30° 判定；左滑下一页、右滑上一页，书库长按需在 28 px 范围内松手确认，正文图片长按路径保留。页脚控件、默认按键和进度保存规则不变。host Debug 与 AppleClang ASan/UBSan 各 18/18（含异步应用、列表/卡片与多屏目录），标准与 Diagnostic 固件构建、441 项交接检查均通过；PR 结果见本批记录。未烧录，真机 IN09 待验证。
 
 ### 诊断工作台与回归场景（Issue #37）
@@ -4398,3 +4400,12 @@ D14 核对：原代码只识别 K1/K3 与正文侧区点按，未识别非触摸
 - 第四轮评审（三项，均成立，`e788a48`）：重开后的位置应以源位置而不是页码核对；同步检查因网络或服务不可用失败时应保持不可判定；字号还原应直接断言。固件 `status` 新增 `anchor`（已保存位置的资源、节点与偏移的 CRC32）和 `font_px`，对应访问器同样只在 host 和带诊断控制台的固件中定义，Release 仍为 3,370,496 B。场景 2 比较 anchor、字号、保存修订和页码；场景 1 的位置保护同时比较 anchor；前提未满足的失败操作列为 excused，其他失败仍按规则判定。Python 测试 45/45，host Debug CTest 18/18。在干净提交 `e788a48` 上重建诊断固件（3,406,512 B，SHA-256 `c99f375654bb2b6a2eae0bc05ab0d5d4502544746f3b466f84af355bcefa11c8`），核对设备身份与布局后写入并通过摘要校验。该镜像上 `reading-flow`（3 轮、每向 4 页）pass，1,000 个事件，三轮内部 RAM 均为 98,179 B，起止 anchor 相同、字号 46 px、保存修订 301 至 325；`image-sync` 2 轮均 pass，同步结果 different，保存修订 330 和 anchor 不变，未出现欠载。来源核验通过，设备现装此镜像。证据在 `.local/runs/reading-flow-final-09/` 与 `.local/runs/image-sync-final-09-*`。本轮未运行 sanitizer 配置，由 CI 覆盖。
 - 第五轮评审（两项，均成立，`885c582`）：workload 标识加入起始位置的 anchor；`image-sync` 要求被取消的请求以 cancelled 结束，否则为 inconclusive。只改主机工具、测试和文档，Python 测试 45/45。未重新烧录：在已安装的 `e788a48` 诊断镜像上用新工具各跑一轮，两个场景的断言均通过，但因当前源码与镜像的构建来源不符，报告结果为 inconclusive，不计为新的通过证据；`image-sync` 该轮的被取消请求终态为 cancelled，workload 标识带有 anchor。证据在 `.local/runs/image-sync-final-10/` 与 `.local/runs/reading-flow-final-10/`。
 - 第六轮评审（三项，均成立，`e323ea3`）：向后翻页后的保存须确认 anchor 已离开起始位置，翻回后的保存须回到起始 anchor；多轮内存检查加入内部 RAM 最大连续块（比首轮小超过 8,192 B 判为失败）；当前摘要不应把较早版本的通过当作最终场景定义的证据。Python 测试 45/45。在干净提交 `e323ea3` 上重建诊断固件（3,406,512 B，SHA-256 `a7ce6267d4f08e6be7fcb4307e0bf58c0c945b481533fd341f0bba0aa44bb49b`），核对设备身份与布局后写入并通过摘要校验。该镜像上 `reading-flow`（3 轮、每向 4 页）pass，1,000 个事件，66 帧以上的驱动帧 p50/p95/最大为 540/622/1,582 ms，三轮内部 RAM 均为 98,179 B、最大连续块均为 51,200 B，起止 anchor 相同，保存修订 351 至 375；`image-sync` 2 轮均 pass，同步结果 different，被取消的请求终态为 cancelled，保存修订 380 与 anchor 不变，其中 1 轮出现一次欠载并由重试恢复。来源核验通过，运行条件齐全，设备现装此镜像。证据在 `.local/runs/reading-flow-final-11/` 与 `.local/runs/image-sync-final-11-*`。当前摘要已改为按提交说明验证范围。
+
+
+## 2026-10-11 · 工作负载字号标识评审
+
+- 范围：评审分支 `fix/workload-font-size` 的 `c9d6a49`，基线为 main `d2762ba`。读取工作台场景、状态解析、元数据生成、最终比较、相关测试及固件诊断状态字段；未发现阻碍推送的缺陷。原实现提交未修改，本批仅补记评审结果。
+- 行为：`workload_place()` 在页码、总页数和 anchor 后加入 `font_px`；`reading-flow` 使用起始状态，`image-sync` 使用场景末尾确认状态。`compare()` 继续要求完整证据和一致的 workload。缺少字号的旧标识与新标识不可比较；这不构成旧报告内容的重新验收。
+- 命令与结果：macOS、Python 3.14.7；`python3 -m unittest discover -s tests -p test_device_workbench.py -v` 为 36/36；`ctest --test-dir build/host -N` 注册 18 项，本批仅运行 `ctest --test-dir build/host -R '^device_workbench$' --output-on-failure`，1/1 通过；`python3 tools/check_handoff.py` 为 441 项通过；`git diff --check main...HEAD` 通过。临时 JSON 比较检查确认同状态可比较，不同字号、不同 anchor、缺少字号的旧标识均不可比较；未新增持久测试文件。
+- 执行与资源：主机 CLI 在场景返回结果后生成包含少量字段的后缀；每次运行一次，没有新增设备任务、I/O、等待或固件内存占用。既有失败、取消及不可判定路径保持原有结果和证据收尾规则。
+- 未测与下一步：本批未运行完整 host CTest、sanitizer 或固件构建，未烧录或操作设备，没有新增性能或 KOReader 接续结论。推送并创建 PR 后，由 Linux CI 覆盖完整 host 和 sanitizer 检查。
