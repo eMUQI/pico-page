@@ -230,6 +230,52 @@ def percentile(samples, p):
     return sorted(samples)[max(0, math.ceil(len(samples) * p) - 1)]
 
 
+def image_evidence(operations):
+    """Join decoded content, adopted pixels and the independently completed driver frame."""
+    images = [op for op in operations if op["kind"] == "3" and op["detail"] == "2"]
+    networks = [op for op in operations if op["kind"] == "2"]
+    frames = [op for op in operations if op["kind"] == "0" and op["detail"] == "1"]
+    chains = []
+    for patch in (op for op in operations if op["kind"] == "4"):
+        content = next((op for op in images if all(op[k] == patch[k] for k in ("session", "layout", "request"))
+                        and op["result"] == "0" and int(op["time_us"]) <= patch["start_us"]), None)
+        frame = next((op for op in frames if op["request"] == patch["frame"]
+                      and op["start_us"] >= int(patch["time_us"])), None)
+        overlap = [] if content is None else [op["op"] for op in networks
+            if max(op["start_us"], content["start_us"]) < min(int(op["time_us"]), int(content["time_us"]))]
+        confirmed = bool(content and frame and patch["result"] == frame["result"] == "0"
+                         and int(patch["session"]) > 0 and int(patch["layout"]) > 0)
+        chains.append(dict(content_op=content["op"] if content else None, patch_op=patch["op"],
+                           frame_op=frame["op"] if frame else None, frame=frame["frame"] if frame else None,
+                           session=patch["session"], layout=patch["layout"], generation=patch["request"],
+                           decoded_images=int(patch["detail"]), network_ops=overlap, confirmed=confirmed))
+    return chains
+
+
+def image_network_check(analysis, observation):
+    if observation.get("status") != "pass":
+        return observation
+    chains = [chain for chain in analysis.get("image_chains", [])
+              if chain["confirmed"] and chain["decoded_images"] > 0 and chain["network_ops"]
+              and chain["frame"] == observation["after"]["frame"]]
+    if not chains:
+        return dict(status="inconclusive", reason="No decoded image/network overlap linked to the captured frame",
+                    observation=observation)
+    return dict(observation, scope="decoded_image_network_overlap_canvas_and_driver_only", evidence=chains)
+
+
+def image_observation(session):
+    after, _ = session.request("status")
+    if (after.get("view") != "reading" or after.get("frame_ok") != "1" or after.get("saved") != "1"
+            or any(after.get(k) != "0" for k in ("pending", "content_busy", "save_busy", "save_due"))):
+        return dict(status="inconclusive", reason="End on a saved, idle image page with a successful frame", after=after)
+    session.capture(session.output / "canvas.pgm")
+    confirmed, _ = session.request("status")
+    if any(after.get(k) != confirmed.get(k) for k in ("frame", "crc32", "revision", "view")):
+        return dict(status="inconclusive", reason="Page changed during canvas capture", after=confirmed)
+    return dict(status="pass", after=after)
+
+
 def analyze(output):
     """Conservative offline analysis. Missing starts/ends or drops invalidate percentiles."""
     active, counts, samples = {}, Counter(), defaultdict(list)
@@ -240,6 +286,7 @@ def analyze(output):
     dropped_baseline = tx_baseline = 0
     cutoff = None
     composition = Counter()
+    operations = []
     with (Path(output) / "events.jsonl").open() as stream:
         for line in stream:
             event = json.loads(line)
@@ -251,6 +298,7 @@ def analyze(output):
                 samples.clear()
                 metric_active.clear()
                 composition.clear()
+                operations.clear()
                 cutoff = None
                 last_seq = event["sequence"]
                 event_count = failures = 0
@@ -287,7 +335,7 @@ def analyze(output):
             event_count += 1
             sequence, operation = int(f["seq"]), int(f["op"])
             if (sequence <= 0 or operation <= 0 or f["begin"] not in ("0", "1") or
-                    not 0 <= int(f["kind"]) < 4 or not 0 <= int(f["result"]) < len(OUTCOMES) or
+                    not 0 <= int(f["kind"]) < 5 or not 0 <= int(f["result"]) < len(OUTCOMES) or
                     int(f["time_us"]) < 0 or int(f["duration_us"]) < 0):
                 raise ValueError("Invalid structured event fields")
             if last_seq is not None and sequence != last_seq + 1:
@@ -303,6 +351,10 @@ def analyze(output):
                     gaps.append("operation_start_missing")
                 elif any(start[k] != f[k] for k in ("kind", "session", "layout", "frame", "request", "detail")):
                     gaps.append("operation_context_changed")
+                elif int(f["time_us"]) < int(start["time_us"]):
+                    gaps.append("operation_time_reversed")
+                else:
+                    operations.append(dict(f, start_us=int(start["time_us"])))
                 result = int(f["result"])
                 counts[OUTCOMES[result]] += 1
                 composition[f'{f["kind"]}:{f["detail"]}:{result}'] += 1
@@ -327,7 +379,9 @@ def analyze(output):
     completed = sum(counts[k] for k in OUTCOMES)
     return dict(counts={k: counts[k] for k in (*OUTCOMES, "unfinished", "command_failure", "command_timeout")},
                 gaps=sorted(set(gaps)), distributions=distributions, events=event_count,
-                composition=dict(composition), frame_failures=failures, failure_rate=counts["failure"] / completed if completed else None)
+                composition=dict(composition), frame_failures=failures,
+                image_chains=image_evidence(operations),
+                failure_rate=counts["failure"] / completed if completed else None)
 
 
 def finalize(output, metadata, result):
@@ -342,6 +396,8 @@ def finalize(output, metadata, result):
             result = dict(status="inconclusive", reason="Incomplete evidence or run conditions", assertion=result)
         elif analysis["counts"]["failure"] or analysis["counts"]["timeout"] or analysis["counts"]["command_failure"] or analysis["frame_failures"]:
             result = dict(status="fail", reason="Failure observed during the run", assertion=result)
+    if metadata.get("mode") == "image-network":
+        result = image_network_check(analysis, result)
     run = dict(schema=1, metadata=metadata, result=result, analysis=analysis)
     write_json(output / "run.json", run)
     marks = [json.loads(line) for line in (output / "marks.jsonl").read_text().splitlines()]
@@ -431,7 +487,7 @@ def main():
     parser.add_argument("--metadata", type=Path, help="Private JSON: hardware, tf, books_sha256, cache, network, device_build_verified")
     parser.add_argument("--firmware", type=Path, help="Build directory containing bin, ELF and effective sdkconfig")
     parser.add_argument("--timeout", type=float, default=15)
-    parser.add_argument("--mode", choices=("manual", "refresh"), default="manual")
+    parser.add_argument("--mode", choices=("manual", "refresh", "image-network"), default="manual")
     args = parser.parse_args()
     if args.compare:
         print(json.dumps(compare(*args.compare), ensure_ascii=False, indent=2))
@@ -456,6 +512,9 @@ def main():
             result = refresh_scenario(session)
         else:
             print("Recording. Enter 'mark short description' to mark a problem; 'end' to finish.")
+            if args.mode == "image-network":
+                print("Use the device to overlap image loading with network sync, then return to the saved image page. "
+                      "Missing overlap is inconclusive; sync correctness and physical display require separate acceptance.")
             while True:
                 ready, _, _ = select.select([sys.stdin], [], [], .25)
                 if ready:
@@ -465,6 +524,8 @@ def main():
                     if command.startswith("mark"):
                         session.mark(command[4:].strip())
                 session.drain()
+            if args.mode == "image-network":
+                result = image_observation(session)
         session.cutoff()
     except AssertionError as exc:
         result = dict(status="fail", reason=str(exc))

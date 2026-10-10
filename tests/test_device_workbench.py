@@ -7,7 +7,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from device_workbench import Session, analyze, compare, finalize, refresh_check, refresh_scenario, metadata_for
+from device_workbench import (Session, analyze, compare, finalize, refresh_check, refresh_scenario,
+                              metadata_for, image_observation)
 
 
 class Serial:
@@ -48,6 +49,55 @@ def trace(seq, op=1, begin=1, result=0):
 
 
 class WorkbenchTest(unittest.TestCase):
+    def image_trace(self, *, overlap=True, content_result=0, patch_result=0, frame_result=0,
+                    decoded=1, generation=4, frame_request=9):
+        session = self.start()
+        # Arrival order follows device monotonic time, including the independent network worker.
+        events = [(1, 3, 1, 100, 0, 0, 4, 2), (2, 2, 1, 150 if overlap else 210, 0, 0, 8, 0),
+                  (1, 3, 0, 200, content_result, 0, 4, 2), (2, 2, 0, 300, 0, 0, 8, 0),
+                  (3, 4, 1, 310, 0, 9, generation, decoded), (3, 4, 0, 320, patch_result, 9, generation, decoded),
+                  (4, 0, 1, 330, 0, 22, frame_request, 1), (4, 0, 0, 400, frame_result, 22, frame_request, 1)]
+        for seq, (op, kind, begin, timestamp, result, frame, request, detail) in enumerate(sorted(events, key=lambda e: e[3]), 1):
+            session._line(f"PP 1 ENTRY seq={seq} time_us={timestamp} op={op} duration_us=10 task=7 "
+                          f"kind={kind} begin={begin} result={result} session=1 layout=2 frame={frame} request={request} detail={detail}")
+        self.cutoff(8)
+        self.finish()
+
+    def test_image_network_chain_requires_decode_adoption_and_matching_frame(self):
+        self.image_trace()
+        run = finalize(self.output, dict(mode="image-network"), dict(status="pass", after=dict(frame="22")))
+        self.assertEqual(run["result"]["status"], "pass")
+        self.assertEqual(run["result"]["evidence"][0]["network_ops"], ["2"])
+        self.assertEqual(finalize(self.output, dict(mode="image-network"),
+                                 dict(status="pass", after=dict(frame="23")))["result"]["status"], "inconclusive")
+
+    def test_image_network_missing_failed_or_stale_evidence_cannot_pass(self):
+        for changes in (dict(overlap=False), dict(content_result=2), dict(patch_result=1),
+                        dict(frame_result=1), dict(decoded=0), dict(generation=5), dict(frame_request=10)):
+            with self.subTest(changes=changes):
+                self.output = Path(self.temp.name) / ("run-" + str(len(list(Path(self.temp.name).iterdir()))))
+                self.image_trace(**changes)
+                run = finalize(self.output, dict(mode="image-network"), dict(status="pass", after=dict(frame="22")))
+                self.assertNotEqual(run["result"]["status"], "pass")
+
+    def test_image_observation_requires_idle_and_unchanged_capture(self):
+        state = dict(view="reading", frame_ok="1", saved="1", pending="0", content_busy="0",
+                     save_busy="0", save_due="0", frame="22", revision="3", crc32="abcd")
+        def reply(port, command):
+            _, ident, verb = command
+            self.assertEqual(verb, "status")
+            port.feed((f"PP {ident} OK " + " ".join(f"{k}={v}" for k, v in state.items()) + "\n").encode())
+        session = self.start(Serial(reply))
+        with patch.object(session, "capture"):
+            self.assertEqual(image_observation(session)["status"], "pass")
+        state["content_busy"] = "1"
+        with patch.object(session, "capture") as capture:
+            self.assertEqual(image_observation(session)["status"], "inconclusive")
+            capture.assert_not_called()
+        state["content_busy"] = "0"
+        with patch.object(session, "capture", side_effect=lambda _: state.update(frame="23")):
+            self.assertEqual(image_observation(session)["status"], "inconclusive")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.output = Path(self.temp.name) / "run"

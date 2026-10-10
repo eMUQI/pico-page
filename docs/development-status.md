@@ -1,5 +1,7 @@
 # 开发状态
 
+2026-10-10 Issue #37 阶段 C 第一批候选已完成：正文图片任务、画布采用与驱动帧建立关联，工作台增加人工操作下的图片/网络交叠证据检查。host Debug 与开启埋点的 ASan/UBSan 各 18/18，Python 工作台 24/24，三模式及标准固件构建均通过；Release 无诊断符号。基于已合并的 PR #38（main `5f22009`），本批未烧录或操作设备；完整场景编排、同步位置保护、场景 2 和真机 A/B 仍待推进。详情见本日「Issue #37：图片采用与网络交叠证据」记录。
+
 2026-10-10 PR #38 的五项评审意见已在本地修正；host Debug 与开启埋点的 ASan/UBSan 各 18/18，四个固件构建入口通过。诊断固件已烧录至实测 ota_0 并通过写入摘要校验；合成 EPUB 的真实 K2 工作台回归通过，另确认截止后业务继续刷新而记录器保持冻结。未推送或合并；屏幕与实体输入、Release/Performance 真机 A/B 及阶段 C 场景待验收。详情见本日「PR #38 评审修正与真机工作台验证」记录。
 
 2026-10-10 Issue #37 首批 A+B 候选已完成：Release/Performance/Diagnostic 编译隔离、有界操作计数与事件、持续串口采集、人工标记及 K2 全刷状态回归。host Debug 与开启埋点的 ASan/UBSan/LSan 各 18/18，三种固件模式和原标准入口均构建通过；Release ELF 无诊断记录器/调用符号。未烧录，实机开销及图片/同步交叠场景未验收。用法见 [诊断工作台](diagnostic-workbench.md)，证据见本日记录。
@@ -4153,3 +4155,14 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
 - 截止补测：报告结束后再通过正常 K2 路由刷新，实际帧 4→5，但冻结的 sequence=2、queued=0、stopped=1 保持不变。设备停在合成测试书，未执行网络或同步操作。采样的内部 RAM 历史最低剩余 56,256 B、PSRAM 3,979,328 B；应用最低余栈 8,176 B、输入 2,080 B，仅为本轮现场，不代表所有场景峰值。
 - 私有证据：安装元数据、校验、状态与截止补测位于 `.local/device/install/pr38-20261010/`；完整工作台报告、原始流、事件及画布位于 `.local/runs/pr38-k2-20261010-01/`。源码为本地未提交候选，报告同时保留内容摘要；TF 型号未记录，不将本轮作为跨设备性能基线。
 - 下一步：阶段 C 两组高风险场景（正文图片与同步/取消/返回交叠；连续翻页、改字号、重开恢复）仍待实现；需要同条件 Release/Performance 真机 A/B、USB 停读/断连、真实网络超时分类和长期资源趋势验证。物理屏幕、残影、实体按键/触摸、功耗、休眠/USB 交接和实际 KOReader 往返未在本批验收。
+
+## 2026-10-10 · Issue #37：图片采用与网络交叠证据
+
+- 范围：从干净的 main `5f22009` 在当前 checkout 建立 `feat/image-workbench-evidence`，不创建 worktree。远端 PR #38 已合并；上方该 PR 的历史记录保留当时状态。本批作为阶段 C 场景 1 的第一部分，保留 issue 开放，不宣称完成完整回归工作台。
+- 实现：渐进图片 Content 事件携带来源正文 session/layout；新增 ImagePatch，关联内容 generation、UI frame request 和本次成功解码数。只在原有身份检查通过后记录像素采用；失败图片的提示画布不记为图片成功。工作台将成功 Content、同代次 ImagePatch、后续 Overlay Frame 和当前截图帧联结，按设备单调时间检查图片任务与网络任务是否实际交叠。内容时间包含排队，网络时间包含联网/校时/HTTP 包装，不表示两者一直同时使用 CPU。缓存命中没有解码数，不满足本入口的冷解码断言。
+- 使用：`tools/device_workbench.py --mode image-network` 沿用人工开始/标记/结束及安全只读采集，通过实体界面操作制造交叠；结束时要求已保存且空闲的正文，校验画布并复查帧/CRC/修订/视图。没有交叠、错帧、取消内容、缺失证据或未完成任务不能通过。用法、结果字段及验收限制已更新至 `docs/diagnostic-workbench.md`。没有新增固件控制命令、绕过忙态或写入 TF 的主机入口。
+- 执行上下文与预算：既有内容 worker 记录成功解码数，应用任务记录像素采用，原平台路径独立记录驱动结果。没有新任务、栈、队列、串口热点输出、动态诊断分配或取消等待。开启配置增加请求上的两个 64 位代次、结果上的 32 位计数和应用上的两个 64 位代次（实际结构大小含对齐）；局部刷新记录另有一个固定 Token 临时值。Xtensa ELF 中记录器为 Performance 352 B、Diagnostic 6,000 B，事件容量仍为 64。Release 宏删除字段、参数求值和调用，ELF、reader_core/reader_app archive 均无 `pico_page::diagnostics::` 符号。新临界区仍仅固定数据更新，最长不可取消时间、实际峰值 RAM/栈和运行时开销待真机测量；溢出只降低证据完整性，不改变阅读或保存路径。
+- host 验证：macOS arm64、AppleClang 21。`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、构建、`ctest -N` 和完整 CTest 18/18（含 Node）通过；原异步应用图片回归新增采用成功、失败画布、代次/帧号关联及切书后无旧采用事件断言。`build/sanitized` 显式开启 `PICO_PAGE_HOST_TRACE_EVENTS=ON`，ASan/UBSan 完整 CTest 18/18。Python 工作台 24/24，覆盖实际区间交叠、未交叠、取消、失败帧、错误代次/帧号、缓存不冒充解码、截图期间变帧及原有串口故障。未使用本机 LSan；Linux CI 的 sanitizer 配置已开启共享埋点并保留 LSan 要求。
+- 固件验证：复用 EIM 管理的 ESP-IDF 6.1（commit `fff9895c82d744c7237be8847347bdd1b07c6643`，保留既有链接脚本修改）和 BSP `5f3406deec33304de8801046db583dec7c49e55b`。通过 EIM 激活后依次执行 `sh tools/build_firmware.sh release`、`performance`、`diagnostic` 和无参数标准入口，全部通过。核对三个生成的 sdkconfig.h：Release 关闭控制台/metrics/trace，Performance 仅 metrics，Diagnostic 三者开启。日志位于 `.local/issue37-c-firmware.log`，host 与 sanitizer 构建日志位于同目录的 `issue37-c-host.log` 和 `issue37-c-sanitized.log`。保留原有组件私有 include、Kconfig 和 Homebrew dylib 目标版本告警。
+- 资料检查：`python3 tools/check_handoff.py` 423 项通过，`git diff --check` 通过。固件来源文件描述构建时的未提交源码快照；本条后补的交接文字不冒充已安装设备的来源证据。
+- 未测与下一步：本批没有烧录、重置或操作设备，没有导入书籍或改动真实卡/网络账户。本轮网络交叠报告来自受控协议回归，不能代替真实设备采集。EP06、DP05、WIFI02 的物理行为、图片内容编号核对、同步位置不被覆盖的独立断言、自动场景编排、场景 2（连续翻页/字号/重开）、Release/Performance 同条件 A/B 和真实 KOReader 往返仍未验收。下一批在隔离测试卡和受控服务上完成真实交叠采集，并补同步/位置状态断言；安装需单独授权和设备核对。
