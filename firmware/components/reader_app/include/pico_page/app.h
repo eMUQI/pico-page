@@ -249,6 +249,7 @@ class ReaderApp {
      * Diagnostic name of the sync panel's last result: "unchecked", "no-record", "same", "different",
      * "unmapped", "uploaded", "uncertain", "unauthorized", "failed", "link-failed" or "config-changed".
      * Starting a check resets it to "unchecked" until the answer is applied. The string is static.
+     * Defined for host builds and for firmware with the diagnostic console.
      */
     const char *sync_state() const;
     CacheUsage cache_usage() const;
