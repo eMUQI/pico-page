@@ -6696,6 +6696,15 @@ bool ReaderApp::background_due() const {
     return !!impl_->cover_job || impl_->pending_covers.has_value() || !!impl_->raster_job || !!impl_->counting_job ||
            impl_->prefetch_due() || impl_->counting_due();
 }
+#if !defined(ESP_PLATFORM) || defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
+// Only the diagnostic console reads this; other firmware builds do not carry the name table.
+const char *ReaderApp::sync_state() const {
+    static constexpr const char *names[] = {"unchecked", "no-record", "same", "different", "unmapped", "uploaded",
+                                            "uncertain", "unauthorized", "failed", "link-failed", "config-changed"};
+    return names[static_cast<unsigned>(impl_->sync_state)];
+}
+int ReaderApp::font_size_px() const { return impl_->settings.font_size_px; }
+#endif
 const char *ReaderApp::background_state() const {
     if (impl_->inline_image_pending) return "image";
     if (impl_->content_loading) {

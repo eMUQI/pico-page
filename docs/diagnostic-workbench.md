@@ -41,7 +41,7 @@ sh tools/build_firmware.sh diagnostic
 
 每项聚合保存 started、active、四类终态数、所有终态的 total_us/max_us。未完成操作保留 active。时间单位是设备单调微秒，父子操作的墙钟不能相加。资源低水位在显式 metrics 查询时读取 ESP-IDF 已有的内部 RAM/PSRAM 历史最低余量。internal_min 是各内部堆（含 `CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL` 储备池）各自历史最低值之和，各堆的最低值出现在不同时刻，因此它不是某一时刻的总余量，也不能与 `internal` 剩余量直接相减来估算瞬时占用；需要瞬时值时按堆分别读取；status 仍可查询连续块和应用/输入任务余栈。不在每次操作结束时扫描任务栈；内容和网络任务最低余栈仍需调试器或旧诊断配置专项采样。
 
-事件含 seq、time_us、op、duration_us、task、kind、begin、result、session、layout、frame、request、detail。op 和 seq 是本次启动单调递增 ID；任务 ID 是固件任务句柄的整数表示。Frame 携带原始会话/排版代次、实际呈现序号和 frame token request，detail 为 FramePurpose。Content 的 request 是内容 generation，detail 为 ContentJob::Kind；Network 的 request 是网络操作 ID，Input 是实体输入序号。没有来源的上下文填 0，不伪造书籍/排版身份，不输出书名、路径或正文。
+事件含 seq、time_us、op、duration_us、task、kind、begin、result、session、layout、frame、request、detail。op 和 seq 是本次启动单调递增 ID；任务 ID 是固件任务句柄的整数表示。Frame 携带原始会话/排版代次、实际呈现序号和 frame token request，detail 为 FramePurpose。Content 的 request 是内容 generation，detail 为 ContentJob::Kind，可选的预取任务再加 256；Network 的 request 是网络操作 ID，Input 是实体输入序号。没有来源的上下文填 0，不伪造书籍/排版身份，不输出书名、路径或正文。
 
 渐进图片 Content（detail=2）另携带来源正文的 session/layout。ImagePatch 沿用这些代次和内容 generation，frame 是局部刷新使用的 UI token request，可与后续 Frame 的 request 关联；不是物理呈现序号。detail 是本次任务成功解码的图片数；灰阶缓存命中为 0，不能据此声称本轮执行了解码。失败图片的提示画布仍会提交，但 ImagePatch 为 failure。旧结果在现有身份检查处被拒绝，不产生 ImagePatch。开启配置在现有请求上增加固定标量，不新增任务、队列、I/O 或等待；关闭配置删除这些字段和记录调用。
 
@@ -53,7 +53,7 @@ sh tools/build_firmware.sh diagnostic
 - `PP <id> trace`：取出最多 8 个事件作为 ENTRY，OK 返回上述队列/丢失状态。耗时与输出发生在显式命令处理时，不在事件写入路径中。
 - `PP <id> trace_start`：在记录器临界区中开始新窗口，清空旧计数和事件；此前的任务 token 不计入新窗口。`trace_stop` 在同一临界区冻结事件与计数并返回含 `stopped=1` 的 metrics。仍在执行的业务任务正常继续，但在截止点计为 unfinished；后续操作不进入该窗口。主机收到截止序号后排空到该序号，才结束采集。
 - metrics 与 trace 的整次响应共用 20 ms 传输等待预算；计入 IDF 驱动对 TX 互斥锁和环形缓冲的两次等待。超出后非阻塞发送，失败计入 tx_failures；该预算不包含任务被抢占和格式化的墙钟时间。
-- status 新增 content_busy、save_busy、save_due。pending=0 只说明无待呈现帧。
+- status 新增 content_busy、save_busy、save_due、已保存位置的身份 anchor（资源、节点与偏移的 CRC32，不输出路径或正文）、生效正文字号 font_px，以及同步面板最近一次结果 sync（unchecked、no-record、same、different、unmapped、uploaded、uncertain、unauthorized、failed、link-failed、config-changed；开始检查时回到 unchecked）。pending=0 只说明无待呈现帧。
 
 `status/metrics/trace/trace_start/trace_stop/screen/ls/file` 是观察命令，不重置主循环空闲计时；否则连续采集会阻止延迟保存、分页和休眠。它们仍可能占用串口和 CRC 计算时间，Diagnostic 性能不等同于 Performance。保留原 `PP 0 FRAME` 主动通知和所有已有导入安全限制。trace 导出失败仍通过 tx_failures 和序号缺口暴露，不能悄悄丢失后显示通过。
 
@@ -100,15 +100,59 @@ python3 tools/device_workbench.py --port /dev/ttyACM0 \
 
 每轮生成 run.json、serial.bin、chunks.jsonl、events.jsonl、marks.jsonl、mark-windows.json、report.html；自动检查成功时另存 canvas.pgm。chunks.jsonl 的 offset/size 精确指向原始字节区间，并保存主机单调时间和 UTC 纳秒时间。报告可离线打开。输出路径必须不存在，工具不会覆盖已有证据。
 
-状态分 pass、fail、skip、inconclusive、infra_error。聚合分别列成功、失败、取消、超时和未完成；命令失败/超时与操作终态分开。发现漏事件、溢出、未完成操作、设备重启或缺元数据，不显示全绿。完整事件样本才给 p50/p95/p99；有缺口时分位数为 null。当前分布按 kind 汇总所有终态（包含失败和取消），应同时查看样本数、max_us 和失败率，不能当成单一图片类型的成功耗时。旧的阈值阶段日志仅原样留存，不纳入新分布。
+状态分 pass、fail、skip、inconclusive、infra_error。聚合分别列成功、失败、取消、超时和未完成；命令失败/超时与操作终态分开。设备在有待呈现帧时拒绝注入输入并回复 `ERROR busy`，这是忙态保护，单独计入 busy，不算命令失败。预取任务（detail 含 256）的所有终态单独计入 `analysis.optional`，不进入 counts 和失败率：它的失败只降低缓存命中率，不使结果变为 fail，但会显示在报告中。发现漏事件、溢出、未完成操作、设备重启或缺元数据，不显示全绿。完整事件样本才给 p50/p95/p99；有缺口时分位数为 null。当前分布按 kind 汇总所有终态（包含失败和取消），应同时查看样本数、max_us 和失败率，不能当成单一图片类型的成功耗时。旧的阈值阶段日志仅原样留存，不纳入新分布。
 
 ```sh
 python3 tools/device_workbench.py --compare .local/runs/base/run.json .local/runs/new/run.json
 ```
 
-比较要求已核验的构建来源、固定脚本身份（当前为 `refresh-v1:K2x1`）以及相同 kind/detail/终态样本数量；自由人工操作没有固定工作负载，不能标为可比。另检查测试条件、dirty 状态和除四个诊断开关外的 sdkconfig；不一致、缺字段、无样本或有证据缺口会提示不可比。保留两边源码 commit 和原始统计，并用 same_source 区分同源码配置 A/B 与跨版本比较；不会把跨版本差异直接归因于诊断开关。
+比较要求两轮结果均为 pass、已核验的构建来源、固定脚本身份（`refresh-v1:K2x1`，自动场景另含书籍路径、起始页和起始位置的 anchor，例如 `reading-flow-v1:rounds=3,turns=4:book=…:page=7/12:anchor=8dccb332`）以及相同 kind/detail/终态样本数量；自由人工操作没有固定工作负载，不能标为可比。另检查测试条件、dirty 状态和除四个诊断开关外的 sdkconfig；不一致、缺字段、无样本或有证据缺口会提示不可比。保留两边源码 commit 和原始统计，并用 same_source 区分同源码配置 A/B 与跨版本比较；不会把跨版本差异直接归因于诊断开关。
 
 原始日志可能含路径、服务地址等隐私。结果默认放在已忽略的 `.local/` 下；不要将真实日志、书籍内容、账号或完整 sdkconfig 未经检查提交仓库。
+
+## 自动场景
+
+两个入口都通过现有诊断口的 `open`、`tap`、`key` 走正常应用路由，按状态和事件等待，不使用固定 sleep，也不绕过忙态保护。每次点击后核对结果视图；点击位置取自当前源码中 684×1216 布局的控件中心，布局变更后需同步更新 `tools/device_workbench.py` 顶部的常量，否则运行会因视图不符而超时结束。`--book` 是测试卡上合成测试 EPUB 的相对路径。只在合成测试书上运行：场景会翻页、保存进度并改动该书的单书排版设置。场景中途失败或超时时不做清理，设备可能停在同步页或保留加大一档的字号，下一轮开始前需人工确认状态。
+
+### 场景 1：图片加载与同步交叠（`--mode image-sync`）
+
+前提：测试书的已保存位置在一个每次都需要解码的图文页（例如 `image-flow.epub` 的衍生本）；Wi-Fi 和同步账户已配置，同步服务可达。只发起检查和取消，不上传，不采用远端位置。
+
+```sh
+python3 tools/device_workbench.py --port /dev/ttyACM0 \
+  --firmware build/firmware-diagnostic --metadata .local/test-conditions.json \
+  --output .local/runs/image-sync-001 --mode image-sync \
+  --book Books/image-flow-test.epub --timeout 20
+```
+
+1. 打开测试书，立即进入工具→同步并检查远端位置，等待请求结束、位置映射完成且 status 的 sync 不再是 unchecked。结果为 different 时点「留在这里」，否则从页眉返回正文。只有 no-record、same、different、unmapped 算有效结果，其他结果（例如 HTTP 成功但应用判为 failed）为 inconclusive。断言保存修订不变。
+2. 打开测试书，等到图片解码的 Content 开始事件出现后再打开一次；随后确认那次解码以取消结束。解码在第二次打开前已经完成时为 inconclusive，因为没有真正放弃一个进行中的图片任务。
+3. 再次进入同步并检查，等到 HTTPS 阶段事件（NetworkStage detail=3）开始后点「取消同步」，在「正在结束同步」页点「继续离线阅读」。正文恢复后图片重新解码，此时被取消的请求尚未退出。等该请求结束并要求其终态为 cancelled；以其他终态结束说明取消没有赶在请求结束之前生效，结果为 inconclusive。断言保存修订和 anchor 不变。
+4. 导出并校验画布，冻结记录器。结果须满足人工入口的同一条图片证据链（见下节），并且 `analysis.stale_image_patches` 为空：没有任何图片在更新会话或排版的帧已呈现之后被采用。该项不为空时，证据和运行条件完整才判为 fail，否则为 inconclusive。
+
+请求在 HTTPS 阶段之前就结束、检查未成功或没有形成交叠时，结果为 inconclusive，不是 fail。等待期间设备进入错误页（例如帧失败后的「屏幕更新失败」）时，场景立即以 fail 结束并照常冻结记录器，使已记录的失败按完整证据判定。第 3 步有意让正文重画落在 TLS 握手期间，这是已知会偶发 EPD 行队列欠载的时序；出现时结果为 fail 并保留驱动日志，这是场景的检出，不是工具故障。页码在计数完成前未知，因此位置保护用保存修订和 anchor 判断。检查因网络、账户或服务不可用而失败时，这是前提未满足：场景把该请求及其阶段的失败标为 excused，结果保持 inconclusive；同一轮中的其他失败仍按规则判定。本入口不验证同步结果内容、上传、采用远端位置或 KOReader 往返。
+
+### 场景 2：翻页、改字号与重开（`--mode reading-flow`）
+
+前提：测试书的已保存位置距书末至少 `--turns` 页，并且是通过翻页到达的页面。场景开始时自行打开 `--book`，使各轮和 workload 标识对应同一本书。
+
+```sh
+python3 tools/device_workbench.py --port /dev/ttyACM0 \
+  --firmware build/firmware-diagnostic --metadata .local/test-conditions.json \
+  --output .local/runs/reading-flow-001 --mode reading-flow \
+  --book Books/image-flow-test.epub --rounds 3 --turns 5 --timeout 20
+```
+
+每一轮：
+
+1. 向后翻 `--turns` 页，每页等待帧完成并断言页码恰好加一、驱动成功。从恢复或跳转得到的位置出发时，一页可能跨两个已统计页，页码会重复或跳过一次；出现这种情况时结果为 inconclusive，其他页码变化为 fail；停留后等待保存，断言保存修订增加且 anchor 已不同于起始位置。再向前翻回，断言再次保存且 anchor 回到起始位置。
+2. 进入排版，字号加一档并应用，等待重新分页并断言 font_px 确实变化；再减一档并应用。字号已是最大档时加一档不产生变化，场景改为先减后加；两个方向都不产生变化时判为 fail。断言 font_px、anchor、页码和总页数回到起始值。
+3. 返回书库并重新打开测试书，断言 anchor、保存修订、font_px 和页码与返回书库前相同。页码不能唯一确定位置，以 anchor 为准。
+4. 记录稳定态的内部 RAM、PSRAM 及其最大连续块。
+
+所有轮次结束后，后续轮次的内部 RAM 稳定值比首轮低超过 4,096 B，或其最大连续块比首轮小超过 8,192 B 时判为 fail。PSRAM 中的缓存会正常增长，只记录不断言。
+
+诊断口在有待呈现帧时拒绝输入，所以本入口的「连续翻页」是逐页等待后注入，覆盖显示完成、保存修订和重开位置；实体连续按键时保留一次后续翻页（D14）的行为无法由注入输入验证，仍需人工模式和实体操作另测。
 
 ## 图片与网络交叠：人工操作、自动检查证据
 
