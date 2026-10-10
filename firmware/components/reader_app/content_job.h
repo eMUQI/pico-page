@@ -1,5 +1,6 @@
 #pragma once
 #include "pico_page/document.h"
+#include "pico_page/diagnostics.h"
 #include "page_cache.h"
 #include "pico_page/graphics.h"
 #include "pico_page/store.h"
@@ -137,6 +138,10 @@ public:
     Result result;
 private:
     void run();
+#ifdef CONFIG_PICO_PAGE_PERF_METRICS
+    void execute();
+    diagnostics::Token measurement_{};
+#endif
     void render_image();
     void prepare_chapter_page(EpubDocument& document);
     void open_book();

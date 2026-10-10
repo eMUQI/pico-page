@@ -10,6 +10,8 @@
 #include <thread>
 #include <unistd.h>
 
+namespace diagnostics = pico_page::diagnostics;
+
 namespace {
 struct Queue {
     std::mutex mutex;
@@ -184,6 +186,13 @@ int main(int argc, char** argv) {
         fs::remove_all(root);
     }
     assert(creations == 1 && allocations == 1);
+    PP_DIAGNOSTIC(
+        const auto measured = diagnostics::snapshot().metrics[static_cast<unsigned>(diagnostics::Kind::Content)];
+        assert(measured.active == 0);
+        assert(measured.outcomes[static_cast<unsigned>(diagnostics::Outcome::Failure)] > 0);
+        assert(measured.outcomes[static_cast<unsigned>(diagnostics::Outcome::Cancelled)] > 0);
+        assert(measured.outcomes[static_cast<unsigned>(diagnostics::Outcome::Success)] > 0);
+    )
     {
         std::lock_guard<std::mutex> lock(queue->mutex);
         queue->shutdown = true; queue->changed.notify_one();

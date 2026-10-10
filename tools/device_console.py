@@ -6,17 +6,22 @@ import time
 import zlib
 
 
+def open_serial(port):
+    import serial
+    connection = serial.Serial(port=None, baudrate=115200, timeout=0.2, write_timeout=2, exclusive=True)
+    # Match IDF Monitor's no-reset sequence; releasing DTR first resets USB Serial/JTAG.
+    connection.rts = True
+    connection.dtr = True
+    connection.port = port
+    connection.open()
+    connection.rts = False
+    connection.dtr = False
+    return connection
+
+
 class Console:
     def __init__(self, port, timeout):
-        import serial
-        self.serial = serial.Serial(port=None, baudrate=115200, timeout=0.2, write_timeout=2)
-        # Match IDF Monitor's no-reset sequence; releasing DTR first resets USB Serial/JTAG.
-        self.serial.rts = True
-        self.serial.dtr = True
-        self.serial.port = port
-        self.serial.open()
-        self.serial.rts = False
-        self.serial.dtr = False
+        self.serial = open_serial(port)
         self.timeout = timeout
         self.identifier = 0
         # USB can enumerate before the application installs its input driver.

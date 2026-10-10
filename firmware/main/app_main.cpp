@@ -1,5 +1,6 @@
 #include "pico_page/app.h"
 #include "pico_page/console.h"
+#include "pico_page/diagnostics.h"
 #include "pico_page/platform.h"
 #include "pico_page/provision.h"
 #include "pico_page/released_tap.h"
@@ -40,6 +41,7 @@ std::int64_t settled_us = 0;
 // radio powered for as long as it is up.
 constexpr std::int64_t portal_idle_us = 600'000'000;
 constexpr char manual_paused[] = "手动连接已暂停，点“立即连接”可恢复。";
+namespace diag = pico_page::diagnostics;
 namespace platform = pico_page::platform;
 namespace provision = pico_page::provision;
 struct NetworkJob {
@@ -67,12 +69,14 @@ void publish_wifi(pico_page::WifiPhase phase, const std::string& ssid = "", cons
     const bool manual = live(holds.manual) && !holds.manual_suspended;
     if (radio_status.phase == phase && radio_status.ssid == ssid && radio_status.detail == detail && radio_status.manual == manual) return;
     radio_status = {radio_status.sequence + 1, phase, ssid, detail, manual};
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
     ESP_LOGI("pico_network", "phase=%u time_ms=%lld internal_free=%u internal_largest=%u psram_free=%u psram_largest=%u",
         static_cast<unsigned>(phase), static_cast<long long>(esp_timer_get_time() / 1000),
         static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
         static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
         static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
         static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
+#endif
     auto* event = new pico_page::WifiStatus(radio_status);
     if (xQueueSend(wifi_events, &event, 0) != pdTRUE) {
         pico_page::WifiStatus* old = nullptr;
@@ -324,7 +328,11 @@ void run_portal(NetworkJob &job) {
         vSemaphoreDelete(session.lock);
 }
 /** One request borrows a whole sync transaction, including the bounded decision interval. */
+#ifdef CONFIG_PICO_PAGE_PERF_METRICS
+void execute_request(NetworkJob &job) {
+#else
 void run_request(NetworkJob &job) {
+#endif
     const auto& cancelled = *job.operation.cancelled;
     if (cancelled.load() || !pico_page::network::live(job.operation.session)) return;
     if (!ensure_station(job.operation.targets, cancelled, job.error, job.failure)) return;
@@ -346,6 +354,15 @@ void run_request(NetworkJob &job) {
         pico_page::network::release(job.operation.session);
     } else if (!cancelled.load()) holds.await_decision(job.operation.session, esp_timer_get_time());
 }
+#ifdef CONFIG_PICO_PAGE_PERF_METRICS
+void run_request(NetworkJob &job) {
+    PP_DIAGNOSTIC(const auto measurement = diag::begin(diag::Kind::Network, {0, 0, 0, job.operation.id});)
+    execute_request(job);
+    PP_DIAGNOSTIC(diag::end(measurement, job.operation.cancelled->load()
+        ? diag::Outcome::Cancelled : !job.error.empty() || job.status < 200 || job.status >= 300
+        ? diag::Outcome::Failure : diag::Outcome::Success);)
+}
+#endif
 void network_worker(void *) {
     for (;;) {
         NetworkJob *job = nullptr;
@@ -376,6 +393,7 @@ void network_worker(void *) {
             }
             if (!retained_station()) release_radio(holds.manual_suspended ? manual_paused : "");
             else if (platform::station_connected()) publish_wifi(pico_page::WifiPhase::Connected, station_target.ssid);
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
             ESP_LOGI("network_worker", "phase=request_done stack_free=%u http_status=%d failed=%d wifi_connected=%d internal_free=%u internal_largest=%u internal_min=%u psram_free=%u psram_largest=%u",
                      static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)), job->status, !job->error.empty(),
                      platform::station_connected(),
@@ -384,6 +402,7 @@ void network_worker(void *) {
                      static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
                      static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
                      static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
+#endif
             xQueueSend(responses, &job, portMAX_DELAY);
         }
         holds.expire(esp_timer_get_time());
@@ -406,18 +425,27 @@ bool present(pico_page::ReaderApp &app) {
         using pico_page::platform::PageWaveform;
         pico_page::platform::set_page_waveform(app.fast_page_updates() ? PageWaveform::Gray8
                                                                        : PageWaveform::Gray16);
+        PP_DIAGNOSTIC(const auto measurement = diag::begin(diag::Kind::Frame,
+            {app.pending_frame()->token.session, app.pending_frame()->token.layout,
+             presentation_sequence, app.pending_frame()->token.request,
+             static_cast<std::uint32_t>(app.pending_frame()->purpose)});)
         const bool okay = pico_page::platform::present(
             app.canvas().data(), app.canvas().pixels().size(),
             app.pending_frame()->refresh == pico_page::RefreshIntent::FullClean, error, app.pending_frame()->region);
+        PP_DIAGNOSTIC(diag::end(measurement, okay ? diag::Outcome::Success : diag::Outcome::Failure);)
         pico_page::console::frame_completed(*app.pending_frame(), okay);
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
         const auto completed = esp_timer_get_time();
+#endif
         app.complete_frame(okay);
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
         const auto timing = pico_page::platform::present_timing();
         ESP_LOGI(tag, "Frame complete: copy=%lld power=%lld draw=%lld complete=%lld ms ok=%d",
                  static_cast<long long>(timing.copy_us / 1000),
                  static_cast<long long>(timing.power_us / 1000),
                  static_cast<long long>(timing.draw_us / 1000),
                  static_cast<long long>((esp_timer_get_time() - completed) / 1000), okay);
+#endif
         if (!okay) {
             ESP_LOGE(tag, "Display transaction failed: %s", error.c_str());
             settled_us = esp_timer_get_time();
@@ -697,15 +725,21 @@ extern "C" void app_main() {
             if (tap.kind == EventKind::K1) input.event.input = pico_page::Input::K1;
             if (tap.kind == EventKind::K2) input.event.input = pico_page::Input::K2;
             if (tap.kind == EventKind::K3) input.event.input = pico_page::Input::K3;
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
             const auto dispatched = esp_timer_get_time();
+#endif
+            PP_DIAGNOSTIC(const auto measurement = diag::begin(diag::Kind::Input, {0, 0, 0, end.sequence});)
             app->input(input);
             input.event.phase = pico_page::Phase::End;
             app->input(input);
+            PP_DIAGNOSTIC(diag::end(measurement, diag::Outcome::Success);)
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
             ESP_LOGI(tag, "Input dispatch: seq=%llu queued=%d waited=%lld prepare=%lld ms pending=%d",
                      static_cast<unsigned long long>(end.sequence), input.queued,
                      static_cast<long long>((dispatched - end.time_us) / 1000),
                      static_cast<long long>((esp_timer_get_time() - dispatched) / 1000),
                      app->pending_frame().has_value());
+#endif
         };
         if (resume_input.active()) {
             if (event.kind == EventKind::SdRemoved || app->view() == pico_page::View::Error) {
@@ -768,9 +802,11 @@ extern "C" void app_main() {
                 app->stop_wifi(true);
             }
         } else if (event.kind != EventKind::None) {
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
             ESP_LOGI(tag, "Input: seq=%llu kind=%d phase=%d x=%d y=%d",
                      static_cast<unsigned long long>(event.sequence), static_cast<int>(event.kind),
                      static_cast<int>(event.phase), event.x, event.y);
+#endif
             if (event.phase == pico_page::platform::EventPhase::Begin) {
                 if (sleep_requested) {
                     app->cancel_sleep();
@@ -801,8 +837,10 @@ extern "C" void app_main() {
             // keyboard instead receives every tap in order and draws them in one update.
             if (tap && tap->time_us < settled_us && !app->keyboard_visible() &&
                 pico_page::platform::input_waiting_before(settled_us)) {
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
                 ESP_LOGI(tag, "Input superseded: seq=%llu",
                          static_cast<unsigned long long>(tap->sequence));
+#endif
             } else if (tap) dispatch_tap(*tap, event);
             if (!physical_source) physical_sequence = 0;
             present(*app);
@@ -841,15 +879,19 @@ extern "C" void app_main() {
                                 !network_busy && !sleep_requested && !app->pending_frame() &&
                                 !pico_page::console::transfer_active() && app->background_due();
         if (background) {
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
             const auto started = esp_timer_get_time();
+#endif
             app->background_step([] {
                 return pico_page::platform::input_waiting_before(std::numeric_limits<std::int64_t>::max());
             });
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
             // Storage, decompression and one page layout can exceed the pagination target.
             const auto elapsed_ms = (esp_timer_get_time() - started) / 1000;
             if (elapsed_ms >= 150)
                 ESP_LOGI(tag, "Page counting slice: %lld ms state=%s", static_cast<long long>(elapsed_ms),
                          app->background_state());
+#endif
         }
         else if (!usb_mode && !sleep_requested && idle >= idle_slow_us && !app->pending_frame() && !app->content_busy() && !app->save_busy())
             pico_page::platform::set_performance(false);

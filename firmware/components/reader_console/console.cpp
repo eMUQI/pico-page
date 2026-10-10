@@ -1,4 +1,5 @@
 #include "pico_page/console.h"
+#include "pico_page/diagnostics.h"
 #include "sdkconfig.h"
 
 #ifdef CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE
@@ -160,7 +161,7 @@ void status(std::uint32_t id, const ReaderApp &app, bool card_available) {
     const auto caches = app.cache_usage();
     const auto input = platform::input_diagnostics();
     reply("PP %lu OK view=%s pending=%d card=%d saved=%d revision=%llu page=%lu pages=%lu count=%s "
-          "largest_psram=%u frame=%llu frame_ok=%d "
+          "content_busy=%d save_busy=%d save_due=%d largest_psram=%u frame=%llu frame_ok=%d "
           "purpose=%d clean=%d bytes=%u crc32=%08lx heap=%u min_heap=%u internal=%u "
           "largest_internal=%u "
           "psram=%u stack_bytes=%u input_stack_bytes=%u input_overflows=%u battery_valid=%d battery_pct=%d importing=%d received=%llu "
@@ -171,6 +172,7 @@ void status(std::uint32_t id, const ReaderApp &app, bool card_available) {
           card_available, !!app.saved_record(), static_cast<unsigned long long>(revision),
           static_cast<unsigned long>(pages ? pages->page : 0),
           static_cast<unsigned long>(pages ? pages->total : 0), app.background_state(),
+          app.content_busy(), app.save_busy(), app.save_due(),
           static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)),
           static_cast<unsigned long long>(frame_number), frame_success,
           static_cast<int>(frame_purpose), frame_refresh == RefreshIntent::FullClean,
@@ -250,6 +252,40 @@ void list(std::uint32_t id, const char *root, std::string_view arguments) {
           more);
 }
 
+#ifdef CONFIG_PICO_PAGE_PERF_METRICS
+void metrics(std::uint32_t id) {
+    const auto snapshot = diagnostics::snapshot();
+    for (unsigned i = 0; i < snapshot.metrics.size(); ++i) {
+        const auto& m = snapshot.metrics[i];
+        reply("PP %lu ENTRY kind=%u started=%llu active=%llu success=%llu failure=%llu cancelled=%llu timeout=%llu total_us=%llu max_us=%llu\n",
+              static_cast<unsigned long>(id), i, m.started, m.active, m.outcomes[0], m.outcomes[1],
+              m.outcomes[2], m.outcomes[3], m.total_us, m.max_us);
+    }
+    reply("PP %lu OK schema=1 queued=%u dropped=%llu sequence=%llu tx_failures=%lu internal_min=%u psram_min=%u\n",
+          static_cast<unsigned long>(id), static_cast<unsigned>(snapshot.queued), snapshot.dropped, snapshot.sequence,
+          static_cast<unsigned long>(reply_failures),
+          static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+          static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM)));
+}
+#endif
+#ifdef CONFIG_PICO_PAGE_TRACE_EVENTS
+void trace(std::uint32_t id) {
+    diagnostics::Event event;
+    // Bounded response; export runs on the console owner, outside recorder critical sections.
+    for (unsigned i = 0; i < 8 && diagnostics::pop(event); ++i) {
+        reply("PP %lu ENTRY seq=%llu time_us=%llu op=%llu duration_us=%llu task=%lu kind=%u begin=%d result=%u "
+              "session=%llu layout=%llu frame=%llu request=%llu detail=%lu\n",
+              static_cast<unsigned long>(id), event.sequence, event.time_us, event.operation, event.duration_us,
+              static_cast<unsigned long>(event.task), static_cast<unsigned>(event.kind), event.begin,
+              static_cast<unsigned>(event.outcome), event.context.session, event.context.layout,
+              event.context.frame, event.context.request, static_cast<unsigned long>(event.context.detail));
+    }
+    const auto snapshot = diagnostics::snapshot();
+    reply("PP %lu OK schema=1 queued=%u dropped=%llu sequence=%llu tx_failures=%lu\n", static_cast<unsigned long>(id),
+          static_cast<unsigned>(snapshot.queued), snapshot.dropped, snapshot.sequence, static_cast<unsigned long>(reply_failures));
+}
+#endif
+
 void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool actions_allowed, bool input_allowed) {
     std::string_view input(line.data(), used), word;
     std::uint32_t id = 0;
@@ -258,6 +294,12 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
         error(id, "usage_PP_id_command");
         return;
     }
+#ifdef CONFIG_PICO_PAGE_PERF_METRICS
+    if (word == "metrics" && input.empty()) { metrics(id); return; }
+#endif
+#ifdef CONFIG_PICO_PAGE_TRACE_EVENTS
+    if (word == "trace" && input.empty()) { trace(id); return; }
+#endif
     if (word == "status" && input.empty()) {
         status(id, app, root != nullptr);
         return;
@@ -508,11 +550,20 @@ bool poll(ReaderApp &app, const char *card_root, std::uint64_t &input_sequence,
             if (discard) {
                 transfer.reset();
                 error(0, "invalid_or_oversized_line");
-            } else if (used)
+            }
+            bool activity = false;
+            if (!discard && used) {
+                std::string_view request(line.data(), used), word;
+                token(request, word); // PP
+                token(request, word); // request ID
+                token(request, word); // command
+                activity = word != "status" && word != "metrics" && word != "trace" &&
+                           word != "screen" && word != "ls" && word != "file";
                 execute(app, card_root, input_sequence, actions_allowed, input_allowed);
+            }
             used = 0;
             discard = false;
-            return true;
+            return activity;
         }
         if (static_cast<unsigned char>(ch) < 0x20 || ch == 0x7f || used == line.size())
             discard = true;
