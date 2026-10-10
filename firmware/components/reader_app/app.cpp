@@ -6112,10 +6112,10 @@ struct ReaderApp::Impl final : DisplayBackend {
                                             ? reading_footer::Device::Clock : reading_footer::Device::Battery;
                     } else {
                         switch (footer_position) {
-                        case reading_footer::Position::Pages: footer_position = reading_footer::Position::Chapters; break;
+                        case reading_footer::Position::Pages: footer_position = reading_footer::Position::Percent; break;
                         case reading_footer::Position::Chapters: footer_position = reading_footer::Position::ChapterName; break;
-                        case reading_footer::Position::ChapterName: footer_position = reading_footer::Position::Percent; break;
-                        case reading_footer::Position::Percent: footer_position = reading_footer::Position::Pages; break;
+                        case reading_footer::Position::ChapterName: footer_position = reading_footer::Position::Pages; break;
+                        case reading_footer::Position::Percent: footer_position = reading_footer::Position::Chapters; break;
                         }
                     }
                     footer();

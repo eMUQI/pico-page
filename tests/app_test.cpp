@@ -539,22 +539,20 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
         driver.present(); unchanged();
     };
     toggle(36);
-    const auto chapters = footer_pixels(app, 0, 540);
-    assert(chapters != page_waiting && footer_pixels(app, 540, 684) == battery);
+    const auto estimated = footer_pixels(app, 0, 540);
+    assert(estimated != page_waiting && footer_pixels(app, 540, 684) == battery);
+    toggle(540);
+    assert(footer_pixels(app, 0, 540) == estimated && footer_pixels(app, 540, 684) != battery);
     toggle(600);
-    assert(footer_pixels(app, 0, 540) == chapters && footer_pixels(app, 540, 684) != battery);
-    toggle(600);
-    assert(footer_pixels(app, 0, 540) == chapters && footer_pixels(app, 540, 684) == battery);
+    assert(footer_pixels(app, 0, 540) == estimated && footer_pixels(app, 540, 684) == battery);
     toggle(539);
+    const auto chapters = footer_pixels(app, 0, 540);
+    assert(chapters != estimated && footer_pixels(app, 540, 684) == battery);
+    expect_text("第 1 章 / 共 2 章");
+    toggle(36);
     const auto chapter_name = footer_pixels(app, 0, 540);
     assert(chapter_name != chapters && footer_pixels(app, 540, 684) == battery);
     expect_text("第一章");
-    toggle(36);
-    const auto estimated = footer_pixels(app, 0, 540);
-    assert(estimated != chapters && footer_pixels(app, 540, 684) == battery);
-    toggle(540);
-    assert(footer_pixels(app, 0, 540) == estimated);
-    toggle(600);
     toggle(36);
     assert(footer_pixels(app, 0, 540) == page_waiting && footer_pixels(app, 540, 684) == battery);
     const auto pixels = app.canvas().pixels();
@@ -575,7 +573,7 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     }
     const auto counted = app.book_pages();
     assert(counted && counted->total > 0 && app.canvas().pixels() == pixels);
-    toggle(36); toggle(36); toggle(36);
+    toggle(36);
     // Check the rendered text against the known page fraction, including its fractional digits.
     const auto value = reading_footer::percent(static_cast<double>(counted->page) / counted->total);
     expect_text(value);
