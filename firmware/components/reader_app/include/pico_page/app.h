@@ -141,8 +141,8 @@ class ReaderApp {
     /** Updates the latest battery reading for the next render; nullopt means unknown. */
     void set_battery(std::optional<int> percent);
     void input(const AppInput &event);
-    /** True when the current reading page can open the image at the given screen point. */
-    bool can_open_image_at(int x, int y) const;
+    /** True when a held touch can open an image or a library book's details at this screen point. */
+    bool can_long_press_at(int x, int y) const;
     /** The canvas must remain immutable until complete_frame is called. */
     const graphics::Canvas &canvas() const;
     const std::optional<Frame> &pending_frame() const;
@@ -159,7 +159,7 @@ class ReaderApp {
     /** Cancels network work on the application owner without waiting for the worker.
      * for_sleep retains the manual target for a cancelled sleep attempt. */
     void stop_wifi(bool for_sleep = false);
-    /** Manual connection/scanning carries credentials, never borrowed card objects. */
+    /** Consumes a Wi-Fi request when display and power-menu work permit it; credentials are owned values. */
     std::optional<WifiOperation> take_wifi_request();
     void complete_wifi(std::uint64_t id, const std::vector<provision::NearbyWifi>& nearby, const std::string& error,
                        LinkFailure failure = LinkFailure::None);

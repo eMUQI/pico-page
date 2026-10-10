@@ -645,7 +645,7 @@ extern "C" void app_main() {
             delete latest_wifi; latest_wifi = wifi_status;
         }
         if (latest_wifi) { app->show_wifi(*latest_wifi); delete latest_wifi; present(*app); }
-        if (!usb_mode && !network_busy && !sleep_requested && !pico_page::console::transfer_active()) {
+        if (!usb_mode && !network_busy && !sleep_requested && !resume_input.active() && !pico_page::console::transfer_active()) {
             if (const auto wifi = app->take_wifi_request()) {
                 if (worker_ready) {
                     auto* job = new NetworkJob{}; job->wifi = *wifi;
@@ -655,7 +655,7 @@ extern "C" void app_main() {
                 present(*app);
             }
         }
-        if (!usb_mode && !network_busy && !sleep_requested && !pico_page::console::transfer_active()) {
+        if (!usb_mode && !network_busy && !sleep_requested && !resume_input.active() && !pico_page::console::transfer_active()) {
             const auto request = app->take_network_request();
             if (request) {
                 if (worker_ready) {
@@ -714,6 +714,13 @@ extern "C" void app_main() {
                 resume_input.accept(event);
                 if (event.kind != EventKind::InputReset) event = {};
                 if (!app->content_busy() && !app->pending_frame()) {
+                    const auto now = esp_timer_get_time();
+                    const auto held = resume_input.due(now);
+                    if (held && app->can_long_press_at(held->x, held->y) &&
+                        !pico_page::platform::input_waiting_before(std::numeric_limits<std::int64_t>::max())) {
+                        resume_input.accept({EventKind::Touch, pico_page::platform::EventPhase::End,
+                                             held->sequence, held->x, held->y, now});
+                    }
                     if (resume_input.menu()) {
                         resume_input.clear();
                         event.kind = EventKind::PowerLong;
@@ -807,7 +814,7 @@ extern "C" void app_main() {
             const auto now = esp_timer_get_time();
             const auto held = released_tap.due(now, presentation_sequence);
             if (held && held->sequence == physical_source && held->time_us >= settled_us &&
-                app->can_open_image_at(held->x, held->y)) {
+                app->can_long_press_at(held->x, held->y)) {
                 const pico_page::platform::Event end{EventKind::Touch, pico_page::platform::EventPhase::End,
                                                       held->sequence, held->x, held->y, now};
                 released_tap.accept(end, presentation_sequence);

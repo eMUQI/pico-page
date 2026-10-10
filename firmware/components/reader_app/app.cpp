@@ -6253,8 +6253,12 @@ void ReaderApp::set_battery(std::optional<int> percent) {
 void ReaderApp::input(const AppInput &event) {
     impl_->input(event);
 }
-bool ReaderApp::can_open_image_at(int x, int y) const {
-    return impl_->image_at(x, y) != nullptr;
+bool ReaderApp::can_long_press_at(int x, int y) const {
+    if (impl_->image_at(x, y)) return true;
+    return impl_->view == View::Library && std::any_of(impl_->hits.begin(), impl_->hits.end(), [&](const auto& hit) {
+        return hit.contains(x, y) && hit.id >= EntryBase && hit.id < TocBase &&
+               !impl_->entries[static_cast<std::size_t>(hit.id - EntryBase)].directory;
+    });
 }
 const graphics::Canvas &ReaderApp::canvas() const {
     return impl_->canvas;
@@ -6384,7 +6388,8 @@ void ReaderApp::stop_wifi(bool for_sleep) {
     if (impl_->view == View::Portal) impl_->portal_action = PortalAction::Stop;
 }
 std::optional<WifiOperation> ReaderApp::take_wifi_request() {
-    if (impl_->display.busy()) return std::nullopt;
+    if (impl_->display.busy() || impl_->power_menu_wait ||
+        impl_->view == View::PowerMenu || impl_->view == View::PowerOff) return std::nullopt;
     return std::exchange(impl_->wifi_request, std::nullopt);
 }
 void ReaderApp::complete_wifi(std::uint64_t id, const std::vector<provision::NearbyWifi>& nearby, const std::string& error,

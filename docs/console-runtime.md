@@ -118,8 +118,9 @@ FatFs 介质掉电行为仍需真机测试，接口没有提供跨掉电的原�
 `driver/usb_serial_jtag.h` 和 FreeRTOS `task.h`。官方资料：
 [控制台非阻塞 I/O](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/api-guides/stdio.html#blocking-and-non-blocking-i-o)、
 [USB Serial JTAG 睡眠限制](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/api-guides/usb-serial-jtag-console.html#sleep-mode-considerations)。
-手动浅睡期间 USB 不响应，唤醒后主机也可能无法重新枚举，需要物理拔插；
-因此不能通过这个连接承诺无人值守的睡眠/唤醒验证。
+手动浅睡期间 USB 不响应。平台在实际唤醒后短暂撤销 USB 上拉，恢复原配置以请求主机重新枚举；
+此恢复候选尚未真机验证，必要时仍需物理拔插。已有串口句柄需重新打开，
+不能通过这个连接承诺无人值守的睡眠/唤醒验证。取消入睡不会主动断开 USB。
 
 本轮将组件的启用与关闭分支分别用当前 Xtensa 工具链和固件配置编译，均通过 `-Werror`。
 这只是目标文件检查；完整链接和实际设备命令结果由主任务另行记录。

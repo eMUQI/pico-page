@@ -126,6 +126,8 @@ Battery battery();
  * The wake input is consumed; this function does not advance reading state.
  * entered_sleep remains true after a successful sleep entry even if wake cleanup fails.
  * An aborted preparation preserves a cancelling long press for the next poll.
+ * USB storage must be stopped. After an actual sleep, the USB console is briefly
+ * disconnected to request host enumeration; existing host handles must reopen.
  */
 bool sleep(std::string& error, bool& entered_sleep);
 
