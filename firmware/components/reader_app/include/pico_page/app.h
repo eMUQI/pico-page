@@ -39,8 +39,10 @@ enum class View {
     PowerOff,
     NetworkClosing,
     Help,
-    TextEntry
+    TextEntry,
+    PageEffects
 };
+enum class PageEffect { Off, TextTurnA, TextTurnB, TextTurnC, Ripple };
 enum class PowerAction { None, Shutdown, Restart };
 struct PowerRequest { PowerAction action = PowerAction::None; bool without_save = false; };
 enum class UsbTransferAction { None, Start, Exit };
@@ -152,6 +154,10 @@ class ReaderApp {
     const std::optional<ReadingRecord> &saved_record() const;
     /** True when the fast refresh preset selects the shorter page-update waveform. */
     bool fast_page_updates() const;
+    /** Volatile experimental selection; shared by the UI and diagnostic console. */
+    PageEffect page_effect() const;
+    /** Selects an effect without saving configuration; redraws an open selection page. */
+    void set_page_effect(PageEffect effect);
     /** Idle minutes before sleep from the global settings loaded at start or book open; 0 disables. */
     int auto_sleep_minutes() const;
     /** Reloads global settings when idle; uses the admitted network state, and rejects access during a bookmark commit. */
