@@ -57,6 +57,21 @@ int main() {
         CHECK(input.menu() && !input.power() && !input.held());
         input.clear();
         CHECK(!input.active() && !input.power());
+        input.begin();
+        input.accept({EventKind::Touch, EventPhase::Begin, 7, 300, 500, 1000});
+        CHECK(!input.due(999 + kLongPressUs));
+        const auto held = input.due(1000 + kLongPressUs);
+        CHECK(held && held->sequence == 7 && held->x == 300 && input.held());
+        input.accept({EventKind::Touch, EventPhase::End, 7, 300, 500, 1000 + kLongPressUs});
+        CHECK(input.tap() && !input.held() && !input.due(1001 + kLongPressUs));
+        input.clear();
+        input.accept({EventKind::Touch, EventPhase::End, 7, 300, 500, 1002 + kLongPressUs});
+        CHECK(!input.tap() && !input.due(1002 + kLongPressUs));
+        input.begin();
+        input.accept({EventKind::K2, EventPhase::Begin, 8});
+        CHECK(!input.due(2 * kLongPressUs));
+        input.accept({EventKind::Touch, EventPhase::Cancel, 8});
+        CHECK(!input.held() && !input.due(2 * kLongPressUs));
     }
     {
         CHECK((RefreshRegion{0, 0, 684, 1216}.fits(684, 1216)));

@@ -1306,6 +1306,10 @@ int main(int argc, char** argv) {
             if (after_frame) {
                 assert(sleep_frame(app)); driver.present();
                 app.wake(false); driver.present(); driver.complete_content();
+                assert(app.show_power_menu()); driver.present();
+                assert(app.view() == View::PowerMenu && !app.take_wifi_request());
+                driver.tap(100, 1100); driver.present();
+                assert(app.view() == View::Reading);
             } else app.cancel_sleep();
             auto restored = app.take_wifi_request();
             assert(restored && !restored->targets.automatic && restored->targets.networks.size() == 1 && restored->targets.networks[0].ssid == "home" && restored->cancelled != manual->cancelled);
@@ -2277,6 +2281,21 @@ int main(int argc, char** argv) {
             else if (kind == EventKind::Touch) assert(app.view() == View::Tools);
             else assert(*app.saved_record() == saved && app.canvas().pixels() == restored_pixels);
         }
+        driver.tap(50, 50); driver.present();
+        assert(app.view() == View::Library && app.can_long_press_at(300, 480));
+        assert(!app.can_long_press_at(50, 50));
+        assert(sleep_frame(app)); driver.present(); app.wake(false); driver.present();
+        SleepInput input;
+        input.begin();
+        input.accept({EventKind::Touch, EventPhase::Begin, 2, 300, 480, 1000});
+        const auto held = input.due(1000 + kLongPressUs);
+        assert(held && app.can_long_press_at(held->x, held->y));
+        input.accept({EventKind::Touch, EventPhase::End, 2, held->x, held->y, 1000 + kLongPressUs});
+        driver.hold(input.tap()->x, input.tap()->y); driver.present(); driver.complete_content();
+        assert(app.view() == View::BookDetails);
+        input.clear();
+        input.accept({EventKind::Touch, EventPhase::End, 2, 300, 480, 2000 + kLongPressUs});
+        assert(!input.tap());
     }
     {
         const auto root = card / "SleepWorker";

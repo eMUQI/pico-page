@@ -1,5 +1,10 @@
 # 开发状态
 
+2026-10-10 PR #28 最终 head `1d05da7` 的两个 CI 均通过，review 已完成并提出 3 条有效意见。
+本批修正取消锁屏后的电源长按/Wi-Fi 派发次序、保留触摸的长按阈值以及封面样本生成依赖，
+并完成浅睡唤醒后的 USB 重新枚举候选。host Debug 与 ASan/UBSan 各 14/14、标准固件构建通过。
+未再次烧录或复位；USB 故障未真机复现，恢复效果与实体输入时序待验收。本批已本地提交；用户已在当前对话明确授权推送、创建后续 PR 并等待 review，远端检查待完成。
+
 2026-10-10 按用户合并并烧录要求，PR #28 已整合 main `d2eacd7` 的设备端 Wi-Fi 更新。
 冲突已解决，取消休眠恢复改为保存完整 WifiTargets；host 与 ASan/UBSan 各 14/14、固件构建通过，待远端检查与应用烧录。
 
@@ -3650,3 +3655,44 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
 - 固件 3398192 字节，SHA-256 `107817a2335ed5e54ebe879a55e42324c690d967a134248edc6c5fc10500a3e8`。日志 `/tmp/pico-merge-{host-test,sanitized-test,firmware}.log`。
 - 设备诊断位于书库，card=1/saved=1/revision=40；实际分区表及 otadata 已读取，seq=1/state=2/CRC 有效，启动 ota_0=0x10000、4 MiB。尚未写入；只计划写应用，不修改其他 Flash 区域或 TF 卡。
 - 本地原有未提交开发记录暂存于专用 stash 和 `/tmp/pico-premerge-development-status.md`，合并提交后恢复。
+
+## 2026-10-10 · PR #28 最终审查修正与 USB 唤醒恢复候选
+
+- 基线：PR #28 已正常合并为 `20107e6975c2169fc3a6ca97a557e7bc6823f37b`，父提交为
+  `d2eacd70be00c535cedce461e5aabfab198227e1` 与最终 head `1d05da7fceaf260a8ec1fad5de5a4bfe2280ba83`。
+  `38008006940`、`38008010586` 的 host CI 均通过；最终 review 已完成，按 `original_commit_id` 区分历史评论。
+  使用当前 checkout 的 `fix/usb-wake-reconnect` 分支；原未提交开发/烧录记录与两个 stash 保留，不全文件提交。
+- 最终 review 的 3 条意见均有效：恢复期间先派发保留输入再启动网络请求；电源菜单及其资源等待阶段保留 Wi-Fi 请求，
+  取消菜单后仍可恢复原目标。SleepInput 复用 ReleasedTap 的原长按阈值，书库条目和正文图片可在持续按住时触发，
+  真实松手不重复执行；普通触摸也使用同一目标检查。CMake 合并为一次样本生成，声明正常及三种错误封面的输出。
+- USB 线索：本批未访问串口或设备。官方 ESP-IDF v6.1 文档确认手动浅睡期间 USB 不响应，唤醒后主机可能不重新枚举；
+  此现象与诊断超时相符，但没有本次硬件复现，不能解释或确认用户报告的所有“重启也不恢复”情形。
+  核对本机 `sleep_modes.c`、`sleep_console.c` 与 ESP32-S3 的 `usb_serial_jtag_ll.h`：IDF 保存并禁用 pad/clock，
+  文档仍声明 D+ 上拉保留风险，候选显式撤销 D+/D- 电阻 100 ms，再恢复原电阻位与软件覆盖状态。
+  只在实际浅睡返回并释放触摸锁后执行，清理失败仍恢复；取消入睡或 PHY 原本关闭不执行，MSC 持有卡时拒绝休眠。
+  已有电脑串口句柄需关闭并重新打开；正常阅读仅枚举串口，MSC 盘仍需用户主动开启文件传输。
+- 执行与资源：全部新逻辑在现有应用所有者任务；未新增任务、队列、堆分配或常驻缓冲。长按目标只检查当前屏幕的热区，
+  不扫描书库文件。USB 局部寄存器快照约 12 字节，恢复阶段以 vTaskDelay 请求让出 100 ms，期间不持触摸锁、不做文件 I/O；
+  调度延迟及原睡眠/清理链路不由此获得总时限保证。电气断开、主机枚举时间及真实栈/内存峰值尚未测量。
+- 环境：macOS、AppleClang 21；ESP-IDF v6.1 固定 commit `fff9895c82d744c7237be8847347bdd1b07c6643`，
+  保留原 `ld.ext_ram.sections` 修改及未跟踪 requirements 文件；BSP `5f3406deec33304de8801046db583dec7c49e55b`。
+  锁文件、sdkconfig 与全局工具链未修改；生效配置为 ESP32-S3、USB Serial/JTAG、1000 Hz tick、MSC 与诊断控制台。
+- 命令与结果：`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、
+  `ctest --test-dir build/host -N` 注册 14 项，完整 CTest **14/14**（26.30 s）；
+  `build/sanitized` 使用 `-fsanitize=address,undefined -fno-omit-frame-pointer`，完整 CTest **14/14**（55.80 s），本机不支持 LSan。
+  初次新增的详情测试遗漏了异步内容完成等待，修正测试流程后保持原详情断言并通过；没有降低断言或跳过资源。
+  四种封面产物逐一删除并运行 `cmake --build build/host --target document_fixtures_target --parallel 4`，均重新生成。
+  `.local/usb-reconnect-selfcheck.cpp` 从实际恢复函数提取代码，clang++ 的断言检查覆盖 64 种电阻/覆盖/pad 状态并通过；
+  该检查使用硬件桩，仅证明配置恢复与跳过关闭 PHY 的逻辑，不证明硬件行为。
+  `sh tools/build_firmware.sh` 通过；初次构建受沙箱 sysctl 限制，按相同标准入口重跑，未替换依赖或关闭组件。
+  应用 **3,399,856 字节**，SHA-256 `6f3ec3bcd4b9212bd6993f7025b7435a6de22a9122d93c09b82e4ab4c0669bba`。
+  `python3 tools/check_handoff.py` **388 项**通过，`git diff --check` 通过。
+- 日志：`.local/sleep-usb-host-20261010.log`、`.local/sleep-usb-sanitized-final-20261010.log`、
+  `.local/sleep-usb-build-final-20261010.log`、`.local/cover-fixture-regeneration-20261010.log`。
+- 未测与下一步：本批不烧录、不复位。后续 PR 先完成远端 CI/review；待用户有空，按 PW05/PW06 验证实际取消时序、
+  连线入睡、睡眠时插线、较长睡眠、三轮重新枚举/只读 status/uptime、原句柄关闭重开与进度不变，再验证 MSC 退出。
+  macOS/Windows/Linux、TF 掉电、资源峰值及长期稳定性未验收；不将候选、host 或构建通过记为 USB 问题已解决。
+- 发布状态：两次推送请求均被自动审批拒绝，理由是代理交接说明及原对话读取结果不能作为本次代码外传的可信授权。
+  已准备本地提交和 PR 描述，并请求用户在当前对话直接授权推送到 `eMUQI/pico-page`、创建后续 PR 及等待 review。
+  未采用其他工具或间接路径推送，远端未获得本批提交。
+- 发布授权更新：用户在当前对话明确回答“可以”，授权推送到 `eMUQI/pico-page`、创建后续 PR 并等待 review；继续原发布步骤。

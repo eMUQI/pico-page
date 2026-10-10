@@ -56,13 +56,15 @@ add_test(NAME graphics COMMAND graphics_test)
 
 set(document_fixtures ${CMAKE_CURRENT_BINARY_DIR}/document-fixtures)
 add_custom_command(OUTPUT ${document_fixtures}/valid.epub
+    ${document_fixtures}/multi-part.epub ${document_fixtures}/multi-part-link.epub
+    ${document_fixtures}/image-cover.epub ${document_fixtures}/missing-image-cover.epub
+    ${document_fixtures}/oversized-image-cover.epub ${document_fixtures}/unsupported-image-cover.epub
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/make_document_fixtures.py ${document_fixtures}
     DEPENDS tests/make_document_fixtures.py tests/make_epub_fixture.py)
-# Segmented reading and cross-part link fixtures share the same deterministic generator.
-add_custom_command(OUTPUT ${document_fixtures}/multi-part.epub ${document_fixtures}/multi-part-link.epub
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/make_document_fixtures.py ${document_fixtures}
-    DEPENDS tests/make_document_fixtures.py tests/make_epub_fixture.py)
-add_custom_target(document_fixtures_target DEPENDS ${document_fixtures}/valid.epub ${document_fixtures}/multi-part.epub ${document_fixtures}/multi-part-link.epub)
+add_custom_target(document_fixtures_target DEPENDS ${document_fixtures}/valid.epub
+    ${document_fixtures}/multi-part.epub ${document_fixtures}/multi-part-link.epub
+    ${document_fixtures}/image-cover.epub ${document_fixtures}/missing-image-cover.epub
+    ${document_fixtures}/oversized-image-cover.epub ${document_fixtures}/unsupported-image-cover.epub)
 add_dependencies(content_worker_test document_fixtures_target)
 add_executable(document_test tests/document_test.cpp)
 add_dependencies(document_test document_fixtures_target)

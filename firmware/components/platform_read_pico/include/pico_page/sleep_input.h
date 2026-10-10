@@ -32,6 +32,11 @@ public:
     bool menu() const { return menu_; }
     bool power() const { return power_; }
     bool held() const { return contact_.pending(); }
+    /** Returns a retained touch that has reached the existing long-press threshold. */
+    std::optional<Event> due(std::int64_t now_us) const {
+        if (!active_ || tap_ || menu_ || power_) return std::nullopt;
+        return contact_.due(now_us, 0);
+    }
     const std::optional<Event>& tap() const { return tap_; }
     const Event& end() const { return end_; }
 private:
