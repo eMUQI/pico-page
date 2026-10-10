@@ -165,10 +165,16 @@ struct Host {
         }
         return true;
     }
+    // The preview has no radio: a scan lists sample names, every connection is refused.
+    void answer_wifi(const WifiOperation& wifi) {
+        network::release(wifi.cancelled);
+        if (wifi.kind == WifiOperation::Kind::Scan)
+            app.complete_wifi(wifi.id, {{"Preview-2.4", -48, false}, {"Preview-Open", -67, true}}, "");
+        else app.complete_wifi(wifi.id, {}, "桌面预览不操作设备 Wi-Fi，请在真机连接。", LinkFailure::Other);
+    }
     void poll_network() {
         if (const auto wifi = app.take_wifi_request()) {
-            network::release(wifi->cancelled);
-            app.complete_wifi(wifi->id, {}, "桌面预览不操作设备 Wi-Fi，请在真机连接。" );
+            answer_wifi(*wifi);
             flush();
         }
         if (network.valid() &&
@@ -187,10 +193,10 @@ struct Host {
     // values and never reports a saved or failed submission or an uploaded book.
     bool poll_portal() {
         const auto action = app.take_portal_action();
-        if (action == PortalAction::Start || action == PortalAction::Upload || action == PortalAction::UploadStation) {
-            const bool upload = action != PortalAction::Start, station = action == PortalAction::UploadStation;
-            if (!app.prepare_portal(upload, station))
-                app.show_portal({PortalPhase::Closed, "", "", "", "无法开启手机配置，请稍后重试。", "", 0, "", app.portal_generation()});
+        if (action == PortalAction::Upload || action == PortalAction::UploadStation) {
+            const bool station = action == PortalAction::UploadStation;
+            if (!app.prepare_portal(station))
+                app.show_portal({PortalPhase::Closed, "", "", "", "无法开启传书，请稍后重试。", "", 0, "", app.portal_generation()});
             else if (flush() && station)
                 app.show_portal({PortalPhase::Waiting, "", "", "http://192.168.1.23/preview", "", "home-preview", 0, "", app.portal_generation()});
             else if (flush())
@@ -203,6 +209,11 @@ struct Host {
         ++sequence;
         app.input({{sequence, Phase::Begin, key}, touch, x, y, false, hold});
         app.input({{sequence, Phase::End, key}, touch, x, y, false, hold});
+        // Keyboard taps are drawn by the next idle poll, as in the device loop.
+        if (app.keyboard_visible()) app.poll_background();
+        if (!flush()) return false;
+        // Scripts have no event loop, so a Wi-Fi request is answered right after its page is shown.
+        if (const auto wifi = app.take_wifi_request()) answer_wifi(*wifi);
         return flush() && poll_portal();
     }
     bool capture(const std::string &path) {

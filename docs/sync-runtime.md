@@ -17,7 +17,7 @@ device_id = "pico-page-personal-device"
 dom_version = 20260812
 ```
 
-在设备上，可从“设置 › KOReader 同步 › 用手机配置”填写：设备验证账户后写入本文件，`device_id` 沿用已有值，
+在设备上，可在“设置 › KOReader 同步”中用屏幕键盘填写：设备验证账户后写入本文件，`device_id` 沿用已有值，
 没有时使用 `pico-page-<MAC>`；整个文件被重写，手写的注释不保留。
 
 也可以在电脑上运行 `python3 tools/setup_network.py [存储卡挂载路径]` 生成本文件和 `network.toml`：

@@ -24,40 +24,6 @@ int main() {
     const FileStore store(root);
     std::string error, problem;
 
-    // Form decoding: each action carries only its own fields, and the KOReader userkey.
-    provision::Submission submission;
-    assert(provision::parse_form("action=wifi_add&ssid=%E5%AE%B6+%222.4G%22%5C&wifi_password=p%22a%5Css+%E5%AF%86"
-                                 "&endpoint=https%3A%2F%2Fx&password=ignored&other=1", submission, problem));
-    assert(submission.action == provision::Action::WifiAdd && submission.verify_wifi);
-    assert(submission.network.ssid == "家 \"2.4G\"\\" && submission.network.password == "p\"a\\ss 密");
-    assert(submission.endpoint.empty() && submission.userkey.empty());
-    assert(provision::parse_form("action=wifi_add&ssid=&manual=typed&wifi_password=", submission, problem));
-    assert(submission.network.ssid == "typed" && submission.network.password.empty() && !submission.verify_wifi);
-    assert(provision::parse_form("action=wifi_add&ssid=picked&manual=typed&wifi_password=", submission, problem));
-    assert(submission.network.ssid == "picked" && submission.verify_wifi);
-    assert(provision::parse_form("action=wifi_delete&ssid=home&wifi_password=x", submission, problem));
-    assert(submission.action == provision::Action::WifiDelete && submission.network.ssid == "home" &&
-           submission.network.password.empty() && !submission.verify_wifi);
-    assert(provision::parse_form("action=account&endpoint=+https%3A%2F%2Fsync.example.invalid%2F%2F+"
-                                 "&username=+%E8%AF%BB%E8%80%85+&password=correct+horse+%E7%94%B5%E6%B1%A0&ssid=x",
-                                 submission, problem));
-    assert(submission.action == provision::Action::Account && submission.network.ssid.empty() && !submission.verify_wifi);
-    assert(submission.endpoint == "https://sync.example.invalid" && submission.username == "读者");
-    assert(submission.userkey == "55d2fddf8ba5768bbc44b083846cf439");
-    assert(provision::parse_form("action=account&endpoint=&username=reader&password=secret", submission, problem));
-    assert(submission.endpoint == provision::default_endpoint && submission.userkey == "5ebe2294ecd0e0f08eab7690d2a6ee69");
-    for (const std::string& body : std::initializer_list<std::string>{"", "ssid=net", "action=other", "action=wifi_add&ssid=",
-                                   "action=wifi_delete&manual=net", "action=wifi_add&ssid=%4", "action=wifi_add&ssid=%zz",
-                                   "action=wifi_add&ssid=net&wifi_password=short", "action=wifi_add&ssid=" + std::string(33, 'x'),
-                                   "action=wifi_add&ssid=a%09b", "action=wifi_add&ssid=net&wifi_password=" + std::string(64, 'g'),
-                                   "action=account&username=reader&password=", "action=account&username=reader&password=x&endpoint=http://sync.example",
-                                   "action=account&username=&password=x", "action=account&username=a%0Ab&password=x",
-                                   "action=wifi_add&ssid=" + std::string(provision::form_limit, 'x')}) {
-        problem.clear();
-        assert(!provision::parse_form(body, submission, problem) && !problem.empty());
-        assert(problem.find("short") == std::string::npos);
-    }
-
     // The written files are read back by the parsers the firmware uses; schema 1 is migrated.
     std::vector<provision::SavedWifi> loaded;
     assert(provision::load_networks(root, loaded, error) && loaded.empty());
@@ -165,48 +131,65 @@ int main() {
 
     // A hotspot can be saved while absent; saving does not invent a connection timestamp.
     const auto account_bytes = read(card / "PicoPage/sync.toml");
-    assert(provision::parse_form("action=wifi_add&ssid=&manual=phone-hotspot&wifi_password=password1",
-                                 submission, problem));
-    assert(provision::save_network_edit(root, submission.network, false, 0, error));
+    assert(provision::save_network_edit(root, {"phone-hotspot", "password1"}, false, 0, error));
     assert(provision::load_networks(root, loaded, error) && loaded.size() == 2 &&
            loaded.back().ssid == "phone-hotspot" && loaded.back().password == "password1" &&
            loaded.back().last_connected == 0);
     assert(read(network_file).find("last_connected") == std::string::npos);
+    // Adding networks leaves the connection automatic; only an explicit choice pins one.
     std::optional<provision::SavedWifi> selected;
-    assert(provision::load_selected_network(root, selected, error) && selected && selected->ssid == "first");
+    assert(provision::load_selected_network(root, selected, error) && !selected);
+    assert(read(network_file).find("selected_ssid") == std::string::npos);
     assert(provision::save_selected_network(root, "phone-hotspot", error));
     assert(provision::load_selected_network(root, selected, error) && selected && selected->ssid == "phone-hotspot");
     assert(read(card / "PicoPage/sync.toml") == account_bytes);
 
-    // Explicit selection survives connection history, phone edits and stronger alternatives.
+    // A pinned network survives connection history, additions and stronger alternatives.
     assert(provision::save_connection(root, "first", now, error));
     assert(provision::load_selected_network(root, selected, error) && selected->ssid == "phone-hotspot");
     assert(provision::save_network_edit(root, {"stronger", "password2"}, false, 0, error));
     assert(provision::load_selected_network(root, selected, error) && selected->ssid == "phone-hotspot");
     const auto pinned = read(network_file);
     assert(!provision::save_selected_network(root, "not-saved", error) && read(network_file) == pinned);
+    // Forgetting the pinned network returns to automatic connection, and later edits keep it.
     assert(provision::save_network_edit(root, {"phone-hotspot", ""}, true, 0, error));
     assert(provision::load_selected_network(root, selected, error) && !selected);
-    assert(read(network_file).find("selected_ssid = \"\"") != std::string::npos);
-    // Phone additions and password updates do not undo an explicit cleared choice.
     assert(provision::save_network_edit(root, {"phone-hotspot", "password1"}, false, 0, error));
-    assert(provision::load_selected_network(root, selected, error) && !selected);
     assert(provision::save_network_edit(root, {"first", "password2"}, false, 0, error));
     assert(provision::load_selected_network(root, selected, error) && !selected);
     assert(provision::save_selected_network(root, "first", error));
     assert(provision::save_network_edit(root, {"phone-hotspot", "password1"}, false, 0, error));
     assert(provision::load_selected_network(root, selected, error) && selected->ssid == "first");
+    // An empty name selects automatic connection again without touching the entries.
+    assert(provision::save_selected_network(root, "", error));
+    assert(provision::load_selected_network(root, selected, error) && !selected);
+    assert(provision::load_networks(root, loaded, error) && loaded.size() == 3);
 
-    // The legacy choice is frozen before a successful connection can reorder the entries.
+    // A file without a selection is automatic, also after a connection reorders its entries.
     assert(store.save_private("network.toml", annotated, error) == StoreStatus::Ok);
-    assert(provision::load_selected_network(root, selected, error) && selected->ssid == "office");
+    assert(provision::load_selected_network(root, selected, error) && !selected);
     assert(provision::save_connection(root, "home", now + day, error));
-    assert(provision::load_selected_network(root, selected, error) && selected->ssid == "office");
+    assert(provision::load_selected_network(root, selected, error) && !selected);
     assert(provision::save_selected_network(root, "home", error));
     assert(read(network_file).find("# office note") != std::string::npos);
+    // A pinned name that is no longer saved falls back to automatic connection.
     assert(store.save_private("network.toml", "selected_ssid = \"gone\"\nschema_version=2\n[[wifi]]\nssid=\"home\"\npassword=\"password\"\n", error) == StoreStatus::Ok);
-    assert(!provision::load_selected_network(root, selected, error) && !selected);
+    assert(provision::load_selected_network(root, selected, error) && !selected);
+    // Adding a network with that leftover name must not pin it.
+    assert(provision::save_network_edit(root, {"gone", "password3"}, false, 0, error));
+    assert(provision::load_selected_network(root, selected, error) && !selected);
+    assert(provision::load_networks(root, loaded, error) && loaded.size() == 2);
     assert(store.save_private("network.toml", pinned, error) == StoreStatus::Ok);
+
+    // Automatic connection tries the saved networks in range, strongest first, each once.
+    const std::vector<provision::WifiCredentials> known{{"home", "password"}, {"office", "password2"}, {"phone", ""}};
+    auto order = provision::connection_order(known, {{"cafe", -30, true}, {"phone", -45, true}, {"home", -60, false},
+                                                     {"phone", -70, true}});
+    assert(order.size() == 2 && order[0].ssid == "phone" && order[1].ssid == "home" && order[1].password == "password");
+    assert(provision::connection_order(known, {{"cafe", -30, true}}).empty() && provision::connection_order({}, {{"home", -30, false}}).empty());
+    assert(provision::network_absent(201) && provision::network_absent(211) && !provision::network_absent(15));
+    assert(provision::password_rejected(15) && provision::password_rejected(202) && !provision::password_rejected(201) &&
+           !provision::password_rejected(8));
 
     // Request completion retains a business transaction; decision timeout never drops a manual hold.
     network::Holds holds;
@@ -297,101 +280,6 @@ int main() {
         assert(error.find("hunter") == std::string::npos);
     }
 
-    // The page escapes scanned names and saved values, and withholds the forms while busy.
-    provision::PageState state;
-    state.device_name = "PicoPage-<7F>";
-    state.nearby = {{"<script>alert(1)</script>", -40}, {"a\"b'c&d", -41}, {std::string("bad\x01name"), -42}, {"", -43},
-                    {std::string(33, 'x'), -44}};
-    for (int i = 0; i < 30; ++i) state.nearby.push_back({"net-" + std::to_string(i), -50 - i});
-    auto html = provision::page(state);
-    assert(html.find("<script>alert") == std::string::npos && html.find("&lt;script&gt;alert(1)&lt;/script&gt;") != std::string::npos);
-    assert(html.find("a&quot;b&#39;c&amp;d") != std::string::npos && html.find("bad") == std::string::npos);
-    assert(html.find("PicoPage-&lt;7F&gt;") != std::string::npos);
-    assert(html.find("net-17") != std::string::npos && html.find("net-18") == std::string::npos);
-    // First setup: the add form is open, the account block waits for Wi-Fi.
-    assert(html.find("value=\"wifi_add\"") != std::string::npos && html.find("id=\"wifi-add\" method") != std::string::npos);
-    assert(html.find("id=\"wifi-add\" method=\"post\" action=\"/save\" class=\"block\" hidden") == std::string::npos);
-    assert(html.find("需要先保存 Wi-Fi") != std::string::npos && html.find("value=\"account\"") == std::string::npos);
-    assert(html.find("id=\"wifi-view\"") == std::string::npos);
-    assert(html.find(">验证并保存 Wi-Fi</button>") != std::string::npos);
-    provision::PageState manual_page;
-    const auto manual_html = provision::page(manual_page);
-    assert(manual_html.find(">保存 Wi-Fi</button>") != std::string::npos);
-    assert(manual_html.find("从列表选择的网络先验证，成功后保存；手动填写的网络直接保存") != std::string::npos);
-    assert(html.find("未开启的手机热点也可手动填写") != std::string::npos);
-    assert(html.find("先保存并在设备上结束配置，再打开手机热点") != std::string::npos);
-
-    state.saved = {{{"home<1>", "secret-wifi"}, now}, {{"office", ""}, 0}};
-    state.nearby = {{"office", -40}, {"home<1>", -60}, {"new", -70}};
-    state.endpoint = "https://sync.example.invalid";
-    state.username = "u\"><b>";
-    html = provision::page(state);
-    assert(html.find("secret-wifi") == std::string::npos);
-    assert(html.find("home&lt;1&gt;") != std::string::npos && html.find("u&quot;&gt;&lt;b&gt;") != std::string::npos);
-    // Nearby by signal first, each with its own delete form; saved names cannot be picked again.
-    assert(html.find("<b>office</b>") != std::string::npos && html.find("office") < html.find("home&lt;1&gt;"));
-    assert(html.find("value=\"wifi_delete\"><input type=\"hidden\" name=\"ssid\" value=\"home&lt;1&gt;\"") != std::string::npos);
-    assert(html.find("data-t=\"" + std::to_string(now) + "\"") != std::string::npos);
-    assert(html.find("value=\"office\" disabled") != std::string::npos && html.find("value=\"new\" checked") != std::string::npos);
-    assert(html.find("id=\"wifi-add\" method=\"post\" action=\"/save\" class=\"block\" hidden") != std::string::npos);
-    assert(html.find("id=\"account-form\" method=\"post\" action=\"/save\" class=\"block\" hidden") != std::string::npos);
-    assert(html.find("更换同步账户") != std::string::npos && html.find("已保存：u&quot;&gt;&lt;b&gt;") != std::string::npos);
-
-    // A refused account stays open with the attempted values and an empty password.
-    state.result = provision::Result{provision::Action::Account, true, "同步服务拒绝了这个账户或密码。"};
-    state.retry_endpoint = "https://other.example.invalid";
-    state.retry_username = "reader2";
-    html = provision::page(state);
-    assert(html.find("账户未保存") != std::string::npos && html.find("设备仍使用原账户“u&quot;&gt;&lt;b&gt;”") != std::string::npos);
-    assert(html.find("value=\"reader2\"") != std::string::npos && html.find("other.example.invalid") != std::string::npos);
-    assert(html.find("id=\"account-form\" method=\"post\" action=\"/save\" class=\"block\">") != std::string::npos);
-    assert(html.find("重新验证") != std::string::npos && html.find("Wi-Fi：office · 已保存") != std::string::npos);
-    state.result = provision::Result{provision::Action::WifiAdd, true, "无法连接“new”。"};
-    html = provision::page(state);
-    assert(html.find("Wi-Fi 未保存") != std::string::npos && html.find("同步账户不受影响") != std::string::npos);
-    assert(html.find("id=\"wifi-add\" method=\"post\" action=\"/save\" class=\"block\">") != std::string::npos);
-    state.result = provision::Result{provision::Action::WifiDelete, false, "已删除 Wi-Fi “x”。"};
-    html = provision::page(state);
-    assert(html.find("<div class=\"ok\" role=\"status\">已删除 Wi-Fi “x”。</div>") != std::string::npos);
-
-    // Five saved networks: no add form.
-    for (const char* name : {"a1", "a2", "a3"}) state.saved.push_back({{name, ""}, 0});
-    html = provision::page(state);
-    assert(html.find("value=\"wifi_add\"") == std::string::npos && html.find("删除一个后才能添加") != std::string::npos);
-
-    state.result = provision::Result{provision::Action::WifiAdd, false, "已保存 Wi-Fi “phone-hotspot”。"};
-    html = provision::page(state);
-    assert(html.find("配置已保存，尚未测试连接") != std::string::npos);
-    assert(html.find("再打开手机的 2.4 GHz 热点") != std::string::npos);
-    state.result = provision::Result{provision::Action::WifiAdd, false, "已验证并保存 Wi-Fi “home”。", true};
-    html = provision::page(state);
-    assert(html.find("设备已连接该网络并取得 IP 地址") != std::string::npos);
-    assert(html.find("配置已保存，尚未测试连接") == std::string::npos);
-    state.busy = true;
-    state.busy_action = provision::Action::Account;
-    state.stage = 2;
-    html = provision::page(state);
-    assert(html.find("<form") == std::string::npos && html.find("content=\"2;url=/\"") != std::string::npos);
-    assert(html.find("<li class=\"done\">取得网络时间</li><li class=\"now\">验证账户…</li><li class=\"next\">保存</li>") != std::string::npos);
-    state.busy_action = provision::Action::WifiAdd;
-    state.busy_name = "new";
-    state.stage = 0;
-    html = provision::page(state);
-    assert(html.find("<li class=\"now\">保存“new”…</li>") != std::string::npos && html.find("<form") == std::string::npos);
-    assert(html.find("连接“new”") == std::string::npos);
-    state.busy_verify_wifi = true;
-    html = provision::page(state);
-    assert(html.find("<li class=\"now\">连接“new”…</li><li class=\"next\">保存</li>") != std::string::npos);
-    assert(html.find("请看设备屏幕上的结果") != std::string::npos);
-    state.stage = 1;
-    html = provision::page(state);
-    assert(html.find("<li class=\"done\">连接“new”</li><li class=\"now\">保存…</li>") != std::string::npos);
-    state = {};
-    state.saved_readable = false;
-    html = provision::page(state);
-    assert(html.find("network.toml 内容无效") != std::string::npos && html.find("<form") == std::string::npos);
-
-    // Result sentences and the access point code.
     using provision::WifiFailure;
     assert(provision::wifi_problem("home", WifiFailure::Rejected, 201).find("找不到") != std::string::npos);
     assert(provision::wifi_problem("home", WifiFailure::Rejected, 211).find("2.4 GHz") != std::string::npos);
@@ -399,18 +287,6 @@ int main() {
     assert(provision::wifi_problem("home", WifiFailure::Rejected, 8) == "无法连接“home”（驱动原因 8）。");
     assert(provision::wifi_problem("home", WifiFailure::NoClock, 0).find("网络时间") != std::string::npos);
     assert(provision::wifi_problem("home", WifiFailure::NoAddress, 0).find("超时") != std::string::npos);
-    assert(provision::account_problem(true, 401, "").find("拒绝") != std::string::npos);
-    assert(provision::account_problem(true, 502, "").find("HTTP 502") != std::string::npos);
-    assert(provision::account_problem(false, 0, "HTTPS connection: ESP_FAIL").find("HTTPS connection") != std::string::npos);
-    submission = {};
-    submission.action = provision::Action::WifiAdd; submission.network.ssid = "home";
-    assert(provision::saved_summary(submission) == "已保存 Wi-Fi “home”，未验证连接。");
-    submission.verify_wifi = true;
-    assert(provision::saved_summary(submission) == "已验证并保存 Wi-Fi “home”。");
-    submission.action = provision::Action::WifiDelete;
-    assert(provision::saved_summary(submission) == "已删除 Wi-Fi “home”。");
-    submission.action = provision::Action::Account; submission.username = "reader";
-    assert(provision::saved_summary(submission) == "已保存同步账户“reader”。");
     assert(provision::wifi_qr({"PicoPage-18B8", "abcd2345"}) == "WIFI:T:WPA;S:PicoPage-18B8;P:abcd2345;;");
     assert(provision::wifi_qr({"a;b", "c:d\\e"}) == R"(WIFI:T:WPA;S:a\;b;P:c\:d\\e;;)");
 
@@ -423,5 +299,5 @@ int main() {
     assert(!sync::auth_request(insecure, request, error) && request.url.empty());
 
     fs::remove_all(card);
-    std::cout << "phone setup actions, saved networks, page states and result sentences passed\n";
+    std::cout << "saved networks, connection mode and order, and failure sentences passed\n";
 }

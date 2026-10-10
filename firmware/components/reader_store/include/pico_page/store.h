@@ -250,6 +250,12 @@ public:
     StoreStatus save_private(const std::string& name, const std::string& bytes,
                              std::string& error) const;
 
+    /**
+     * Deletes PicoPage/network.toml or PicoPage/sync.toml; any other name is rejected. Missing
+     * when the file does not exist. No backup is kept because the file holds credentials.
+     */
+    StoreStatus remove_private(const std::string& name) const;
+
     /** Reports the capacity and free space of the mounted card in bytes; false when unavailable. */
     bool card_space(std::uint64_t& total, std::uint64_t& available) const;
 

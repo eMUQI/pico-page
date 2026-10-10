@@ -125,7 +125,8 @@ struct Driver {
         else if (app.view() == View::Refresh) tap(628, 474);
         else if (app.view() == View::Sync) {
             tap(628, 480);
-            if (!app.pending_frame()) tap(100, 950);
+            // The position choice has no strip; its local card keeps the current page.
+            if (!app.pending_frame()) tap(100, 800);
         }
         else if (app.view() == View::Error || app.view() == View::Confirmation || app.view() == View::UsbTransfer) tap(100, 1100);
         else tap(60, 50);
@@ -166,6 +167,267 @@ struct Driver {
         tap(205, 1140); assert(app.view() == View::Typography); present();
     }
 };
+
+// Wi-Fi and account setup on the device: the keyboard, joining before saving, the connection
+// mode and the verified account. No step may write a credential before its check succeeds.
+static void network_setup_test(const fs::path& root, const fs::path& fixtures, bool async) {
+    fs::create_directories(root / "Books");
+    fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
+    const auto network_file = root / "PicoPage/network.toml", account_file = root / "PicoPage/sync.toml";
+    ReaderApp app(root.string(), "setup-test", true, async); Driver driver{app};
+    assert(app.initialize()); driver.present();
+    // Keys of the letter layer by character; rows start at 812, 912 and 1012.
+    const auto letter = [&](char c) {
+        const std::string rows[] = {"qwertyuiop", "asdfghjkl", "zxcvbnm"};
+        const int lefts[] = {40, 73, 140};
+        for (int row = 0; row < 3; ++row)
+            if (const auto column = rows[row].find(c); column != std::string::npos)
+                return driver.tap(lefts[row] + 67 * static_cast<int>(column), 860 + 100 * row);
+        std::abort();
+    };
+    const auto type = [&](const std::string& text) {
+        for (const char c : text) letter(c);
+        app.poll_background(); driver.present();
+    };
+    std::vector<provision::SavedWifi> saved; std::optional<provision::SavedWifi> pinned; std::string error;
+
+    driver.tap(600, 50); driver.present(); driver.tap(300, 180); driver.present();
+    driver.tap(300, 570); driver.present(); assert(app.view() == View::WifiSettings);
+    // Without a saved network there is nothing to connect to.
+    driver.tap(300, 740); assert(!app.pending_frame() && !app.take_wifi_request());
+    driver.tap(300, 590); driver.present();
+    auto scan = app.take_wifi_request();
+    assert(scan && scan->kind == WifiOperation::Kind::Scan);
+    app.complete_wifi(scan->id, {{"Office-2.4", -40, false}, {"Guest", -60, true}}, ""); driver.present();
+    driver.tap(300, 220); driver.present(); assert(app.view() == View::TextEntry && app.keyboard_visible());
+    // A network that the scan reported as protected does not accept an empty password.
+    driver.tap(579, 1160); assert(!app.pending_frame() && app.view() == View::TextEntry && !app.take_wifi_request());
+
+    // Key taps change the entry only; taps made during a refresh are kept in order, and the next
+    // idle poll draws all of them in one regional update.
+    const auto empty = app.canvas().pixels();
+    driver.tap(40, 860);
+    assert(!app.pending_frame() && app.canvas().pixels() == empty);
+    driver.queued(Input::TouchCenter, true, 107, 860);
+    driver.key(Input::K1); driver.key(Input::K3);
+    app.poll_background(true);
+    assert(!app.pending_frame() && app.view() == View::TextEntry);
+    app.poll_background();
+    assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::Content && app.pending_frame()->region);
+    driver.present(); assert(app.canvas().pixels() != empty);
+    // Once the enter key keeps its state, a character repaints the input field alone.
+    driver.tap(174, 860); app.poll_background();
+    assert(app.pending_frame() && app.pending_frame()->region->y == 104 && app.pending_frame()->region->height == 320);
+    driver.present();
+    // Three characters do not make a password, and a contact that leaves its key enters nothing.
+    driver.tap(579, 1160); assert(!app.pending_frame() && app.view() == View::TextEntry && !app.take_wifi_request());
+    driver.drag(241, 860, {241, 860, 330, 860}); app.poll_background(); assert(!app.pending_frame());
+    // A layer change redraws the keys at once; digits follow on the new layer.
+    driver.tap(74, 1160);
+    assert(app.pending_frame() && app.pending_frame()->region && app.pending_frame()->region->y == 796);
+    driver.present();
+    for (int digit = 0; digit < 5; ++digit) driver.tap(40 + 67 * digit, 860);
+    app.poll_background(); driver.present();
+    driver.tap(74, 1160); driver.present();
+    // Shift applies to one letter; backspace removes the last character.
+    driver.tap(57, 1060); driver.present();
+    driver.tap(40, 860); driver.present();
+    letter('q'); letter('z'); driver.tap(627, 1060);
+    app.poll_background(); driver.present();
+    driver.refresh();
+    driver.tap(579, 1160); driver.present(); assert(app.view() == View::WifiSettings);
+    auto join = app.take_wifi_request();
+    assert(join && join->kind == WifiOperation::Kind::Join && !join->targets.automatic && join->targets.networks.size() == 1);
+    assert(join->targets.networks[0].ssid == "Office-2.4" && join->targets.networks[0].password == "qwe12345Qq");
+    assert(!fs::exists(network_file));
+    // Cancelling returns to the password with its draft; the late result saves nothing.
+    driver.tap(300, 1040); driver.present();
+    assert(app.view() == View::TextEntry && join->cancelled->load());
+    app.complete_wifi(join->id, {}, ""); assert(!app.pending_frame() && !fs::exists(network_file));
+    // The enter key right after the character that completes the password, before that
+    // character is drawn, still connects: taps meet the keys of the current entry.
+    for (int i = 0; i < 3; ++i) driver.tap(627, 1060);
+    app.poll_background(); driver.present();
+    driver.tap(579, 1160); assert(!app.pending_frame() && app.view() == View::TextEntry);
+    driver.tap(74, 1160); driver.present();
+    driver.tap(308, 860); assert(!app.pending_frame());
+    driver.queued(Input::TouchCenter, true, 579, 1160);
+    driver.present(); assert(app.view() == View::WifiSettings);
+    join = app.take_wifi_request();
+    assert(join && join->targets.networks[0].password == "qwe12345");
+    // A refused password saves nothing and leads back to the same draft.
+    app.complete_wifi(join->id, {}, "无法连接“Office-2.4”，密码可能不正确（驱动原因 15）。", LinkFailure::Password);
+    driver.present(); assert(app.view() == View::WifiSettings && !fs::exists(network_file));
+    driver.tap(300, 920); driver.present(); assert(app.view() == View::TextEntry);
+    driver.tap(579, 1160); driver.present();
+    join = app.take_wifi_request();
+    assert(join && join->targets.networks[0].password == "qwe12345");
+    // The link of a join earns no connection record: the network is not saved yet.
+    app.show_wifi({1, WifiPhase::Connected, "Office-2.4", "", false}); app.poll_background();
+    assert(!app.pending_frame() && !fs::exists(network_file));
+    app.complete_wifi(join->id, {}, ""); driver.present();
+    app.show_wifi({2, WifiPhase::Offline, "", "", false}); app.poll_background();
+    // The verified network is saved; adding it leaves the connection automatic.
+    assert(provision::load_networks(root.string(), saved, error) && saved.size() == 1 &&
+           saved[0].ssid == "Office-2.4" && saved[0].password == "qwe12345" && saved[0].last_connected > 0);
+    assert(provision::load_selected_network(root.string(), pinned, error) && !pinned);
+
+    // A typed name of an open network survives a cancelled attempt; a 64-digit key is accepted.
+    driver.tap(300, 1040); driver.present(); assert(app.view() == View::WifiSettings);
+    // The page carries no notice about an unsaved connection record.
+    for (int y = 1056; y < 1100; ++y)
+        for (int x = 36; x < 648; ++x) assert(app.canvas().pixel(x, y) == 15);
+    driver.tap(300, 590); driver.present();
+    scan = app.take_wifi_request(); assert(scan);
+    app.complete_wifi(scan->id, {}, ""); driver.present();
+    driver.tap(300, 770); driver.present(); assert(app.view() == View::TextEntry);
+    type("cafe");
+    driver.tap(579, 1160); driver.present(); assert(app.view() == View::TextEntry);
+    driver.tap(579, 1160); driver.present(); assert(app.view() == View::WifiSettings);
+    join = app.take_wifi_request();
+    assert(join && join->targets.networks[0].ssid == "cafe" && join->targets.networks[0].password.empty());
+    driver.tap(300, 1040); driver.present(); assert(app.view() == View::TextEntry && join->cancelled->load());
+    for (int i = 0; i < 64; ++i) letter('a');
+    letter('a');
+    app.poll_background(); driver.present();
+    driver.tap(579, 1160); driver.present(); assert(app.view() == View::WifiSettings);
+    join = app.take_wifi_request();
+    assert(join && join->targets.networks[0].ssid == "cafe" && join->targets.networks[0].password == std::string(64, 'a'));
+    app.complete_wifi(join->id, {}, "找不到名为“cafe”的网络。", LinkFailure::NotNearby); driver.present();
+    assert(provision::load_networks(root.string(), saved, error) && saved.size() == 1);
+    // A refused empty password of a typed network leads back to the password, not to a blind retry.
+    driver.tap(300, 1040); driver.present(); driver.tap(300, 770); driver.present(); type("cafe");
+    driver.tap(579, 1160); driver.present(); driver.tap(579, 1160); driver.present();
+    join = app.take_wifi_request(); assert(join && join->targets.networks[0].password.empty());
+    app.complete_wifi(join->id, {}, "无法连接“cafe”，密码可能不正确（驱动原因 15）。", LinkFailure::Password); driver.present();
+    driver.tap(300, 920); driver.present(); assert(app.view() == View::TextEntry && !app.take_wifi_request());
+    driver.tap(60, 50); driver.present(); driver.tap(60, 50); driver.present();
+    // A 64-character password that is not a hexadecimal key cannot be submitted.
+    assert(app.view() == View::WifiSettings);
+    driver.tap(300, 770); driver.present(); type("cafe");
+    driver.tap(579, 1160); driver.present();
+    for (int i = 0; i < 64; ++i) letter('z');
+    app.poll_background(); driver.present();
+    driver.tap(579, 1160); assert(!app.pending_frame() && app.view() == View::TextEntry && !app.take_wifi_request());
+    driver.tap(60, 50); driver.present(); driver.tap(60, 50); driver.present();
+    assert(app.view() == View::WifiSettings);
+    driver.tap(60, 50); driver.present(); driver.tap(60, 50); driver.present();
+    driver.tap(300, 310); driver.present(); assert(app.view() == View::SyncSettings);
+
+    // Its check runs before anything is written.
+    driver.tap(300, 620); assert(!app.pending_frame() && !app.take_network_request());
+    driver.tap(300, 310); driver.present(); assert(app.view() == View::TextEntry);
+    type("reader");
+    driver.tap(579, 1160); driver.present(); assert(app.view() == View::SyncSettings);
+    driver.tap(300, 410); driver.present();
+    type("secret");
+    driver.tap(579, 1160); driver.present();
+    driver.tap(300, 620); driver.present();
+    auto check = app.take_network_request();
+    assert(check && check->request.method == "GET" && check->request.url == std::string(provision::default_endpoint) + "/users/auth");
+    assert(check->targets.automatic && check->targets.networks.size() == 1 && check->targets.networks[0].ssid == "Office-2.4");
+    bool keyed = false;
+    for (const auto& header : check->request.headers)
+        keyed |= header.first == "x-auth-key" && header.second == "5ebe2294ecd0e0f08eab7690d2a6ee69";
+    assert(keyed && !fs::exists(account_file));
+    app.complete_network(check->id, 401, "{}", ""); driver.present();
+    assert(app.view() == View::SyncSettings && !fs::exists(account_file) && !network::live(check->session));
+    driver.tap(300, 620); driver.present();
+    check = app.take_network_request(); assert(check);
+    // A link failure is reported with its cause and still saves nothing.
+    app.complete_network(check->id, 0, "", "附近没有已保存的网络。", LinkFailure::NotNearby); driver.present();
+    assert(app.view() == View::SyncSettings && !fs::exists(account_file));
+    driver.tap(300, 620); driver.present();
+    check = app.take_network_request(); assert(check);
+    app.complete_network(check->id, 200, "{}", ""); driver.present();
+    sync::Config account;
+    assert(sync::load_config(root.string(), account, error) && account.endpoint == provision::default_endpoint &&
+           account.username == "reader" && account.userkey == "5ebe2294ecd0e0f08eab7690d2a6ee69" &&
+           account.device_id == "setup-test");
+    const auto account_bytes = read(account_file);
+    // Re-verification of the unchanged account uses the stored key.
+    driver.tap(300, 620); driver.present();
+    check = app.take_network_request(); assert(check);
+    app.complete_network(check->id, 200, "{}", ""); driver.present();
+    assert(read(account_file) == account_bytes);
+
+    // A remote position without a local counterpart keeps reading as the first action.
+    opened(app, "Books/book.epub"); driver.present();
+    const auto reading = *app.saved_record();
+    driver.sync_view();
+    auto query = driver.check_remote();
+    assert(query.targets.automatic);
+    app.complete_network(query.id, 200, R"({"progress":"/body[1]/DocFragment[9]/body[1]/p[77]/text()[1].0","percentage":0.42,"device":"Kindle"})", "");
+    driver.present(); driver.complete_content();
+    assert(app.view() == View::Sync && *app.saved_record() == reading);
+    driver.tap(342, 990); driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && !app.take_network_request() && *app.saved_record() == reading);
+
+    // Pinning is explicit; forgetting the pinned network returns to automatic connection.
+    driver.tap(342, 500); driver.present(); driver.tap(60, 50); driver.present(); driver.complete_content();
+    assert(app.view() == View::Library);
+    driver.tap(600, 50); driver.present();
+    driver.tap(300, 180); driver.present(); driver.tap(300, 570); driver.present();
+    assert(app.view() == View::WifiSettings);
+    driver.tap(300, 390); driver.present(); driver.tap(300, 370); driver.present();
+    assert(provision::load_selected_network(root.string(), pinned, error) && pinned && pinned->ssid == "Office-2.4");
+    driver.tap(300, 180); driver.present();
+    assert(provision::load_selected_network(root.string(), pinned, error) && !pinned);
+    driver.tap(300, 370); driver.present();
+    driver.tap(60, 50); driver.present(); driver.tap(300, 490); driver.present();
+    driver.tap(300, 230); driver.present(); driver.tap(300, 420); driver.present();
+    driver.refresh();
+    driver.tap(500, 1120); driver.present();
+    assert(provision::load_networks(root.string(), saved, error) && saved.empty());
+    assert(provision::load_selected_network(root.string(), pinned, error) && !pinned);
+
+    // Removing the account deletes its file after a confirmation.
+    driver.tap(60, 50); driver.present(); driver.tap(60, 50); driver.present();
+    assert(app.view() == View::Settings);
+    driver.tap(300, 310); driver.present(); assert(app.view() == View::SyncSettings);
+    driver.tap(300, 740); driver.present(); assert(fs::exists(account_file));
+    driver.tap(500, 1120); driver.present();
+    assert(app.view() == View::SyncSettings && !fs::exists(account_file));
+
+    // An account name from a hand-edited file may hold multi-byte characters; backspace removes
+    // one whole character, so the name that is checked stays valid UTF-8.
+    write(account_file, "schema_version = 1\ndom_version = 20260812\nendpoint = \"https://example.invalid\"\n"
+                        "username = \"读者ab\"\nuserkey = \"test-only-placeholder\"\ndevice_id = \"setup-test\"\n");
+    write(network_file, "schema_version=2\n[[wifi]]\nssid=\"home\"\npassword=\"password\"\n");
+    driver.tap(60, 50); driver.present(); driver.tap(300, 310); driver.present();
+    driver.tap(300, 310); driver.present(); assert(app.view() == View::TextEntry);
+    for (int i = 0; i < 3; ++i) driver.tap(627, 1060);
+    app.poll_background(); driver.present();
+    driver.tap(579, 1160); driver.present(); assert(app.view() == View::SyncSettings);
+    driver.tap(300, 410); driver.present();
+    type("secret");
+    driver.tap(579, 1160); driver.present();
+    driver.tap(300, 620); driver.present();
+    check = app.take_network_request();
+    bool named = false;
+    for (const auto& header : check->request.headers) named |= header.first == "x-auth-user" && header.second == "读";
+    assert(check && named);
+    driver.tap(300, 1040); driver.present();
+    assert(app.view() == View::NetworkClosing && check->cancelled->load());
+    app.complete_network(check->id, 200, "{}", ""); driver.present();
+    assert(app.view() == View::SyncSettings && read(account_file).find("读者ab") != std::string::npos);
+
+    // A kept connection that an access point session suspended is offline; the page offers to
+    // connect again instead of only ending the kept intent.
+    driver.tap(60, 50); driver.present(); driver.tap(300, 180); driver.present();
+    driver.tap(300, 570); driver.present(); assert(app.view() == View::WifiSettings);
+    driver.tap(300, 740); driver.present();
+    const auto kept = app.take_wifi_request();
+    assert(kept && kept->kind == WifiOperation::Kind::Connect && kept->targets.automatic);
+    app.complete_wifi(kept->id, {}, "");
+    app.show_wifi({101, WifiPhase::Connected, "home", "", true}); driver.present();
+    app.show_wifi({102, WifiPhase::Offline, "", "手动连接已暂停，点“立即连接”可恢复。", false}); driver.present();
+    assert(network::live(kept->cancelled));
+    driver.tap(300, 740); driver.present();
+    const auto resumed = app.take_wifi_request();
+    assert(resumed && resumed->kind == WifiOperation::Kind::Connect && kept->cancelled->load());
+    app.stop_wifi();
+}
 
 static void help_test(const fs::path& root, const fs::path& fixtures, bool async, bool with_book) {
     ReaderApp app(root.string(), "help-test", true, async); Driver driver{app};
@@ -350,6 +612,8 @@ int main(int argc, char** argv) {
     help_test(card / "HelpNoCard", fixtures, false, false);
     help_test(card / "HelpSync", fixtures, false, true);
     help_test(card / "HelpAsync", fixtures, true, true);
+    network_setup_test(card / "NetworkSetupSync", fixtures, false);
+    network_setup_test(card / "NetworkSetupAsync", fixtures, true);
     fs::create_directories(card / "Books");
     fs::create_directories(card / "PicoPage");
     fs::copy_file(fixtures / "valid.epub", card / "Books/book.epub");
@@ -990,10 +1254,12 @@ int main(int argc, char** argv) {
         assert(app.initialize()); driver.present();
         assert(app.wifi_enabled() && !app.take_wifi_request() && !app.take_network_request());
         driver.tap(600, 50); driver.present(); driver.tap(300, 180); driver.present();
-        driver.tap(520, 460); driver.present();
-        driver.tap(300, 450); driver.present();
+        driver.tap(300, 570); driver.present(); assert(app.view() == View::WifiSettings);
+        driver.tap(300, 740); driver.present();
         auto manual = app.take_wifi_request();
-        assert(manual && manual->kind == WifiOperation::Kind::Connect && manual->target.ssid == "home");
+        // A pinned network is the only candidate; the worker never substitutes another one.
+        assert(manual && manual->kind == WifiOperation::Kind::Connect && !manual->targets.automatic);
+        assert(manual->targets.networks.size() == 1 && manual->targets.networks[0].ssid == "home");
         app.show_wifi({1, WifiPhase::Connecting, "home", "", false}); driver.present();
         // A connection carries no card objects; local reading works before it finishes.
         opened(app, "Books/book.epub"); driver.present();
@@ -1003,7 +1269,7 @@ int main(int argc, char** argv) {
         app.show_wifi({2, WifiPhase::Connected, "home", "", true});
         assert(!app.pending_frame());
         driver.sync_view(); const auto query = driver.check_remote();
-        assert(query.target.ssid == "home" && network::live(query.session));
+        assert(query.targets.networks.size() == 1 && query.targets.networks[0].ssid == "home" && network::live(query.session));
         const auto busy_pixels = app.canvas().pixels();
         const auto busy_saved = app.saved_record();
         for (const auto phase : {WifiPhase::Connecting, WifiPhase::Clock, WifiPhase::Request}) {
@@ -1017,7 +1283,7 @@ int main(int argc, char** argv) {
         assert(network::live(query.session) && !query.cancelled->load());
         app.complete_network(query.id, 200, "{}", ""); driver.present();
         assert(network::live(query.session) && network::live(manual->cancelled));
-        driver.tap(342, 960); driver.present(); driver.tap(500, 1120); driver.present(); driver.complete_content();
+        driver.tap(342, 1090); driver.present(); driver.tap(500, 1120); driver.present(); driver.complete_content();
         const auto upload = app.take_network_request();
         assert(upload && upload->request.method == "PUT" && upload->session == query.session);
         app.complete_network(upload->id, 200, "{}", ""); driver.present();
@@ -1026,17 +1292,12 @@ int main(int argc, char** argv) {
         driver.close(); driver.present(); driver.complete_content(); driver.sync_view(); const auto expired = driver.check_remote();
         app.complete_network(expired.id, 200, "{}", ""); driver.present();
         network::release(expired.session);
-        driver.tap(342, 960); driver.present();
+        driver.tap(342, 1090); driver.present();
         auto refreshed = app.take_network_request();
         assert(refreshed && refreshed->request.method == "GET" && refreshed->session != expired.session);
         app.complete_network(refreshed->id, 200, "{}", ""); driver.present();
-        // A target edited between GET and PUT ends the transaction instead of changing networks.
-        std::string selection_error;
-        assert(provision::save_selected_network(root.string(), "phone", selection_error));
-        driver.tap(342, 960); driver.present(); driver.tap(500, 1120); driver.present(); driver.complete_content();
-        assert(!app.take_network_request() && !network::live(refreshed->session));
-        assert(provision::save_selected_network(root.string(), "home", selection_error));
         driver.close(); driver.present(); driver.complete_content();
+        std::string selection_error;
         for (const bool after_frame : {false, true}) {
             app.stop_wifi(true);
             assert(!network::live(manual->cancelled));
@@ -1047,25 +1308,25 @@ int main(int argc, char** argv) {
                 app.wake(false); driver.present(); driver.complete_content();
             } else app.cancel_sleep();
             auto restored = app.take_wifi_request();
-            assert(restored && restored->target.ssid == "home" && restored->cancelled != manual->cancelled);
+            assert(restored && !restored->targets.automatic && restored->targets.networks.size() == 1 && restored->targets.networks[0].ssid == "home" && restored->cancelled != manual->cancelled);
             assert(network::live(restored->cancelled));
             app.complete_wifi(restored->id, {}, "");
             manual = restored;
             app.cancel_sleep();
             assert(!app.take_wifi_request());
         }
+        assert(provision::save_selected_network(root.string(), "home", selection_error));
         app.stop_wifi(true);
         assert(sleep_frame(app)); driver.present();
         assert(!network::live(manual->cancelled) && !network::live(refreshed->session));
         app.wake(); driver.present(); driver.complete_content();
         assert(!app.take_wifi_request() && !app.take_network_request());
-        // A forbidden radio requires an explicit, local confirmation that resumes the GET.
+        // A closed radio is named in the panel; one explicit control opens it and starts the GET.
         write(root / "PicoPage/settings.toml", "schema_version=1\n[network]\nwifi_enabled=false\n");
-        driver.sync_view(); driver.tap(342, 960); driver.present();
+        driver.sync_view();
         assert(!app.take_network_request() && !app.wifi_enabled());
-        driver.tap(342, 550); driver.present();
-        assert(!app.take_network_request() && !app.wifi_enabled());
-        driver.tap(342, 960); driver.present(); driver.tap(342, 425); driver.present();
+        driver.tap(342, 1090); assert(!app.pending_frame() && !app.wifi_enabled());
+        driver.tap(342, 990); driver.present();
         auto allowed = app.take_network_request();
         assert(allowed && app.wifi_enabled() && allowed->request.method == "GET");
         app.complete_network(allowed->id, 0, "", "目标网络没有取得 IP 地址。"); driver.present();
@@ -1093,30 +1354,35 @@ int main(int argc, char** argv) {
         assert(app.view() == View::Error && app.saved_record() == saved_before_failure);
         driver.tap(300, 1120); driver.present(); driver.complete_content();
         driver.sync_view();
-        // Failed results survive unrelated touches; selecting a saved target is explicit.
-        driver.tap(342, 1170); driver.present(); assert(app.view() == View::WifiSettings);
+        // The panel's network row opens the connection mode; a failure notice survives unrelated touches.
+        driver.tap(342, 910); driver.present(); assert(app.view() == View::WifiSettings);
         app.show_wifi({20, WifiPhase::Offline, "", "目标网络没有取得 IP 地址。", false}); driver.present();
         const auto failed = app.canvas().pixels();
         driver.tap(680, 600); assert(!app.pending_frame() && app.canvas().pixels() == failed);
         app.show_wifi({2, WifiPhase::Connected, "old", "", true}); assert(!app.pending_frame());
-        driver.tap(300, 680); driver.present();
         std::vector<provision::SavedWifi> networks;
-        assert(provision::load_networks(root.string(), networks, selection_error));
+        std::optional<provision::SavedWifi> target; std::string error;
+        assert(provision::load_networks(root.string(), networks, error));
         const auto phone = std::find_if(networks.begin(), networks.end(), [](const auto& n) { return n.ssid == "phone"; });
         assert(phone != networks.end());
-        driver.tap(300, 260 + static_cast<int>(phone - networks.begin()) * 112); driver.present();
-        driver.tap(300, 540); driver.present();
-        auto selected = app.take_wifi_request();
-        assert(selected && selected->target.ssid == "phone");
-        std::optional<provision::SavedWifi> target; std::string error;
-        assert(provision::load_selected_network(root.string(), target, error) && target->ssid == "phone");
-        app.complete_wifi(selected->id, {}, "找不到所选网络。"); driver.present();
-        app.complete_wifi(selected->id, {}, "");
-        assert(app.prepare_portal()); driver.present();
-        driver.portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); driver.present();
-        app.stop_wifi(true); assert(selected->cancelled->load());
-        app.cancel_sleep();
-        assert(!app.take_wifi_request());
+        driver.tap(300, 352 + static_cast<int>(phone - networks.begin()) * 124); driver.present();
+        assert(provision::load_selected_network(root.string(), target, error) && target && target->ssid == "phone");
+        driver.tap(60, 50); driver.present(); assert(app.view() == View::Sync);
+        // A pinned network that is out of range is not replaced; automatic selection is offered for one check.
+        auto pinned = driver.check_remote();
+        assert(!pinned.targets.automatic && pinned.targets.networks.size() == 1 && pinned.targets.networks[0].ssid == "phone");
+        app.complete_network(pinned.id, 0, "", "找不到名为“phone”的网络。", LinkFailure::NotNearby); driver.present();
+        assert(app.view() == View::Sync && !network::live(pinned.session));
+        driver.tap(342, 1090); driver.present();
+        auto once = app.take_network_request();
+        assert(once && once->request.method == "GET" && once->targets.automatic && once->targets.networks.size() == 2);
+        assert(provision::load_selected_network(root.string(), target, error) && target && target->ssid == "phone");
+        app.complete_network(once->id, 0, "", "附近没有已保存的网络。", LinkFailure::NotNearby); driver.present();
+        // After an automatic failure the lower control leads to the Wi-Fi page instead.
+        driver.tap(342, 1090); driver.present(); assert(app.view() == View::WifiSettings);
+        driver.tap(60, 50); driver.present(); assert(app.view() == View::Sync);
+        const auto last = driver.check_remote();
+        app.stop_wifi(); assert(last.cancelled->load());
     }
     // Each instance models reopening after a restart. Empty records never schedule mapping;
     // transient and sustained task-start failures must preserve the committed progress bytes.
@@ -1166,13 +1432,13 @@ int main(int argc, char** argv) {
 
         // Upload mapping fails before any PUT and requires a new check and confirmation.
         request = driver.check_remote(); app.complete_network(request.id, 200, "{}", ""); driver.present();
-        driver.tap(342, 960); driver.present(); driver.tap(500, 1120); driver.present();
+        driver.tap(342, 1090); driver.present(); driver.tap(500, 1120); driver.present();
         ContentJob::fail_starts_for_test(ContentJob::Kind::MapUpload, 3, failure);
         driver.complete_content();
         assert(app.view() == View::Sync && !app.take_network_request());
         assert(*app.saved_record() == saved && read(progress_path) == progress_bytes);
         request = driver.check_remote(); app.complete_network(request.id, 200, "{}", ""); driver.present();
-        driver.tap(342, 960); driver.present(); driver.tap(500, 1120); driver.present();
+        driver.tap(342, 1090); driver.present(); driver.tap(500, 1120); driver.present();
         driver.complete_content();
         auto upload = app.take_network_request();
         assert(upload && upload->request.method == "PUT");
@@ -1188,10 +1454,10 @@ int main(int argc, char** argv) {
             write(path, "schema_version=1\n[network]\nwifi_enabled=false # retain\n");
             ReaderApp app(card.string(), "wifi-test", true, asynchronous); Driver driver{app};
             assert(app.initialize()); driver.present();
-            assert(!app.wifi_enabled() && !app.prepare_portal() && !app.prepare_portal(true) && !app.prepare_portal(true, true));
+            assert(!app.wifi_enabled() && !app.prepare_portal() && !app.prepare_portal(true));
             driver.tap(600, 50); driver.present();
             driver.tap(300, 180); driver.present(); assert(app.view() == View::Import);
-            driver.tap(520, 460); driver.present(); assert(app.view() == View::WifiSettings);
+            driver.tap(300, 720); driver.present(); assert(app.view() == View::WifiSettings);
             driver.refresh();
             driver.tap(300, 300); driver.present(); assert(app.wifi_enabled());
             assert(read(path).find("wifi_enabled=true # retain") != std::string::npos);
@@ -1211,8 +1477,7 @@ int main(int argc, char** argv) {
             driver.tap(300, 300); driver.present(); assert(app.wifi_enabled());
             driver.close(); driver.present();
             driver.tap(300, 180); driver.present();
-            // The top-right edge of the network row must not hit the switch above it.
-            driver.tap(640, 509); assert(app.take_portal_action() == PortalAction::Start);
+            driver.tap(300, 890); assert(app.take_portal_action() == PortalAction::Upload);
             assert(app.prepare_portal()); driver.present();
             const auto admitted = read(path);
             // While a FileImport may own the card, reads use only the admitted in-memory state.
@@ -1242,8 +1507,10 @@ int main(int argc, char** argv) {
             driver.tap(300, 310); driver.present(); assert(app.view() == View::SyncSettings);
             app.show_portal(old_closed);
             assert(app.view() == View::SyncSettings && !app.pending_frame());
-            driver.tap(342, 800);
-            assert(app.take_portal_action() == PortalAction::Start);
+            driver.close(); driver.present();
+            driver.tap(300, 180); driver.present();
+            driver.tap(300, 890);
+            assert(app.take_portal_action() == PortalAction::Upload);
             app.show_portal(old_closed); assert(!app.pending_frame());
             assert(app.prepare_portal()); driver.present();
             assert(app.portal_generation() != old_closed.generation);
@@ -1252,8 +1519,8 @@ int main(int argc, char** argv) {
             app.show_portal(old_closed);
             assert(app.view() == View::Portal && !app.pending_frame());
             driver.portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); driver.present();
-            driver.tap(300, 180); driver.present();
-            driver.tap(520, 460); driver.present();
+            assert(app.view() == View::Import);
+            driver.tap(300, 570); driver.present();
             driver.tap(300, 300); driver.present(); assert(!app.wifi_enabled());
             write(path, "schema_version=1\n[network]\nwifi_enabled=true\n");
             opened(app, "Books/book.epub"); driver.present();
@@ -1311,12 +1578,12 @@ int main(int argc, char** argv) {
         assert(app.view() == View::Sync && *app.saved_record() == saved);
         driver.close(); driver.present(); driver.sync_view();
         request = driver.check_remote(); app.complete_network(request.id, 200, "{}", ""); driver.present();
-        driver.tap(342, 960); driver.present(); driver.tap(500, 1120); driver.present();
+        driver.tap(342, 1090); driver.present(); driver.tap(500, 1120); driver.present();
         assert(app.view() == View::Loading && !app.take_network_request());
         driver.tap(342, 1075); driver.present(); driver.complete_content();
         assert(!app.take_network_request() && *app.saved_record() == saved);
         request = driver.check_remote(); app.complete_network(request.id, 200, "{}", ""); driver.present();
-        driver.tap(342, 960); driver.present(); driver.tap(500, 1120); driver.present();
+        driver.tap(342, 1090); driver.present(); driver.tap(500, 1120); driver.present();
         driver.complete_content();
         auto upload = app.take_network_request();
         assert(upload && upload->request.method == "PUT" && *app.saved_record() == saved);
@@ -1351,7 +1618,7 @@ int main(int argc, char** argv) {
         auto switched_account = sync_config;
         switched_account.replace(switched_account.find("test-user"), 9, "other-user");
         write(card / "PicoPage/sync.toml", switched_account);
-        driver.tap(500, 950);
+        driver.tap(500, 800);
         assert(app.view() == View::Sync && app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Overlay);
         driver.present(); assert(*app.saved_record() == before && !app.take_network_request());
         driver.close(); driver.present();
@@ -1368,7 +1635,9 @@ int main(int argc, char** argv) {
         assert(!app.pending_frame() && !app.take_network_request() && *app.saved_record() == cover);
         app.complete_network(current.id, 200, "{}", ""); driver.present();
         assert(*app.saved_record() == cover && !app.take_network_request());
-        driver.tap(342, 960); assert(app.view() == View::Confirmation); driver.present();
+        // The upload control sits below the row of the check control.
+        driver.tap(342, 990); assert(app.view() == View::Sync && !app.pending_frame());
+        driver.tap(342, 1090); assert(app.view() == View::Confirmation); driver.present();
         driver.refresh(); assert(!app.take_network_request());
         driver.close(); driver.present();
         assert(app.view() == View::Reading && !app.take_network_request() && *app.saved_record() == cover);
@@ -1376,7 +1645,7 @@ int main(int argc, char** argv) {
         const auto sync_saved = *app.saved_record();
         driver.sync_view(); const auto no_record = driver.check_remote();
         app.complete_network(no_record.id, 200, "{}", ""); driver.present();
-        driver.tap(342, 960); driver.present(); driver.tap(500, 1120); driver.present();
+        driver.tap(342, 1090); driver.present(); driver.tap(500, 1120); driver.present();
         auto upload = app.take_network_request(); assert(upload && upload->request.method == "PUT");
         const bool settings_existed = fs::exists(settings);
         const auto original_settings = read(settings);
@@ -1391,9 +1660,12 @@ int main(int argc, char** argv) {
         driver.sync_view(); const auto recheck = driver.check_remote();
         app.complete_network(recheck.id, 401, "{}", ""); driver.present(); driver.refresh();
         assert(!app.take_network_request() && *app.saved_record() == sync_saved);
+        // A rejected account leads to the account page; returning from it allows a new check.
+        driver.tap(342, 990); driver.present(); assert(app.view() == View::SyncSettings);
+        driver.tap(60, 50); driver.present(); assert(app.view() == View::Sync);
         const auto retry = driver.check_remote();
         app.complete_network(retry.id, 200, "{}", ""); driver.present();
-        driver.tap(342, 960); driver.present(); driver.tap(500, 1120); driver.present();
+        driver.tap(342, 1090); driver.present(); driver.tap(500, 1120); driver.present();
         upload = app.take_network_request(); assert(upload && upload->request.method == "PUT");
         app.complete_network(upload->id, 200, "{}", ""); driver.present(); driver.refresh();
         assert(*app.saved_record() == sync_saved);
@@ -2341,20 +2613,20 @@ int main(int argc, char** argv) {
     }
     {
         fs::remove(card / "PicoPage/network.toml");
-        // Phone setup: both entry points only request a session, the page keeps K2 and ignores
-        // every control but its own, and a closed session returns to the settings list.
+        // Upload over the device access point: the entry only requests a session, the page keeps K2
+        // and ignores every control but its own, and a session that never started returns to the
+        // network page with the reason.
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present();
         driver.tap(600, 50); driver.present(); assert(app.view() == View::Settings);
         driver.tap(300, 180); driver.present(); assert(app.view() == View::Import);
-        driver.tap(342, 510);
+        driver.tap(342, 660);
         assert(!app.pending_frame() && app.view() == View::Import);
-        assert(app.take_portal_action() == PortalAction::Start && app.take_portal_action() == PortalAction::None);
-        driver.portal({PortalPhase::Closed, "", "", "", "无法开启手机配置，请稍后重试。", "", 0, ""}); driver.present();
-        assert(app.view() == View::Settings && app.status() == "无法开启手机配置，请稍后重试。");
-        driver.tap(300, 310); driver.present(); assert(app.view() == View::SyncSettings && app.status().empty());
-        driver.tap(342, 800);
-        assert(app.take_portal_action() == PortalAction::Start);
+        assert(app.take_portal_action() == PortalAction::Upload && app.take_portal_action() == PortalAction::None);
+        driver.portal({PortalPhase::Closed, "", "", "", "设备热点没有启动，请重试。", "", 0, ""}); driver.present();
+        assert(app.view() == View::Import && app.status() == "设备热点没有启动，请重试。");
+        driver.tap(342, 660);
+        assert(app.take_portal_action() == PortalAction::Upload);
         assert(app.prepare_portal()); driver.present(); assert(app.view() == View::Portal);
         const auto starting = app.canvas().pixels();
         PortalStatus status{PortalPhase::Waiting, "PicoPage-TEST", "abcd2345", "http://192.168.4.1", "", "", 0, ""};
@@ -2370,43 +2642,18 @@ int main(int argc, char** argv) {
         driver.key(Input::K1); driver.key(Input::K3); driver.tap(60, 50); driver.tap(342, 500);
         assert(!app.pending_frame() && app.view() == View::Portal);
         assert(app.take_portal_action() == PortalAction::None && !app.prepare_sleep());
-        status.phase = PortalPhase::JoiningWifi; status.detail = "home";
+        status.phase = PortalPhase::Receiving;
         driver.portal(status);
         assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::Content);
         driver.present();
-        status.phase = PortalPhase::Failed; status.detail = "无法连接“home”（驱动原因 8）。设备没有保存这次的设置。";
-        driver.portal(status); driver.present();
-        const auto failed = app.canvas().pixels();
-        status.detail = provision::wifi_problem("12345678901234567890123456789012", provision::WifiFailure::Rejected, 201) +
-                        "设备没有保存这次的设置。";
-        driver.portal(status); driver.present();
-        assert(app.canvas().pixel(24, 980) == 15 && app.canvas().pixel(659, 1000) == 15);
-        bool third_line = false;
-        for (int y = 968; y < 1032; ++y)
-            for (int x = 36; x < 648; ++x) third_line |= app.canvas().pixel(x, y) < 15;
-        assert(third_line);
-        status.detail = std::string(300, 'x');
-        driver.portal(status); driver.present();
-        for (int y = 1048; y < 1080; ++y)
-            for (int x = 24; x < 660; ++x) assert(app.canvas().pixel(x, y) == 15);
-        status.phase = PortalPhase::Saved; status.detail = "已验证并保存 Wi-Fi “home”。";
-        driver.portal(status); driver.present();
-        assert(app.canvas().pixels() != failed && app.view() == View::Portal); driver.refresh();
-        const auto verified = app.canvas().pixels();
-        status.detail = "已保存 Wi-Fi “phone”，未验证连接。";
-        driver.portal(status); driver.present();
-        assert(app.canvas().pixels() != verified && app.view() == View::Portal);
-        const auto manual_saved = app.canvas().pixels();
-        driver.refresh();
-        assert(!app.pending_frame() && app.canvas().pixels() == manual_saved);
         driver.tap(342, 1120);
         assert(app.take_portal_action() == PortalAction::Stop); driver.present();
         driver.tap(342, 1120);
         assert(app.take_portal_action() == PortalAction::None && !app.pending_frame());
         driver.portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); driver.present();
-        assert(app.view() == View::Settings && app.status().empty());
+        assert(app.view() == View::Library && app.status().empty());
         driver.portal(status);
-        assert(!app.pending_frame() && app.view() == View::Settings);
+        assert(!app.pending_frame() && app.view() == View::Library);
         // With a book open the session starts from saved progress and leaves it unchanged.
         opened(app, "Books/book.epub"); driver.present();
         driver.key(Input::K3); driver.present();
@@ -2414,11 +2661,10 @@ int main(int argc, char** argv) {
         assert(app.view() == View::Portal && !app.save_due());
         const auto saved = *app.saved_record();
         driver.portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); driver.present();
-        assert(app.view() == View::Settings && *app.saved_record() == saved);
-        driver.tap(300, 180); driver.present();
+        assert(app.view() == View::Import && *app.saved_record() == saved);
         driver.tap(342, 660);
         assert(app.take_portal_action() == PortalAction::Upload);
-        assert(app.prepare_portal(true)); driver.present();
+        assert(app.prepare_portal()); driver.present();
         driver.portal({PortalPhase::Waiting, "PicoPage-TEST", "abcd2345", "http://192.168.4.1", "", "", 0, ""});
         driver.present(); driver.refresh();
         assert(app.view() == View::Portal && *app.saved_record() == saved && !app.prepare_sleep());
@@ -2439,7 +2685,7 @@ int main(int argc, char** argv) {
         assert(app.take_portal_action() == PortalAction::Upload);
         driver.tap(342, 760);
         assert(app.take_portal_action() == PortalAction::UploadStation);
-        assert(app.prepare_portal(true, true)); driver.present();
+        assert(app.prepare_portal(true)); driver.present();
         assert(app.view() == View::Portal && !app.prepare_sleep());
         const std::string refused = "无法连接“home”，密码可能不正确（驱动原因 15）。可以改用设备热点传书。";
         driver.portal({PortalPhase::Closed, "", "", "", refused, "", 0, ""}); driver.present();
@@ -2447,7 +2693,7 @@ int main(int argc, char** argv) {
         // A started session shows one code for the joined network and the saved-book summary.
         driver.tap(342, 760);
         assert(app.take_portal_action() == PortalAction::UploadStation);
-        assert(app.prepare_portal(true, true)); driver.present();
+        assert(app.prepare_portal(true)); driver.present();
         const auto connecting = app.canvas().pixels();
         PortalStatus station{PortalPhase::Waiting, "", "", "http://192.168.1.23/abc234", "", "home", 0, ""};
         driver.portal(station);
@@ -2654,7 +2900,7 @@ int main(int argc, char** argv) {
         app.complete_network(request.id, 200, upload ? "{}" :
             R"({"progress":"/body[1]/DocFragment[1]/body[1]/h1[1]/text()[1].0","percentage":0.1})", "");
         driver.present();
-        if (upload) { driver.tap(342, 960); driver.present(); }
+        if (upload) { driver.tap(342, 1090); driver.present(); }
         const auto sync_view = app.view(); const auto pixels = app.canvas().pixels();
         const auto recent = home / "PicoPage/data/last-book.txt";
         fs::rename(recent, recent.string() + ".held"); fs::create_directory(recent);
@@ -2663,7 +2909,7 @@ int main(int argc, char** argv) {
         driver.tap(100, 1100); driver.present();
         assert(app.view() == sync_view && app.canvas().pixels() == pixels);
         fs::remove(recent); fs::rename(recent.string() + ".held", recent);
-        driver.tap(500, upload ? 1120 : 950); driver.present();
+        driver.tap(500, upload ? 1120 : 800); driver.present();
         if (upload) {
             const auto sent = app.take_network_request();
             assert(sent && sent->request.method == "PUT");

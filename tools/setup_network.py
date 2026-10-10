@@ -126,7 +126,7 @@ def wifi_toml(ssid, password, networks=()):
             break
     else:
         if len(merged) >= WIFI_LIMIT:
-            raise ValueError(f"已保存 {WIFI_LIMIT} 个网络。请先在设备的手机配置页删除一个；没有写入任何文件。")
+            raise ValueError(f"已保存 {WIFI_LIMIT} 个网络。请先在设备的“已保存网络”中忘记一个；没有写入任何文件。")
         merged.append(entry)
     text = "schema_version = 2\n"
     for saved in merged:
@@ -168,7 +168,7 @@ def edited_wifi_toml(source, ssid, password):
     target = next((index for index, entry in enumerate(desired) if entry["ssid"] == ssid), None)
     if target is None:
         if len(desired) >= WIFI_LIMIT:
-            raise ValueError(f"已保存 {WIFI_LIMIT} 个网络。请先在设备的手机配置页删除一个；没有写入任何文件。")
+            raise ValueError(f"已保存 {WIFI_LIMIT} 个网络。请先在设备的“已保存网络”中忘记一个；没有写入任何文件。")
         desired.append({"ssid": ssid, "password": password})
     else:
         desired[target]["password"] = password
@@ -210,13 +210,7 @@ def edited_wifi_toml(source, ssid, password):
             edited += newline
         edited += (newline + "[[wifi]]" + newline + "ssid = " + _quote(ssid) + newline +
                    "password = " + _quote(password) + newline)
-    if "selected_ssid" not in tomllib.loads(source):
-        selected = current[-1]["ssid"] if current else ssid
-        match = re.search(r"(?m)^\s*schema_version[^\n]*(?:\n|$)", edited)
-        if not match:
-            raise ValueError(unsupported)
-        offset = match.end()
-        edited = edited[:offset].rstrip("\n") + "\nselected_ssid = " + _quote(selected) + "\n" + edited[offset:]
+    # selected_ssid is left as found: a missing or empty value means automatic connection.
     if _networks_from_text(edited) != desired:
         raise ValueError(unsupported)
     return edited

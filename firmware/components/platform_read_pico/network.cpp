@@ -166,8 +166,9 @@ bool scan(std::vector<NearbyNetwork>& networks, std::string& error, const std::a
         if (name.empty()) continue;
         const auto found = std::find_if(networks.begin(), networks.end(),
                                         [&](const NearbyNetwork& item) { return item.ssid == name; });
-        if (found == networks.end()) networks.push_back({std::move(name), records[index].rssi});
-        else found->rssi = std::max<int>(found->rssi, records[index].rssi);
+        const bool open = records[index].authmode == WIFI_AUTH_OPEN;
+        if (found == networks.end()) networks.push_back({std::move(name), records[index].rssi, open});
+        else if (records[index].rssi > found->rssi) { found->rssi = records[index].rssi; found->open = open; }
     }
     std::stable_sort(networks.begin(), networks.end(),
                      [](const NearbyNetwork& a, const NearbyNetwork& b) { return a.rssi > b.rssi; });
