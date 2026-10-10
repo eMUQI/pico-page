@@ -106,7 +106,7 @@ python3 tools/device_workbench.py --port /dev/ttyACM0 \
 python3 tools/device_workbench.py --compare .local/runs/base/run.json .local/runs/new/run.json
 ```
 
-比较要求两轮结果均为 pass、已核验的构建来源、固定脚本身份（`refresh-v1:K2x1`，自动场景另含书籍路径和起始页，例如 `reading-flow-v1:rounds=3,turns=4:book=…:page=7/12`）以及相同 kind/detail/终态样本数量；自由人工操作没有固定工作负载，不能标为可比。另检查测试条件、dirty 状态和除四个诊断开关外的 sdkconfig；不一致、缺字段、无样本或有证据缺口会提示不可比。保留两边源码 commit 和原始统计，并用 same_source 区分同源码配置 A/B 与跨版本比较；不会把跨版本差异直接归因于诊断开关。
+比较要求两轮结果均为 pass、已核验的构建来源、固定脚本身份（`refresh-v1:K2x1`，自动场景另含书籍路径、起始页和起始位置的 anchor，例如 `reading-flow-v1:rounds=3,turns=4:book=…:page=7/12:anchor=8dccb332`）以及相同 kind/detail/终态样本数量；自由人工操作没有固定工作负载，不能标为可比。另检查测试条件、dirty 状态和除四个诊断开关外的 sdkconfig；不一致、缺字段、无样本或有证据缺口会提示不可比。保留两边源码 commit 和原始统计，并用 same_source 区分同源码配置 A/B 与跨版本比较；不会把跨版本差异直接归因于诊断开关。
 
 原始日志可能含路径、服务地址等隐私。结果默认放在已忽略的 `.local/` 下；不要将真实日志、书籍内容、账号或完整 sdkconfig 未经检查提交仓库。
 
@@ -127,7 +127,7 @@ python3 tools/device_workbench.py --port /dev/ttyACM0 \
 
 1. 打开测试书，立即进入工具→同步并检查远端位置，等待请求结束、位置映射完成且 status 的 sync 不再是 unchecked。结果为 different 时点「留在这里」，否则从页眉返回正文。只有 no-record、same、different、unmapped 算有效结果，其他结果（例如 HTTP 成功但应用判为 failed）为 inconclusive。断言保存修订不变。
 2. 打开测试书，等到图片解码的 Content 开始事件出现后再打开一次；随后确认那次解码以取消结束。解码在第二次打开前已经完成时为 inconclusive，因为没有真正放弃一个进行中的图片任务。
-3. 再次进入同步并检查，等到 HTTPS 阶段事件（NetworkStage detail=3）开始后点「取消同步」，在「正在结束同步」页点「继续离线阅读」。正文恢复后图片重新解码，此时被取消的请求尚未退出。断言保存修订不变。
+3. 再次进入同步并检查，等到 HTTPS 阶段事件（NetworkStage detail=3）开始后点「取消同步」，在「正在结束同步」页点「继续离线阅读」。正文恢复后图片重新解码，此时被取消的请求尚未退出。等该请求结束并要求其终态为 cancelled；以其他终态结束说明取消没有赶在请求结束之前生效，结果为 inconclusive。断言保存修订和 anchor 不变。
 4. 导出并校验画布，冻结记录器。结果须满足人工入口的同一条图片证据链（见下节），并且 `analysis.stale_image_patches` 为空：没有任何图片在更新会话或排版的帧已呈现之后被采用。该项不为空时，证据和运行条件完整才判为 fail，否则为 inconclusive。
 
 请求在 HTTPS 阶段之前就结束、检查未成功或没有形成交叠时，结果为 inconclusive，不是 fail。等待期间设备进入错误页（例如帧失败后的「屏幕更新失败」）时，场景立即以 fail 结束并照常冻结记录器，使已记录的失败按完整证据判定。第 3 步有意让正文重画落在 TLS 握手期间，这是已知会偶发 EPD 行队列欠载的时序；出现时结果为 fail 并保留驱动日志，这是场景的检出，不是工具故障。页码在计数完成前未知，因此位置保护用保存修订和 anchor 判断。检查因网络、账户或服务不可用而失败时，这是前提未满足：场景把该请求及其阶段的失败标为 excused，结果保持 inconclusive；同一轮中的其他失败仍按规则判定。本入口不验证同步结果内容、上传、采用远端位置或 KOReader 往返。

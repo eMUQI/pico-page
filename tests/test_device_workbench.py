@@ -121,7 +121,8 @@ class Reader:
             s.update(view="reading", frame=21, revision=s["revision"] + self.faults.get("moved", 0))  # 22 once this tap is counted
             # The image decodes while the cancelled request is still inside its HTTPS phase.
             self.emit(4, 3, 1, 200, request=4, detail=2); self.emit(3, 5, 0, 260, result=2, request=8, detail=3)
-            self.emit(2, 2, 0, 270, result=2, request=8); self.emit(4, 3, 0, 300, request=4, detail=2)
+            self.emit(2, 2, 0, 270, result=0 if self.faults.get("late_cancel") else 2, request=8)
+            self.emit(4, 3, 0, 300, request=4, detail=2)
             self.emit(5, 4, 1, 310, frame=9, request=4, detail=1); self.emit(5, 4, 0, 320, frame=9, request=4, detail=1)
             self.emit(6, 0, 1, 330, frame=22, request=9, detail=1); self.emit(6, 0, 0, 400, frame=22, request=9, detail=1)
         elif (view, point) == ("typography", FONT_SIZE): pass
@@ -247,7 +248,8 @@ class WorkbenchTest(unittest.TestCase):
         # HTTP success with an answer the application rejected, a failed request, a decode that ended before
         # the second reopen, and a request that never reached HTTPS all leave the run undecided.
         for fault, reason in ((dict(answer="failed"), "valid answer: failed"), (dict(offline=1), "did not succeed"),
-                              (dict(fast_decode=1), "finished before the second reopen"), (dict(no_https=1), "before its HTTPS phase")):
+                              (dict(fast_decode=1), "finished before the second reopen"), (dict(no_https=1), "before its HTTPS phase"),
+                              (dict(late_cancel=1), "ended as success, not cancelled")):
             with self.subTest(fault=fault):
                 self.output = Path(self.temp.name) / ("run-" + str(len(list(Path(self.temp.name).iterdir()))))
                 reader = Reader(image=1, **fault)

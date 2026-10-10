@@ -484,6 +484,12 @@ def image_sync(session, book):
     unchanged("the cancelled sync check")
     # The image can finish before the cancelled request has unwound; its end must be inside the capture.
     wait_for(session, lambda s: not open_operations(session.trace[mark:]), "cancelled sync request finished", long_wait)
+    # The worker reports cancelled whenever the flag was set before it returned. Any other outcome means the
+    # request ended before the cancellation took effect, so this run did not exercise a cancelled request.
+    outcome = traced(mark, "2", "0")[0]["result"]
+    if outcome != "2":
+        return dict(status="inconclusive", reason="The sync request ended as " + OUTCOMES[int(outcome)] + ", not cancelled",
+                    before=before)
     observation = image_observation(session)
     return dict(observation, before=before, sync_answer=answer) if observation["status"] == "pass" else observation
 
@@ -852,7 +858,7 @@ def main():
         # Runs are comparable only for the same book and page range; the start is known once the scenario has run.
         place = result.get("start") or result.get("after")
         if args.mode in ("image-sync", "reading-flow") and place:
-            metadata["workload"] += f":page={place.get('page')}/{place.get('pages')}"
+            metadata["workload"] += f":page={place.get('page')}/{place.get('pages')}:anchor={place.get('anchor')}"
         session.cutoff()
     except AssertionError as exc:
         result = dict(status="fail", reason=str(exc))
