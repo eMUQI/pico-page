@@ -1773,6 +1773,73 @@ int main(int argc, char** argv) {
         app.complete_network(upload->id, 200, "{}", ""); driver.present();
         assert(*app.saved_record() == saved);
     }
+    // Which of two different positions is further comes from where the remote position was mapped,
+    // never from the percentage the server stores: each client computes that value its own way.
+    for (const bool async : {false, true}) {
+        const auto root = card / (async ? "SyncOrderAsync" : "SyncOrderSync");
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
+        fs::copy_file(fixtures / "multi-part-link.epub", root / "Books/parts.epub");
+        write(root / "PicoPage/sync.toml", sync_config);
+        write(root / "PicoPage/network.toml", "schema_version=2\n[[wifi]]\nssid=\"home\"\npassword=\"password\"\n");
+        ReaderApp app(root.string(), "sync-order", true, async); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        // Checks the remote position, returns the order and the panel, then stays on the local page.
+        const auto compare = [&](const std::string& pointer, const char* percentage) {
+            const auto saved = *app.saved_record();
+            driver.sync_view();
+            const auto request = driver.check_remote();
+            app.complete_network(request.id, 200, R"({"progress":")" + pointer + R"(","percentage":)" + percentage + "}", "");
+            driver.present(); driver.complete_content();
+            assert(app.view() == View::Sync && std::string(app.sync_state()) == "different");
+            const std::pair result{app.sync_order(), app.canvas().pixels()};
+            driver.close(); driver.present(); driver.complete_content();
+            assert(app.view() == View::Reading && !app.take_network_request() && *app.saved_record() == saved);
+            return result;
+        };
+        const std::string second = "/body[1]/DocFragment[2]/body[1]/";
+        opened(app, "Books/book.epub"); driver.present();
+        assert(app.saved_record()->anchor.resource.find("chapter1") != std::string::npos);
+        // A later chapter is further, whatever percentage the other client stored.
+        const auto later = compare(second + "h1[1]/text()[1].0", "0.01");
+        assert(later.first == 1);
+        assert(compare(second + "h1[1]/text()[1].0", "0.99") == later);
+        while (app.saved_record()->anchor.resource.find("chapter2") == std::string::npos) {
+            driver.key(Input::K3); driver.present(); driver.complete_content();
+        }
+        // On the visible page, at another anchor than the saved one: neither side is further.
+        assert(compare(second + "p[1]/text()[1].0", "0.99").first == 0);
+        driver.key(Input::K3); driver.present(); driver.complete_content();
+        // The start of this chapter lies before its second page; the stored 99% does not count.
+        const auto earlier = compare(second + "h1[1]/text()[1].0", "0.99");
+        assert(earlier.first == -1 && earlier.second != later.second);
+        assert(compare(second + "h1[1]/text()[1].0", "0.01") == earlier);
+        // Counted pages change how both percentages are computed, not which position is further.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (app.background_due()) {
+            app.background_step(); app.poll_background();
+            if (app.pending_frame()) driver.present();
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(app.book_pages());
+        const auto counted = compare(second + "h1[1]/text()[1].0", "0.99");
+        assert(counted.first == -1 && compare(second + "h1[1]/text()[1].0", "0.01") == counted);
+
+        // Within one long chapter the order follows the chapter parts, which hold unequal shares
+        // of the book: the first chapter here has three parts and the second a single page.
+        const std::string first = "/body[1]/DocFragment[1]/body[1]/";
+        opened(app, "Books/parts.epub"); driver.present();
+        assert(compare(first + "p[4501]/text()[1].0", "0").first == 1);
+        const auto config = FileStore(root.string()).load_settings("Books/parts.epub").settings;
+        driver.tap(config.margin_x_px + config.indent_chars * config.font_size_px + config.font_size_px / 2, 80);
+        driver.present(); driver.complete_content();
+        assert(app.saved_record()->anchor.node.find("/p[4501]/") != std::string::npos);
+        driver.key(Input::K3); driver.present(); driver.complete_content();
+        assert(compare(first + "p[2]/text()[1].0", "0.99").first == -1);
+        assert(compare(first + "p[4501]/text()[1].0", "0.99").first == -1);
+        assert(compare(second + "h1[1]/text()[1].0", "0").first == 1);
+    }
     {
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();

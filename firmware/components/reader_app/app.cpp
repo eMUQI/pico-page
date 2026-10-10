@@ -538,12 +538,16 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::optional<NetworkOperation> network_request;
     std::shared_ptr<std::atomic_bool> network_cancel;
     std::optional<Anchor> remote_anchor;
+    // Where remote_anchor lies in its chapter; set by the mapping that produced the anchor.
+    std::optional<sync::PartPosition> remote_place;
     std::optional<ReadingRecord> upload_record, acknowledged_record, uncertain_record;
     sync::Config acknowledged_config, uncertain_config;
     enum class SyncState { Unchecked, NoRecord, Same, Different, Unmapped, Uploaded, Uncertain,
                            Unauthorized, Failed, LinkFailed, ConfigChanged };
     SyncState sync_state = SyncState::Unchecked;
-    // Remote percentage in [0, 1] and device name from the last answered check; negative when unknown.
+    // Percentage in [0, 1] as the server reported it, and device name, from the last answered check;
+    // negative when unknown. Each client computes this percentage its own way, so it is shown only
+    // for a position that could not be mapped and never compared with a local percentage.
     double remote_percent = -1;
     std::string remote_device;
     // Whether the running or failed check may use only the pinned network, and that network's name.
@@ -1226,7 +1230,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (!sync::load_config(root, current, detail) || !same_account(current, sync_config)) {
                 cancel_sync(); sync_state = SyncState::ConfigChanged;
             } else if (request.kind == ContentJob::Kind::MapDownload) {
-                accept_remote_mapping(job->result.mapped_anchor, job->result.error);
+                accept_remote_mapping(job->result.mapped_anchor, job->result.mapped_place, job->result.error);
             } else if (!job->result.error.empty()) {
                 sync_status = "这个位置暂时不能上传。";
             } else if (!sync_checked || !request.record || !session.saved_record() || !(*session.saved_record() == *request.record)) {
@@ -1672,45 +1676,59 @@ struct ReaderApp::Impl final : DisplayBackend {
         return current_page(page.start);
     }
     std::uint32_t current_page(std::size_t start) const {
+        return counted_page(chapter_index, chapter.part, start);
+    }
+    /** As current_page, for a scalar offset in any part of any spine item. */
+    std::uint32_t counted_page(std::size_t index, std::uint32_t in_part, std::size_t start) const {
         const auto &spine = document.spine();
-        if (!pages_complete || chapter_index >= spine.size() || !spine[chapter_index].linear) return 0;
-        const auto &parts = chapter_pages[chapter_index];
-        if (chapter.part >= parts.size() || parts[chapter.part].empty()) return 0;
+        if (!pages_complete || index >= spine.size() || !spine[index].linear) return 0;
+        const auto &parts = chapter_pages[index];
+        if (in_part >= parts.size() || parts[in_part].empty()) return 0;
         std::size_t before = 0;
-        for (std::size_t i = 0; i < chapter_index; ++i)
+        for (std::size_t i = 0; i < index; ++i)
             for (const auto &starts : chapter_pages[i]) before += starts.size();
-        for (std::uint32_t part = 0; part < chapter.part; ++part) before += parts[part].size();
-        const auto &starts = parts[chapter.part];
+        for (std::uint32_t part = 0; part < in_part; ++part) before += parts[part].size();
+        const auto &starts = parts[in_part];
         const auto within = std::upper_bound(starts.begin(), starts.end(), static_cast<std::uint32_t>(start)) - starts.begin();
         return static_cast<std::uint32_t>(before + std::max<std::ptrdiff_t>(1, within));
     }
     /** Position weighted by the uncompressed size of each linear chapter; used until pages are counted. */
     std::pair<std::uint64_t, std::uint64_t> estimated_position(std::size_t end) const {
+        return estimated_position(chapter_index, loaded_part(end));
+    }
+    /** The loaded chapter part with a scalar offset in it. */
+    sync::PartPosition loaded_part(std::size_t offset) const {
+        return {chapter.part, static_cast<std::uint32_t>(offset), static_cast<std::uint32_t>(chapter.text.size()),
+                chapter.last_part};
+    }
+    /** As estimated_position(end), read up to at.offset in a part of any spine item. */
+    std::pair<std::uint64_t, std::uint64_t> estimated_position(std::size_t index, const sync::PartPosition &at) const {
         const auto &spine = document.spine();
+        const std::uint64_t size = at.part_scalars, end = std::min(at.offset, at.part_scalars);
         std::uint64_t read = 0, total = 0;
         for (std::size_t i = 0; i < spine.size(); ++i) {
             if (!spine[i].linear) continue;
             total += spine[i].bytes;
-            if (i < chapter_index) read += spine[i].bytes;
-            else if (i == chapter_index && !chapter.text.empty()) {
+            if (i < index) read += spine[i].bytes;
+            else if (i == index && size) {
                 if (txt_name(book_path)) {
-                    // Byte span of the loaded part: recorded boundaries for GB18030, 48 KiB steps
-                    // for UTF-8, both limited by the file size so that a short part is not overstated.
+                    // Byte span of the part: recorded boundaries for GB18030, 48 KiB steps for
+                    // UTF-8, both limited by the file size so that a short part is not overstated.
                     const auto &offsets = document.metadata().txt_offsets;
-                    std::uint64_t begin = static_cast<std::uint64_t>(chapter.part) * kTxtPartBytes, span = kTxtPartBytes;
-                    if (chapter.part + 1 < offsets.size()) {
-                        begin = offsets[chapter.part];
-                        span = offsets[chapter.part + 1] - begin;
+                    std::uint64_t begin = static_cast<std::uint64_t>(at.part) * kTxtPartBytes, span = kTxtPartBytes;
+                    if (at.part + 1 < offsets.size()) {
+                        begin = offsets[at.part];
+                        span = offsets[at.part + 1] - begin;
                     }
                     begin = std::min<std::uint64_t>(begin, spine[i].bytes);
                     span = std::min<std::uint64_t>(span, spine[i].bytes - begin);
-                    read += begin + span * std::min(end, chapter.text.size()) / chapter.text.size();
+                    read += begin + span * end / size;
                     continue;
                 }
                 // The number of parts is unknown before the item is counted; one more is assumed.
-                const std::uint64_t parts = chapter.part + (chapter.last_part ? 1 : 2);
-                const std::uint64_t within = chapter.part * chapter.text.size() + std::min(end, chapter.text.size());
-                read += spine[i].bytes * within / (parts * chapter.text.size());
+                const std::uint64_t parts = at.part + (at.last_part ? 1 : 2);
+                const std::uint64_t within = at.part * size + end;
+                read += spine[i].bytes * within / (parts * size);
             }
         }
         return {read, total};
@@ -1721,9 +1739,16 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     /** Whole-book percentage of a page spanning [start, end) of the loaded chapter. */
     int book_percent_value(std::size_t start, std::size_t end) const {
-        if (const auto current = current_page(start))
+        return book_percent_value(chapter_index, loaded_part(end), start);
+    }
+    /**
+     * Whole-book percentage of a position in any spine item: the counted page that holds start
+     * once every chapter is counted, otherwise the size read up to at.offset.
+     */
+    int book_percent_value(std::size_t index, const sync::PartPosition &at, std::size_t start) const {
+        if (const auto current = counted_page(index, at.part, start))
             return static_cast<int>(static_cast<std::uint64_t>(current) * 100 / total_pages());
-        const auto [read, total] = estimated_position(end);
+        const auto [read, total] = estimated_position(index, at);
         return total ? static_cast<int>(read * 100 / total) : 0;
     }
     std::string book_percent(std::size_t start, std::size_t end) const {
@@ -4729,6 +4754,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         active_network = 0;
         network_request.reset();
         remote_anchor.reset();
+        remote_place.reset();
         upload_record.reset();
         sync_checked = false;
         uploading = false;
@@ -4745,16 +4771,35 @@ struct ReaderApp::Impl final : DisplayBackend {
         return std::to_string(static_cast<int>(std::lround(std::clamp(fraction, 0., 1.) * 100))) + "%";
     }
     std::string local_position() const { return chapter_label() + " · " + book_percent(); }
+    /** Spine index of the mapped remote position; false until a mapping supplied its place. */
+    bool remote_chapter(std::size_t& index) const {
+        return remote_anchor && remote_place && document.chapter_index_for(remote_anchor->resource, index);
+    }
+    /** Percentage of the mapped remote position, computed as book_percent() is; empty when unmapped. */
+    std::string remote_book_percent() const {
+        std::size_t index;
+        if (!remote_chapter(index)) return {};
+        return std::to_string(book_percent_value(index, *remote_place, remote_place->offset)) + "%";
+    }
     /** The remote position: its chapter once mapped, otherwise only the percentage the server reported. */
     std::string remote_position() const {
-        if (remote_anchor) return anchor_label(*remote_anchor) + (remote_percent >= 0 ? " · " + percent_text(remote_percent) : "");
+        if (remote_anchor) {
+            const auto percent = remote_book_percent();
+            return anchor_label(*remote_anchor) + (percent.empty() ? "" : " · " + percent);
+        }
         return remote_percent >= 0 ? "约 " + percent_text(remote_percent) : "位置未知";
     }
-    /** 1 when the remote position is at least one percent further into the book, -1 for the local one, else 0. */
+    /**
+     * 1 when the mapped remote position lies after the visible page, -1 when it lies before the
+     * page, 0 when it is on the page or was not mapped. Spine item, chapter part and offset are
+     * compared; percentages are not.
+     */
     int further() const {
-        if (remote_percent < 0) return 0;
-        const double difference = remote_percent * 100 - book_percent_value(page.start, page.end);
-        return difference >= 1 ? 1 : difference <= -1 ? -1 : 0;
+        std::size_t index;
+        if (!remote_chapter(index)) return 0;
+        if (index != chapter_index) return index > chapter_index ? 1 : -1;
+        if (remote_place->part != chapter.part) return remote_place->part > chapter.part ? 1 : -1;
+        return remote_place->offset >= page.end ? 1 : remote_place->offset < page.start ? -1 : 0;
     }
     /** Returns the sync panel to its unchecked state after a cancelled request. */
     void sync_cancelled(bool sent) {
@@ -4819,7 +4864,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             hits.push_back({36, 674, 297, 250, SyncStay});
             text("远端", 371, 694, 24, 256, 3);
             title_lines(anchor_label(*remote_anchor), 371, 738, 256, 28, true, 2);
-            text(remote_percent >= 0 ? percent_text(remote_percent) : "", 371, 806, 24, 256);
+            text(remote_book_percent(), 371, 806, 24, 256);
             const auto device = remote_device.empty() ? std::string("其他设备") : remote_device;
             text(order > 0 ? device + " · 更靠后" : device, 371, 838, 22, 256, 3);
             canvas.line(351, 872, 647, 872, 12, 2);
@@ -4993,14 +5038,15 @@ struct ReaderApp::Impl final : DisplayBackend {
         view = View::Loading;
         overlay();
     }
-    void accept_remote_mapping(const Anchor& candidate, const std::string& detail) {
+    void accept_remote_mapping(const Anchor& candidate, const sync::PartPosition& place, const std::string& detail) {
         sync_status.clear();
+        remote_place.reset();
         if (detail.empty()) {
             remote_anchor = candidate;
             if (session.saved_record() && session.saved_record()->anchor == candidate) {
                 network::release(sync_hold);
                 remote_anchor.reset(); sync_state = SyncState::Same;
-            } else sync_state = SyncState::Different;
+            } else { remote_place = place; sync_state = SyncState::Different; }
         } else {
             remote_anchor.reset(); sync_state = SyncState::Unmapped;
             if (memory_error(detail)) sync_status = "设备内存不足，暂时无法定位远端位置，没有跳转。";
@@ -5122,12 +5168,13 @@ struct ReaderApp::Impl final : DisplayBackend {
             } else if (remote.status == sync::RemoteStatus::Found) {
                 uncertain_record.reset(); acknowledged_record.reset();
                 Anchor candidate;
+                sync::PartPosition place;
                 sync_checked = true;
                 remote_percent = remote.percentage;  // parse_remote() accepts only [0, 1].
                 remote_device = remote.device;
                 if (async_content) { begin_mapping(ContentJob::Kind::MapDownload, remote.progress); return; }
-                sync::from_xpointer(document, remote.progress, sync_config.dom_version, candidate, detail);
-                accept_remote_mapping(candidate, detail);
+                sync::from_xpointer(document, remote.progress, sync_config.dom_version, candidate, detail, {}, &place);
+                accept_remote_mapping(candidate, place, detail);
             } else {
                 sync_checked = false;
                 sync_state = remote.status == sync::RemoteStatus::Unauthorized ? SyncState::Unauthorized : SyncState::Failed;
@@ -6703,6 +6750,7 @@ const char *ReaderApp::sync_state() const {
                                             "uncertain", "unauthorized", "failed", "link-failed", "config-changed"};
     return names[static_cast<unsigned>(impl_->sync_state)];
 }
+int ReaderApp::sync_order() const { return impl_->sync_state == Impl::SyncState::Different ? impl_->further() : 0; }
 int ReaderApp::font_size_px() const { return impl_->settings.font_size_px; }
 #endif
 const char *ReaderApp::background_state() const {

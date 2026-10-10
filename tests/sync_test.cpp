@@ -29,8 +29,13 @@ int main(int argc, char** argv) {
         assert(recovered == emoji);
         assert(sync::to_xpointer(document, chapter, leading, version, pointer, error));
         assert(pointer == "/body[1]/DocFragment[1]/body[1]/p[1]/text()[1].1");
-        assert(sync::from_xpointer(document, pointer, version, recovered, error));
-        assert(recovered == leading);
+        // The reported place is the part that holds the anchor and the anchor's offset in its text.
+        sync::PartPosition place;
+        std::uint32_t visible = 0;
+        assert(sync::from_xpointer(document, pointer, version, recovered, error, {}, &place));
+        assert(recovered == leading && chapter.offset_for(leading, visible));
+        assert(place.part == chapter.part && place.offset == visible && place.last_part == chapter.last_part);
+        assert(place.part_scalars == chapter.text.size());
         assert(sync::from_xpointer(document, "/body/DocFragment[2]/body/p[2]/text().114", version, recovered, error));
         assert(recovered.resource == document.spine()[1].resource && recovered.offset == 114);
         assert(!sync::from_xpointer(document, "/body/DocFragment[99]/body/p/text().0", version, recovered, error));

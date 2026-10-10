@@ -180,7 +180,7 @@ bool to_xpointer(const EpubDocument& document, const Chapter& chapter, const Anc
 }
 
 bool from_xpointer(EpubDocument& document, const std::string& xpointer, int dom_version,
-                   Anchor& anchor, std::string& error, const std::function<bool()>& stop) {
+                   Anchor& anchor, std::string& error, const std::function<bool()>& stop, PartPosition* place) {
     anchor = {};
     if (stop && stop()) { error = kChapterCancelled; return false; }
     error.clear();
@@ -226,6 +226,7 @@ bool from_xpointer(EpubDocument& document, const std::string& xpointer, int dom_
     std::uint32_t visible = 0;
     if (!chapter.offset_for(candidate, visible)) { error = "KOReader position is not retained in the reading text"; return false; }
     anchor = std::move(candidate);
+    if (place) *place = {chapter.part, visible, static_cast<std::uint32_t>(chapter.text.size()), chapter.last_part};
     return true;
 }
 

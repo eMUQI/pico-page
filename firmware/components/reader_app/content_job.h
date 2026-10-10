@@ -4,6 +4,7 @@
 #include "page_cache.h"
 #include "pico_page/graphics.h"
 #include "pico_page/store.h"
+#include "pico_page/sync.h"
 #include <sys/types.h>
 #include <atomic>
 #include <memory>
@@ -89,6 +90,7 @@ public:
         bool part_done = false, last_part = false;
         std::string error, font_identity, xpointer;
         Anchor mapped_anchor;
+        sync::PartPosition mapped_place;  // Valid with mapped_anchor after a successful MapDownload.
         double percentage = 0;
         std::unique_ptr<graphics::Canvas> image;
         std::vector<std::size_t> failed_images;

@@ -29,7 +29,7 @@ Wi-Fi 由板级网络适配读取 `PicoPage/network.toml`，字段见板级运�
 
 依据固定 KOReader commit `2ce49e115fc1bcc47b473078c549e59b3922105b` 的 [`KOSyncClient.lua`](https://github.com/koreader/koreader/blob/2ce49e115fc1bcc47b473078c549e59b3922105b/plugins/kosync.koplugin/KOSyncClient.lua) 和 [`api.json`](https://github.com/koreader/koreader/blob/2ce49e115fc1bcc47b473078c549e59b3922105b/plugins/kosync.koplugin/api.json)，独立实现 GET `/syncs/progress/<partial_md5>` 与 PUT `/syncs/progress`。请求头使用 `accept: application/vnd.koreader.v1+json`、`x-auth-user` 和 `x-auth-key`。PUT 正文包含 document、progress、percentage、device、device_id。
 
-percentage 只作为服务展示数据，不参与本项目的位置查找和冲突判定。响应上限 32 KiB，拒绝重复字段、无效 JSON、NUL、无效位置和范围外百分比。200 空对象表示尚无记录；401/403 表示鉴权失败；其他错误保留本地记录。上传只把 200 作为发送版本的服务确认。202、取消已发请求、连接中断等情况不能保证远端未变化，再次上传前应重新读取核对。服务端没有条件写入保障，确认到实际写入之间仍存在竞争窗口。
+percentage 只作为服务展示数据，不参与本项目的位置查找、冲突判定和前后关系判断；各客户端的计算方法不同，不能与本机百分比比较。远端位置映射成功后，面板显示按本机方法重新计算的百分比；只有无法映射时才显示服务器记录的数值。响应上限 32 KiB，拒绝重复字段、无效 JSON、NUL、无效位置和范围外百分比。200 空对象表示尚无记录；401/403 表示鉴权失败；其他错误保留本地记录。上传只把 200 作为发送版本的服务确认。202、取消已发请求、连接中断等情况不能保证远端未变化，再次上传前应重新读取核对。服务端没有条件写入保障，确认到实际写入之间仍存在竞争窗口。
 
 ## 精确映射与明确拒绝
 

@@ -378,7 +378,8 @@ void ContentJob::map_position() {
     EpubDocument document;
     if (!document.open_verified(request.path, request.identity, result.error, stop)) return;
     if (request.kind == Kind::MapDownload) {
-        sync::from_xpointer(document, request.xpointer, request.dom_version, result.mapped_anchor, result.error, stop);
+        sync::from_xpointer(document, request.xpointer, request.dom_version, result.mapped_anchor, result.error, stop,
+                            &result.mapped_place);
         return;
     }
     if (!request.record) { result.error = "Saved record unavailable"; return; }
