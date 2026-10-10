@@ -2339,13 +2339,16 @@ int main(int argc, char** argv) {
         assert(graphics::image_decode_count() == prepared_decodes && app.view() == View::Sleeping);
         assert(app.canvas().pixel(50, 100) == 0 && app.canvas().pixel(50, 900) == 5);
         app.wake(); driver.present(); driver.complete_content();
-        app.background_step();
-        while (std::string(app.background_state()) == "sleep-cover") {
-            app.poll_background();
+        // Reading spends idle time on saving, prefetch and pagination; it never starts the cover worker.
+        fs::remove_all(root / "PicoPage/cache/covers");
+        while (app.save_due() || app.save_busy() || app.background_due()) {
+            if (app.save_due()) app.save_progress();
+            app.background_step(); app.poll_background();
+            assert(std::string(app.background_state()) != "sleep-cover" && !fs::exists(root / "PicoPage/cache/covers"));
             assert(std::chrono::steady_clock::now() < deadline);
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        assert(graphics::image_decode_count() == prepared_decodes);
+        assert(graphics::image_decode_count() == prepared_decodes && app.book_pages());
     }
     {
         const auto root = card / "SleepAdopt";
@@ -2369,16 +2372,21 @@ int main(int argc, char** argv) {
             assert(std::chrono::steady_clock::now() < content_deadline);
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        assert(!app.save_due() && std::string(app.background_state()) == "sleep-cover");
-        const auto decodes = graphics::image_decode_count();
+        assert(!app.save_due() && std::string(app.background_state()) != "sleep-cover");
         const auto pixels = app.canvas().pixels();
-        app.background_step();
+        assert(!app.prepare_sleep() && app.sleep_pending());
+        app.cancel_sleep();
+        assert(!app.sleep_pending() && std::string(app.background_state()) == "sleep-cover");
+        // A repeated request adopts the cancelled worker: with starts failing, only adoption can leave it pending.
         ContentJob::fail_starts_for_test(ContentJob::Kind::SleepCover, 1, ContentJob::StartFailure::TaskCreate);
         assert(!app.prepare_sleep() && app.sleep_pending());
         ContentJob::fail_starts_for_test(ContentJob::Kind::SleepCover, 0, ContentJob::StartFailure::TaskCreate);
         assert(app.canvas().pixels() == pixels && !app.pending_frame());
         assert(sleep_frame(app)); driver.present();
-        assert(graphics::image_decode_count() == decodes + 1);
+        assert(app.view() == View::Sleeping);
+        // The cancelled attempt may have stopped before publishing; the next request completes the cover.
+        app.wake(); driver.present(); driver.complete_content();
+        assert(sleep_frame(app)); driver.present();
         assert(app.canvas().pixel(50, 100) == 0 && app.canvas().pixel(50, 900) == 5);
     }
     {
@@ -2390,7 +2398,7 @@ int main(int argc, char** argv) {
         driver.complete_content();
         const auto saved = *app.saved_record();
         const auto pixels = app.canvas().pixels();
-        // Failed publication must finish the sleep request once, without retrying indefinitely.
+        // Failed publication ends the sleep request after one attempt; nothing retries until the next request.
         fs::remove_all(root / "PicoPage/cache/covers");
         write(root / "PicoPage/cache/covers", "blocked");
         assert(!app.prepare_sleep() && app.sleep_pending());
@@ -2411,62 +2419,21 @@ int main(int argc, char** argv) {
         }
         driver.present(); driver.tap(300, 1120); driver.present();
         assert(app.view() == View::Reading && app.canvas().pixels() == pixels);
-        while (std::string(app.background_state()) == "sleep-cover") {
-            app.poll_background();
-            assert(!app.pending_frame() && app.canvas().pixels() == pixels && *app.saved_record() == saved);
-            assert(std::chrono::steady_clock::now() < deadline);
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-        const auto retry_decodes = graphics::image_decode_count();
-        assert(app.prepare_sleep() && !app.sleep_pending()); driver.present();
-        assert(graphics::image_decode_count() == retry_decodes);
-        app.wake(); driver.present(); driver.complete_content();
-        ContentJob::fail_starts_for_test(ContentJob::Kind::SleepCover, 1, ContentJob::StartFailure::InternalMemory);
-        assert(app.prepare_sleep() && !app.sleep_pending()); driver.present();
-        assert(app.view() == View::Sleeping && *app.saved_record() == saved);
-        app.wake(); driver.present(); driver.complete_content();
-        assert(sleep_frame(app)); driver.present();
-        assert(app.view() == View::Sleeping && *app.saved_record() == saved);
-        assert(fs::is_regular_file(root / "PicoPage/cache/covers"));
-        app.wake(); driver.present(); driver.complete_content();
-        fs::remove(root / "PicoPage/cache/covers");
-        assert(sleep_frame(app)); driver.present();
-        assert(app.canvas().pixel(50, 100) == 0 && app.canvas().pixel(50, 900) == 5);
-        assert(*app.saved_record() == saved);
-    }
-    {
-        const auto root = card / "SleepRetry";
-        fs::create_directories(root / "Books");
-        fs::copy_file(fixtures / "image-cover.epub", root / "Books/cover.epub");
-        ReaderApp app(root.string(), "sleep-retry", true, true); Driver driver{app};
-        assert(app.initialize()); driver.present(); opened(app, "Books/cover.epub"); driver.present();
-        driver.complete_content();
-        const auto saved = *app.saved_record();
-        const auto pixels = app.canvas().pixels();
-        fs::remove_all(root / "PicoPage/cache/covers");
-        write(root / "PicoPage/cache/covers", "blocked");
-        ContentJob::fail_starts_for_test(ContentJob::Kind::SleepCover, 1, ContentJob::StartFailure::InternalMemory);
-        app.background_step();
         assert(std::string(app.background_state()) != "sleep-cover");
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-        const auto wait_cover_attempt = [&] {
-            while (std::string(app.background_state()) != "sleep-cover") {
-                app.background_step(); app.poll_background();
-                assert(std::chrono::steady_clock::now() < deadline);
-                assert(!app.pending_frame() && app.canvas().pixels() == pixels && *app.saved_record() == saved);
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            }
-            app.background_step();
-            while (std::string(app.background_state()) == "sleep-cover") {
-                app.background_step(); app.poll_background();
-                assert(std::chrono::steady_clock::now() < deadline);
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            }
-        };
-        wait_cover_attempt();
+        const auto retry_decodes = graphics::image_decode_count();
+        assert(sleep_frame(app)); driver.present();
+        assert(graphics::image_decode_count() == retry_decodes + 1);
+        assert(app.view() == View::Sleeping && *app.saved_record() == saved);
+        app.wake(); driver.present(); driver.complete_content();
+        ContentJob::fail_starts_for_test(ContentJob::Kind::SleepCover, 1, ContentJob::StartFailure::InternalMemory);
+        assert(app.prepare_sleep() && !app.sleep_pending()); driver.present();
+        assert(app.view() == View::Sleeping && *app.saved_record() == saved);
+        app.wake(); driver.present(); driver.complete_content();
+        assert(sleep_frame(app)); driver.present();
+        assert(app.view() == View::Sleeping && *app.saved_record() == saved);
         assert(fs::is_regular_file(root / "PicoPage/cache/covers"));
+        app.wake(); driver.present(); driver.complete_content();
         fs::remove(root / "PicoPage/cache/covers");
-        wait_cover_attempt();
         assert(sleep_frame(app)); driver.present();
         assert(app.canvas().pixel(50, 100) == 0 && app.canvas().pixel(50, 900) == 5);
         assert(*app.saved_record() == saved);
