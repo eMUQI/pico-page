@@ -30,13 +30,14 @@
 - tomlc17.c：加入 `<inttypes.h>`，将 UTF-8 错误消息的 `uint32_t` 格式从 `%04x` 改为 `%04` `PRIx32`。
   原因：Xtensa 的 `uint32_t` 是 `unsigned long`，ESP-IDF `-Werror=format` 拒绝原格式。
   这是打印格式移植修正，不改变解析行为。
+- tomlc17.c：加入 `<stddef.h>`，内存页分配大小按 `offsetof(page_t, data) + (size_t)size` 计算，使用标准成员偏移计算，避免通过空指针成员访问计算偏移。
 - tomlc17.h、cJSON.c、cJSON.h 均未改动。cJSON 深度限制通过构建定义设置。
 
 ## 本地交付源码 SHA-256
 
 | 文件 | SHA-256 |
 |---|---|
-| `tomlc17/tomlc17.c`（已应用上述修改） | `9d873ce30af1874f17943052e4c0ef7d5127229c782543ca0b7d2f64ab2a3804` |
+| `tomlc17/tomlc17.c`（已应用上述修改） | `feee649e83eee6c548ec66622201f852e1f75c72606f870d93cc92bdeda32ccc` |
 | `tomlc17/tomlc17.h` | `29c0909092f4b23c7edce705167064f4a90548db5334b4aa2cd95d7ad801adb9` |
 | `cjson/cJSON.c` | `298581a04a36c0165da4b0aade235c23088cb2faa58651d720ea2f3706ed0b0d` |
 | `cjson/cJSON.h` | `25b0145150d500498e4d209cec69c18c42cf818bffcc54690be3b895a2a16dee` |

@@ -1,5 +1,7 @@
 # Read Pico 设备验证记录
 
+个人主目录、设备标识及私有样本名称已脱敏；占位路径不保证可直接执行。历史日期、验证数值和结果保留，历史授权不适用于新的设备操作。
+
 ## 2026-10-06 · USB 文件传输候选
 
 仅烧录 OTA0 的候选已完成正常启动、设置切换和 macOS MSC 挂载。1 MiB 文件写入、fsync、重命名及 SHA-256 读回一致；71 个实际 EPUB 目标与原始导出摘要一致，7 个单书数据目录摘要保持一致。磁盘安全弹出成功。用户已操作退出重启，串口与 TF 恢复；迁移书籍 CRC32、进度修订号 3、K2 全刷前后进度和像素一致均已验证。完整烧录未重复执行。详情、目录整理例外及私人证据路径见 [USB 运行记录](usb-storage-runtime.md)。
@@ -9,7 +11,7 @@
 
 ## 安装依据
 
-设备端口 `/dev/cu.usbmodem1101`，ESP32-S3 revision v0.2，内置 8 MiB PSRAM、16 MiB Flash。Secure Boot 和 Flash Encryption 未启用。使用 esptool 5.3.1 自动进入下载模式。从 `0x8000` 读取分区表，并由当前 IDF 的 `gen_esp32part.py` 验证：
+设备端口 `/dev/cu.TARGET_DEVICE`，ESP32-S3 revision v0.2，内置 8 MiB PSRAM、16 MiB Flash。Secure Boot 和 Flash Encryption 未启用。使用 esptool 5.3.1 自动进入下载模式。从 `0x8000` 读取分区表，并由当前 IDF 的 `gen_esp32part.py` 验证：
 
 | 名称 | 类型 | 偏移 | 大小 |
 |---|---|---|---|
@@ -30,7 +32,7 @@ otadata 有效条目为 sequence 1、state 2（VALID），CRC 正确，对应 OT
 安装命令只写已核验的 OTA0：
 
 ```sh
-python -m esptool --chip esp32s3 --port /dev/cu.usbmodem1101 --baud 115200 \
+python -m esptool --chip esp32s3 --port /dev/cu.TARGET_DEVICE --baud 115200 \
   --before usb-reset --after hard-reset write-flash \
   0x10000 .local/device/install/pico_page-first-boot.bin
 ```
@@ -82,13 +84,13 @@ USB Serial/JTAG 的手动浅睡可能需要物理拔插后重新连接，因此�
 
 ## 空闲降频与自动休眠镜像
 
-应用 `.local/device/install/pico_page-idle-power.bin`，1,964,144 字节，SHA-256：`8e050edba93be7d17f3242604f7d4f3a731573664fd920a3611fa953369c165d`，ELF 同目录保存。同时连接着另一台 ESP32-S3 设备（`/dev/cu.usbmodem101`，USB 序列号 `…:56:C8`），未对其执行任何操作。写入前用三项独立证据确认目标为 `/dev/cu.usbmodem1101`：ioreg 中该端口的 USB 序列号为`…:18:B8`；该端口应答 Pico Page 诊断 `status`；esptool `read-mac` 返回 `…:18:B8`，与此前各次烧录日志一致。写入命令与此前相同，仅 `0x10000`；日志 `idle-power-premac.log`、`idle-power-flash.log`。
+应用 `.local/device/install/pico_page-idle-power.bin`，1,964,144 字节，SHA-256：`8e050edba93be7d17f3242604f7d4f3a731573664fd920a3611fa953369c165d`，ELF 同目录保存。同时连接着另一台 ESP32-S3 设备（`/dev/cu.OTHER_DEVICE`，USB 序列号 `DEVICE_B_REDACTED`），未对其执行任何操作。写入前用三项独立证据确认目标为 `/dev/cu.TARGET_DEVICE`：ioreg 中该端口的 USB 序列号为`DEVICE_A_REDACTED`；该端口应答 Pico Page 诊断 `status`；esptool `read-mac` 返回 `DEVICE_A_REDACTED`，与此前各次烧录日志一致。写入命令与此前相同，仅 `0x10000`；日志 `idle-power-premac.log`、`idle-power-flash.log`。
 
 诊断输入验证记录在 `.local/device/install/idle-power-validation.log`：开书恢复修订 30 原页；K3×4、K1×4 往返，各页画布 CRC 往返一致；空闲 5–8 秒后的翻页与 K2 全刷 `frame_ok=1`；内部空闲约 148 KB、最大内部块 98,304 字节、主任务最低剩余栈 7,536 字节。这些是诊断注入和画布摘要，不是面板实拍、实体输入或电流测量。
 
 ## 字形位图缓存镜像
 
-应用 `.local/device/install/pico_page-glyph-cache.bin`，1,965,408 字节，SHA-256：`48e79332c22f1790fd65004c0add89497dd733c1d33d4683ddc4a06bc8e456c6`，ELF 同目录保存。写入前由脚本核对 `/dev/cu.usbmodem1101` 的 USB 序列号和 esptool `read-mac`，均为 `…:18:B8`，任一不符即中止；另一台设备（`/dev/cu.usbmodem101`）未被操作。仅写 `0x10000`，摘要校验成功，日志 `glyph-cache-flash.log`。翻页计时 `latency-glyph-cache.log`：页面准备 0.35–1.02 秒（缓存预热中）、已缓存页 0.09–0.10 秒，面板呈现约 0.99 秒；改前同脚本为 1.27 + 0.99 秒（`latency-idle-power.log`）。以上为诊断注入和画布摘要，不是面板实拍或实体输入验收。
+应用 `.local/device/install/pico_page-glyph-cache.bin`，1,965,408 字节，SHA-256：`48e79332c22f1790fd65004c0add89497dd733c1d33d4683ddc4a06bc8e456c6`，ELF 同目录保存。写入前由脚本核对 `/dev/cu.TARGET_DEVICE` 的 USB 序列号和 esptool `read-mac`，均为 `DEVICE_A_REDACTED`，任一不符即中止；另一台设备（`/dev/cu.OTHER_DEVICE`）未被操作。仅写 `0x10000`，摘要校验成功，日志 `glyph-cache-flash.log`。翻页计时 `latency-glyph-cache.log`：页面准备 0.35–1.02 秒（缓存预热中）、已缓存页 0.09–0.10 秒，面板呈现约 0.99 秒；改前同脚本为 1.27 + 0.99 秒（`latency-idle-power.log`）。以上为诊断注入和画布摘要，不是面板实拍或实体输入验收。
 
 ## 最终离线候选与重启验收
 
@@ -130,24 +132,24 @@ USB Serial/JTAG 的手动浅睡可能需要物理拔插后重新连接，因此�
 
 ## 2026-10-06 交互耗时修复
 
-应用 `1a6816c2a341ef7799566f05b285a5ea52f5a1892826d0b2611cde2911fdb0e5`（2,084,672 字节）仅写入 `0x10000`，摘要校验通过；写入前核对 USB 序列号与芯片 MAC 均为 `…:18:B8`，只有这一台设备连接。同一轮复测中先后写入过两个对照版本（`99c76ddd…`、`1927fda1…`），均为同一偏移并校验通过，已被当前版本取代。日志 `.local/perf-20261006/flash.log`。未改 bootloader、分区表、NVS、otadata 或校准数据。
+应用 `1a6816c2a341ef7799566f05b285a5ea52f5a1892826d0b2611cde2911fdb0e5`（2,084,672 字节）仅写入 `0x10000`，摘要校验通过；写入前核对 USB 序列号与芯片 MAC 均为 `DEVICE_A_REDACTED`，只有这一台设备连接。同一轮复测中先后写入过两个对照版本（`99c76ddd…`、`1927fda1…`），均为同一偏移并校验通过，已被当前版本取代。日志 `.local/perf-20261006/flash.log`。未改 bootloader、分区表、NVS、otadata 或校准数据。
 
 启动后书库、TF 卡和诊断连接正常。诊断输入复测了书库封面缓存、开书、翻页、跨章回翻、排版预览、状态行和书籍详情，计时与前后对比见 [开发状态](development-status.md)。设备停在烧录前用户在读的页面，修订号 7 未变。串口注入绕过实体触摸；状态行、占位封面的面板观感和休眠封面未验收。
 
 ## 2026-10-06 延后保存与输入采样
 
-应用 `88ee4586d81102c60ec6f75d05e5b0f276f991076fad8d51b10ce719cd627054`（2,085,024 字节）仅写入 `0x10000`，摘要校验通过；写入前核对 USB 序列号与芯片 MAC 均为 `…:18:B8`。诊断输入确认：连续翻页不产生中间保存，停止输入约 2 秒后提交最后一页；打开工具前立即提交；「继续阅读」先出状态帧再开书。设备停在烧录前的页面（修订号 40，CRC32 `94beb2b5`）。实体点击的改善、休眠前保存和空闲电流未验证。计时见 [开发状态](development-status.md)。
+应用 `88ee4586d81102c60ec6f75d05e5b0f276f991076fad8d51b10ce719cd627054`（2,085,024 字节）仅写入 `0x10000`，摘要校验通过；写入前核对 USB 序列号与芯片 MAC 均为 `DEVICE_A_REDACTED`。诊断输入确认：连续翻页不产生中间保存，停止输入约 2 秒后提交最后一页；打开工具前立即提交；「继续阅读」先出状态帧再开书。设备停在烧录前的页面（修订号 40，CRC32 `94beb2b5`）。实体点击的改善、休眠前保存和空闲电流未验证。计时见 [开发状态](development-status.md)。
 
 ## 2026-10-06 独立触摸采样与连续翻页
 
-应用 `3b2a65383e2af00617955b23cdb6302bf362c2a89621c2a72d0b764d8488ec68`（2,088,640 字节）仅写入 `0x10000`，摘要校验通过；写入前核对 USB 序列号与芯片 MAC 均为 `…:18:B8`。同一轮中先写入过持续 5 毫秒采样的对照版本 `2b2e3cb7…`，已被取代。诊断输入确认刷屏时间未变（376 / 1,363 毫秒）、无触摸读取或显示错误，翻页与延后保存正常。设备停在烧录前的页面（修订号 206，CRC32 `6ac88c11`）。实体连点、触摸中断线是否触发、休眠唤醒后的触摸均未验证。
+应用 `3b2a65383e2af00617955b23cdb6302bf362c2a89621c2a72d0b764d8488ec68`（2,088,640 字节）仅写入 `0x10000`，摘要校验通过；写入前核对 USB 序列号与芯片 MAC 均为 `DEVICE_A_REDACTED`。同一轮中先写入过持续 5 毫秒采样的对照版本 `2b2e3cb7…`，已被取代。诊断输入确认刷屏时间未变（376 / 1,363 毫秒）、无触摸读取或显示错误，翻页与延后保存正常。设备停在烧录前的页面（修订号 206，CRC32 `6ac88c11`）。实体连点、触摸中断线是否触发、休眠唤醒后的触摸均未验证。
 
 ## 2026-10-07 内置 3,500 常用字字体
 
-应用 `605095784fae75a9c2bf25df6c264c65dd6455989174cb1b02722b990a82c449`（3,142,720 字节）仅写入 `0x10000`，摘要校验通过；写入前核对 USB 序列号与芯片 MAC 均为 `…:18:B8`，只有这一台设备连接。诊断输入确认：重启后书库帧成功；「继续阅读」恢复到烧录前的页面（修订号 113，CRC32 `6a597379`）；K3、K1 往返后 CRC 一致，修订号为 115。卡上有完整字体，内置字体的正文路径未触发；其堆占用、耗时和面板显示效果均未验证。证据在 `.local/builtin-font-install/`，说明见 [开发状态](development-status.md)。
+应用 `605095784fae75a9c2bf25df6c264c65dd6455989174cb1b02722b990a82c449`（3,142,720 字节）仅写入 `0x10000`，摘要校验通过；写入前核对 USB 序列号与芯片 MAC 均为 `DEVICE_A_REDACTED`，只有这一台设备连接。诊断输入确认：重启后书库帧成功；「继续阅读」恢复到烧录前的页面（修订号 113，CRC32 `6a597379`）；K3、K1 往返后 CRC 一致，修订号为 115。卡上有完整字体，内置字体的正文路径未触发；其堆占用、耗时和面板显示效果均未验证。证据在 `.local/builtin-font-install/`，说明见 [开发状态](development-status.md)。
 
 随后把卡上 `PicoPage/fonts` 临时改名，在无字体状态下由诊断口确认简体书正常显示、繁体缺字显示为方框，内部空闲内存约 137 KB，与有字体时相同；再把目录改回 `fonts`。之后安装状态栏修复版 `877756721fad1f37adb743a58db808cd2fdfd58e063711c92c3842f8190f1f9d`（3,143,120 字节），同样仅写入 `0x10000`，摘要校验通过，重启后书库帧成功，文楷和 Noto 的长度与 CRC 不变。随后安装页数统计取消修复版 `00c6693e119faa0f15346241eb129f56df4ddaffe4f5dc7449ebf0bf88443e26`（3,143,136 字节），仅写入 `0x10000`，摘要校验通过。诊断口每约 18 秒注入一次翻页，26 次翻页、465 秒后《呐喊》统计出 460 页，期间状态没有变为 `failed`；每约 4 秒翻页时统计不失败但没有进展。面板显示和实体操作未验证。
 
 ## 2026-10-07 统计会话
 
-应用 `fb1cd61372186f67b521a6690d9940c0985160dff664dc9c79a29094d111ce6e`（3,146,096 字节）仅写入 `0x10000`，摘要校验通过；此前同一轮先写入的 `5977d831…` 在设备上卡在统计等待状态，已被取代。两次写入前均核对 USB 序列号与芯片 MAC 为 `…:18:B8`。诊断口确认：《呐喊》（文楷 40 px）不打扰时 38.2 秒统计出 460 页；每约 4 秒翻一页时统计不失败但没有进展。设备停在第 7 页，`pages=460 count=idle`。实体操作和面板显示未验证。数据与原因见 [开发状态](development-status.md)。
+应用 `fb1cd61372186f67b521a6690d9940c0985160dff664dc9c79a29094d111ce6e`（3,146,096 字节）仅写入 `0x10000`，摘要校验通过；此前同一轮先写入的 `5977d831…` 在设备上卡在统计等待状态，已被取代。两次写入前均核对 USB 序列号与芯片 MAC 为 `DEVICE_A_REDACTED`。诊断口确认：《呐喊》（文楷 40 px）不打扰时 38.2 秒统计出 460 页；每约 4 秒翻一页时统计不失败但没有进展。设备停在第 7 页，`pages=460 count=idle`。实体操作和面板显示未验证。数据与原因见 [开发状态](development-status.md)。

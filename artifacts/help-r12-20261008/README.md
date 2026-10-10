@@ -7,7 +7,7 @@
 在仓库根目录复现：
 
 ```sh
-source /workspace/cloud-tools/activate-host.sh
+python3 tools/setup_fonts.py
 cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug
 cmake --build build/host --parallel 4
 python3 artifacts/help-r12-20261008/render.py

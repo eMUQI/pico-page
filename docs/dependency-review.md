@@ -8,7 +8,7 @@
 | Expat / miniz | CrossPoint 的独立第三方目录 | `50823ffa125b437b4c9fe5882f326458780198da` | 各源文件 MIT；siphash CC0；保留全部声明 | Expat 配置及 entropy 守卫移植 | 纳入 reader_document；未复制 CrossPoint 应用 |
 | PapyriX cache/content | bigbag/papyrix-reader | 待查 | 查分支关系与依赖 | 无 | 按需参考 |
 | EPub-InkPlate | turgu1/EPub-InkPlate | 待查 | 查字体/IDF/显示依赖 | 无 | 调度和 IDF 实现参考 |
-| epdiy 与板级波形 | 官方 BSP 的 `components/epdiy` / `e0470_epaper_waveform` | 同官方 BSP commit | LGPL-3.0-or-later / Apache-2.0 分别核查 | 无 | 已编译；硬件刷新未验证 |
+| epdiy 与板级波形 | 官方 BSP 的 `components/epdiy` / `e0470_epaper_waveform` | 同官方 BSP commit | LGPL-3.0-or-later / Apache-2.0 分别核查 | 构建副本应用 epdiy 欠载诊断及清屏检查补丁 | 已集成；部分设备证据见开发状态，完整显示验收仍需实测 |
 | tomlc17 | cktan/tomlc17 | `8a4564e0b257b010c24c973d4353e0c1ebf33f80` | MIT；C17；32 KiB 输入上限，UTF-8 校验；不支持无损写回 | Xtensa `PRIx32` 打印格式修正；内存页大小使用 `offsetof`，避免空指针成员访问 | 纳入 reader_store，仅解析配置 |
 | cJSON | DaveGamble/cJSON v1.7.19 | `c859b25da02955fef659d658b8f324b5cde87be3` | MIT；16 KiB 输入及 16 层嵌套上限；大修订号用字符串 | 源码无修改 | 纳入 reader_store，进度 JSON |
 | FreeType | freetype/freetype | `526ec5c47b9ebccc4754c85ac0c0cdf7c85a5e9b` | FTL、MIT 及 Adobe CFF 附加条款 | 模块/选项配置 | 固定下载到 .local，纳入 reader_graphics |
@@ -101,7 +101,7 @@ GB18030 解码表的来源与复核（2026-10-07）：`firmware/components/reade
 - KOReader 的 crengine 在开书时排完整本书，页码始终精确；本项目的「当前页优先」规则不允许开书时整书排版。
 - 采用：空闲时统计全书分页、结果按排版参数缓存、完成前显示估算百分比（按章节大小加权）。
 - 不采用：独立后台任务。本项目的文档、字体和会话由应用任务独占，改为在应用任务的空闲时间分片执行；也不把缓存放在原书旁，沿用 `PicoPage/cache`。
-- 资源审计时补看 CrossMux 检出中沿用 CrossPoint 的工程规则（`docs/engineering/memory-and-allocation.md`、`hardware-constraints.md`，MIT）和章节解析器接口 `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.h`：关闭异常时裸 `new` 失败即 abort，大分配须先检查可用总量和最大连续块并保留余量（`memory::hasAllocationHeadroom`）；追加循环前先 `reserve`；章节以可续接的步骤流式解析，页面生成后立即写入 TF 卡，内存中不保留整章。本项目采用其中的余量检查和预留做法；统计仍在内存中解析整章，但改为有上界的精简解析。只读规则与接口，未复制代码。用户说明：设备厂商页面列出的 Pico Reader 为业余人员借助 AI 开发，参考以 CrossPoint 和 KOReader 为主。
+- 资源审计时补看 CrossMux 检出中沿用 CrossPoint 的工程规则（`docs/engineering/memory-and-allocation.md`、`hardware-constraints.md`，MIT）和章节解析器接口 `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.h`：关闭异常时裸 `new` 失败即 abort，大分配须先检查可用总量和最大连续块并保留余量（`memory::hasAllocationHeadroom`）；追加循环前先 `reserve`；章节以可续接的步骤流式解析，页面生成后立即写入 TF 卡，内存中不保留整章。本项目采用其中的余量检查和预留做法；统计仍在内存中解析整章，但改为有上界的精简解析。只读规则与接口，未复制代码。技术参考以 CrossPoint 和 KOReader 为主，采用前仍需核对具体源码、约束和许可。
 - 容量与版本使用乐鑫官方接口：`esp_vfs_fat_info` 读取 FAT 卷的总容量和可用空间，`esp_app_get_description` 读取固件版本。ESP-IDF 的 FatFs 配置 `FF_FS_NOFSINFO` 为 0，FAT32 的可用簇数优先取自 FSInfo 扇区。host 使用 `statvfs`。`reader_store` 新增对 `fatfs` 组件的依赖，`reader_app` 新增对 `esp_app_format` 的依赖，均为 ESP-IDF 自带组件。
 
 - `CONFIG_FATFS_VFS_FSTAT_BLKSIZE=4096` 经真机对照后未采用：顺序读没有可见收益，字形的随机小块读取变慢，新页准备时间增加约六成。官方建议针对顺序吞吐，不适用于本项目的字体访问方式。

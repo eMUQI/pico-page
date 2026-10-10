@@ -55,7 +55,7 @@
 主机工具可以执行 `upload <source> <destination>`，不会重置设备。例如：
 
 ```sh
-python3 tools/device_console.py --port /dev/cu.usbmodem1101 upload local-book.epub Books/local-book.epub
+python3 tools/device_console.py --port /dev/cu.TARGET_DEVICE upload local-book.epub Books/local-book.epub
 ```
 
 端口必须替换为已确认设备。组件不查找设备、不控制主机串口；上面的命令只说明用法。主机先计算长度和 CRC32，串行发送有界数据块，再核对设备实际接收偏移。commit 成功后再次执行 file，确认正式文件摘要一致。主机请求失败时尝试 abort，设备在 30 秒没有导入活动或发现卡不可用时也终止事务。
@@ -84,11 +84,11 @@ USB 文件传输开启前会停止本诊断连接。MSC 与 USB Serial/JTAG 分�
 `tools/device_console.py` 使用 ESP-IDF Python 环境中已有的 pyserial，不安装驱动，采用官方 IDF Monitor 的无复位顺序：打开前 DTR/RTS 设为 true，打开后先将 RTS、再将 DTR 设为 false。本机已用连续两次 uptime 采样验证重连不重启。USB 枚举可能早于应用输入驱动安装，因此建立连接后先在总超时内重试只读 status，收到回复后才允许调用方发起动作。仅在诊断固件已运行后使用：
 
 ```sh
-python3 tools/device_console.py --port /dev/cu.usbmodem1101 status
-python3 tools/device_console.py --port /dev/cu.usbmodem1101 ls Books
-python3 tools/device_console.py --port /dev/cu.usbmodem1101 open Books/lu-xun-aq-25332.epub
-python3 tools/device_console.py --port /dev/cu.usbmodem1101 key K2
-python3 tools/device_console.py --port /dev/cu.usbmodem1101 capture .local/device/frame.pgm
+python3 tools/device_console.py --port /dev/cu.TARGET_DEVICE status
+python3 tools/device_console.py --port /dev/cu.TARGET_DEVICE ls Books
+python3 tools/device_console.py --port /dev/cu.TARGET_DEVICE open Books/lu-xun-aq-25332.epub
+python3 tools/device_console.py --port /dev/cu.TARGET_DEVICE key K2
+python3 tools/device_console.py --port /dev/cu.TARGET_DEVICE capture .local/device/frame.pgm
 ```
 
 所选 Python 必须已有 pyserial。端口必须依据当前枚举结果选定；示例不代表固件已安装。客户端逐块核对帧号、偏移、长度和整帧 CRC，再写入新 PGM；已有输出文件不会被覆盖。控制字符、超长回复和导出期间变帧会失败，不能输出伪装为完整帧的文件。模拟传输已检查协议分帧、像素半字节顺序、变帧拒绝及已有文件保护；真实设备已验证状态、目录查询、无复位重连、两份许可证导入及未完成大文件取消；完整字体/EPUB 导入与画布导出另行验证。

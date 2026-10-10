@@ -1,5 +1,19 @@
 # 开发状态
 
+## 当前摘要（2026-10-11）
+
+当前分支 `feat/image-workbench-evidence`（PR #39）基于 main `718f376`，包含 #42 的合并。相对 main 新增：图片采用与网络交叠的证据链、同步请求的阶段事件（NetworkStage）、mbedTLS 动态内存改从 PSRAM 分配、构建入口对 defaults 生效情况的核对。Issue #37 的阶段 A、B 已随 PR #38 合并；阶段 C 场景 1 的图片证据链在本分支，自动场景编排、同步位置保护断言和场景 2 尚未实现。
+
+本分支的验证范围：host Debug 与开启埋点的 ASan/UBSan 各 18/18，Python 测试 38/38，四个固件入口在 `1e2aea0` 上构建通过；诊断固件已烧录并完成 Release/Performance 真机 A/B、同步期间内部 RAM 定位和网络阶段事件核对。这些是应用和驱动层证据，不代表物理屏幕、实体输入或 KOReader 双向接续验收。实测中发现的两个既有问题见 Issue #40、#41。
+
+现有代码包含 EPUB/TXT 阅读、分页缓存、文件配置与进度、网络设置与传书、KOSync 和诊断工作台。历史记录包含 host、sanitizer、固件构建及部分真机证据，必须按记录的版本和范围使用。2026-10-09 有实际双向接续操作证据；完整异常路径、重复稳定性、实体输入、显示效果和资源峰值仍按验收表逐项确认，不能统称首版已验收。
+
+对外分发前仍需确定项目总许可证、整理第三方许可，并提供经过验证的安装与恢复流程。网站尚无可用的浏览器安装入口。当前文档整理不构成固件发布或新的设备验收。
+
+个人主目录、设备标识及私有样本名称已脱敏；占位路径不保证可直接执行。历史日期、验证数值和结果保留，历史授权不适用于新的设备操作。
+
+## 历史摘要与开发记录
+
 2026-10-11 PR #39 的三项评审意见和 #42 合并前遗留的一项已修正：证据完整时已记录的失败不再被「不可判定」的状态观察掩盖；已取消的网络请求须有新增的 NetworkStage 阶段事件落在图片任务区间内才算交叠；画布导出中途帧变化归为不可判定。host Debug 与开启埋点的 ASan/UBSan 各 18/18，Python 测试 38/38，四个固件入口在干净提交 `1e2aea0` 上构建通过，Release 无诊断符号。诊断镜像 `b3c9e0c9…` 已烧录，真机上完成与取消两种同步请求的阶段事件符合预期。详情见本日「PR #39 评审修正与网络阶段事件」记录。
 
 2026-10-10 PR #42 的两项评审意见已修正：构建入口现在在构建前后核对 defaults 是否在生效 sdkconfig 中取同样的值，过期配置会报错而不是静默沿用旧分配模式；运行时文档和配置注释不再写实测数值。Python 测试 35/35，四个固件入口重建通过。详情见本日「PR #42 评审修正」记录。
@@ -389,9 +403,9 @@ host Debug 与 ASan/UBSan/LSan 各 13/13、标准固件构建通过；按用户�
 2026-10-08 当前 main `f84b41a` 已重新构建并烧录：应用写入摘要校验通过，复位后进入书库、TF 卡识别及首帧显示成功。
 包含书签、正文补图内存修复与失败日志、渐进式 JPEG 预览及“已关机”文案；屏幕观感和功能专项验收仍待真机确认。
 
-2026-10-08 Headspace 书库封面修复候选：补充渐进式 JPEG 的 1/8 灰阶预览，旧封面失败缓存自动失效。
+2026-10-08 PrivateSampleE 书库封面修复候选：补充渐进式 JPEG 的 1/8 灰阶预览，旧封面失败缓存自动失效。
 原书同步/异步 host 书库均显示封面；host 与 ASan/UBSan 各 13/13、标准固件构建通过。
-用户授权后已烧录并通过写入摘要校验，设备正常进入书库、识别 TF 卡并完成显示；Headspace 封面目视效果和完整资源峰值待测。
+用户授权后已烧录并通过写入摘要校验，设备正常进入书库、识别 TF 卡并完成显示；PrivateSampleE 封面目视效果和完整资源峰值待测。
 
 
 2026-10-08 路线图新增 R14：主页取消屏幕翻页按钮、保留页码与状态提示，后续增加左滑下一页、
@@ -455,9 +469,9 @@ host Debug 与 ASan/UBSan/LSan 各 13/13、标准固件构建通过；按用户�
   新收录的上游源码、许可证及补丁保留原有空白格式，因此完整暂存差异的空白检查会报告第三方行尾空格与末尾空行。
   未为消除这些格式提示改写上游文件或许可证。交接检查通过，私有书籍、设备原始日志与固件均未纳入提交。
 
-## 2026-10-08 · Headspace 封面候选烧录
+## 2026-10-08 · PrivateSampleE 封面候选烧录
 
-- 用户明确要求烧录后，核对 `/dev/cu.usbmodem1101` 的 USB 序列号与芯片 MAC，均为 `14:c1:9f:d0:18:b8`。
+- 用户明确要求烧录后，核对 `/dev/cu.TARGET_DEVICE` 的 USB 序列号与芯片 MAC，均为 `DEVICE_A_REDACTED`。
   重读 `0x8000` 分区表并由 IDF 工具解析，确认 `ota_0=0x10000/4 MiB`、`ota_1=0x410000/4 MiB`。
 - 使用 esptool 5.3.1、460800 波特率，仅向 `0x10000` 写入上一批保存的 `.local/progressive-jpeg/pico_page.bin`。
   文件 3,375,264 字节、SHA-256 `b1b14ecd5263af77c4f4f8907c4a6c5ca8a3a527443d19e895e9496b930c0321`；
@@ -466,11 +480,11 @@ host Debug 与 ASan/UBSan/LSan 各 13/13、标准固件构建通过；按用户�
   运行至 83,756 ms 时显示帧为 20，PSRAM 空闲 4,613,028 字节、最大连续块 4,456,448 字节，
   应用最低剩余栈 10,928 字节、输入栈 2,080 字节、输入溢出 0。这是现场采样，不是全流程资源峰值验收。
 - 两次读取完整画布均因页面在传输中变化而被帧一致性检查拒绝；日志记录到现场物理触摸。
-  未取得有效设备截图，未将 host 截图或显示驱动成功作为 Headspace 封面目视确认。
+  未取得有效设备截图，未将 host 截图或显示驱动成功作为 PrivateSampleE 封面目视确认。
   证据：忽略目录 `.local/progressive-jpeg/` 内的 `preflash.log`、`device-partitions.bin`、`flash.log`、
-  `device-console.log` 和 `device-status.txt`。下一步由用户查看设备上的 Headspace 书库封面并反馈显示效果。
+  `device-console.log` 和 `device-status.txt`。下一步由用户查看设备上的 PrivateSampleE 书库封面并反馈显示效果。
 
-## 2026-10-08 · Headspace 渐进式 JPEG 封面（本地候选，未安装）
+## 2026-10-08 · PrivateSampleE 渐进式 JPEG 封面（本地候选，未安装）
 
 - 原书的 OPF 封面读取成功，封面为 1410 × 2000 的 SOF2 渐进式 JPEG；旧 TJpgDec 只支持 baseline，
   解码失败后写入无封面缓存。正文和目录解析不是本次故障点；未修改私有 EPUB。
@@ -484,7 +498,7 @@ host Debug 与 ASan/UBSan/LSan 各 13/13、标准固件构建通过；按用户�
   书库 184 × 250 的输出及临时灰阶各 23,000 字节；不分配原图帧或整图系数。沿用平台堆策略，无新增 DMA/IRAM 要求，
   内部 RAM/PSRAM 实际分配峰值和连续块待真机测量。读/seek/MCU 输出检查取消，单次库内处理和阻塞 TF 调用无实测时间上界。
   失败不修改目标画布，书库保留占位；分配失败不写永久失败缓存，原有工作任务代次及存储交接规则不变。
-- 在 `/Users/wulu/workspace/pico-page`、基于 `4277508` 的当前工作区执行 host Debug 配置/构建，
+- 在 `~/workspace/pico-page`、基于 `4277508` 的当前工作区执行 host Debug 配置/构建，
   `ctest --test-dir build/host -N` 注册 13 项，完整 CTest **13/13**；ASan/UBSan 完整 CTest **13/13**，
   `UBSAN_OPTIONS=halt_on_error=1`，未关闭 sanitizer 检查。新增原创彩色/灰度样本覆盖缩放、取消、尺寸上限和截断，
   应用回归覆盖旧失败缓存重建。原书三个 JPEG 在普通及 sanitizer 探针下均成功；异步真实书库冷/热/旧负缓存
@@ -1116,14 +1130,14 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 - 图片查看页右侧显示当前档位，点按按原图 0/3、增强 1/3、2/3、3/3、原图 0/3 循环。2/3 沿用前一版调强映射；1/3 较轻，3/3 更强。每档都从保留的原始画布重新映射，不重新解码 EPUB 图片、不累计损失；切换时全刷，关闭或重开图片时回到原图。
 - 在 host 实际画布导出并目视检查 [原图](../artifacts/image-contrast-steps-20261007/original.png)、[1/3](../artifacts/image-contrast-steps-20261007/level-1.png)、[2/3](../artifacts/image-contrast-steps-20261007/level-2.png)、[3/3](../artifacts/image-contrast-steps-20261007/level-3.png)。该合成插图只验证按钮、灰块与档位顺序，不代表用户照片的真机可读性。
 - 实际执行 `cmake --build build/host -j 8` 与 `ctest --test-dir build/host --output-on-failure`，11/11 通过；现有应用测试验证逐档灰阶、全刷、原图像素恢复、无重复解码和进度不变。`sh tools/build_firmware.sh` 构建通过；应用镜像 3,225,600 字节，SHA-256 `b91bbce7163caccec56fc4b34db441649be22df3e1356987ce8ce1b3ed9f55a1`，4 MiB 应用槽剩余约 23%。
-- 当时 USB 设备从串口模式变为 `PICO-PAGE-TF` 传书盘，`/dev/cu.usbmodem1101` 消失，因此暂停了这版镜像的烧录；固定副本位于 `.local/image-contrast-steps-install-20261007/`。设备后来恢复并写入基于 `d8ed960` 的固件，这版逐级调节镜像仍未安装。安装后仍需用同一张实体图片核对各档效果和文字可读性。
+- 当时 USB 设备从串口模式变为 `PICO-PAGE-TF` 传书盘，`/dev/cu.TARGET_DEVICE` 消失，因此暂停了这版镜像的烧录；固定副本位于 `.local/image-contrast-steps-install-20261007/`。设备后来恢复并写入基于 `d8ed960` 的固件，这版逐级调节镜像仍未安装。安装后仍需用同一张实体图片核对各档效果和文字可读性。
 
 ## 2026-10-07 · 增强对比度幅度调整（已安装，实体效果待确认）
 
 - 用户反馈先前增强几乎看不出差别。旧映射把示例中灰 5 级仅降至 4 级；本批改为 3 级，并对称拉开其他中间灰阶，黑白端点保持不变。纯黑白图片不会因该映射改变。
 - 在同一张合成插图上导出并目视比较 [原图画布](../artifacts/image-contrast-strong-20261007/original.png) 与 [增强画布](../artifacts/image-contrast-strong-20261007/enhanced.png)，中灰差异比上一批明显。示例只含黑色和中灰色块，不能替代照片、线稿或真机灰阶验收。
 - 实际执行 `cmake --build build/host -j 8`、`ctest --test-dir build/host --output-on-failure`，11/11 通过；`sh tools/build_firmware.sh` 构建通过。应用镜像 3,225,216 字节，SHA-256 `9df07ffdbfe9e8d59ec421db03219a255f3a9c18b99da144f3905acef3f919d1`，4 MiB 槽剩余约 23%。
-- 烧录前重新核对 USB 序列号及芯片 MAC 均为 `14:C1:9F:D0:18:B8`；读回设备实际分区表与 OTA 元数据，确认有效 sequence 1、state 2，CRC 正确，指向 `ota_0=0x10000/4 MiB`。固定镜像、读回文件及启动日志保存在 `.local/image-contrast-strong-install-20261007/`。
+- 烧录前重新核对 USB 序列号及芯片 MAC 均为 `DEVICE_A_REDACTED`；读回设备实际分区表与 OTA 元数据，确认有效 sequence 1、state 2，CRC 正确，指向 `ota_0=0x10000/4 MiB`。固定镜像、读回文件及启动日志保存在 `.local/image-contrast-strong-install-20261007/`。
 - 仅执行 `esptool write-flash 0x10000 .local/image-contrast-strong-install-20261007/pico_page.bin`；写入 3,225,216 字节后报告 `Hash of data verified`。未写 bootloader、分区表、NVS、otadata、OTA1、校准或 TF 卡。
 - 复位日志确认从 `0x10000` 加载新应用，ELF SHA-256 前缀 `dec9db1a3` 与镜像信息一致；PSRAM 检查通过、TF 卡挂载成功、首帧 `ok=1`。用户提供的两张设备照片拍于 21:26，早于本次 21:34 的烧录；照片中按钮从“增强对比度”变为“显示原图”，确认上一版的触摸切换已生效。照片里问卷图片的上下留白较多、文字较小，旧版两档的目视差别很弱；这组照片不能证明新版增强效果。仍需对同一张图片在新版固件下做实体对照。
 
@@ -1133,7 +1147,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 - 保留一次解码所得的 4 位灰阶原图，切换时复制画布并使用固定的轻度 16 级映射；恢复原图不重新读取 EPUB 或解码图片。额外保留约 406 KiB 画布，实际 PSRAM 峰值仍需真机测量。
 - 现有应用测试覆盖增强后的灰阶变化、全刷、原图像素恢复、无重复解码及进度不变。实际执行 `cmake --build build/host -j 8`、`ctest --test-dir build/host --output-on-failure`，11/11 通过；`sh tools/build_firmware.sh` 构建通过。应用镜像 3,225,216 字节，SHA-256 `80f1bc202c8e2992a1258933ff669962c73e2e7edf08b784c48de666939ea14c`，4 MiB 应用槽剩余约 23%。`python3 tools/check_handoff.py` 通过 344 项，`git diff --check` 通过。
 - 使用合成插图导出并目视检查 [原图查看页](../artifacts/image-contrast-20261007/original.png) 与 [增强查看页](../artifacts/image-contrast-20261007/enhanced.png)。该插图只有黑色和中灰色块，能检查按钮与切换结果，不能代表照片渐变或真实墨水屏观感。
-- 烧录前确认 USB 序列号与芯片 MAC 均为 `14:C1:9F:D0:18:B8`。重新读回实际分区表和 OTA 元数据：有效 sequence 1、state 2，CRC 正确，指向 `ota_0=0x10000/4 MiB`。固定镜像、读回证据及启动日志位于 `.local/image-contrast-install-20261007/`。
+- 烧录前确认 USB 序列号与芯片 MAC 均为 `DEVICE_A_REDACTED`。重新读回实际分区表和 OTA 元数据：有效 sequence 1、state 2，CRC 正确，指向 `ota_0=0x10000/4 MiB`。固定镜像、读回证据及启动日志位于 `.local/image-contrast-install-20261007/`。
 - 仅执行 `esptool write-flash 0x10000 .local/image-contrast-install-20261007/pico_page.bin`；写入 3,225,216 字节后报告 `Hash of data verified`。未写 bootloader、分区表、NVS、otadata、OTA1、工厂校准或 TF 卡。
 - 复位日志确认从 `0x10000` 加载新应用，ELF SHA-256 前缀 `f50f7b120` 与镜像信息一致；PSRAM 检查通过、TF 卡挂载成功、首帧 `ok=1`。实体点击切换、对照片与线稿的增强效果、灰阶断层和内存峰值尚未在设备上验证。下一步用含照片及线稿的 EPUB 在设备上比较两档，并观察切换延迟与可用内存。
 
@@ -1143,7 +1157,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 - `ReleasedTap` 增加仅查询已到阈值触摸的入口；主循环先排空待处理输入，再按当前页面的图片热区提交一次动作。图片热区检查与应用输入共用同一规则，避免显示切换后再次点击。
 - 实际执行 `cmake --build build/host -j 8`、`ctest --test-dir build/host --output-on-failure`，11/11 通过；`sh tools/build_firmware.sh` 构建通过。新应用镜像 3,224,704 字节，SHA-256 `80d6680cfc902efb0909a7b77c773f2dc4829dfef5c7c8a1c431ab6a44b67fd1`，4 MiB 应用槽剩余约 23%。
 - `python3 tools/check_handoff.py` 通过 342 项交接检查，`git diff --check` 通过；这些检查不替代真机触摸验收。
-- 烧录前确认 USB 序列号和芯片 MAC 均为 `14:C1:9F:D0:18:B8`；重新读回实际分区表与 OTA 元数据，确认有效 sequence 1、state 2 指向 `ota_0=0x10000/4 MiB`。固定镜像和读回证据保存在 `.local/image-hold-threshold-install-20261007/`。
+- 烧录前确认 USB 序列号和芯片 MAC 均为 `DEVICE_A_REDACTED`；重新读回实际分区表与 OTA 元数据，确认有效 sequence 1、state 2 指向 `ota_0=0x10000/4 MiB`。固定镜像和读回证据保存在 `.local/image-hold-threshold-install-20261007/`。
 - 仅执行 `esptool write-flash 0x10000 .local/image-hold-threshold-install-20261007/pico_page.bin`；写入 3,224,704 字节后报告 `Hash of data verified`。没有写 bootloader、分区表、NVS、otadata、OTA1、工厂校准或 TF 卡。
 - 复位后串口日志确认从 `0x10000` 加载新应用，ELF SHA-256 前缀 `f9a891df6` 与镜像信息一致，PSRAM 检查通过，TF 卡挂载成功，首帧 `ok=1`。实体图片长按触发时机、松手抑制和墨水屏放大观感仍需在设备上操作确认。
 
@@ -1154,7 +1168,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 - 在本工作目录执行 `cmake --build build/host -j 8` 与 `ctest --test-dir build/host --output-on-failure`，11/11 通过；烧录记录补齐后 `python3 tools/check_handoff.py` 通过 342 项，`git diff --check` 通过。
 - `sh tools/build_firmware.sh` 首次因沙箱限制 ESP-IDF 的 `sysctl` 进程查询而失败；允许该只读查询后重新构建成功。应用镜像 3,223,952 字节，SHA-256 `e2551d502521f9b1629b395ce462746009b0c3c23c1a101b20d5d49dd0e00fbe`，4 MiB 应用槽剩余约 23%。
 - 使用合成插图导出并目视检查 [桌面查看页](../artifacts/image-viewer-20261007/host-preview.png)；该画布只证明页面布局和图片解码，不代表墨水屏实体观感。
-- 用户明确要求烧录后，确认 USB 序列号与 esptool 读取的芯片 MAC 均为 `14:C1:9F:D0:18:B8`。读回实际分区表得 `ota_0=0x10000/4 MiB`，OTA 元数据有效记录为 sequence 1、state 2，CRC 与 ESP-IDF 算法一致，指向 OTA0。固定镜像副本、分区表和 OTA 元数据位于 `.local/image-viewer-install-20261007/`。
+- 用户明确要求烧录后，确认 USB 序列号与 esptool 读取的芯片 MAC 均为 `DEVICE_A_REDACTED`。读回实际分区表得 `ota_0=0x10000/4 MiB`，OTA 元数据有效记录为 sequence 1、state 2，CRC 与 ESP-IDF 算法一致，指向 OTA0。固定镜像副本、分区表和 OTA 元数据位于 `.local/image-viewer-install-20261007/`。
 - 仅执行 `esptool write-flash 0x10000 .local/image-viewer-install-20261007/pico_page.bin` 写入应用槽；esptool 报告写入 3,223,952 字节且 `Hash of data verified`，未写 bootloader、分区表、NVS、otadata、OTA1、工厂校准或 TF 卡。
 - 再次复位采集的启动日志 `.local/image-viewer-install-20261007/boot.log` 确认从 `0x10000` 加载 `v0.1.0-mvp-54-g37d1332-dirty`；8 MiB PSRAM 检查通过，TF 卡挂载成功，首帧 `ok=1`。这是启动与显示事务证据，不是屏幕目视或实体输入验收。
 - 图片长按热区、600 ms 阈值、放大后的墨水屏观感及内存不足时的提示仍需真机验证；下一步是在设备上用带文字与插图的 EPUB 检查上述流程。
@@ -1167,7 +1181,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
   `cmake --build build/host -j 8` 和 `ctest --test-dir build/host --output-on-failure`，11/11 通过。
   `sh tools/build_firmware.sh` 完整构建通过；关闭开发诊断接口的普通版镜像为 3,221,680 字节，
   SHA-256 `90b80a42b5c969032bf8b39c7cff58972c779f183207a9df21b8d49be75e6e7d`。
-- 重新核对唯一连接设备的 USB 序列号与芯片 MAC 均为 `14:C1:9F:D0:18:B8`；读回的分区表和
+- 重新核对唯一连接设备的 USB 序列号与芯片 MAC 均为 `DEVICE_A_REDACTED`；读回的分区表和
   OTA 元数据与上次转储一致：`ota_0=0x10000/4 MiB`，有效 sequence 1、state 2，CRC 正确。
   只向 `0x10000` 写入上述镜像，esptool 报告 `Hash of data verified`。未写 bootloader、分区表、
   NVS、otadata、OTA1、校准或 TF 卡。
@@ -1189,7 +1203,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
   `ctest --test-dir build/host --output-on-failure`（11/11）、`python3 tools/check_handoff.py`（334 项）和
   `git diff --check` 均通过。`sh tools/build_firmware.sh` 首次因沙箱不允许组件管理器调用 macOS
   `sysctl()` 中断；获准在沙箱外重试后完整构建通过，镜像 3,220,864 字节，4 MiB 应用槽剩余 23%。
-- 用户授权“烧录看看”后，核对唯一 Read Pico 的 USB 序列号和芯片 MAC 均为 `14:C1:9F:D0:18:B8`；
+- 用户授权“烧录看看”后，核对唯一 Read Pico 的 USB 序列号和芯片 MAC 均为 `DEVICE_A_REDACTED`；
   烧录前诊断为书库、无待处理帧、未传书，进入书库前的阅读位置已保存。重新读回分区表和 OTA 元数据，
   确认启动槽为 `ota_0=0x10000/4 MiB`，有效 OTA 条目为 sequence 1、state 2，CRC 正确。
   仅向 `0x10000` 写入普通版应用 3,220,864 字节，SHA-256
@@ -1211,7 +1225,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 - 镜像 `firmware/build/pico_page.bin` 为 ESP32-S3、16 MiB Flash 配置，3,213,744 字节；4 MiB 应用槽剩余约 23%。安装固定副本 `.local/sync-test-install/pico_page-d8ed960.bin` 已逐字节摘要核对，SHA-256 为 `569547f81118293bc9a07619c41617b3c9c0b503eb7b7669d0d1b61d86a47fef`。`esptool image-info` 成功；未执行构建产物建议的整片烧录命令。
 - `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host -j 8`、`ctest --test-dir build/host --output-on-failure` 均通过，CTest **11/11**；日志在 `.local/sync-test-host-*.log`、`.local/sync-test-ctest.log`。这些结果不代表设备同步成功。
 - TF 卡已在电脑上安全弹出。退出 USB 传输后，设备一度保留主页画面但触摸与电源短按无响应，macOS 也未枚举出 Pico。用户依据板级 PMU 的强制关机与开机操作恢复设备，确认触摸再次可用；同一 USB 串口随后重新出现。
-- 烧录前 `esptool read-mac` 与 USB 序列号均为 `14:C1:9F:D0:18:B8`。从设备只读保存分区表和 OTA 元数据到 `.local/sync-test-install/`：分区表经 ESP-IDF `gen_esp32part.py` 验证，`ota_0=0x10000/4 MiB`；OTA 第一个条目 `sequence=1`、`state=2`，CRC 正确，当前有效槽为 OTA0。镜像 SHA-256 在写入前再次核对一致。
+- 烧录前 `esptool read-mac` 与 USB 序列号均为 `DEVICE_A_REDACTED`。从设备只读保存分区表和 OTA 元数据到 `.local/sync-test-install/`：分区表经 ESP-IDF `gen_esp32part.py` 验证，`ota_0=0x10000/4 MiB`；OTA 第一个条目 `sequence=1`、`state=2`，CRC 正确，当前有效槽为 OTA0。镜像 SHA-256 在写入前再次核对一致。
 - 自动权限审查首次超时，烧录命令未启动；按审查提示重试后，仅向 `0x10000` 写入 3,213,744 字节应用镜像。`esptool` 报告 `Hash of data verified` 并执行硬件复位；未写 bootloader、分区表、NVS、otadata、OTA1、TF 卡或工厂校准。
 - 构建配置中 `CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE` 未启用，因此烧录后的 `tools/device_console.py status` 无回应，不能使用诊断命令核对画面和 TF 卡状态。设备启动画面、触摸及后续 KOReader 双向接续仍待实际确认。
 
@@ -1240,12 +1254,12 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 - 单一书库扫描根直接作为“书库”首页，默认情况下直接列出 `Books/` 内的文件夹和 EPUB/TXT，不再单列 `Books` 入口。进入 `Books/Articles/` 等子文件夹后，顶栏返回“书库”；配置多个扫描根时仍列出各根入口。继续阅读、排序、列表/卡片样式保持原结构；目录读取失败显示错误，不当作空书库。
 - 684×1216 桌面画布预览：[书库首页](../artifacts/library-home-20261007/home.png)、[Articles 文件夹](../artifacts/library-home-20261007/articles.png)。预览使用合成 EPUB 和本地字体，来自实际 C++ 阅读程序的 `--headless --script` 输出，不是设备照片，也不代表墨水屏效果。
 - 调整了依赖旧 `Books` 入口的应用交互测试，并以独立演示卡验证从首页进入子文件夹、返回首页、直接打开根目录书籍。实际执行 `cmake --build build/host -j 8` 通过，`ctest --test-dir build/host --output-on-failure` **11/11** 通过；最后补充目录安全检查后重新构建，`ctest --test-dir build/host -R '^app$' --output-on-failure` **1/1** 通过。最终代码执行 `sh tools/build_firmware.sh` 通过，镜像 3,235,808 字节，4 MiB 应用槽剩余 23%。
-- 用户明确授权烧录。镜像固定副本位于 Git 忽略的 `.local/library-home-install-20261007/`，SHA-256 `f1a962a63d487039df8c8187a9673701111607d216b09ee48bfc24f6ce0473ac`。设备 USB 序列号与 `esptool read-mac` 均为 `14:C1:9F:D0:18:B8`。烧录前诊断为 `view=library pending=0 card=1 saved=1`；只读分区表与 OTA 元数据转储和前次安装逐字节一致：`ota_0=0x10000/4 MiB`，sequence 1、state 2 指向 OTA0。只执行 `esptool write-flash 0x10000` 写入应用镜像，报告 `Hash of data verified`，未写 bootloader、分区表、NVS、otadata、OTA1 或 TF 卡。
+- 用户明确授权烧录。镜像固定副本位于 Git 忽略的 `.local/library-home-install-20261007/`，SHA-256 `f1a962a63d487039df8c8187a9673701111607d216b09ee48bfc24f6ce0473ac`。设备 USB 序列号与 `esptool read-mac` 均为 `DEVICE_A_REDACTED`。烧录前诊断为 `view=library pending=0 card=1 saved=1`；只读分区表与 OTA 元数据转储和前次安装逐字节一致：`ota_0=0x10000/4 MiB`，sequence 1、state 2 指向 OTA0。只执行 `esptool write-flash 0x10000` 写入应用镜像，报告 `Hash of data verified`，未写 bootloader、分区表、NVS、otadata、OTA1 或 TF 卡。
 - 硬件复位后诊断为 `view=library pending=0 card=1 frame_ok=1 clean=1`，首帧已呈现。诊断画布采集返回 `frame_not_confirmed_or_changed`，当时画面正在变化；后续状态为 `view=reading saved=1 frame_ok=1`。尚未由设备画布或目视确认首页的具体书目层级、物理屏幕效果及触摸返回路径。
 
 ## 2026-10-07 · TF 卡目录迁移与固件安装（已安装，诊断验证）
 
-- 用户授权烧录。USB 序列号与 `esptool read-mac` 均为 `14:C1:9F:D0:18:B8`；设备复位后诊断为 `view=library pending=0 card=1 importing=0`。经设备 USB 传输页交出 TF 卡，电脑确认 `disk4s1` 为 31.3 GB FAT32 卷 `PICO PAGE`。
+- 用户授权烧录。USB 序列号与 `esptool read-mac` 均为 `DEVICE_A_REDACTED`；设备复位后诊断为 `view=library pending=0 card=1 importing=0`。经设备 USB 传输页交出 TF 卡，电脑确认 `disk4s1` 为 31.3 GB FAT32 卷 `PICO PAGE`。
 - 将根目录 `Articles/` 移至 `Books/Articles/`，将 `PicoPage/fonts/` 移至根目录 `Fonts/`。移动前复制并逐项核对 87 个文件、67,371,639 字节的本地备份；移动后从新路径回读，87 个 SHA-256 均与备份一致。书籍伴随目录随文章目录整体移动；`PicoPage/settings.toml` 未指定旧扫描根或旧字体路径，无须改写。未触碰 `Books/` 现有书籍、阅读进度文件内容、网络/同步凭据或其他 TF 文件。
 - 私人备份、逐文件摘要清单和固定镜像保存在 Git 忽略的 `.local/tf-layout-migration-20261007/`。`sh tools/build_firmware.sh` 通过；镜像 3,234,704 字节，SHA-256 `25a59493f6995323b4a7310a73c2b2ac98316f296ce3d14aef2f079e8a964207`，`esptool image-info` 校验镜像类型与内部哈希。`diskutil eject disk4` 成功，电脑已安全弹出 TF 卡。
 - 用户在设备上点“退出并重启”后，串口恢复，诊断显示 `view=library pending=0 card=1 importing=0`。烧录前读取并核对分区表及 OTA 元数据：`ota_0=0x10000/4 MiB`，当前有效记录为 sequence 1、state 2，指向 OTA0。使用 `esptool write-flash 0x10000` 只写 3,234,704 字节的应用镜像，报告 `Hash of data verified`，并完成硬件复位；未写 bootloader、分区表、NVS、otadata、OTA1 或校准数据。烧录前的分区表与 OTA 元数据转储保存在上述 Git 忽略目录。
@@ -1304,7 +1318,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
   GB18030 解码表的生成工具版本、可复现性核对和许可情况记入 [依赖审查](dependency-review.md)。
 - 用户提出列表视图应有封面：按原稿 S01-1 补上，列表行左侧显示由卡片缩略图缩小的 59 × 80 封面，无封面不留空位，状态移到行右侧。
 - 用户授权“可以先烧录”后安装到设备，共写入三次（评审修正版、列表封面版、白封面回退版），每次流程相同：
-  确认只连接一台设备，USB 序列号与 esptool `read-mac` 均为 `14:C1:9F:D0:18:B8`；诊断 `status` 为 `view=library pending=0 card=1 importing=0`；
+  确认只连接一台设备，USB 序列号与 esptool `read-mac` 均为 `DEVICE_A_REDACTED`；诊断 `status` 为 `view=library pending=0 card=1 importing=0`；
   重新读取分区表和 OTA 元数据，与此前核实过的转储逐字节相同（`ota_0=0x10000/4 MiB`，sequence 1、state 2）；
   只向 `0x10000` 写入应用，esptool 报告 `Hash of data verified`，看门狗复位后书库首帧成功。未写 bootloader、分区表、NVS、otadata、OTA1 或校准数据，未改 TF 卡上的书和进度。
   最终镜像来自提交 `a6764e6`，3,234,176 字节，SHA-256 `184201158ada5ace5cf0be9c80ba8a5f4bfc82333cb36ac445a05a656b7b510a`，应用槽剩余 23%。日志和转储在忽略目录 `.local/ui-review-install/`。
@@ -1329,7 +1343,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 - UTF-8 优先；无效时尝试 GB18030。使用 Python 标准库编码器生成双字节映射及四字节区间表，固件按流验证原文件，并将 GB18030 段边界对齐到字符起点；在已核实的受控存储会话中复用边界。UTF-8 继续使用 `txt-utf8-v1`，GB18030 使用独立 `txt-gb18030-v1` 阅读与分页修订，不复用另一种编码的记录。其他编码、手动指定编码和 TXT 的 KOReader 接续仍未实现；无标记的旧编码可能误判。
 - 实际执行 `cmake --build build/host -j 8` 和 `ctest --test-dir build/host --output-on-failure`（11/11）；修订进度选择后再次运行 document/app 两项（2/2）。合成样本覆盖四字节字符跨 48 KiB 分段及 GBK 不收录的双字节字符。对用户原书逐段读取，共 33 段、794,268 个 Unicode 标量，逐字 FNV 摘要与 Python `gb18030` 解码一致。该原书验证脚本只放在 `/tmp`。
 - `sh tools/build_firmware.sh` 首次因沙箱 `sysctl()` 权限失败；获准重试后完整构建通过。安装镜像 3,221,616 字节，SHA-256 `28dfdd4455b2fec72c2091cfaafa82bb127bfe29d633fef46bfa38f698b15b4a`，4 MiB 应用槽剩余约 23%。
-- 烧录前设备报告 `view=library pending=0 card=1 importing=0`；串口芯片 MAC 为 `14:C1:9F:D0:18:B8`。重新读取分区表和 OTA 元数据，确认有效的 `ota_0=0x10000/4 MiB`、sequence 1、state 2、CRC 正确。只向 `0x10000` 写入应用镜像，esptool 报告 `Hash of data verified`；未写其他 Flash 分区或 TF 卡。重启后书库首帧成功且 `card=1`。
+- 烧录前设备报告 `view=library pending=0 card=1 importing=0`；串口芯片 MAC 为 `DEVICE_A_REDACTED`。重新读取分区表和 OTA 元数据，确认有效的 `ota_0=0x10000/4 MiB`、sequence 1、state 2、CRC 正确。只向 `0x10000` 写入应用镜像，esptool 报告 `Hash of data verified`；未写其他 Flash 分区或 TF 卡。重启后书库首帧成功且 `card=1`。
 - 设备 TF 卡上的目标文件与电脑原书长度均为 1,579,496 字节、CRC32 均为 `f136e06f`。设备打开后，诊断从 `view=loading` 进入 `view=reading frame_ok=1`；一次 K3 翻页后画面 CRC 变化，阅读修订号为 1，`saved=1`。抓取完整正文画面时帧发生变化，命令返回 `frame_not_confirmed_or_changed`，因此没有留存完整屏幕截图；用户随后确认中文正常显示并可翻页。重启后进度恢复、其他编码误判和传书入口仍待验证。未提交或推送。
 
 ## 2026-10-07 · 一份 TXT 无法打开（已定位）
@@ -1341,7 +1355,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 
 - 进入 USB 传输、卸载应用侧 FatFs 前，读取 TF 卷标。仅空卷标或 `NONAME` 改为 `PICO PAGE`；保留其他卷标。读取或写入失败时不交出卡。启用 `CONFIG_FATFS_USE_LABEL`，不修改分区或格式。
 - 实际执行 `sh tools/build_firmware.sh`：首次在沙箱内因组件管理器的 `sysctl()` 权限失败；获准重试后完整构建通过。安装前重新构建当时的源代码，镜像 3,167,552 字节，SHA-256 `02d1fb4e4c598ada08edc16e192075f78be90e9f7a3321517da06fda05b2658f`；构建日志 `.local/usb-label-build.log`。
-- 用户授权“烧录看看”。烧录前诊断 `view=reading pending=0 card=1 saved=1 importing=0`；USB 序列号与 esptool MAC 均为 `14:C1:9F:D0:18:B8`。重新读取设备分区表和 OTA 元数据，确认当前有效 `ota_0=0x10000/4 MiB`、sequence 1、state 2 且 CRC 正确。仅向 `0x10000` 写入上述应用镜像；esptool 报告 `Hash of data verified`。未写 bootloader、分区表、NVS、otadata、OTA1 或工厂校准。
+- 用户授权“烧录看看”。烧录前诊断 `view=reading pending=0 card=1 saved=1 importing=0`；USB 序列号与 esptool MAC 均为 `DEVICE_A_REDACTED`。重新读取设备分区表和 OTA 元数据，确认当前有效 `ota_0=0x10000/4 MiB`、sequence 1、state 2 且 CRC 正确。仅向 `0x10000` 写入上述应用镜像；esptool 报告 `Hash of data verified`。未写 bootloader、分区表、NVS、otadata、OTA1 或工厂校准。
 - 看门狗复位后诊断为 `view=library pending=0 card=1 frame_ok=1 clean=1`。诊断触摸进入 USB 传输，macOS `diskutil` 识别 31.3 GB FAT32 分区，卷名为 `PICO PAGE`；`diskutil eject /dev/disk4` 成功，外置磁盘从挂载列表消失。证据见 `.local/usb-label-install/`。
 - 用户在设备屏幕退出并重启后，同一 USB 序列号的串口恢复；只读诊断为 `view=tools pending=0 card=1 saved=1 frame_ok=1 importing=0`，说明 TF 卡和阅读界面恢复。未对比重启前后的同一本书位置锚点；证据 `.local/usb-label-install/after-exit-status.log`。本批未推送。
 
@@ -1352,7 +1366,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 - 当前只接受有效 UTF-8；GBK/GB18030、UTF-16 与 TXT 章节自动识别未实现。无效 UTF-8 或 NUL 字节在开书时拒绝，保留原文件。未更改已有 EPUB 进度修订格式，TXT 使用独立的 `txt-utf8-v1` 修订。
 - 实际执行：`cmake --build build/host -j 8`、`ctest --test-dir build/host --output-on-failure`（**11/11**）、`node tests/wifi_upload_page_test.mjs`、`sh tools/build_firmware.sh`、`python3 tools/check_handoff.py`（328 项）和 `git diff --check` 均通过。首次固件配置在沙箱内被 `sysctl()` 权限拦截，获准重试完成；最终固件 3,164,848 字节，SHA-256 `6d0719de83732a9913a09666cd6357ba887e1730d4a4de5d4a09668a855279e9`。
 - 用合成 TXT 的桌面画布检查书库文件名、正文和“仅本地”同步提示；书库原有 EPUB 扩展名截取曾把 `sample.txt` 显示为 `sampl`，已修正并复查。截图在忽略的 `artifacts/txt-support-20261007/`，为 host 画布，字体使用回退路径，不是真机照片。
-- 用户授权“烧录”后，仅连接一台 Read Pico；USB 序列号与 esptool 芯片 MAC 均为 `14:C1:9F:D0:18:B8`。烧录前诊断为 `view=library`、`pending=0`、`card=1`、`importing=0`。从设备重新读取分区表和 OTA 元数据，确认当前有效启动槽 `ota_0=0x10000/4 MiB`、sequence 1、state 2 且 CRC 正确。将上述摘要的镜像复制至忽略目录 `.local/txt-support/install/` 后，仅向 `0x10000` 写入 3,164,848 字节；esptool 报告 `Hash of data verified`。未写 bootloader、分区表、NVS、otadata、OTA1 或工厂校准，未擦除 TF 卡。
+- 用户授权“烧录”后，仅连接一台 Read Pico；USB 序列号与 esptool 芯片 MAC 均为 `DEVICE_A_REDACTED`。烧录前诊断为 `view=library`、`pending=0`、`card=1`、`importing=0`。从设备重新读取分区表和 OTA 元数据，确认当前有效启动槽 `ota_0=0x10000/4 MiB`、sequence 1、state 2 且 CRC 正确。将上述摘要的镜像复制至忽略目录 `.local/txt-support/install/` 后，仅向 `0x10000` 写入 3,164,848 字节；esptool 报告 `Hash of data verified`。未写 bootloader、分区表、NVS、otadata、OTA1 或工厂校准，未擦除 TF 卡。
 - esptool 硬复位后串口诊断无应答；按既有设备流程使用 `--after watchdog-reset read-mac` 后成功启动。诊断返回 `view=library`、`card=1`、`frame_ok=1`、`clean=1`，首帧全刷成功。只读分页列出设备 `Books/` 共 52 项，其中 4 个普通 `.txt` 文件仍在。书库根画面可见 Books 文件夹；进入后画面持续变化，抓图返回 `frame_not_confirmed_or_changed`，因此尚未确认 TXT 书目在屏幕上显示。私有证据为 `.local/txt-support/install/` 的分区、OTA、镜像、烧录日志和根画面。
 - 未执行：真机 TXT 开书、翻页/回翻、屏幕排版目视、TF 卡读写性能、USB 和手机 Wi-Fi TXT 传输、休眠恢复。未提交或推送。下一步先在设备上用 UTF-8 中文 TXT 验证书目显示、阅读与重启恢复，再评估是否需要 GBK/GB18030 或章节识别。
 
@@ -1487,7 +1501,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
   SHA-256 `fb1cd61372186f67b521a6690d9940c0985160dff664dc9c79a29094d111ce6e`；
   日志 `.local/count-session-{host,sanitized,firmware}.log`。
 - 安装（用户授权“刷入并对照”）：先装 `5977d831…`，发现上述卡住后装修正版 `fb1cd613…`；两次均核对 USB 序列号与
-  `read-mac` 为 `…:18:B8`，仅写入 `0x10000`，`Hash of data verified`。证据在 `.local/count-session-install/`。
+  `read-mac` 为 `DEVICE_A_REDACTED`，仅写入 `0x10000`，`Hash of data verified`。证据在 `.local/count-session-install/`。
 - 真机对照（诊断口，文楷 40 px，《呐喊》460 页）：
 
   | 场景 | 改前 | 改后 |
@@ -1532,7 +1546,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
   链接映射显示 `kFallbackFont` 位于 `.rodata`（Flash 映射），不占 RAM。
 - host 无字体渲染：简体演示书 3,569 个字符缺字 0；繁体《呐喊》95,813 个字符缺字 19.10%，
   《阿Q正传》42,070 个字符缺字 19.34%，缺字显示为方框。内置字体不覆盖繁体。
-- 用户授权“刷到设备上试试”后安装。只连接一台设备，USB 序列号与 esptool `read-mac` 均为 `…:18:B8`；
+- 用户授权“刷到设备上试试”后安装。只连接一台设备，USB 序列号与 esptool `read-mac` 均为 `DEVICE_A_REDACTED`；
   刷机前 `view=reading saved=1 revision=113 crc32=6a597379`，卡上文楷和 Noto 的长度与 CRC 已记录。
   仅写入 `ota_0`（`0x10000`），3,142,720 字节，23.0 秒，`Hash of data verified`。
   重启 4.6 秒后书库帧成功。诊断口点“继续阅读”恢复到修订 113，画布 CRC 仍为 `6a597379`；
@@ -1555,7 +1569,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
   修复后 host 与 ASan/UBSan CTest 各 **11/11** 通过，固件构建通过：3,143,120 字节，
   SHA-256 `877756721fad1f37adb743a58db808cd2fdfd58e063711c92c3842f8190f1f9d`。
 - 用户在 USB 传输模式下授权后，卡上目录已改回 `PicoPage/fonts`（25 个文件；重启后文楷和 Noto 的长度与 CRC 和改名前一致）。
-  用户授权“刷修复版”后安装 `87775672…`：USB 序列号与 `read-mac` 均为 `…:18:B8`，仅写入 `0x10000`，
+  用户授权“刷修复版”后安装 `87775672…`：USB 序列号与 `read-mac` 均为 `DEVICE_A_REDACTED`，仅写入 `0x10000`，
   3,143,120 字节，`Hash of data verified`，重启后书库帧成功。证据为 `.local/builtin-font-install/fix-*.log`。
   状态栏修复在真机上的显示尚未由诊断口或实体操作确认。
 - 页数统计 `failed` 的原因已查明，与字体无关：统计任务每批都重新打开 EPUB，输入取消正在打开的任务时，
@@ -1567,7 +1581,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
   SHA-256 `00c6693e119faa0f15346241eb129f56df4ddaffe4f5dc7449ebf0bf88443e26`。
 - 设备日志确认了同一原因：安装前的 `87775672…` 版本上，一次触摸落在统计任务的 `epub_open` 阶段，约 4 秒后状态变为 `failed`
   （`.local/builtin-font-install/count-raw.log`）。用户反馈此前没有任何一本书统计出过页数。
-- 用户授权后安装 `00c6693e…`：USB 序列号与 `read-mac` 均为 `…:18:B8`，仅写入 `0x10000`，3,143,136 字节，`Hash of data verified`。
+- 用户授权后安装 `00c6693e…`：USB 序列号与 `read-mac` 均为 `DEVICE_A_REDACTED`，仅写入 `0x10000`，3,143,136 字节，`Hash of data verified`。
   真机验证（诊断口注入按键，文楷 40 px，《呐喊》）：每约 4 秒翻一页共 19 次，状态一直是 `counting`，但页索引没有增长，
   因为每批统计都在完成前被取消（`count-fix-verify-4s.log`）；改为每约 18 秒翻一页，26 次翻页、465 秒后
   `pages=460 count=idle`（`count-fix-verify.log`）。这是诊断注入，不是实体操作；状态栏页码的面板显示未确认。
@@ -1600,7 +1614,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
   中间回归发现同步模式错误等待字体摘要的循环条件，已修正并重新通过全部检查。
 - 最终本地应用 `firmware/build/pico_page.bin`：2,329,360 字节，
   SHA-256 `95f47a1a4fcfd30519bca4d710b5664430dfbde18166db8d5c5affb90326dc66`。
-- 用户授权“刷机”后，核对唯一连接设备的 USB 序列号与芯片 MAC 均为 `…:18:B8`，
+- 用户授权“刷机”后，核对唯一连接设备的 USB 序列号与芯片 MAC 均为 `DEVICE_A_REDACTED`，
   刷机前 `pending=0 saved=1 revision=113`。仅写入 `ota_0`（`0x10000`），`Hash of data verified`，重启后书库帧成功。
   通过“继续阅读”恢复后，修订号仍为 113，正文 CRC 仍为 `6a597379`，与刷机前一致；
   后台已开始分页，约 94 秒的状态采样中页索引容量由 700 增至 5,256 字节；
@@ -1620,7 +1634,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
   产物 `.local/responsiveness-20261007/pico_page-bitmap.bin`，2,327,056 字节，
   SHA-256 `1fc070d01c3c94ead0d746fd78d81c8979e12b5e864145d8c209b831acd5fa4a`。
 - 安装：用户确认（“刷吧”）后写入，仅 `0x10000`，`Hash of data verified`；写入前设备无待处理帧、进度已保存（修订号 14），
-  USB 序列号与芯片 MAC 均为 `…:18:B8`（`pre-status-bitmap.log`、`premac-bitmap.log`、`flash-bitmap.log`）。重启后进入书库。
+  USB 序列号与芯片 MAC 均为 `DEVICE_A_REDACTED`（`pre-status-bitmap.log`、`premac-bitmap.log`、`flash-bitmap.log`）。重启后进入书库。
 - 真机数据（用户实体操作约 3 分钟，98 次正文翻页，`reader-run-bitmap.log`，状态查询间隔 30 秒；单次小样本）：
   - 上一帧完成 1 秒后的翻页 39 次，全部命中。`body_prepare_hit` 共 42 条：P50 49.5 ms，P95 67.7 ms，最长 80 ms。
     P95 ≤ 50 ms 的目标未达到，P99 ≤ 100 ms 达到。第一轮同类翻页（仅字形预热）为 105–131 ms。
@@ -1650,21 +1664,21 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
   3. XHTML 1.x DTD 的命名字符实体（`&nbsp;`、`&mdash;` 等 Latin-1 全集和常用符号）按一个字符并入所在文本节点；
      未列出的实体报 `Unsupported XML entity: <名称>`。此前任何命名实体都会使整章失败。
      没有外部 DTD 声明的文档（如 `<!DOCTYPE html>`）里的命名实体仍是 XML 格式错误，未处理。
-- 起因：《乡土中国》修好空书名页后，host 探针继续报 `Unresolved XML entities are unsupported`；
+- 起因：《私有样本 C》修好空书名页后，host 探针继续报 `Unresolved XML entities are unsupported`；
   该书 22 个 spine 文件中 19 个含 `&nbsp;`，修复前除封面外基本无法阅读。
 - 新增夹具 `background-page`、`background-text`、`named-entities`、`unknown-entity` 及断言
   （实体与相邻文字属于同一个 run，偏移连续）。
-- 实际执行：host 与 ASan/UBSan CTest 各 11/11；`sh tools/check_public_books.sh` 对《乡土中国》《素食者》《看见孩子》
-  和公开的《呐喊》三种字号全书通过，缺字 0，《乡土中国》书名页图片输出。`sh tools/build_firmware.sh` 成功，
+- 实际执行：host 与 ASan/UBSan CTest 各 11/11；`sh tools/check_public_books.sh` 对《私有样本 C》《私有样本 B》《私有样本 D》
+  和公开的《呐喊》三种字号全书通过，缺字 0，《私有样本 C》书名页图片输出。`sh tools/build_firmware.sh` 成功，
   产物 `.local/responsiveness-20261007/pico_page-parser.bin`，2,330,368 字节，
   SHA-256 `bde9d67312bf819f0ba72c8ea0b9b418ad2c591d1978470c1e394f657716af20`。
 - 安装：用户确认（“同意，一起做完再刷”）后写入，仅 `0x10000`，`Hash of data verified`；写入前设备无待处理帧、进度已保存，
-  USB 序列号与芯片 MAC 均为 `…:18:B8`（`pre-status-parser.log`、`premac-parser.log`、`flash-parser.log`）。重启后进入书库。
+  USB 序列号与芯片 MAC 均为 `DEVICE_A_REDACTED`（`pre-status-parser.log`、`premac-parser.log`、`flash-parser.log`）。重启后进入书库。
 - 真机验证（`verify_books.py`，诊断串口 `open` 与 `key`，日志 `verify-books.log`）：三本书各自打开后 K3×3、K1×3，
   全程 `view=reading`、`frame_ok=1`，每次 K3 画布 CRC 变化，K1 返回后 CRC 与去程逐页一致；
-  没有 `Error shown` 或 `Image unavailable` 日志；《乡土中国》书名页和《素食者》封面有解码记录。
+  没有 `Error shown` 或 `Image unavailable` 日志；《私有样本 C》书名页和《私有样本 B》封面有解码记录。
   这是诊断注入和画布摘要，不是面板实拍或实体输入。
-- 副作用：验证后设备停在《看见孩子》的原位置（修订号 8 未变）；《素食者》在切书时新写了一条位于首页的进度记录。
+- 副作用：验证后设备停在《私有样本 D》的原位置（修订号 8 未变）；《私有样本 B》在切书时新写了一条位于首页的进度记录。
   验证期间修订号不随翻页增加，是因为串口请求会重置 2 秒空闲保存计时（`app_main.cpp` 的 `idle_save_us`），切书时已提交。
 - 未验证：KOReader 对含 `&nbsp;` 的文本和 `body` 锚点的位置换算（未运行 CREngine 对照）；用户实体操作下的显示效果；
   `&nbsp;` 在行首和行尾的排版观感。
@@ -1672,7 +1686,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 ## 2026-10-07 · calibre 封面页图片无法显示：已修复（host 验证，未安装）
 
 - 真机日志 `.local/responsiveness-20261007/reader-run-errlog.log`：用户实际操作只有最后约 27 秒落在采集窗口内。
-  《乡土中国》封面页图片正常显示；翻到下一页记录到 `Error shown: 章节读取失败：Chapter contains no supported body content`，
+  《私有样本 C》封面页图片正常显示；翻到下一页记录到 `Error shown: 章节读取失败：Chapter contains no supported body content`，
   与 host 复现一致。本次没有出现 `Image unavailable`。空闲期间有一次 `PMU event: ESP_ERR_INVALID_RESPONSE`（09:15:45），
   随后状态查询正常，原因未查。
 - 图片失败的根因（host 复现）：按第一轮日志中的身份摘要耗时推断出两本小书，文件大小与卡上一致（233,728 和 266,940 字节），
@@ -1684,26 +1698,26 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
   解析结果变化，章节内容缓存版本升为 `content-reading-v2`，旧缓存不再读取（卡上的 v1 文件未清理，可重建）。
   新增 `calibre-svg-cover.epub` 夹具和断言。
 - 实际执行：host CTest 11/11；两本书的探针全书通过并输出封面图。sanitizer 与固件构建未重跑，未安装。
-- 未修：《乡土中国》的空正文书名页（`body` 背景图）仍报错，处理方式待定。
+- 未修：《私有样本 C》的空正文书名页（`body` 背景图）仍报错，处理方式待定。
   错误页上的三次点击没有产生新画面（`prepare=0`、无帧），是否为控件之外的点击未确认。
 
-## 2026-10-07 · 错误原因写入串口日志；《乡土中国》章节失败原因（已安装，待复现）
+## 2026-10-07 · 错误原因写入串口日志；《私有样本 C》章节失败原因（已安装，待复现）
 
-- 起因：用户报告书内图片显示“图片无法显示”，以及《乡土中国》有章节加载失败。第一轮日志没有任何错误文本：
+- 起因：用户报告书内图片显示“图片无法显示”，以及《私有样本 C》有章节加载失败。第一轮日志没有任何错误文本：
   图片失败只画统一提示，`error()` 显示的错误也不写串口。
 - 修改（未提交）：`app.cpp` 在 `error()` 入口记录 `Error shown: …`，图片任务失败时记录
   `Image unavailable: resource=… error=…`，均为 `reader_app` 的警告级日志，仅固件构建生效。没有改变任何行为。
-- 第一轮日志对图片失败的限定：《瓦尔登湖》的 5 次图片请求都完成解码并显示；失败的两次都是开书后的第一页，
+- 第一轮日志对图片失败的限定：《私有样本 F》的 5 次图片请求都完成解码并显示；失败的两次都是开书后的第一页，
   图片任务在 `epub_open` 结束后 2–3 ms 内返回，没有解码记录，当时内存准入已通过。
   因此失败发生在查找图片或识别格式阶段，具体错误待新日志确认；不是内存不足，也不是解码超时。
-- 《乡土中国》已在 host 用生产解析器复现（`sh tools/check_public_books.sh`，用户本机的个人 EPUB，未纳入仓库）：
+- 《私有样本 C》已在 host 用生产解析器复现（`sh tools/check_public_books.sh`，用户本机的个人 EPUB，未纳入仓库）：
   `Chapter 1: Chapter contains no supported body content`。第二个 spine 项 `Text/front001.html`（书名页）的
   `<body>` 没有任何子节点，图片只写在 `body` 的 `style="background-image:url('../Images/imageSMY.jpg')"` 里。
   解析器把没有正文的章节判为错误（`document.cpp` 的 `load`），应用因此显示章节读取失败。尚未修复。
 - 实际执行：host CTest 11/11；`sh tools/build_firmware.sh` 成功。产物 `.local/responsiveness-20261007/pico_page-errlog.bin`，
   2,327,280 字节，SHA-256 `16452f061405aa980bd27933a124eab0c62ac876f85d1dc00022ccc3333f1b09`。
   用户确认（“加错误日志，重新刷机吧”）后写入，仅 `0x10000`，`Hash of data verified`；写入前设备在书库、进度已保存，
-  USB 序列号与芯片 MAC 均为 `…:18:B8`（`pre-status-errlog.log`、`premac-errlog.log`、`flash-errlog.log`）。
+  USB 序列号与芯片 MAC 均为 `DEVICE_A_REDACTED`（`pre-status-errlog.log`、`premac-errlog.log`、`flash-errlog.log`）。
   重启后进入书库，TF 已挂载，首帧成功，内部 RAM 137,643 字节（`post-status-errlog.log`）。
 - 未验证：新日志尚未在真机上捕获到任何错误；sanitizer 未重跑。
 - 下一步：用户复现图片失败后读取 `reader-run-errlog.log`；决定空正文章节的处理方式后再修。
@@ -1739,7 +1753,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 - 用户确认（“可以，你刷吧”）后，在提交 `2b98f97` 上运行 `sh tools/build_firmware.sh`，构建成功，
   脚本输出 `Read Pico BSP: 5f3406d…`。产物 `.local/responsiveness-20261007/pico_page.bin`，2,327,184 字节，
   SHA-256 `77fe4836e25c238d314badc28e991b5617198cfcd41e9af2ca08d673d82de99c`，ELF 同目录保存。
-- 写入前核对：只连接一台设备，USB 序列号与 esptool `read-mac` 均为 `…:18:B8`；设备在正文，无待处理帧，
+- 写入前核对：只连接一台设备，USB 序列号与 esptool `read-mac` 均为 `DEVICE_A_REDACTED`；设备在正文，无待处理帧，
   进度已保存（修订号 10，第 4 / 409 页，`pre-status.log`）。
 - 写入命令与此前相同，仅 `0x10000`，`Hash of data verified`（`premac.log`、`flash.log`）。
   没有写 bootloader、分区表、NVS 或 otadata，没有擦除 Flash 或 TF。
@@ -2175,7 +2189,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 ## 2026-10-06 · 手机配置版本已安装（配置功能尚未在真机运行）
 
 - 用户确认（“你烧录吧”）后写入 `.local/provisioning-20261006/pico_page.bin`，仅 `0x10000`，`Hash of data verified`
-  （`flash.log`）。写入前核对：只连接一台设备，USB 序列号与芯片 MAC 均为 `…:18:B8`；设备在正文，
+  （`flash.log`）。写入前核对：只连接一台设备，USB 序列号与芯片 MAC 均为 `DEVICE_A_REDACTED`；设备在正文，
   进度已保存（修订号 9，第 3 / 409 页，`pre-status.log`）。
 - 重启后进入书库，TF 已挂载，首帧成功；启动后可用内部 RAM 137,659 字节，最大连续块 90,112 字节，
   与安装前的数值相同（`post-status.log`）。
@@ -2255,8 +2269,8 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 ## 2026-10-06 · 版本 E 真机验证（已安装）
 
 - 用户确认（“烧录吧”）后写入 `.local/pages-settings-20261006/pico_page-e.bin`，仅 `0x10000`，`Hash of data verified`
-  （`flash-e.log`）；写入前核对 USB 序列号与芯片 MAC 均为 `…:18:B8`，设备在书库，修订号 258。
-- 诊断输入实测《亲密关系（十周年纪念版）》（`count-e-qm.log` 及本次会话的导航输出；截图 `e-ref.png`、`e-restored.png`）：
+  （`flash-e.log`）；写入前核对 USB 序列号与芯片 MAC 均为 `DEVICE_A_REDACTED`，设备在书库，修订号 258。
+- 诊断输入实测《私有样本 A（版本 1）》（`count-e-qm.log` 及本次会话的导航输出；截图 `e-ref.png`、`e-restored.png`）：
   - 开书 5.93 秒。旧缓存作废后重新统计全书，约 31 秒内完成（每 10 秒轮询一次，含轮询造成的停顿），共 2,551 页。
     统计期间 `min_heap` 3,871,440 字节；统计后可用 4,628,719 字节，没有滞留。
   - 从目录进入“参考文献”1.52 秒，显示第 1681 / 2551 页，正文正常；前后翻页 0.73–0.86 秒。
@@ -2268,8 +2282,8 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 
 ## 2026-10-06 · 章节分段读取（版本 E）
 
-- 用户确认后写入版本 D（`flash-d.log`，仅 `0x10000`，校验通过，序列号与 MAC 均为 `…:18:B8`）。真机验证：
-  从目录跳到《亲密关系（十周年纪念版）》的“参考文献”（422 KB，约 35.5 万字），设备没有重启，
+- 用户确认后写入版本 D（`flash-d.log`，仅 `0x10000`，校验通过，序列号与 MAC 均为 `DEVICE_A_REDACTED`）。真机验证：
+  从目录跳到《私有样本 A（版本 1）》的“参考文献”（422 KB，约 35.5 万字），设备没有重启，
   显示“本章内容过大，设备内存不足，无法显示。”，`min_heap` 1,986,908 字节；点“恢复阅读”回到第 226 页，修订号 258 不变。
   测试画面被用户看到。用户明确表示读者不会接受章节打不开（D17）。
 - 该章此前从未能显示：旧版本受“单章 200,000 标量”上限限制，报读取失败或因内存不足重启。
@@ -2298,11 +2312,11 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 ## 2026-10-06 · 章节读取的内存余量检查（版本 D，已安装）
 
 - 用户确认后写入版本 C：`.local/pages-settings-20261006/pico_page-c.bin`，仅 `0x10000`，`Hash of data verified`
-  （`flash-c.log`）；写入前核对 USB 序列号与芯片 MAC 均为 `…:18:B8`，写入前设备在书库，修订号 258。
+  （`flash-c.log`）；写入前核对 USB 序列号与芯片 MAC 均为 `DEVICE_A_REDACTED`，写入前设备在书库，修订号 258。
 - 版本 C 真机实测（诊断 `open` 加每 10 秒一次 `status`，`count-c-nahan.log`、`count-c-qm.log`）：
   - 《吶喊》从未统计到统计完成不超过 10 秒，共 460 页。统计期间 `min_heap` 2,793,224 字节；
     统计后可用内存 3,967,367 字节，比统计前少约 0.1 MB，版本 B 的 1.6 MB 滞留不再出现。
-  - 《亲密关系（十周年纪念版）》开书 6.06 秒，直接采用缓存，显示第 226 / 1693 页，没有重新统计。
+  - 《私有样本 A（版本 1）》开书 6.06 秒，直接采用缓存，显示第 226 / 1693 页，没有重新统计。
   - 主任务栈最低剩余 7,600–7,728 字节。日志中没有超过 150 毫秒的统计单片记录（记录只在诊断轮询之间采集，不完整）。
 - 本批（版本 D）：解析章节时由解析器自己检查余量，内存不足成为可恢复的读取失败，不再依赖调用方估算。
   - 每个元素和每段文本开始前检查 PSRAM 可用总量不低于 768 KiB；正文缓冲和单个文本节点原文增长前，
@@ -2325,10 +2339,10 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 ## 2026-10-06 · 资源审计与修正（版本 C，已安装）
 
 - 用户确认（“烧录吧”）后写入版本 B：`.local/pages-settings-20261006/pico_page-b.bin`，仅 `0x10000`，`Hash of data verified`
-  （`flash-b.log`）；写入前核对 USB 序列号与芯片 MAC 均为 `…:18:B8`。随后按用户要求做资源审计，
+  （`flash-b.log`）；写入前核对 USB 序列号与芯片 MAC 均为 `DEVICE_A_REDACTED`。随后按用户要求做资源审计，
   参考以 CrossPoint（经 CrossMux 检出）和 KOReader 为主，来源见 [依赖审查](dependency-review.md)。
 - 版本 B 真机实测（诊断输入，`repro-3.log`、`probe-settings.log`）：
-  - 打开 12.5 MB 的《亲密关系（十周年纪念版）》并统计完成，150 秒内无重启。`min_heap` 为 1,380,096 字节（修复前 292,680）。
+  - 打开 12.5 MB 的《私有样本 A（版本 1）》并统计完成，150 秒内无重启。`min_heap` 为 1,380,096 字节（修复前 292,680）。
   - 统计结束后可用内存比统计前少约 1.6 MB 且不恢复。
   - 设置首页首次进入准备 0.50 秒，再次 0.07 秒，没有出现数秒的 FAT 扫描；存储页首次 0.82 秒，再次 0.21 秒；
     输入页 0.56 秒，同步设置页 0.69 秒。首次耗时主要是新字形。
@@ -2358,7 +2372,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 
 ## 2026-10-06 · 页数统计导致重启（版本 B 修复，已安装）
 
-- 用户反馈：在刚安装的版本上打开《亲密关系》，过程中设备回到书库。设备 `uptime_ms` 只有 31 秒，实际是重启。
+- 用户反馈：在刚安装的版本上打开《私有样本 A》，过程中设备回到书库。设备 `uptime_ms` 只有 31 秒，实际是重启。
 - 复现（诊断 `open` 加每 5 秒一次 `status`，`.local/pages-settings-20261006/repro-2.log`）：
   12.5 MB 的十周年纪念版开书正常，可用内存约 3.9 MB；开书后 15–20 秒之间 `min_heap` 由 3,685,332 降到 292,680 字节，
   之后统计停止。这次没有重启，也没有采到崩溃日志；5.5 MB 的另一本同名书全程正常（`repro-1.log`）。
@@ -2378,7 +2392,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 - 产物：`.local/pages-settings-20261006/pico_page-b.bin`，2,111,280 字节；
   SHA-256 `02d862d566eaea8c0b63fc886d9becd1ee1e88ecf745ebb8838de6c057d5dc3a`。
   第一次写入命令被权限检查拒绝；用户再次确认后已安装，见上一条记录。
-- 复现的副作用：两本《亲密关系》各新建了进度记录（修订号 1，位于首页）。用户此前在读书籍的修订号 250 未受影响。
+- 复现的副作用：两本《私有样本 A》各新建了进度记录（修订号 1，位于首页）。用户此前在读书籍的修订号 250 未受影响。
 - 未验证：修复版在真机上的最低可用内存、统计耗时和输入延迟；内存估算在真机上是否足够保守。
 - 另见的既有风险（未改）：读者翻到超限章节时，阅读侧同样会完整解析该章后才报错，内存占用与本次相同，可能重启。
 
@@ -2406,7 +2420,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 - 产物：`.local/pages-settings-20261006/pico_page.bin`，2,110,864 字节，
   SHA-256 `3dc46d3bf986271471577be7696b4e0a10d5e11405ee32ac3b6884e8462dc4fd`，与 `firmware/build/pico_page.bin` 一致。
 - 烧录：用户确认（“烧录吧”）后仅写入 `0x10000`，`Hash of data verified`（`flash.log`）。写入前核对 USB 序列号与芯片 MAC
-  均为 `…:18:B8`，只有这一台设备连接。写入前设备在正文，修订号 250、画布 CRC `b8362619`（`pre-status.log`）；
+  均为 `DEVICE_A_REDACTED`，只有这一台设备连接。写入前设备在正文，修订号 250、画布 CRC `b8362619`（`pre-status.log`）；
   重启后进入书库，TF 已挂载，首帧成功（`post-status.log`）。没有注入任何输入，未打开书籍，进度未变。
 - 未验证（均需真机）：
   - 统计全书页数的实际耗时。每个新字符首次取字宽需读 TF 卡，此前 20,370 个字符的章节排版约 2.7 秒，大书可能需要数分钟；
@@ -2569,7 +2583,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
   点击开书先出状态帧且此时不产生进度；回翻进入长章节先出状态帧并保持已确认位置，
   随后的回翻不再重排，前后翻回到原位置。新增夹具 `long-chapter.epub`。
 - 烧录：用户授权后共写入三次，均只写 `0x10000` 并校验摘要；每次写入前核对 USB 序列号与芯片 MAC
-  均为 `…:18:B8`（`.local/perf-20261006/flash.log`）。第一版含 4096 字节缓冲，第二版仅把它改回默认用于对照，
+  均为 `DEVICE_A_REDACTED`（`.local/perf-20261006/flash.log`）。第一版含 4096 字节缓冲，第二版仅把它改回默认用于对照，
   第三版为当前安装版本。第二、三次写入属于同一轮复测，未另行询问。
 - 设备复测（诊断输入，`.local/perf-20261006/serial-after*.log`；“总计”含呈现与保存）：
 
@@ -2788,7 +2802,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 
 - 已对照 ESP-IDF 6.1 固定提交的 `tusb_msc` 示例，并检查 esp_tinyusb 2.4.0 源码；官方 `auto_mount_off` 可关闭回挂，已修正文档此前不完整的理由。
 - 保留同步块回调的原因是便利层延后写失败只记录日志；具体来源与差异见 [USB 运行记录](usb-storage-runtime.md)。本轮未修改固件代码或重复烧录。
-- 71 个 EPUB 文件名清理计划已检查无重名，去掉导入序号与 Z-Library 标识；保留书名、作者与扩展名；71 个文件已重命名并逐个核对 SHA-256，7 个进度目录及最近阅读路径同步更新。一个此前无法按名称访问的旧副本仍留在 Books/Kindle，其正常使用副本已命名为 Books/素食者.epub。
+- 71 个 EPUB 文件名清理计划已检查无重名，去掉导入序号与来源标识；保留书名、作者与扩展名；71 个文件已重命名并逐个核对 SHA-256，7 个进度目录及最近阅读路径同步更新。一个此前无法按名称访问的旧副本仍留在 Books/Kindle，其正常使用副本已命名为 Books/私有样本 B.epub。
 - 重新挂载后，1 MiB 专用测试文件的 SHA-256 仍一致。私有记录：`.local/usb-storage-check/rename-results.jsonl`、`rename.log`、`after-usb.log`。
 
 ## 已接通的实际路径
@@ -2804,7 +2818,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 
 ## 累计验证记录
 
-工作目录：`/Users/wulu/workspace/pico-page`。
+工作目录：`~/workspace/pico-page`。
 
 | 命令 / 操作 | 结果和证据 |
 |---|---|
@@ -2969,7 +2983,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 - 启用 `CONFIG_PM_ENABLE`：活动时持有最高频率锁（240 MHz），无活动 3 秒后释放，空闲频率 80 MHz；
   `present()` 总是先恢复最高频率。未启用自动浅睡（tickless）。
 - 启用 `CONFIG_FATFS_USE_FASTSEEK`，只对只读打开的文件生效；簇链表建立失败时 IDF 回退到普通 seek。
-- 实际执行与结果（工作目录 `/Users/wulu/workspace/pico-page`）：
+- 实际执行与结果（工作目录 `~/workspace/pico-page`）：
 
 | 命令 | 结果 |
 |---|---|
@@ -3044,7 +3058,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 
 ### 2026-10-05 · 代码注释规范
 - 改动：在 `AGENTS.md` 中加入完整的 Code Comment Policy，明确注释内容、措辞、API 文档及修改时的清理要求；面向用户的说明参考 Tech-Doc-Style-Chinese，补充中文表达、操作步骤、事实保真和排版原则，并明确 ASD-STE100 方法的中文适用边界。
-- 实际执行命令与工作目录：在 `/Users/wulu/workspace/pico-page` 执行 `python3 tools/check_handoff.py`，248 项交接包检查通过。
+- 实际执行命令与工作目录：在 `~/workspace/pico-page` 执行 `python3 tools/check_handoff.py`，248 项交接包检查通过。
 - 验证范围：仅文档与交接包检查；未新增测试，未执行固件构建、host 或真机验证。
 - 当轮限制：修改规范时目录尚未初始化 Git，无法检查 Git 差异；现已完成初始化，见下方记录。
 - 新的兼容性、迁移或许可证风险：无，仅更新开发规范。
@@ -3052,7 +3066,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 
 ### 2026-10-05 · 初始化本地仓库
 - 改动：执行 `git init -b main`，建立本地 Git 仓库；按现有 `.gitignore` 纳入当前交接资料、设计原件、示例与检查工具。
-- 实际执行命令与工作目录：在 `/Users/wulu/workspace/pico-page` 执行 `python3 tools/check_handoff.py`，248 项交接包检查通过；常见凭据模式与个人 EPUB、二进制备份、密钥、日志文件名检查未发现匹配项。
+- 实际执行命令与工作目录：在 `~/workspace/pico-page` 执行 `python3 tools/check_handoff.py`，248 项交接包检查通过；常见凭据模式与个人 EPUB、二进制备份、密钥、日志文件名检查未发现匹配项。
 - 验证范围：仅资料完整性与提交内容检查；固件构建、host 和真机验证仍未执行。
 - 远端状态：未配置远端，未推送。
 - 下一项最小工作：继续按 `CODEX_START.md` 推进 G0 + G1a。
@@ -3061,7 +3075,7 @@ R9 书签已整合最新主线，并修复 PR #12 第五轮的 4 条评审意见
 
 - 改动：完成上述 core/store 和诊断工程，新增构建脚本、host CI、合成 EPUB 探针与逐项依赖审查。
   未修改 49 个原设计文件或三份历史快照；没有新增占位 UI、自定义按键、网络成功状态或专有阅读包。
-- 工作目录：`/Users/wulu/workspace/pico-page`。所有改动保留本地，未提交、未发布、未 push、未刷写。
+- 工作目录：`~/workspace/pico-page`。所有改动保留本地，未提交、未发布、未 push、未刷写。
 - 实际命令和结果：
 
 | 命令 | 实际结果与证据 |
@@ -3131,7 +3145,7 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
 
 ## 2026-10-08 · 最新主线设备烧录完成
 
-- 设备连接恢复，USB 序列号与 esptool MAC 均为 `14:c1:9f:d0:18:b8`。实际分区表读回并验证；otadata sequence 1、state 2、CRC 有效，当前启动槽为 ota_0。
+- 设备连接恢复，USB 序列号与 esptool MAC 均为 `DEVICE_A_REDACTED`。实际分区表读回并验证；otadata sequence 1、state 2、CRC 有效，当前启动槽为 ota_0。
 - 用户授权下仅向 `0x10000` 写入上述 `f34cdbe` 应用，3,320,896 字节；esptool 返回 `Hash of data verified` 并复位。未修改 bootloader、分区表、NVS、otadata、工厂校准或 TF 内容。
 - 首次诊断请求 30 秒超时；随后复位采集原始启动日志，确认版本 `v0.1.0-mvp-65-gf34cdbe`、8 MiB PSRAM 自检成功、PMU 就绪、工厂 VCOM 读取、TF 卡挂载及首帧 `success=1`。再次只读 status 请求成功。
 - 证据目录 `.local/device/install/latest-20261008/`：`flash.log`、`boot.log`、`status-after-reset.log`，以及只读分区元数据。本次未执行 host 测试；固件构建与写入验证不能替代实体输入、屏幕观感、图片补刷、配网、休眠及关机专项验收。
@@ -3144,14 +3158,14 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
 - 执行上下文：沿用主应用与单个 ContentJob；不新增任务、队列或缓冲。正在运行的分页 worker 保留 shared_ptr，结束后才销毁其借用资源；图片仍等待该 worker 完成后启动。释放已空闲会话不等待后台退出，文件关闭耗时仍由既有驱动决定，未测整条链最长不可取消时间。资源不足继续保留正文并显示图片区错误。
 - 本机构建命令：`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、CTest 注册 13 项且 13/13 通过；标准 `sh tools/build_firmware.sh` 成功。ASan/UBSan 按环境文档配置，初次构建发现旧 sanitized 目录未设置 C++17，power_key_test 被 C++17 扩展检查阻止；补 `-DCMAKE_CXX_STANDARD=17`（与本机 host 配置一致）后构建和 CTest 13/13 通过，未关闭 sanitizer 或移除测试。日志 `.local/image-fix-*.log`。
 - 实际 IDF commit `fff9895c82d744c7237be8847347bdd1b07c6643`，既有 v6.1-dirty；BSP 沿用 `5f3406deec33304de8801046db583dec7c49e55b`，未改依赖或 sdkconfig。镜像 3,320,992 字节，SHA-256 `7203bb9902316f46ba98bdca3a487d997921790658bb10b6d74bb0553639d6e9`。
-- 继续本轮设备安装验证：USB 身份仍为 `14:c1:9f:d0:18:b8`，只写前文已读回确认的 ota_0 `0x10000`，摘要校验通过。串口点击“继续阅读”恢复原位置，保存修订仍为 833；图片 worker kind=2 完成，image_patch 30,663 µs，补图帧 success=1。任务完成时 PSRAM 剩余 3,939,880 字节，本次启动最低值 3,465,292 字节；这是单次冷启动样本，不能视为同条件性能对比或全局峰值保证。
+- 继续本轮设备安装验证：USB 身份仍为 `DEVICE_A_REDACTED`，只写前文已读回确认的 ota_0 `0x10000`，摘要校验通过。串口点击“继续阅读”恢复原位置，保存修订仍为 833；图片 worker kind=2 完成，image_patch 30,663 µs，补图帧 success=1。任务完成时 PSRAM 剩余 3,939,880 字节，本次启动最低值 3,465,292 字节；这是单次冷启动样本，不能视为同条件性能对比或全局峰值保证。
 - 已目视核对设备导出画布 `.local/device/image-fix/restored.png`：同一“主编简介”页的人像已恢复，周围文字保留。这是设备画布证据，不是面板实拍。
 - 证据 `.local/device/image-fix/flash.log`、`runtime.log`；故障画布 `.local/device/install/latest-20261008/image-report.pgm`。本次没有重放故障时全部翻页历史，不宣称所有内存压力路径已验收；持续翻页、不同图片格式、灰阶和残影仍待真机确认。代码未提交或推送。
 
 ## 2026-10-08 · 用户确认连续翻页后图片正常
 
 - 用户在已安装的图片会话释放修复候选上连续翻阅很多页，并明确反馈“图片都正常显示”。本轮所遇图片的持续阅读显示行为由用户真机确认；未记录精确页数、持续时间或格式覆盖范围。
-- 尝试读取翻页后诊断状态：`tools/device_console.py --port /dev/cu.usbmodem1101 --timeout 10 status` 及 30 秒重试均无回复。未复位设备，因此没有本次连续翻页后的内存或任务采样，不能据此报告资源峰值或所有压力场景已通过。
+- 尝试读取翻页后诊断状态：`tools/device_console.py --port /dev/cu.TARGET_DEVICE --timeout 10 status` 及 30 秒重试均无回复。未复位设备，因此没有本次连续翻页后的内存或任务采样，不能据此报告资源峰值或所有压力场景已通过。
 - 未新增源码改动、烧录、提交或推送；后续如再现，结合具体页面和可读取的设备日志继续定位。
 
 ## 2026-10-08 · 图片修复 PR 整理与最新主线验证
@@ -3208,7 +3222,7 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
 - 实际环境：既有 EIM ESP-IDF v6.1-dirty，commit `fff9895c82d744c7237be8847347bdd1b07c6643`，
   保留原有链接脚本修改和未跟踪 requirements；BSP `5f3406deec33304de8801046db583dec7c49e55b`。
   生效 sdkconfig 为 ESP32-S3、16 MiB Flash、Octal PSRAM 80 MHz、主任务栈 32 KiB；未改工具链、依赖或配置。
-- 串口 `/dev/cu.usbmodem1101` 的 USB 序列号与 esptool 芯片 MAC 均为 `14:c1:9f:d0:18:b8`。
+- 串口 `/dev/cu.TARGET_DEVICE` 的 USB 序列号与 esptool 芯片 MAC 均为 `DEVICE_A_REDACTED`。
   烧录前只读状态为书库、无待呈现帧、TF 已挂载。重新读取 `0x8000` 分区表：
   `ota_0=0x10000/4 MiB`、`ota_1=0x410000/4 MiB`；读取 `0x810000` 的 otadata，
   sequence 1、state 2、CRC 有效，当前启动槽为 ota_0。
@@ -3245,8 +3259,8 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
 
 ## 2026-10-09 · 最新 main 烧录完成（a0c8f7c）
 
-- 用户要求重试后，macOS 枚举出 `/dev/cu.usbmodem1101`；USB 序列号与 esptool 芯片 MAC
-  均为 `14:c1:9f:d0:18:b8`，ESP32-S3 revision v0.2、8 MiB PSRAM。烧录前为书库，
+- 用户要求重试后，macOS 枚举出 `/dev/cu.TARGET_DEVICE`；USB 序列号与 esptool 芯片 MAC
+  均为 `DEVICE_A_REDACTED`，ESP32-S3 revision v0.2、8 MiB PSRAM。烧录前为书库，
   `pending=0 card=1 frame_ok=1`，电量 93%，没有在 USB 传输模式。
 - 本次读回真实分区表：ota_0 为 `0x10000/4 MiB`，ota_1 为 `0x410000/4 MiB`；
   otadata 有效项 sequence 1、state 2、CRC 正确，当前启动槽为 ota_0。
@@ -3269,7 +3283,7 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
 
 - 用户提供设备照片，提示“内部内存不足，无法启动位置准备”。开始时为 `main=a0c8f7c`，
   已有未提交安装记录仅位于本文件，原样保留；本次不切分支、不提交、不推送。
-- 使用 `tools/device_console.py --port /dev/cu.usbmodem1101 --timeout 8 status` 只读查询：
+- 使用 `tools/device_console.py --port /dev/cu.TARGET_DEVICE --timeout 8 status` 只读查询：
   `view=error pending=0 card=1 saved=1 revision=244 uptime_ms=285479`；内部空闲 **97,963 字节**，
   最大连续块 **31,744 字节**，PSRAM 空闲 **4,231,428 字节**、最大块 **3,538,944 字节**。
   应用最低剩余栈 10,272 字节、输入栈 2,080 字节。此为照片反馈后的单次现场，并非错误发生瞬间的分配轨迹；
@@ -3311,7 +3325,7 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
 
 - 用户明确要求“烧录看看”。复核当前候选 `bb11176712d8d2eb5dd9bfeba34c0313bf31f403131e57a8dc23966e86424da3`、
   3,397,536 字节，与上一批构建一致；本次未重建、未重跑 host/sanitizer，未提交或推送。
-- USB 串口 `/dev/cu.usbmodem1101`，USB 序列号与 esptool MAC 均为 `14:c1:9f:d0:18:b8`，
+- USB 串口 `/dev/cu.TARGET_DEVICE`，USB 序列号与 esptool MAC 均为 `DEVICE_A_REDACTED`，
   ESP32-S3 revision v0.2、8 MiB PSRAM。烧录前 `view=error pending=0 card=1 saved=1 revision=244`，
   内部最大连续块仍为 31,744 字节。
 - 重新只读核对真实分区：ota_0 `0x10000/4 MiB`、ota_1 `0x410000/4 MiB`，
@@ -3429,7 +3443,7 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
   保留 IDF 原有 linker patch 与未跟踪 requirements 文件，依赖锁和 sdkconfig 未改。
 - 应用为 **3,397,712 字节**，SHA-256
   `1e3ba3bdc3c0588bcd9d270fef6e2db06ea706148b76ca2532e4c8255c28f5bf`。
-  USB 序列号与 esptool MAC 均为 `14:c1:9f:d0:18:b8`；重新读回真实分区和 otadata，
+  USB 序列号与 esptool MAC 均为 `DEVICE_A_REDACTED`；重新读回真实分区和 otadata，
   确认启动 OTA0（sequence 1、state 2、CRC 有效）。只写 `0x10000` 的应用槽，
   `Hash of data verified`；未写 bootloader、分区表、NVS、otadata、OTA1、校准或 TF 资源。
   首次复位后诊断超时，额外硬件复位采集日志确认从 `0x10000` 加载本次 ELF
@@ -3729,7 +3743,7 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
 - PR CI run `37960666986`：host Debug 14/14（37.46 秒），Linux ASan/UBSan/LSan 14/14（91.31 秒），
   交接 387 项通过；push CI 也成功。已请求自动 review，尚未合并。
 - 只读枚举现场：macOS 能看到 USB Serial/JTAG（VID 0x303a、PID 0x1001）及
-  `/dev/cu.usbmodem1101`，没有外接物理磁盘；正常阅读模式不开放 MSC，因此未据此认定传书失败。
+  `/dev/cu.TARGET_DEVICE`，没有外接物理磁盘；正常阅读模式不开放 MSC，因此未据此认定传书失败。
   通过现有无复位诊断工具作约 5 秒状态查询超时，未切换 USB 模式、未重启、未操作 TF 文件。
   现场查询保存在忽略目录 `.local/usb-investigation-20261010/`。
 - 已核对 `platform::sleep()`、诊断驱动生命周期、`start_usb_storage()` 和当前 IDF 的
@@ -4164,12 +4178,27 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
 - 协议与比较：兼容真机 `OK accepted pending=...` 回复，回归替身使用相同文本。比较仅接受有构建来源、固定脚本身份及相同 kind/detail/终态样本组成的记录；自由人工操作不标为可比，脏源码仍不作为性能基线。
 - 本机检查：macOS arm64、AppleClang 21；`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、构建、`ctest -N` 与完整 CTest 18/18，包含 Node 页面入口。`build/sanitized` 开启 `PICO_PAGE_HOST_TRACE_EVENTS=ON`，使用 ASan/UBSan，完整 CTest 18/18；本轮未运行 LSan，不能沿用 PR 原先的 Linux 结果。Python 工作台回归 21/21，覆盖截止排空、旧快照假绿、旧来源/产物以及不同场景拒绝比较。保留第三方未使用函数与 Homebrew dylib 最低系统版本的既有警告。
 - 固件检查：复用 ESP-IDF 6.1 commit `fff9895c82d744c7237be8847347bdd1b07c6643`，保留其既有链接脚本修改；BSP 为 `5f3406deec33304de8801046db583dec7c49e55b`。`sh tools/build_firmware.sh` 及 release/performance/diagnostic 三模式均通过，模式构建通过 EIM 激活环境调用；核对实际 sdkconfig.h 和 ELF。初次直接激活后调用子脚本未找到 idf.py，修正上述入口后成功。构建日志保留既有组件私有 include 告警；交接检查 423 项及 `git diff --check` 通过。
-- 烧录：用户本轮明确允许烧录。先读设备 status，原正文已保存修订 60、无待刷新；设备为 `/dev/cu.usbmodem1101`，MAC `14:c1:9f:d0:18:b8`，ESP32-S3 rev0.2。读回真实分区表与 otadata，CRC 验证 sequence 1/state 2，确认 ota_0=`0x10000`/4 MiB。仅写诊断应用 3,403,376 字节，SHA-256 `168bdc8929a18cb4fc385a50059ed8d25228ce67a212e5a830fc67dbeb2c0feb`，25.5 秒完成，`Hash of data verified`。未改 bootloader、分区、NVS、otadata、校准或已有书籍。首次复位后无诊断回复，第二次受控复位后书库 `card=1 frame=1 frame_ok=1`。
+- 烧录：用户本轮明确允许烧录。先读设备 status，原正文已保存修订 60、无待刷新；设备为 `/dev/cu.TARGET_DEVICE`，MAC `DEVICE_A_REDACTED`，ESP32-S3 rev0.2。读回真实分区表与 otadata，CRC 验证 sequence 1/state 2，确认 ota_0=`0x10000`/4 MiB。仅写诊断应用 3,403,376 字节，SHA-256 `168bdc8929a18cb4fc385a50059ed8d25228ce67a212e5a830fc67dbeb2c0feb`，25.5 秒完成，`Hash of data verified`。未改 bootloader、分区、NVS、otadata、校准或已有书籍。首次复位后无诊断回复，第二次受控复位后书库 `card=1 frame=1 frame_ok=1`。
 - 真机工作台：通过已有安全导入新增 `Books/Workbench-PR38-20261010.epub`，来源为 `build/host/document-fixtures/valid.epub`，发布后读回 CRC；不覆盖用户文件。K2 回归的采集持续 38.47 秒，共 1,636 条命令、915,321 原始串口字节，截图按分块协议完成 CRC 校验。页码 1/11、保存修订 1 和画布 CRC `45deafb6` 不变，帧 3→4，ManualRefresh/FullClean/驱动成功；操作 1 次成功、0 失败/取消/超时/未完成，dropped 与 tx_failures 均为 0，无证据缺口。结果为 pass，范围仅应用与驱动。单样本帧耗时 1,663,605 µs，不能据此推断延迟分布或开销百分比。
 - 截止补测：报告结束后再通过正常 K2 路由刷新，实际帧 4→5，但冻结的 sequence=2、queued=0、stopped=1 保持不变。设备停在合成测试书，未执行网络或同步操作。采样的内部 RAM 历史最低剩余 56,256 B、PSRAM 3,979,328 B；应用最低余栈 8,176 B、输入 2,080 B，仅为本轮现场，不代表所有场景峰值。
 - 私有证据：安装元数据、校验、状态与截止补测位于 `.local/device/install/pr38-20261010/`；完整工作台报告、原始流、事件及画布位于 `.local/runs/pr38-k2-20261010-01/`。源码为本地未提交候选，报告同时保留内容摘要；TF 型号未记录，不将本轮作为跨设备性能基线。
 - 下一步：阶段 C 两组高风险场景（正文图片与同步/取消/返回交叠；连续翻页、改字号、重开恢复）仍待实现；需要同条件 Release/Performance 真机 A/B、USB 停读/断连、真实网络超时分类和长期资源趋势验证。物理屏幕、残影、实体按键/触摸、功耗、休眠/USB 交接和实际 KOReader 往返未在本批验收。
 
+## 2026-10-10 · 文档准确性与对外发布整理
+
+- 变更：将初始开发任务正文归档并重写当前入口，明确旧交接、计划与设备授权的历史范围；更新当前合并状态、K2、分页缓存、配置字段、浅睡验收、显示恢复、同步证据和第三方源码摘要。网站入口明确区分构建说明与尚未可用的安装服务。
+- 隐私：对个人主目录、设备 MAC/串口标识和私有书名做定向脱敏；保留历史日期、提交、镜像摘要、测量数值与验证结论。未改写 Git 历史。原始设计与三份原始历史快照保持原样，初始任务正文完整保留于归档。
+- 环境与检查：在基于 `5f22009` 的当前检出运行 `python3 tools/check_handoff.py`，438 项通过，本地文档链接及 TOML 示例检查通过；49 个原始设计文件、36 个 PNG 和 3 份原始快照校验通过。`git diff --check` 通过。用脚本逐字比较原开发记录应用指定脱敏替换后的文本，确认原记录未被删除或改写验证结果；检查已知个人标识无残留。用 `shasum -a 256` 核对 tomlc17.c，与更新后的来源清单一致。
+- 未测项：本次仅修改文档和网站文字，未新增测试，未运行 host、sanitizer、固件或网站构建，未连接设备；未重新验证远端 CI、外部服务或所有外链可达性。这些检查不代表产品验收或正式发布已完成。
+- 下一步：审阅当前未提交差异。正式分发前确定项目总许可证，核对第三方分发义务，补齐经验证的安装/恢复流程与对应真机验收。按本次要求不提交、不推送、不发布。
+
+## 2026-10-10 · 文档整理 PR 准备
+
+用户随后要求创建 PR。已创建本地分支 `docs/publication-readiness`，并核对远端 main 与本次源码基线一致；重新运行 `python3 tools/check_handoff.py`，438 项通过，原始设计与历史快照校验通过，`git diff --check` 通过。自动审批未接受简短的 PR 请求作为撤销此前「先不要提交」限制的充分授权，因此提交被阻止，尚未推送或创建 PR，等待用户明确确认。本批只涉及文档和网站文字，未新增固件或设备验证。
+
+## 2026-10-10 · 文档 PR 评审接续
+
+用户进一步要求跟进评审、修复问题并在检查通过后合并。本次据此继续提交、推送和创建文档 PR；上一条审批阻塞记录仅描述此前状态。提交前复核修正归档导语中的决定编号，K2 全局全刷对应 D03；原始任务正文未改。验证结果以本批检查和 PR 对应提交为准。
 ## 2026-10-10 · Issue #37：图片采用与网络交叠证据
 
 - 范围：从干净的 main `5f22009` 在当前 checkout 建立 `feat/image-workbench-evidence`，不创建 worktree。远端 PR #38 已合并；上方该 PR 的历史记录保留当时状态。本批作为阶段 C 场景 1 的第一部分，保留 issue 开放，不宣称完成完整回归工作台。
@@ -4213,7 +4242,7 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
 
 - 授权与范围：用户在 A/B 记录提交（`dd06a9e`）后明确授权烧录。只把设备从 Release 恢复为 A/B 之前已安装并验证过的诊断应用，未重新构建，固件源码未改。
 - 镜像：`build/firmware-diagnostic/pico_page.bin`，3,403,808 B，SHA-256 `5d53d163e3ea509126c792e602b12ce1cf7a65b834ef75b9d22d069acb85a7f4`，来源记录为干净提交 `260a3df`。`dd06a9e` 相对该提交只改了两份文档。
-- 安装：EIM 的 ESP-IDF 6.1 Python 环境，esptool 5.3.1，端口 `/dev/cu.usbmodem1101`。写入前核对芯片为 ESP32-S3 rev0.2、MAC `14:c1:9f:d0:18:b8`，读回的分区表与 otadata 和本日 PR #39 安装时的副本逐字节一致。仅向 ota_0=`0x10000` 写应用，25.6 秒完成，`Hash of data verified`。未改分区、bootloader、NVS、otadata 或校准。
+- 安装：EIM 的 ESP-IDF 6.1 Python 环境，esptool 5.3.1，端口 `/dev/cu.TARGET_DEVICE`。写入前核对芯片为 ESP32-S3 rev0.2、MAC `DEVICE_A_REDACTED`，读回的分区表与 otadata 和本日 PR #39 安装时的副本逐字节一致。仅向 ota_0=`0x10000` 写应用，25.6 秒完成，`Hash of data verified`。未改分区、bootloader、NVS、otadata 或校准。
 - 结果：RTS 复位后诊断口无应答，与本日上一次安装的现象相同；执行一次 watchdog reset 后，`status` 返回书库视图、card=1、首帧 frame_ok=1、电量 100%、input_overflows=0。只做了这一次只读查询，未操作书籍、网络或输入。
 - 证据：`.local/device/install/pr39-ab-restore-20261010/` 的 `preflight.log`、`otadata.log`、`flash.log`、`reset.log`、`boot-status.log` 及读回的分区表与 otadata。本地忽略文件，不提交。
 - 未测与下一步：未核对实体屏幕与触摸；未开书，A/B 结束时保存的修订 57 未在诊断固件下复核。RTS 复位后停在下载模式的现象已出现两次，后续安装可直接使用 watchdog reset。A/B 记录列出的内部 RAM 低水位和 pico_touch 余栈仍待定位。
@@ -4237,7 +4266,7 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
 - 授权与范围：用户要求按「mbedTLS 分配挪到 PSRAM」的方向修改并实测，此前已授权烧录和上传。改动只有 `firmware/sdkconfig.defaults` 新增 `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y`，未改 C/C++ 源码。使用现有 TF、Wi-Fi 和 KOReader 账户，合成书与一本 7.3 MB 的真实 EPUB。
 - 依据：ESP-IDF 6.1 的 `components/mbedtls/Kconfig` 中该选项依赖 `SPIRAM_USE_MALLOC`，`esp_mem.c` 在此模式下以 `MALLOC_CAP_SPIRAM` 分配 mbedTLS 的全部动态内存。Espressif 文档说明内部 RAM 是安全角度的首选，内部 RAM 不足时可改用其他模式；ESP32-S3 启用 Flash 加密后 PSRAM 内容可加密。本设备未启用 Flash 加密，因此 TLS 会话密钥等数据在 PSRAM 中不加密，这是本改动接受的取舍。
 - 构建与生效配置：已有的生成配置不会跟随 defaults 变化，因此先备份并删除四个入口的生成 sdkconfig 再构建。诊断固件在 `845ec8c` 加本改动（未提交）上构建，应用 3,403,808 B，SHA-256 `7ce3218a78636bec9340c5da3bd54ef1752d5d1eea10fd85a48b0322c6492b29`，来源记录 dirty=true。前后生效 sdkconfig 只差 `CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC` 与 `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC` 两行。随后 Release（3,369,680 B）、Performance（3,371,216 B）和标准入口（3,392,688 B）经 EIM 的 ESP-IDF 6.1 重建通过，各自生效配置同样只差这两行。本机 `firmware/sdkconfig` 原有的 `CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE=y` 属本地设置，已保留，只改了分配模式两行。
-- 安装：esptool 5.3.1，每次写入前核对 MAC `14:c1:9f:d0:18:b8`；首次写入前读回的分区表和 otadata 与本日早先副本逐字节一致。仅向 ota_0=`0x10000` 写应用，均得到 `Hash of data verified`，随后 watchdog reset。顺序为新镜像、旧镜像 `5d53d163…`（对照）、新镜像，共三次写入；未改分区、bootloader、NVS、otadata 或校准。设备现装新镜像。
+- 安装：esptool 5.3.1，每次写入前核对 MAC `DEVICE_A_REDACTED`；首次写入前读回的分区表和 otadata 与本日早先副本逐字节一致。仅向 ota_0=`0x10000` 写应用，均得到 `Hash of data verified`，随后 watchdog reset。顺序为新镜像、旧镜像 `5d53d163…`（对照）、新镜像，共三次写入；未改分区、bootloader、NVS、otadata 或校准。设备现装新镜像。
 - 内部 RAM（同一采样方法，约 23 次/秒轮询加 `metrics` 历史最低值）：TLS 会话期间内部 RAM 剩余由 33.5 KB 升到约 60 KB，轮询最低由 20.5 KB 升到 59.8 KB，最大连续块最低由 7,936 B 升到 31,744 B。只做检查时，启动以来的历史最低由 10,964 B 升到 27,344 B（新固件 5 轮检查后），此时最低点来自 Wi-Fi 驱动启动的瞬时占用。Wi-Fi 常驻约 38 KB 未变。
 - 新的最低点：Wi-Fi 保持期间执行位置映射任务（MapUpload/MapDownload）时，历史最低降到 20,176–20,212 B，三次一致，即映射任务瞬时占用约 40 KB 内部 RAM。旧固件上该瞬时被 10,964 B 的 TLS 低点遮住。占用来源未归因。
 - PSRAM：TLS 会话期间 PSRAM 剩余下降约 37 KB。真实书上 PSRAM 历史最低 3,043,388 B，新旧固件相同量级（旧 3,044,664 B）。
