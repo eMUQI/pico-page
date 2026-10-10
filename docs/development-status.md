@@ -1,5 +1,11 @@
 # 开发状态
 
+2026-10-10 PR #42 的两项评审意见已修正：构建入口现在在构建前后核对 defaults 是否在生效 sdkconfig 中取同样的值，过期配置会报错而不是静默沿用旧分配模式；运行时文档和配置注释不再写实测数值。Python 测试 35/35，四个固件入口重建通过。详情见本日「PR #42 评审修正」记录。
+
+2026-10-10 位置映射任务的「约 40 KB 内部 RAM 瞬时占用」已定位：其中约 8 KB 是真实占用，来自 SD 卡向 PSRAM 缓冲读数据时 ESP-IDF 临时分配的 DMA 缓冲；其余 32 KB 是口径差，`internal` 剩余量含 32 KB 储备池，而 internal_min 中该池的最低值自启动起为 0。按此口径修正：改动前 TLS 握手期间主内部堆最低约 2 KB 并挤占储备池，改动后为约 18 KB（只做检查）和约 11 KB（Wi-Fi 保持时执行映射）。结论方向不变，候选文档修正未提交。详情见本日「映射任务内部 RAM 占用定位与口径修正」记录。
+
+2026-10-10 TLS 分配已改到 PSRAM（`CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y`，候选未提交）并在真机对照实测：TLS 会话期间内部 RAM 剩余由 33.5 KB 升到约 60 KB，最大连续块最低由 7.9 KB 升到 31.7 KB，只做检查时的历史最低由 10,964 B 升到 27,344 B；稳态同步耗时未变慢，检查、位置映射和上传在新固件上均成功。四个固件构建入口通过。新的最低点约 20 KB 来自位置映射任务。另确认两项既有问题：真实书位置无法映射上传，远端前后关系判断口径不一致。设备现装新诊断镜像 `7ce3218a…`。详情见本日「TLS 分配改到 PSRAM 并实测」记录。
+
 2026-10-10 同步期间内部 RAM 低水位已在诊断固件 `5d53d163…` 上按阶段定位：Wi-Fi 启动常驻约 38 KB，TLS 会话再占约 25 KB，握手瞬时把内部 RAM 压到 10,964 B、最大连续块压到约 8 KB；六次网络操作数值一致，与书籍无关。现行代码下位置映射任务在 Wi-Fi 保持期间能正常启动，#19 的「内容任务无法启动」未复现。另发现图片页位置无法上传。未改代码，修法待定。详情见本日「同步期间内部 RAM 定位」记录。
 
 2026-10-10 PR #39 的 Release/Performance 真机 A/B 首轮已完成：同一提交 `260a3df`、设备、TF 和合成图片书，按 Release→Performance→Performance→Release 各采一块，共 140 个计时样本，驱动帧无失败，20 次同步检查均为 HTTP 200。开图、缓存重画、K2 全刷和文字翻页的两模式中位数相差 0.1%–0.8%，与单样本散布同量级，未分辨出指标开关的时延开销；Performance 启动时内部 RAM 少 352 B，应用大 1,536 B。计时为 JTAG 主机侧口径，不是实体触摸到屏幕的时延。两种模式在首次同步后内部 RAM 历史最低剩余均约 11 KB，需单独跟进。采样后设备已按授权烧回诊断固件 `5d53d163…`，书库、TF 和首帧正常。详情见本日「PR #39：Release/Performance 真机 A/B」与「A/B 后恢复诊断固件」记录。
@@ -4223,3 +4229,40 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
 - 状态与收尾：合成书位置已上传到现有账户（第二章 50%）；真实书只检查未上传，保存修订 141 未变。结束时设备停在真实书正文，无线已释放，pending/content_busy/save_busy 均为 0。
 - 证据：`.local/runs/sync-heap-01/` 的七个 JSONL 采样文件（A–G）、`screens/` 画布导出和三个脚本。画布导出不是物理屏幕照片。本地忽略文件，含书名与网络信息，不提交。
 - 未测与下一步：未归因到具体分配者（需堆追踪或分配失败回调）；未测握手期间并发翻页、图片解码或保存；未测弱网、重连和手机传书会话；未在 Release 固件上重复。修法待决定，候选是把 mbedTLS 分配改到 PSRAM（`CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC`）和让 Wi-Fi/LwIP 优先用 PSRAM，改动 sdkconfig 后需验证生效值并重测本记录的同一流程。pico_touch 余栈 2,080 B 未处理。
+
+## 2026-10-10 · TLS 分配改到 PSRAM 并实测
+
+- 授权与范围：用户要求按「mbedTLS 分配挪到 PSRAM」的方向修改并实测，此前已授权烧录和上传。改动只有 `firmware/sdkconfig.defaults` 新增 `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y`，未改 C/C++ 源码。使用现有 TF、Wi-Fi 和 KOReader 账户，合成书与一本 7.3 MB 的真实 EPUB。
+- 依据：ESP-IDF 6.1 的 `components/mbedtls/Kconfig` 中该选项依赖 `SPIRAM_USE_MALLOC`，`esp_mem.c` 在此模式下以 `MALLOC_CAP_SPIRAM` 分配 mbedTLS 的全部动态内存。Espressif 文档说明内部 RAM 是安全角度的首选，内部 RAM 不足时可改用其他模式；ESP32-S3 启用 Flash 加密后 PSRAM 内容可加密。本设备未启用 Flash 加密，因此 TLS 会话密钥等数据在 PSRAM 中不加密，这是本改动接受的取舍。
+- 构建与生效配置：已有的生成配置不会跟随 defaults 变化，因此先备份并删除四个入口的生成 sdkconfig 再构建。诊断固件在 `845ec8c` 加本改动（未提交）上构建，应用 3,403,808 B，SHA-256 `7ce3218a78636bec9340c5da3bd54ef1752d5d1eea10fd85a48b0322c6492b29`，来源记录 dirty=true。前后生效 sdkconfig 只差 `CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC` 与 `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC` 两行。随后 Release（3,369,680 B）、Performance（3,371,216 B）和标准入口（3,392,688 B）经 EIM 的 ESP-IDF 6.1 重建通过，各自生效配置同样只差这两行。本机 `firmware/sdkconfig` 原有的 `CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE=y` 属本地设置，已保留，只改了分配模式两行。
+- 安装：esptool 5.3.1，每次写入前核对 MAC `14:c1:9f:d0:18:b8`；首次写入前读回的分区表和 otadata 与本日早先副本逐字节一致。仅向 ota_0=`0x10000` 写应用，均得到 `Hash of data verified`，随后 watchdog reset。顺序为新镜像、旧镜像 `5d53d163…`（对照）、新镜像，共三次写入；未改分区、bootloader、NVS、otadata 或校准。设备现装新镜像。
+- 内部 RAM（同一采样方法，约 23 次/秒轮询加 `metrics` 历史最低值）：TLS 会话期间内部 RAM 剩余由 33.5 KB 升到约 60 KB，轮询最低由 20.5 KB 升到 59.8 KB，最大连续块最低由 7,936 B 升到 31,744 B。只做检查时，启动以来的历史最低由 10,964 B 升到 27,344 B（新固件 5 轮检查后），此时最低点来自 Wi-Fi 驱动启动的瞬时占用。Wi-Fi 常驻约 38 KB 未变。
+- 新的最低点：Wi-Fi 保持期间执行位置映射任务（MapUpload/MapDownload）时，历史最低降到 20,176–20,212 B，三次一致，即映射任务瞬时占用约 40 KB 内部 RAM。旧固件上该瞬时被 10,964 B 的 TLS 低点遮住。占用来源未归因。
+- PSRAM：TLS 会话期间 PSRAM 剩余下降约 37 KB。真实书上 PSRAM 历史最低 3,043,388 B，新旧固件相同量级（旧 3,044,664 B）。
+- 耗时：同一本真实书、同一脚本各 5 轮「离开同步页→重新进入→检查」。旧固件总耗时 8.40–9.21 秒，其中 TLS 加 HTTP 4.06–4.88 秒；新固件第 2–5 轮 7.70–7.80 秒，其中 TLS 加 HTTP 3.85–3.98 秒，未见变慢。启动后的第一次检查，新固件 TLS 加 HTTP 为 6.64、6.95、11.53 秒（3 次），旧固件为 4.04、4.59 秒（2 次）；样本少且含不同书籍，尚不能确定首次握手是否变慢。
+- 功能：新固件上 9 次检查均成功，另有一次检查被采样脚本的误触取消；合成书文字页 MapDownload 两次成功，MapUpload 加 PUT 一次成功，界面显示「已上传」。真实书（第 113/477 页）确认上传时 MapUpload 失败，界面显示「这个位置暂时不能上传。」；刷回旧镜像后同一操作同样失败（198 ms），因此是既有问题，与本改动无关。失败的具体原因字符串未取得。
+- 其他发现：合成书上传后翻一页再检查，界面显示本机 58%、远端 65% 并把远端标为「更靠后」，而远端记录来自前一页。`further()` 用服务器返回的百分比与本机百分比比较，上传时写入的百分比按书脊章节计算（`(章节序号 + 章内比例) / 章节数`），两者口径不同，会给出错误的前后关系。本批未修。
+- 状态与收尾：合成书位置再次上传到现有账户（第 7/12 页）；真实书未上传成功，保存修订 141 未变。设备停在合成书正文，无线已释放。每轮采集 dropped 为 0，tx_failures 保持 1。
+- 证据：`.local/runs/sync-heap-02/` 的 H–P 采样文件与 `screens/`，`.local/runs/sync-heap-01/` 的脚本（含 `phases.py`），`.local/device/install/tls-psram-20261010/` 的镜像、ELF 与烧录日志，`.local/tls-psram-build*.log`。本地忽略文件，不提交。画布导出不是物理屏幕照片。
+- 未测与下一步：本批未运行 host CTest 或 sanitizer，改动不涉及 host 构建的源码。未测握手期间并发翻页、图片解码或保存；未测弱网、TLS 失败与取消路径、手机传书会话；未在 Release 固件真机上重复；PSRAM 紧张时 TLS 分配失败的表现未验证。待定位：映射任务约 40 KB 的内部 RAM 瞬时占用、真实书位置无法映射上传、远端前后关系判断口径、首次握手耗时。Wi-Fi/LwIP 优先用 PSRAM 作为第二步尚未尝试。
+
+## 2026-10-10 · 映射任务内部 RAM 占用定位与口径修正
+
+- 范围：继续定位上一条记录中「映射任务瞬时占用约 40 KB 内部 RAM」。在已安装的诊断镜像 `7ce3218a…` 上通过 USB JTAG（OpenOCD 加 GDB）只读观察，未改固件源码、未烧录、未用网络。分支 `fix/tls-psram-alloc`，本批只改注释和文档，未提交。
+- 复现：不需要网络。从书库打开合成书后，`status` 的 internal 为约 98.0 KB，`metrics` 的 internal_min 为 57,780 B，差值同样约 40.3 KB，与 Wi-Fi 保持时映射任务的差值一致。
+- 各堆读数（书库空闲，GDB 读 `registered_heaps`）：主内部堆 `0x3fcb1140` 共 230,864 B，剩余 57,752 B，最低 57,752 B；另一段内部堆 22,308 B，剩余 1,236 B，最低 1,208 B；RTC 内存堆 8,120 B，剩余与最低均为 7,740 B；`CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL` 的储备池 32,767 B（能力为 DMA 与内部），剩余 32,031 B，最低 0 B。四个剩余量之和 98,759 B、四个最低值之和 66,700 B，与同一时刻诊断口报告的 internal 和 internal_min 逐字节相同。
+- 口径：`heap_caps_get_minimum_free_size()` 把各堆各自的历史最低值相加，不是某一时刻的总余量。储备池的最低值自本次启动起就是 0，因此 internal_min 实际等于「主内部堆最低值加约 8.9 KB」，而 internal 剩余量包含储备池的约 32 KB。两者相减会多出约 32 KB。储备池最低值为何为 0 未查。
+- 真实占用：分配追踪在 `heap_caps_malloc` 上记录到 8,192 B、能力为 DMA 的分配，调用栈为 `fread` → `vfs_fat_read` → `f_read` → `ff_sdmmc_read` → `sdmmc_read_sectors` → `allocate_dma_buf`。ESP-IDF 6.1 在目标缓冲不能直接做 DMA 时（stdio 缓冲和文档缓冲都在 PSRAM）按最多 16 个扇区分配临时缓冲，读完释放。打开合成书期间没有其他 4 KB 以上的显式内部或 DMA 分配。这与轮询到的约 8.4 KB 单点下降一致。
+- 结论：约 40 KB 中约 8 KB 是 SD 读取的临时 DMA 缓冲，32 KB 是上述口径差，不存在一个 40 KB 的内部分配。
+- 对此前记录的修正（按空闲时各堆读数推算，假设两个小堆的最低值不变）：改动前 TLS 握手期间报告的 internal_min 10,964 B 对应主内部堆最低约 2,016 B；当时轮询到的 internal 最低 20.5 KB 中主内部堆与储备池合计只有约 11.6 KB，说明储备池至少被占用约 20 KB。改动后只做检查时主内部堆最低约 18.4 KB；Wi-Fi 保持时执行映射为约 11.2 KB。Wi-Fi 保持时主内部堆空闲约 19.5 KB，储备池未动用。此前记录中「历史最低 10,964 B」「27,344 B」「约 20.2 KB」均是 internal_min 口径的原值，不是某一时刻的内部 RAM 总余量；「最大连续块」来自 `heap_caps_get_largest_free_block()`，不受此口径影响。TLS 改到 PSRAM 的结论方向不变。
+- 文档修正：`firmware/sdkconfig.defaults` 的注释、`docs/platform-runtime.md` 的对应句子改为主内部堆口径；`docs/diagnostic-workbench.md` 补充 internal_min 的含义和限制。注释改动不影响构建产物，四个入口未重建，现有产物的来源摘要对应改注释之前的源码。
+- 过程中的问题：首次 GDB 连接时 OpenOCD 自动探测 Flash 失败并拒绝连接，设备停在暂停态；以 `reset run` 恢复，随后用 `ESP_FLASH_SIZE 0` 关闭探测。全部内存分配上的断点追踪每次命中约 0.27 秒，240 秒内未能覆盖完整的开书过程，改用显式能力分配入口后完成。一次观察点脚本因参数错误退出并使设备暂停，已手动恢复。这些复位和暂停发生在书库或已保存的正文位置，保存修订 63 未变。
+- 状态与收尾：OpenOCD 已关闭，无残留断点，设备运行于书库，internal 98,759 B。证据在 `.local/runs/alloc-trace-01/`（脚本、分配记录、各堆读数、OpenOCD 与 GDB 日志），本地忽略文件。
+- 未测与下一步：未在 TLS 握手期间直接读取各堆（改动前的主内部堆最低值为推算）；未测 Release 固件。可跟进：每次从 SD 读到 PSRAM 缓冲都要分配、复制、释放一个 8 KB 内部缓冲，对读取耗时和内部 RAM 的影响未量化；工作台若要报告可比较的低水位，应按堆分别读取或改报主内部堆。
+
+## 2026-10-10 · PR #42 评审修正
+
+- 意见一（过期 sdkconfig 使新 default 失效）：成立。已有的 `firmware/sdkconfig` 或 `build/firmware-<mode>/sdkconfig` 优先于 defaults，更新后直接构建会得到仍用内部 RAM 分配 TLS 的固件。`tools/firmware_provenance.py` 新增核对：`begin` 在已有 sdkconfig 时、`finish` 在构建后，逐项比较 `firmware/sdkconfig.defaults` 与模式 defaults（后者覆盖前者，`=n` 与「is not set」等价）和生效 sdkconfig，不一致时报错并列出选项。不自动删除配置，由开发者移走或显式更新。
+- 意见二（实测数值不应写进运行时契约）：成立。`docs/platform-runtime.md` 只保留分配位置、原因和安全后果；`firmware/sdkconfig.defaults` 的注释改为不含数值的约束说明。数值及其条件留在开发记录。
+- 验证：`python3 -m unittest discover -s tests` 35/35，新增分层 defaults 的过期与一致两种情况。用改动前备份的 Release sdkconfig 核对，报出 `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC`；当前四份生效配置核对通过。经 EIM 的 ESP-IDF 6.1 依次执行 release、performance、diagnostic 和无参数入口，全部通过，应用大小 3,369,680 / 3,371,216 / 3,403,808 / 3,392,688 B。交接检查与 diff 检查通过。
+- 未测：未重跑 host CTest 的 C++ 部分和 sanitizer，由 CI 覆盖；本批未烧录，设备仍装 `7ce3218a…`，与新构建的生效配置相同、镜像摘要不同。本地无参数入口的 sdkconfig 今后只能改动 defaults 未指定的选项。

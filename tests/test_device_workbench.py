@@ -360,6 +360,16 @@ class WorkbenchTest(unittest.TestCase):
         session._line("PP 2 OK queued=0 sequence=2 dropped=0 tx_failures=0")
         self.assertIn("device_cutoff_missing", self.finish()["gaps"])
 
+    def test_stale_sdkconfig_is_reported_against_layered_defaults(self):
+        from firmware_provenance import unapplied_defaults
+        root = Path(self.temp.name)
+        (root / "base").write_text("# note\nCONFIG_A=y\nCONFIG_B=y\nCONFIG_NAME=\"x\"\nCONFIG_OFF=n\n# CONFIG_UNSET is not set\n")
+        (root / "mode").write_text("CONFIG_B=n\nCONFIG_C=y\n")
+        (root / "sdkconfig").write_text("CONFIG_A=y\n# CONFIG_B is not set\nCONFIG_NAME=\"x\"\nCONFIG_UNSET=y\n")
+        self.assertEqual(unapplied_defaults(root / "sdkconfig", [root / "base", root / "mode"]), ["CONFIG_C", "CONFIG_UNSET"])
+        (root / "sdkconfig").write_text("CONFIG_A=y\nCONFIG_C=y\nCONFIG_NAME=\"x\"\n")
+        self.assertEqual(unapplied_defaults(root / "sdkconfig", [root / "base", root / "mode"]), [])
+
     def test_build_provenance_rejects_stale_binary_and_source(self):
         from firmware_provenance import artifacts
         build = Path(self.temp.name) / "firmware"
