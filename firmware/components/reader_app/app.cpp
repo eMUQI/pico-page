@@ -1740,6 +1740,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         switch (footer_position) {
         case reading_footer::Position::Chapters:
             return "第 " + std::to_string(chapter_index + 1) + " 章 / 共 " + std::to_string(document.spine().size()) + " 章";
+        case reading_footer::Position::ChapterName: {
+            const auto label = chapter_label();
+            return label.empty() ? "第 " + std::to_string(chapter_index + 1) + " 章" : label;
+        }
         case reading_footer::Position::Percent:
             if (const auto current = current_page())
                 return reading_footer::percent(static_cast<double>(current) / total_pages());
@@ -6109,7 +6113,8 @@ struct ReaderApp::Impl final : DisplayBackend {
                     } else {
                         switch (footer_position) {
                         case reading_footer::Position::Pages: footer_position = reading_footer::Position::Chapters; break;
-                        case reading_footer::Position::Chapters: footer_position = reading_footer::Position::Percent; break;
+                        case reading_footer::Position::Chapters: footer_position = reading_footer::Position::ChapterName; break;
+                        case reading_footer::Position::ChapterName: footer_position = reading_footer::Position::Percent; break;
                         case reading_footer::Position::Percent: footer_position = reading_footer::Position::Pages; break;
                         }
                     }

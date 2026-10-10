@@ -502,7 +502,7 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     app.set_battery(75);
     opened(app, "Books/book.epub"); driver.present();
     // Dismiss any first-open notice, then return to the default page-count mode.
-    for (int i = 0; i < 3; ++i) { driver.tap(36, 1160); driver.present(); }
+    for (int i = 0; i < 4; ++i) { driver.tap(36, 1160); driver.present(); }
     const auto saved = app.saved_record();
     const auto progress = read(root / "Books/book.epub.picopage/progress.json");
     const auto body = app.canvas().pixels();
@@ -513,6 +513,18 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
         assert(read(root / "Books/book.epub.picopage/progress.json") == progress);
         assert(std::equal(body.begin(), body.begin() + 1128 * app.canvas().stride(), app.canvas().pixels().begin()));
         assert(!app.take_network_request());
+    };
+    const auto expect_text = [&](const std::string& value) {
+        graphics::Canvas expected;
+        graphics::Font font; assert(font.open_fallback() && font.size(24));
+        int x = 36;
+        for (const auto scalar : graphics::decode_utf8(value)) {
+            font.draw(expected, scalar, x, 1156 + font.metrics().ascender, 3);
+            x += font.advance(scalar);
+        }
+        for (int y = 1128; y < 1216; ++y)
+            for (int column = 0; column < 540; ++column)
+                assert(app.canvas().pixel(column, y) == expected.pixel(column, y));
     };
     const auto toggle = [&](int x) {
         driver.tap(x, 1160);
@@ -534,6 +546,10 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     toggle(600);
     assert(footer_pixels(app, 0, 540) == chapters && footer_pixels(app, 540, 684) == battery);
     toggle(539);
+    const auto chapter_name = footer_pixels(app, 0, 540);
+    assert(chapter_name != chapters && footer_pixels(app, 540, 684) == battery);
+    expect_text("第一章");
+    toggle(36);
     const auto estimated = footer_pixels(app, 0, 540);
     assert(estimated != chapters && footer_pixels(app, 540, 684) == battery);
     toggle(540);
@@ -559,19 +575,10 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     }
     const auto counted = app.book_pages();
     assert(counted && counted->total > 0 && app.canvas().pixels() == pixels);
-    toggle(36); toggle(36);
+    toggle(36); toggle(36); toggle(36);
     // Check the rendered text against the known page fraction, including its fractional digits.
     const auto value = reading_footer::percent(static_cast<double>(counted->page) / counted->total);
-    graphics::Canvas expected;
-    graphics::Font font; assert(font.open_fallback() && font.size(24));
-    int x = 36;
-    for (const auto scalar : graphics::decode_utf8(value)) {
-        font.draw(expected, scalar, x, 1156 + font.metrics().ascender, 3);
-        x += font.advance(scalar);
-    }
-    for (int y = 1128; y < 1216; ++y)
-        for (int column = 0; column < 540; ++column)
-            assert(app.canvas().pixel(column, y) == expected.pixel(column, y));
+    expect_text(value);
     toggle(600);
     toggle(36);
     assert(footer_pixels(app, 0, 540) != page_waiting);

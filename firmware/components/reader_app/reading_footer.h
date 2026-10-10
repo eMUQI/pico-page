@@ -8,7 +8,7 @@
 #include <string>
 
 namespace pico_page::reading_footer {
-enum class Position { Pages, Chapters, Percent };
+enum class Position { Pages, Chapters, ChapterName, Percent };
 enum class Device { Battery, Clock };
 inline constexpr int device_left = 540;
 
