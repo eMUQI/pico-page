@@ -79,6 +79,7 @@ public:
         bool save_last_book = false, prefetch = false, cover_crop = false, preview = false;
         bool progressive = false;
         std::uint64_t generation = 0;
+        PP_DIAGNOSTIC(std::uint64_t diagnostic_session = 0, diagnostic_layout = 0;)
         std::size_t chapter = 0, offset = 0;
         std::uint32_t part = 0;
     };
@@ -91,6 +92,7 @@ public:
         double percentage = 0;
         std::unique_ptr<graphics::Canvas> image;
         std::vector<std::size_t> failed_images;
+        PP_DIAGNOSTIC(std::uint32_t decoded_images = 0;)
         std::vector<std::vector<std::uint8_t>> covers;
         std::unique_ptr<EpubDocument> document;
         Chapter chapter;

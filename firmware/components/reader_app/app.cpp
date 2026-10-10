@@ -906,6 +906,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::unique_ptr<graphics::Canvas> prepared_image;
     std::vector<std::size_t> prepared_image_failures;
     std::uint64_t foreground_generation = 0;
+    PP_DIAGNOSTIC(std::uint64_t diagnostic_session = 0, diagnostic_layout = 0;)
     bool content_loading = false, image_prepared = false;
     bool inline_image_pending = false, body_images_pending = false;
     std::string prepared_image_error;
@@ -1021,6 +1022,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         release_counting();
         ContentJob::Request request;
         request.kind = ContentJob::Kind::Image;
+        PP_DIAGNOSTIC(
+            request.diagnostic_session = diagnostic_session;
+            request.diagnostic_layout = diagnostic_layout;
+        )
         request.root = root; request.path = root + "/" + book_path; request.identity = document.metadata();
         request.preview = preview;
         request.progressive = progressive;
@@ -1106,6 +1111,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             request.part != chapter.part || request.offset != page.start ||
             !same_layout(request.layout, layout(settings, link_return ? 144 : 64))) return;
         body_images_pending = false;
+        PP_DIAGNOSTIC(const auto patch = diagnostics::begin(diagnostics::Kind::ImagePatch,
+            {request.diagnostic_session, request.diagnostic_layout, ui_sequence + 1,
+             request.generation, job.result.decoded_images});)
 #ifdef ESP_PLATFORM
         if (!job.result.error.empty())
             ESP_LOGW("reader_app", "Inline image unavailable: error=%s psram_free=%u largest=%u",
@@ -1137,8 +1145,13 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         if (body_canvas) *body_canvas = canvas;
         region.width = right - region.x; region.height = bottom - region.y;
+        bool submitted = false;
         if (region.width > 0 && region.height > 0)
-            display.present({{"ui", 0, 0, ++ui_sequence}, {}, FramePurpose::Overlay, RefreshIntent::Content, region});
+            submitted = display.present({{"ui", 0, 0, ++ui_sequence}, {}, FramePurpose::Overlay, RefreshIntent::Content, region});
+        PP_DIAGNOSTIC(diagnostics::end(patch,
+            submitted && job.result.image && job.result.error.empty() && job.result.failed_images.empty()
+                ? diagnostics::Outcome::Success : diagnostics::Outcome::Failure);)
+        (void)submitted;
     }
     void poll_content(bool allow_inline = true) {
         if (inline_image_pending && (view != View::Reading || image_viewing)) abandon_content();
@@ -1356,6 +1369,12 @@ struct ReaderApp::Impl final : DisplayBackend {
     Impl(std::string card, std::string id)
         : root(std::move(card)), writer(std::move(id)), store(root) {}
     bool start(const Frame &frame) override {
+        PP_DIAGNOSTIC(
+            if (frame.purpose == FramePurpose::Body) {
+                diagnostic_session = frame.token.session;
+                diagnostic_layout = frame.token.layout;
+            }
+        )
         pending = frame;
         return true;
     }
@@ -5936,6 +5955,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                     --library_page;
                 else if (id == Next && (library_page + 1) * library_page_size() < entries.size())
                     ++library_page;
+                else return;
                 draw_library();
             } else if (view == View::WifiSettings) {
                 if (wifi_page != WifiPage::Add) return;
@@ -6086,16 +6106,17 @@ struct ReaderApp::Impl final : DisplayBackend {
             return;
         }
         const bool preserve_prefetch = view == View::Reading &&
-            ((!input.touch && (input.event.input == Input::K3 || input.event.input == Input::K2)) ||
+            ((!input.touch && (input.event.input == Input::K3 || input.event.input == Input::Next || input.event.input == Input::K2)) ||
              (input.touch && input.x >= 479 && input.y < footer_top));
         if (!preserve_prefetch) clear_prefetch();
         if (input.queued) {
             const bool turn_touch = input.touch && input.y < footer_top && (input.x < 205 || input.x >= 479);
-            const bool turn_key = !input.touch && (input.event.input == Input::K1 || input.event.input == Input::K3);
+            const auto action = input.touch ? Action::None : MapInput(context(), input.event.input);
+            const bool turn_key = action == Action::PreviousPage || action == Action::NextPage;
             if (view != View::Reading || !turned || (!turn_touch && !turn_key))
                 return;
             // Links are not followed: the contact was aimed at the page that has been replaced.
-            turn(turn_touch ? input.x >= 479 : input.event.input == Input::K3);
+            turn(turn_touch ? input.x >= 479 : action == Action::NextPage);
             return;
         }
         turned = false;
@@ -6706,6 +6727,15 @@ bool ReaderApp::background_due() const {
     return !!impl_->cover_job || impl_->pending_covers.has_value() || !!impl_->raster_job || !!impl_->counting_job ||
            impl_->prefetch_due() || impl_->counting_due();
 }
+#if !defined(ESP_PLATFORM) || defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
+// Only the diagnostic console reads this; other firmware builds do not carry the name table.
+const char *ReaderApp::sync_state() const {
+    static constexpr const char *names[] = {"unchecked", "no-record", "same", "different", "unmapped", "uploaded",
+                                            "uncertain", "unauthorized", "failed", "link-failed", "config-changed"};
+    return names[static_cast<unsigned>(impl_->sync_state)];
+}
+int ReaderApp::font_size_px() const { return impl_->settings.font_size_px; }
+#endif
 const char *ReaderApp::background_state() const {
     if (impl_->inline_image_pending) return "image";
     if (impl_->content_loading) {

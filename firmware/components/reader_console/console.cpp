@@ -169,10 +169,18 @@ void status(std::uint32_t id, const ReaderApp &app, bool card_available) {
     const auto battery = platform::battery();
     const auto crc = esp_rom_crc32_le(0, pixels.data(), pixels.size());
     const auto revision = app.saved_record() ? app.saved_record()->local_revision : 0;
+    // Identity of the saved source position without printing the resource path or any text.
+    std::uint32_t anchor = 0;
+    if (const auto &record = app.saved_record()) {
+        const auto &position = record->anchor;
+        anchor = esp_rom_crc32_le(0, reinterpret_cast<const std::uint8_t *>(position.resource.data()), position.resource.size());
+        anchor = esp_rom_crc32_le(anchor, reinterpret_cast<const std::uint8_t *>(position.node.data()), position.node.size());
+        anchor = esp_rom_crc32_le(anchor, reinterpret_cast<const std::uint8_t *>(&position.offset), sizeof(position.offset));
+    }
     const auto pages = app.book_pages();
     const auto caches = app.cache_usage();
     const auto input = platform::input_diagnostics();
-    reply("PP %lu OK view=%s pending=%d card=%d saved=%d revision=%llu page=%lu pages=%lu count=%s "
+    reply("PP %lu OK view=%s pending=%d card=%d saved=%d revision=%llu anchor=%08lx font_px=%d page=%lu pages=%lu count=%s sync=%s "
           "content_busy=%d save_busy=%d save_due=%d largest_psram=%u frame=%llu frame_ok=%d "
           "purpose=%d clean=%d bytes=%u crc32=%08lx heap=%u min_heap=%u internal=%u "
           "largest_internal=%u "
@@ -182,8 +190,9 @@ void status(std::uint32_t id, const ReaderApp &app, bool card_available) {
           "glyph_ui_bytes=%u glyph_body_bytes=%u glyph_ui=%u glyph_body=%u advances_ui=%u advances_body=%u\n",
           static_cast<unsigned long>(id), view_name(app.view()), !!app.pending_frame(),
           card_available, !!app.saved_record(), static_cast<unsigned long long>(revision),
+          static_cast<unsigned long>(anchor), app.font_size_px(),
           static_cast<unsigned long>(pages ? pages->page : 0),
-          static_cast<unsigned long>(pages ? pages->total : 0), app.background_state(),
+          static_cast<unsigned long>(pages ? pages->total : 0), app.background_state(), app.sync_state(),
           app.content_busy(), app.save_busy(), app.save_due(),
           static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)),
           static_cast<unsigned long long>(frame_number), frame_success,
@@ -458,7 +467,7 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
               static_cast<unsigned>(count), data.c_str());
         return;
     }
-    const bool input_command = word == "key" || word == "tap" || word == "hold";
+    const bool input_command = word == "key" || word == "tap" || word == "hold" || word == "swipe";
     if ((!actions_allowed && !(input_allowed && input_command)) || app.pending_frame() || transfer) {
         error(id, "busy");
         return;
@@ -487,8 +496,8 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
             error(id, "open_failed");
             return;
         }
-    } else if (word == "key" || word == "tap" || word == "hold") {
-        AppInput event{{0, Phase::Begin, Input::TouchCenter}, word != "key", 0, 0, false, word == "hold"};
+    } else if (word == "key" || word == "tap" || word == "hold" || word == "swipe") {
+        AppInput event{{0, Phase::Begin, Input::TouchCenter}, word == "tap" || word == "hold", 0, 0, false, word == "hold"};
         std::string_view first, second, extra;
         if (!token(input, first)) {
             error(id, "missing_input");
@@ -501,6 +510,12 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
                 error(id, "invalid_touch");
                 return;
             }
+        } else if (word == "swipe") {
+            if (!input.empty() || (first != "left" && first != "right")) {
+                error(id, "invalid_swipe");
+                return;
+            }
+            event.event.input = first == "left" ? Input::Next : Input::Previous;
         } else {
             if (!input.empty() || (first != "K1" && first != "K2" && first != "K3")) {
                 error(id, "invalid_key");

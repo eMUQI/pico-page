@@ -18,6 +18,7 @@ jobs:
       - name: Configure sanitizers
         run: >-
           cmake -S . -B build/sanitized -DCMAKE_BUILD_TYPE=Debug
+          -DPICO_PAGE_HOST_TRACE_EVENTS=ON
           -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           '-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer'
           '-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer'

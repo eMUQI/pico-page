@@ -11,7 +11,7 @@
 1. 在应用任务调用 `console::initialize(error)`。它安装带 8 KiB 接收、2 KiB 发送缓冲的官方 USB 驱动，将现有控制台绑定到该驱动。协议使用 `usb_serial_jtag_read_bytes(..., 0)` 非阻塞读取；回复采用独立有界缓冲，一次入队整行，避免日志 VFS 逐字节尽力发送造成回复不完整。
 2. 所有显示调用完成后、`app.complete_frame()` 之前，调用 `console::frame_completed(frame, actual_result)`。结果必须来自真实平台调用。
 3. 每轮主循环调用 `console::poll(app, card_root, input_sequence, actions_allowed, input_allowed)`。物理输入与诊断输入共用一个递增序号；物理释放和取消沿用对应按下的序号。
-4. 有网络工作、休眠请求或物理触摸尚未结束时，传入 `actions_allowed=false`，拒绝直接开书和开始导入。仅网络工作忙且无物理接触/休眠请求时，另传 `input_allowed=true`，允许 `key/tap/hold` 走实体输入相同的应用路由，用于验证 K2 和取消；在途显示帧及资源导入仍拒绝输入。`status`、目录列表与屏幕分块仍可读取。挂载不可用时传入空 `card_root`。
+4. 有网络工作、休眠请求或物理触摸尚未结束时，传入 `actions_allowed=false`，拒绝直接开书和开始导入。仅网络工作忙且无物理接触/休眠请求时，另传 `input_allowed=true`，允许 `key/tap/hold/swipe` 走实体输入相同的应用路由，用于验证 K2 和取消；在途显示帧及资源导入仍拒绝输入。`status`、目录列表与屏幕分块仍可读取。挂载不可用时传入空 `card_root`。
 5. `console::transfer_active()` 为真时，暂缓新的物理输入、网络分派与休眠。已被吞下的物理接触持续吞到释放；断卡事件仍需处理。已有导入的 data/commit/abort 不依赖 `actions_allowed`，否则事务会被自己的保护条件阻塞。
 
 组件不调用 `complete_frame()`，不跳过 App 的呈现确认、保存或输入路由。关闭配置后，三个入口保留空实现，不读取输入、不安装 USB 驱动、不输出诊断结果。
@@ -108,3 +108,7 @@ python3 tools/device_console.py --port /dev/cu.TARGET_DEVICE capture .local/devi
 每组使用同一本书、同一源位置、同一字号和「均衡」档位；切换后先按 K2 建立同样的清屏起点，再按相同顺序翻页至下一次自动全刷，分别记录默认 GL16、A、B、C 和水波纹。观察中间白场、连续残影、抗锯齿边缘灰度和带图页；水波纹额外观察条带边界、方向和中断后恢复。保留照片或录像与原始串口日志，不以画布导出代替物理成像。
 
 面板耗时对比需使用相同的旧计时诊断配置：启用 `CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE=y`、`CONFIG_PICO_PAGE_LEGACY_PERF_LOG=y`，关闭 `CONFIG_PICO_PAGE_PERF_METRICS` 与 `CONFIG_PICO_PAGE_TRACE_EVENTS`，核对生成的 sdkconfig。将每组非清屏翻页的 `Frame complete` 原始行分组保存，再用 `python3 tools/summarize_reader_perf.py <该组日志> --json` 汇总 `panel_draw`；全刷、失败和恢复另列。保留完整原始日志及分组规则，记录 commit、固件摘要、缓存冷/热、样本数、P50/P95/P99/最大值和资源数据。默认 Diagnostic 模式关闭旧计时，不能拿无样本汇总声称耗时已验证。
+
+## 2026-10-11 · 轻扫动作注入
+
+`python3 tools/device_console.py --port <串口> swipe left` 注入下一页，`swipe right` 注入上一页；设备协议为 `swipe left|right`。命令直接发送非触摸的 `Input::Next/Previous`，沿用应用上下文与忙碌限制，不模拟采样、坐标、时长或物理轻扫识别，不作为阈值或真机手感的验收证据。

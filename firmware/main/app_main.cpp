@@ -327,6 +327,18 @@ void run_portal(NetworkJob &job) {
     if (session.lock)
         vSemaphoreDelete(session.lock);
 }
+/**
+ * Records one phase of a sync request as its own operation: detail 1 station, 2 clock, 3 HTTP.
+ * A request cancelled before its first phase therefore leaves no evidence that networking ran.
+ */
+template <typename Call>
+bool network_stage([[maybe_unused]] const NetworkJob& job, [[maybe_unused]] std::uint32_t stage, Call&& call) {
+    PP_DIAGNOSTIC(const auto measurement = diag::begin(diag::Kind::NetworkStage, {0, 0, 0, job.operation.id, stage});)
+    const bool okay = call();
+    PP_DIAGNOSTIC(diag::end(measurement, job.operation.cancelled->load() ? diag::Outcome::Cancelled
+        : okay ? diag::Outcome::Success : diag::Outcome::Failure);)
+    return okay;
+}
 /** One request borrows a whole sync transaction, including the bounded decision interval. */
 #ifdef CONFIG_PICO_PAGE_PERF_METRICS
 void execute_request(NetworkJob &job) {
@@ -335,10 +347,10 @@ void run_request(NetworkJob &job) {
 #endif
     const auto& cancelled = *job.operation.cancelled;
     if (cancelled.load() || !pico_page::network::live(job.operation.session)) return;
-    if (!ensure_station(job.operation.targets, cancelled, job.error, job.failure)) return;
+    if (!network_stage(job, 1, [&] { return ensure_station(job.operation.targets, cancelled, job.error, job.failure); })) return;
     publish_wifi(pico_page::WifiPhase::Clock, station_target.ssid);
     platform::ConnectFailure failure;
-    if (!platform::synchronize_clock(job.error, &failure, &cancelled)) {
+    if (!network_stage(job, 2, [&] { return platform::synchronize_clock(job.error, &failure, &cancelled); })) {
         // Without a clock TLS cannot start; the user sees it as a network that does not work.
         job.error = cancelled.load() ? "操作已取消。" : wifi_failure(station_target.ssid, failure);
         job.failure = pico_page::LinkFailure::Other;
@@ -347,8 +359,10 @@ void run_request(NetworkJob &job) {
     if (cancelled.load()) return;
     publish_wifi(pico_page::WifiPhase::Request, station_target.ssid);
     const auto &request = job.operation.request;
-    const bool okay = platform::http_request(request.method, request.url, request.headers, request.body, job.body, job.status,
-                           job.error, job.operation.cancelled.get());
+    const bool okay = network_stage(job, 3, [&] {
+        return platform::http_request(request.method, request.url, request.headers, request.body, job.body, job.status,
+                                      job.error, job.operation.cancelled.get());
+    });
     if (!okay) {
         job.error = request.method == "GET" ? "同步服务不可达，请检查网络或服务地址后重试。" : "上传结果未确认，请重新查询远端。";
         pico_page::network::release(job.operation.session);
@@ -734,8 +748,16 @@ extern "C" void app_main() {
                 {physical_sequence, pico_page::Phase::Begin, pico_page::Input::TouchCenter},
                 tap.kind == EventKind::Touch, tap.x, tap.y, !resumed && tap.time_us < settled_us,
                 pico_page::platform::long_press(tap, end)};
-            if (input.touch)
-                input.touch_bounds = {end.min_x, end.min_y, end.max_x, end.max_y};
+            if (input.touch) {
+                const auto gesture = pico_page::platform::released_gesture(tap, end);
+                using Gesture = pico_page::platform::ReleasedGesture;
+                if (gesture == Gesture::Ignore) return;
+                if (gesture != Gesture::Tap) {
+                    input.touch = false;
+                    input.long_press = false;
+                    input.event.input = gesture == Gesture::Next ? pico_page::Input::Next : pico_page::Input::Previous;
+                } else input.touch_bounds = {end.min_x, end.min_y, end.max_x, end.max_y};
+            }
             if (tap.kind == EventKind::K1) input.event.input = pico_page::Input::K1;
             if (tap.kind == EventKind::K2) input.event.input = pico_page::Input::K2;
             if (tap.kind == EventKind::K3) input.event.input = pico_page::Input::K3;
@@ -764,7 +786,7 @@ extern "C" void app_main() {
                 if (!app->content_busy() && !app->pending_frame()) {
                     const auto now = esp_timer_get_time();
                     const auto held = resume_input.due(now);
-                    if (held && app->can_long_press_at(held->x, held->y) &&
+                    if (held && app->view() == pico_page::View::Reading && app->can_long_press_at(held->x, held->y) &&
                         !pico_page::platform::input_waiting_before(std::numeric_limits<std::int64_t>::max())) {
                         resume_input.accept({EventKind::Touch, pico_page::platform::EventPhase::End,
                                              held->sequence, held->x, held->y, now});
@@ -866,7 +888,7 @@ extern "C" void app_main() {
             const auto now = esp_timer_get_time();
             const auto held = released_tap.due(now, presentation_sequence);
             if (held && held->sequence == physical_source && held->time_us >= settled_us &&
-                app->can_long_press_at(held->x, held->y)) {
+                app->view() == pico_page::View::Reading && app->can_long_press_at(held->x, held->y)) {
                 const pico_page::platform::Event end{EventKind::Touch, pico_page::platform::EventPhase::End,
                                                       held->sequence, held->x, held->y, now};
                 released_tap.accept(end, presentation_sequence);
