@@ -1,5 +1,7 @@
 # 开发状态
 
+2026-10-10 现行 Markdown 文档已按 Tech-Doc-Style-Chinese 整理：41 个文件展开段落硬换行，弯引号改为直角引号，并修正 `docs/runtime.md`、`docs/usb-storage-runtime.md`、`tests/README.md`、`examples/README.md` 中与现状不符的说明。仅改文档，未改代码、未构建、未烧录。详情见本日「文档风格整理」记录。
+
 2026-10-10 根目录 README 已在分支 `docs/readme-rewrite`（基于 main `f25852c`）按正式项目的结构重写，仅改文档，未改代码、未构建固件、未烧录。已提交为 PR #31，交接检查与远端 host CI 通过，自动 review 的 2 条 P2 已修正。详情见本日“README 重写”记录。
 
 2026-10-10 PR #28 最终 head `1d05da7` 的两个 CI 均通过，review 已完成并提出 3 条有效意见。
@@ -78,6 +80,15 @@ EPD 行队列欠载（1024）：网络请求阶段与状态画面刷新重叠，
 2026-10-09 Issue #21 本地候选：阅读页脚左侧独立切换页码/总页数、章节、两位小数百分比；
 右侧独立切换电量/北京时间时钟。host Debug 与 ASan/UBSan/LSan 完整 CTest 各 13/13，标准固件构建通过。
 已核对合成书籍的实际 host 绘制，真机触摸、电量、联网校时和刷新效果待验收；按用户要求整理 PR，未烧录。
+
+## 2026-10-10 · 文档风格整理
+
+- 变更：对 42 个现行 Markdown 文件按 Tech-Doc-Style-Chinese 整理。用该规范的 `unwrap_md_paragraphs.py` 展开 41 个文件共 725 处段落硬换行；把正文中的 848 个弯引号改为直角引号「」，嵌套处用『』，代码块、行内代码和链接目标不变；「落盘」「闭环」「链路」「兜底」改为具体说法；5 处文件名放进行内代码。`AGENTS.md` 的「面向用户的说明」增加一条引号与换行约定。
+- 事实修正：`docs/usb-storage-runtime.md` 的入口由设置的「文件导入」改为「设置 → 网络与传输」的「开启 USB 传输」（依据 `app.cpp` 与 `help_content.h`）。`docs/runtime.md` 删除「未进行烧录」等过期状态并指向设备检查记录，图片分页改为与 `docs/image-runtime.md` 一致，补上 Wi-Fi 传书，进入详情改为长按书库中的书，排版面板一步拆为列表。`tests/README.md` 的入口数由 13 改为 14 并补上 `content_worker`（依据 CMake 注册的 `add_test`）。`examples/README.md` 改为 `settings.toml` 已用于界面和正文排版，`integrations.toml` 固件不读取。
+- 未改范围：`docs/archive/`、`docs/design/original/`和本文件的历史记录保持原样；固件界面字符串中的弯引号未改。
+- 命令与环境：本机 macOS，在仓库根目录执行。规范自带的 `lint_copy_rules.py` 对 42 个文件报告 error=0、warning=0、style=3（3 处均为 `claude.ai` 网址）；`unwrap_md_paragraphs.py --check` 通过；`python3 tools/check_handoff.py` 通过（416 项）；`git diff --check` 通过。
+- 未测项：未运行 host 构建、CTest 和固件构建，本批没有改动代码。展开后的段落没有逐个文件人工通读，只抽查了 `AGENTS.md`、`docs/runtime.md`、`docs/wifi-transfer.md`、`docs/usb-storage-runtime.md` 和各 README。`examples/README.md` 中「锚点编码仍需 G1 对照后冻结」是否仍成立未核对。
+- 下一步：确认固件界面文案是否也改用直角引号。
 
 ## 2026-10-10 · README 重写
 
