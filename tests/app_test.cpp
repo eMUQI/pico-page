@@ -675,6 +675,34 @@ int main(int argc, char** argv) {
     help_test(card / "HelpAsync", fixtures, true, true);
     network_setup_test(card / "NetworkSetupSync", fixtures, false);
     network_setup_test(card / "NetworkSetupAsync", fixtures, true);
+    for (bool async : {false, true}) {
+        const auto root = card / (async ? "EffectsAsync" : "EffectsSync");
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
+        ReaderApp app(root.string(), "effects", async, async); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+        assert(app.page_effect() == PageEffect::Off);
+        const auto record = app.saved_record();
+        const auto config = root / "PicoPage/settings.toml";
+        const auto before = read(config);
+        driver.tap(342, 500); driver.present();
+        driver.tap(479, 1140); driver.present(); assert(app.view() == View::Refresh);
+        driver.tap(490, 1060); driver.present(); assert(app.view() == View::PageEffects);
+        const PageEffect effects[] = {PageEffect::Off, PageEffect::TextTurnA, PageEffect::TextTurnB,
+                                      PageEffect::TextTurnC, PageEffect::Ripple};
+        for (unsigned index = 0; index < 5; ++index) {
+            driver.tap(300, 260 + index * 136); driver.present();
+            assert(app.page_effect() == effects[index]);
+            driver.refresh();
+            assert(app.view() == View::PageEffects && app.page_effect() == effects[index]);
+            assert(app.saved_record() == record && read(config) == before);
+        }
+        app.set_page_effect(PageEffect::TextTurnA);
+        assert(app.pending_frame() && app.page_effect() == PageEffect::TextTurnA);
+        driver.present(); driver.refresh();
+        driver.tap(60, 50); driver.present(); assert(app.view() == View::Refresh);
+        ReaderApp restarted(root.string()); assert(restarted.page_effect() == PageEffect::Off);
+    }
     fs::create_directories(card / "Books");
     fs::create_directories(card / "PicoPage");
     fs::copy_file(fixtures / "valid.epub", card / "Books/book.epub");

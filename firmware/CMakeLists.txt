@@ -21,6 +21,8 @@ if(read_pico_untracked)
 endif()
 
 # Patch a build-local copy, preserving the verified upstream checkout.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_LIST_DIR}/patches/epdiy-row-phases.patch")
 set(READ_PICO_ADAPTED "${CMAKE_CURRENT_BINARY_DIR}/pico_bsp")
 file(REMOVE_RECURSE "${READ_PICO_ADAPTED}/read_pico")
 file(MAKE_DIRECTORY "${READ_PICO_ADAPTED}")
@@ -39,6 +41,12 @@ execute_process(COMMAND git apply --unsafe-paths
     WORKING_DIRECTORY "${READ_PICO_ADAPTED}/epdiy" RESULT_VARIABLE epdiy_patch_result)
 if(NOT epdiy_patch_result EQUAL 0)
     message(FATAL_ERROR "Cannot apply EPD underrun diagnostics patch")
+endif()
+execute_process(COMMAND git apply --unsafe-paths
+    "${CMAKE_CURRENT_LIST_DIR}/patches/epdiy-row-phases.patch"
+    WORKING_DIRECTORY "${READ_PICO_ADAPTED}/epdiy" RESULT_VARIABLE row_patch_result)
+if(NOT row_patch_result EQUAL 0)
+    message(FATAL_ERROR "Cannot apply EPD row-phase patch")
 endif()
 list(APPEND EXTRA_COMPONENT_DIRS "${READ_PICO_ADAPTED}/epdiy")
 foreach(component read_pico_pmu e0470_epaper_waveform

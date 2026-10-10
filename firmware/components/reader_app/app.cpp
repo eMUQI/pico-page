@@ -91,6 +91,7 @@ enum Control {
     LibraryGrid,
     RefreshAccept,
     RefreshInterval,
+    PageEffects, EffectOff, EffectA, EffectB, EffectC, EffectRipple,
     IntervalLess,
     IntervalMore,
     IntervalSave,
@@ -837,6 +838,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool library_directory_unavailable = false;
     reading_footer::Position footer_position = reading_footer::Position::Pages;
     reading_footer::Device footer_device = reading_footer::Device::Battery;
+    PageEffect page_effect = PageEffect::Off;
     bool refresh_from_settings = false, import_from_settings = false;
     std::string detail_path, detail_position, detail_error;
     BookSnapshot management_snapshot;
@@ -3546,13 +3548,26 @@ struct ReaderApp::Impl final : DisplayBackend {
         choice(RefreshClear, "清晰", "每页执行全刷，减少残影", 616, values.refresh_preset == "clear");
         choice(RefreshBalanced, "均衡", "灰阶更新，定期全刷", 752, values.refresh_preset == "balanced");
         choice(RefreshFast, "快速", "优先响应速度，可能更易留痕", 884, values.refresh_preset == "fast");
-        button(FullRefresh, "立即全刷", 36, 1020, 612, 96);
+        button(FullRefresh, "立即全刷", 36, 1020, 294, 96);
+        button(PageEffects, "翻页效果", 354, 1020, 294, 96);
         if (values.refresh_preset == "clear") note("自动全刷间隔：每页", 1150);
         else {
             text("自动全刷间隔", 36, 1150, 24, 360);
             text("每 " + std::to_string(refresh_interval(values)) + " 页 ›", 490, 1150, 24, 170);
             hits.push_back({24, 1128, 636, 88, RefreshInterval});
         }
+    }
+    void draw_page_effects() {
+        view = View::PageEffects;
+        hits.clear(); canvas.clear(); header("翻页效果", Back, "刷新");
+        text("实验功能 · 本次启动有效", 36, 144, 26, 612, 3);
+        choice(EffectOff, "关闭", "沿用当前刷新模式", 220, page_effect == PageEffect::Off);
+        choice(EffectA, "文字转页 A", "仅左对齐，保留全部驱动动作", 356, page_effect == PageEffect::TextTurnA);
+        choice(EffectB, "文字转页 B", "A + 未变化像素不驱动", 492, page_effect == PageEffect::TextTurnB);
+        choice(EffectC, "文字转页 C", "B + 去掉深色目标的前导擦白", 628, page_effect == PageEffect::TextTurnC);
+        choice(EffectRipple, "水波纹", "条带依次展开，翻页可能更慢", 764, page_effect == PageEffect::Ripple);
+        wrapped("仅用于正文非全刷更新。清晰模式每页全刷，不播放效果。", 36, 936, 612, 25, 3);
+        wrapped("效果、残影和灰阶均待真机验证。按全刷键可清理当前画面。", 36, 1040, 612, 25, 3);
     }
     void draw_refresh_confirm() {
         draw_refresh();
@@ -5261,7 +5276,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (usb_confirm) { usb_confirm = false; draw_usb(); overlay(); }
             return;
         }
-        if (view == View::RefreshConfirm || view == View::RefreshInterval) {
+        if (view == View::RefreshConfirm || view == View::RefreshInterval || view == View::PageEffects) {
             draw_refresh(); overlay(); return;
         }
         if (view == View::Help || view == View::WifiSettings || view == View::PowerSettings || view == View::StorageSettings || view == View::InputSettings ||
@@ -5743,6 +5758,14 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (async_content) { open(detail_path); return; }
             defer("正在打开书籍…", [this] { open(detail_path); });
             return;
+        case PageEffects:
+            draw_page_effects();
+            break;
+        case EffectOff: case EffectA: case EffectB: case EffectC: case EffectRipple:
+            page_effect = id == EffectOff ? PageEffect::Off : id == EffectA ? PageEffect::TextTurnA :
+                          id == EffectB ? PageEffect::TextTurnB : id == EffectC ? PageEffect::TextTurnC : PageEffect::Ripple;
+            draw_page_effects();
+            break;
         case RefreshAccept:
             apply_refresh(RefreshFast);
             return;
@@ -6305,6 +6328,14 @@ const std::optional<ReadingRecord> &ReaderApp::saved_record() const {
 }
 bool ReaderApp::fast_page_updates() const {
     return impl_->settings.refresh_preset == "fast";
+}
+PageEffect ReaderApp::page_effect() const { return impl_->page_effect; }
+void ReaderApp::set_page_effect(PageEffect effect) {
+    impl_->page_effect = effect;
+    if (impl_->view == View::PageEffects) {
+        impl_->draw_page_effects();
+        if (!impl_->display.busy()) impl_->overlay();
+    }
 }
 int ReaderApp::auto_sleep_minutes() const {
     return impl_->settings.auto_sleep_minutes;

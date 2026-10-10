@@ -107,6 +107,7 @@ void error(std::uint32_t id, const char *reason) {
 
 const char *view_name(View view) {
     switch (view) {
+    case View::PageEffects: return "page_effects";
     case View::TextEntry: return "text_entry";
     case View::Loading: return "loading";
     case View::NetworkClosing: return "network_closing";
@@ -460,6 +461,19 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
     const bool input_command = word == "key" || word == "tap" || word == "hold";
     if ((!actions_allowed && !(input_allowed && input_command)) || app.pending_frame() || transfer) {
         error(id, "busy");
+        return;
+    }
+    if (word == "waveform") {
+        PageEffect effect;
+        if (input == "default") effect = PageEffect::Off;
+        else if (input == "A") effect = PageEffect::TextTurnA;
+        else if (input == "B") effect = PageEffect::TextTurnB;
+        else if (input == "C") effect = PageEffect::TextTurnC;
+        else if (input == "ripple") effect = PageEffect::Ripple;
+        else { error(id, "usage_waveform_default_A_B_C_ripple"); return; }
+        app.set_page_effect(effect);
+        reply("PP %lu OK waveform=%.*s\n", static_cast<unsigned long>(id),
+              static_cast<int>(input.size()), input.data());
         return;
     }
     if (word == "open") {

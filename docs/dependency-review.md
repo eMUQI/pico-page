@@ -106,3 +106,14 @@ GB18030 解码表的来源与复核（2026-10-07）：`firmware/components/reade
 
 - `CONFIG_FATFS_VFS_FSTAT_BLKSIZE=4096` 经真机对照后未采用：顺序读没有可见收益，字形的随机小块读取变慢，新页准备时间增加约六成。官方建议针对顺序吞吐，不适用于本项目的字体访问方式。
 - 字宽改用 FreeType 自带的 `FT_Get_Advance`（[接口说明](https://freetype.org/freetype2/docs/reference/ft2-quick_advance.html)），属于已固定版本 FreeType 的公开接口，没有新增依赖。与 freeink-sdk 的结论一致：不使用 `FT_LOAD_NO_HINTING`，而是复现带 hinting 加载时的取整结果，并用全字符比对确认一致。
+
+
+## 2026-10-11 · 文字转页与水波纹候选
+
+文字转页来源：[FreeInk SDK](https://github.com/0x1abin/freeink-sdk/tree/96de1be6ce08eb732909e6e8149af8f892b9a2c5)，完整 commit `96de1be6ce08eb732909e6e8149af8f892b9a2c5`，文件 `libs/display/EpdiyLcd/src/e0470/e0470_epaper_waveform.c`。移植前读取根 `LICENSE`（MIT、2026 FreeInk）、同目录 `LICENSE` 与源码头（2026 mindreset、Apache-2.0）；适用的波形文件许可为 Apache-2.0，不能用根 MIT 替代。仅移植左对齐、对角线保持、深色目标前导擦白置零三步至 `platform_read_pico/text_turn_waveform.cpp`。修改为不依赖 ESP-IDF 的纯函数、独立布尔选项、容量与重叠检查，删除临时序列数组；不引入 FreeInk 波形数据或其他代码。保留版权/SPDX 与修改声明，组件原 `LICENSE` 署名保留，增加完整 `Apache-2.0.txt`。
+
+参考中文注释反对清对角线，但代码实际清除，对应本项目 B/C；中文注释中的抗锯齿残影风险仍未解决。C 将前导动作 2 置为 0，不再次压缩或左移后续推黑，也不把动作 3 改成推黑；`to != 15` 涵盖 1–14 级灰色，并非只有纯黑，最终亮度必须真机对比。A 提供保守对照，三步也分别受合成 LUT 测试覆盖。
+
+水波纹来源：[wegooo-cell/read-pico-reader（kiikoread）](https://github.com/wegooo-cell/read-pico-reader/tree/8d6f1a6f2f5cbee5bba08df43ebb5001d2584d83)，完整 commit `8d6f1a6f2f5cbee5bba08df43ebb5001d2584d83`，`components/e0470_page_turn/e0470_page_turn.c` 和公开头文件；根 `LICENSE` 为 Apache-2.0，组件文件署名 2026 mindreset、Apache-2.0。读取 `components/epdiy/LICENSE`：该子组件仍为 LGPL-3.0-or-later。移植条带逐拍调度至 `platform_read_pico/ripple.cpp`，仅保留倒置竖屏全屏从右向左的 16 条带路径，PSRAM 表精确为 37 KiB；移除多方向、区域裁剪、40 相预留、FAST 扫描和软件忙等，不复制其应用界面、配置或波形表。
+
+驱动参考范围为该 commit 的 `components/epdiy/src/render.c`、`output_common/render_context.h`、`output_lcd/render_lcd.c`：仅适配逐行相位 LUT 借用接口，增加相位范围与单相差分模式检查、同步返回后的指针清理。补丁 `firmware/patches/epdiy-row-phases.patch` 应用到构建目录的 epdiy 副本，沿用 LGPL-3.0-or-later 义务与原文件署名，不将其标成 Apache。原欠载汇合补丁在前，BSP 锁定 `5f3406deec33304de8801046db583dec7c49e55b` 不变，`.local/read_pico_firmware` 无源码修改。依赖仍为现有 epdiy、E0470 波形组件、ESP-IDF 能力堆和应用显示所有者，没有新增 SDK。源码及补丁的公开分发应保留相应许可、署名和可对应的修改源码；项目总许可证未因此改变。
