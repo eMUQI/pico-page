@@ -1,13 +1,5 @@
 # 配置示例
 
-全局和本书 `settings.toml` 已由共享 `reader_store` 读取、校验并合成；界面和正文渲染尚未接入。
-`integrations.toml` 仍为后续网络配置提案，当前没有服务连接实现。格式冻结仍需后续验收。
-`sdcard/PicoPage` 表示复制到 TF 卡根目录下的产品配置。
-`sidecar/settings.toml` 表示某本 `<完整文件名>.picopage/` 内的局部覆盖。
-目录名称已经统一到 Pico Page；不自动覆盖用户现有卡或迁移旧 ReadPico 数据。
+全局和本书 `settings.toml` 已由共享 `reader_store` 读取、校验并合成，用于界面和正文排版。`integrations.toml` 仍为后续网络配置提案，固件不读取该文件；Wi-Fi 和 KOSync 使用 `PicoPage/network.toml` 与 `PicoPage/sync.toml`，这两个含凭据的文件不提供示例。格式冻结仍需后续验收。`sdcard/PicoPage` 表示复制到 TF 卡根目录下的产品配置。`sidecar/settings.toml` 表示某本 `<完整文件名>.picopage/` 内的局部覆盖。目录名称已经统一到 Pico Page；不自动覆盖用户现有卡或迁移旧 ReadPico 数据。
 
-示例中没有真实字体、书籍、用户名、令牌或 Wi-Fi 配置。
-reader.ttf 只是用户字体路径示例，缺失时固件必须保留偏好并明确回退。
-同步默认禁用，服务地址留空；不得把空配置自动解释为可连接账户。
-K2 映射目前在集中上下文表实现，不借示例配置提前承诺自定义按键功能。
-progress.json 的锚点编码仍需 G1 对照后冻结，本包不创建伪造的“可恢复位置”实例。
+示例中没有真实字体、书籍、用户名、令牌或 Wi-Fi 配置。`reader.ttf` 只是用户字体路径示例，缺失时固件必须保留偏好并明确回退。同步默认禁用，服务地址留空；不得把空配置自动解释为可连接账户。K2 映射目前在集中上下文表实现，不借示例配置提前承诺自定义按键功能。`progress.json` 的锚点编码仍需 G1 对照后冻结，本包不创建伪造的「可恢复位置」实例。
