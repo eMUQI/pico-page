@@ -237,6 +237,7 @@ def refresh_scenario(session):
 
 
 QUIET = ("pending", "content_busy", "save_busy", "save_due")
+LONG_WAIT = 60  # seconds: deferred saves, repagination, Wi-Fi association and a TLS handshake
 
 
 def settled(state):
@@ -311,25 +312,28 @@ def reading_flow(session, book, rounds, turns):
     Injected input cannot test the retained follow-up turn of rapid physical presses, because the
     console refuses input while a frame is pending; that part stays a manual acceptance item.
     """
-    long_wait = max(session.timeout, 60)
+    long_wait = max(session.timeout, LONG_WAIT)
     start, _ = session.request("status")
     if start.get("view") != "reading":
         return dict(status="skip", reason="Open the test book before starting")
     start = wait_for(session, lambda s: settled(s) and int(s["pages"]) > 0, "saved idle page with a page count", long_wait)
     if int(start["page"]) + turns > int(start["pages"]):
         return dict(status="skip", reason="Start at least --turns pages before the end of the book")
-    samples = []
+    def saved_after(previous, what):
+        # The save follows a dwell; a position that is displayed but never saved is a failure, not a timeout.
+        try:
+            return wait_for(session, lambda s: settled(s) and int(s["revision"]) > int(previous["revision"]), what, long_wait)
+        except TimeoutError:
+            raise AssertionError(what + ": the saved revision did not advance") from None
+
+    samples, reopened = [], start
     for _ in range(rounds):
         for _ in range(turns):
             turn(session, "K3", 1)
-        forward = wait_for(session, settled, "forward position saved", long_wait)
-        if int(forward["revision"]) <= int(start["revision"]):
-            raise AssertionError("page turns were displayed but the saved revision did not advance")
+        forward = saved_after(reopened, "forward position saved")
         for _ in range(turns):
             turn(session, "K1", -1)
-        back = wait_for(session, settled, "start position saved again", long_wait)
-        if int(back["revision"]) <= int(forward["revision"]):
-            raise AssertionError("returning to the start page was not saved")
+        saved_after(forward, "start position saved again")
         for button in (PLUS, MINUS):
             tap(session, READING_BODY, "tools")
             tap(session, TOOL_TYPOGRAPHY, "typography", long_wait)
@@ -368,7 +372,7 @@ def image_sync(session, book):
     Requires the image chain for the final frame, no image adopted from an abandoned session, and a
     saved revision that none of the three steps changed.
     """
-    long_wait = max(session.timeout, 60)
+    long_wait = max(session.timeout, LONG_WAIT)
     opened = lambda s: s.get("view") == "reading" and s.get("pending") == "0" and s.get("saved") == "1"
     before = act(session, "open " + book, opened, "book opened at its saved position", long_wait)
 
@@ -394,11 +398,13 @@ def image_sync(session, book):
     mark = check()
     wait_for(session, lambda s: traced(mark, "2", "0"), "sync request finished", long_wait)
     if traced(mark, "2", "0")[0]["result"] != "0":
+        tap(session, HEADER_BACK, "reading", long_wait)
         return dict(status="inconclusive", reason="The sync check did not succeed; network or account unavailable", before=before)
     answered = lambda s: (s.get("view") == "sync" and s.get("pending") == "0" and s.get("content_busy") == "0"
                           and not open_operations(session.trace[mark:]))
     wait_for(session, answered, "sync answer shown", long_wait)
-    wait_for(session, answered, "sync answer stable", long_wait)  # a position mapping job may start after the first frame
+    # A position mapping job can start just after the first answer frame; require the idle state on a second poll.
+    wait_for(session, answered, "sync answer stable", long_wait)
     stay = act(session, "tap %d %d" % SYNC_STAY, lambda s: s.get("pending") == "0" and s.get("view") in ("sync", "reading"),
                "differing positions dismissed", long_wait)
     if stay["view"] == "sync":
@@ -413,6 +419,7 @@ def image_sync(session, book):
     mark = check()
     wait_for(session, lambda s: traced(mark, "5", "1", "3") or traced(mark, "2", "0"), "HTTPS phase of the sync check", long_wait)
     if not traced(mark, "5", "1", "3"):
+        tap(session, HEADER_BACK, "reading", long_wait)
         return dict(status="inconclusive", reason="The sync request ended before its HTTPS phase", before=before)
     closing = act(session, "tap %d %d" % SYNC_CANCEL, lambda s: s.get("pending") == "0"
                   and s.get("view") in ("network_closing", "sync"), "sync cancelled", long_wait)

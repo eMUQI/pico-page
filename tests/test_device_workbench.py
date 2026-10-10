@@ -143,7 +143,7 @@ class WorkbenchTest(unittest.TestCase):
         self.assertEqual(self.finish()["counts"]["busy"], 1)
 
     def test_reading_flow_rejects_skips_unsaved_turns_drift_and_leaks(self):
-        for fault, message in ((dict(skip=1), "moved page"), (dict(unsaved=1), "revision did not advance"),
+        for fault, message in ((dict(skip=1), "moved page"), (dict(unsaved=1), "saved revision did not advance"),
                                (dict(drift=1), "reverting the font size"), (dict(leak=5000), "internal RAM fell")):
             with self.subTest(fault=fault):
                 self.output = Path(self.temp.name) / ("run-" + str(len(list(Path(self.temp.name).iterdir()))))
@@ -310,6 +310,9 @@ class WorkbenchTest(unittest.TestCase):
             self.assertEqual(image_observation(session)["status"], "inconclusive")
 
     def setUp(self):
+        waits = patch("device_workbench.LONG_WAIT", .3)
+        waits.start()
+        self.addCleanup(waits.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.output = Path(self.temp.name) / "run"
         self.session = None
