@@ -23,7 +23,7 @@ PREFETCH = 256  # Content detail flag: optional work whose failure only lowers t
 READING_BODY, HEADER_BACK = (342, 500), (40, 40)
 TOOL_TYPOGRAPHY, TOOL_SYNC = (205, 1150), (342, 1150)
 SYNC_CHECK, SYNC_CANCEL, CONTINUE_OFFLINE, SYNC_STAY = (342, 996), (342, 1096), (342, 1128), (184, 799)
-FONT_SIZE, MINUS, PLUS, APPLY = (261, 824), (96, 948), (588, 948), (499, 1136)
+FONT_SIZE, MINUS, PLUS, APPLY, PANEL_CLOSE = (261, 824), (96, 948), (588, 948), (499, 1136), (342, 628)
 REQUIRED_CONDITIONS = ("hardware", "tf", "books_sha256", "cache", "network")
 
 
@@ -329,6 +329,20 @@ def reading_flow(session, book, rounds, turns):
         except TimeoutError:
             raise AssertionError(what + ": the saved revision did not advance") from None
 
+    def resize(button):
+        """Applies one font-size step and waits for repagination; False when the step changed nothing."""
+        tap(session, READING_BODY, "tools")
+        tap(session, TOOL_TYPOGRAPHY, "typography", long_wait)
+        tap(session, FONT_SIZE, "typography")
+        tap(session, button, "typography", long_wait)
+        applied = act(session, "tap %d %d" % APPLY, lambda s: s.get("pending") == "0"
+                      and s.get("view") in ("reading", "typography"), "typography applied", long_wait)
+        if applied["view"] == "typography":
+            tap(session, PANEL_CLOSE, "reading", long_wait)
+            return False
+        wait_for(session, lambda s: settled(s) and int(s["pages"]) > 0, "repagination after typography change", long_wait)
+        return True
+
     samples, reopened = [], start
     for _ in range(rounds):
         for _ in range(turns):
@@ -337,13 +351,15 @@ def reading_flow(session, book, rounds, turns):
         for _ in range(turns):
             turn(session, "K1", -1)
         saved_after(forward, "start position saved again")
-        for button in (PLUS, MINUS):
-            tap(session, READING_BODY, "tools")
-            tap(session, TOOL_TYPOGRAPHY, "typography", long_wait)
-            tap(session, FONT_SIZE, "typography")
-            tap(session, button, "typography", long_wait)
-            tap(session, APPLY, "reading", long_wait)
-            wait_for(session, lambda s: settled(s) and int(s["pages"]) > 0, "repagination after typography change", long_wait)
+        # At the largest size the first step is clamped and leaves nothing to apply; then go down and back up.
+        if resize(PLUS):
+            reverse = MINUS
+        elif resize(MINUS):
+            reverse = PLUS
+        else:
+            raise AssertionError("neither font-size step changed the typography")
+        if not resize(reverse):
+            raise AssertionError("the font size could not be restored")
         restored = wait_for(session, lambda s: settled(s) and int(s["pages"]) > 0, "restored typography", long_wait)
         if (restored["page"], restored["pages"]) != (start["page"], start["pages"]):
             raise AssertionError(f"reverting the font size left page {restored['page']}/{restored['pages']}, "
@@ -636,7 +652,7 @@ def finalize(output, metadata, result):
     elif result["status"] in ("pass", "inconclusive") and failed and not incomplete:
         # A recorded failure in complete evidence and conditions outranks an observation that could not be judged.
         result = dict(status="fail", reason="Failure observed during the run", assertion=result)
-    if result["status"] != "infra_error" and analysis.get("stale_image_patches"):
+    if result["status"] != "infra_error" and analysis.get("stale_image_patches") and not incomplete:
         result = dict(status="fail", reason="An image from an earlier session or layout was adopted", assertion=result)
     if metadata.get("mode") in ("image-network", "image-sync"):
         result = image_network_check(analysis, result)
@@ -706,7 +722,9 @@ def compare(first, second):
         m["effective_sdkconfig"] = "\n".join(line for line in m.get("effective_sdkconfig", "").splitlines()
                                                if not any(flag in line for flag in mode_flags))
         return {k: m.get(k) for k in keys}
-    comparable = (bool(left["metadata"].get("workload"))
+    # A run that failed or could not be judged did not complete the workload it names.
+    comparable = (left.get("result", {}).get("status") == right.get("result", {}).get("status") == "pass"
+                  and bool(left["metadata"].get("workload"))
                   and left["metadata"].get("provenance_verified") is True
                   and right["metadata"].get("provenance_verified") is True
                   and bool(left["analysis"].get("composition"))

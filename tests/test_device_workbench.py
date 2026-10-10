@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from device_workbench import (Session, analyze, compare, finalize, refresh_check, refresh_scenario,
                               metadata_for, image_observation, image_sync, reading_flow, trend_check,
                               stale_image_patches, READING_BODY, HEADER_BACK, TOOL_TYPOGRAPHY, TOOL_SYNC,
-                              SYNC_CHECK, SYNC_CANCEL, CONTINUE_OFFLINE, SYNC_STAY, FONT_SIZE, MINUS, PLUS, APPLY)
+                              SYNC_CHECK, SYNC_CANCEL, CONTINUE_OFFLINE, SYNC_STAY, FONT_SIZE, MINUS, PLUS, APPLY, PANEL_CLOSE)
 
 
 class Serial:
@@ -86,8 +86,10 @@ class Reader:
         elif (view, point) == ("tools", TOOL_TYPOGRAPHY): s["view"], self.draft = "typography", self.font
         elif (view, point) == ("tools", TOOL_SYNC): s["view"] = "sync"
         elif (view, point) == ("tools", HEADER_BACK): s["view"] = "library"
-        elif (view, point) == ("typography", PLUS): self.draft += 1
-        elif (view, point) == ("typography", MINUS): self.draft -= 1
+        elif (view, point) == ("typography", PLUS): self.draft = min(self.draft + 1, self.faults.get("largest", 9))
+        elif (view, point) == ("typography", MINUS): self.draft = max(self.draft - 1, self.faults.get("smallest", -9))
+        elif (view, point) == ("typography", PANEL_CLOSE): s["view"] = "reading"
+        elif (view, point) == ("typography", APPLY) and self.draft == self.font: pass  # nothing to apply
         elif (view, point) == ("typography", APPLY):
             self.font = self.draft
             s.update(view="reading", pages=20 - 4 * self.font, page=4 - self.font + self.faults.get("drift", 0) * (self.font == 0))
@@ -172,6 +174,16 @@ class WorkbenchTest(unittest.TestCase):
                 with self.assertRaisesRegex(AssertionError, message):
                     reading_flow(self.start(Serial(Reader(**fault))), "Books/t.epub", 2, 2)
                 self.finish()
+        # At the largest size the scenario steps down and back up; a size that cannot change at all is a failure.
+        self.output = Path(self.temp.name) / "largest"
+        reader = Reader(largest=0)
+        self.assertEqual(reading_flow(self.start(Serial(reader)), "Books/t.epub", 1, 1)["status"], "pass")
+        self.assertEqual((reader.font, reader.taps.count(PANEL_CLOSE), reader.taps.count(MINUS), reader.taps.count(PLUS)), (0, 1, 1, 2))
+        self.finish()
+        self.output = Path(self.temp.name) / "fixed"
+        with self.assertRaisesRegex(AssertionError, "neither font-size step"):
+            reading_flow(self.start(Serial(Reader(largest=0, smallest=0))), "Books/t.epub", 1, 1)
+        self.finish()
         self.output = Path(self.temp.name) / "library"
         reader = Reader()
         reader.state["view"] = "library"
@@ -224,6 +236,18 @@ class WorkbenchTest(unittest.TestCase):
         with patch.object(session, "capture"):
             self.assertEqual(image_sync(session, "Books/t.epub")["sync_answer"], "same")
         self.assertEqual((reader.taps.count(SYNC_STAY), reader.taps.count(HEADER_BACK)), (0, 1))
+
+    def test_stale_patch_needs_complete_conditions_to_fail(self):
+        session = self.start()
+        events = ((7, 0, 1, 50, "2", "1"), (7, 0, 0, 100, "2", "1"), (8, 4, 1, 120, "1", "1"), (8, 4, 0, 130, "1", "1"))
+        for seq, (op, kind, begin, timestamp, session_id, layout) in enumerate(events, 1):
+            session._line(f"PP 1 ENTRY seq={seq} time_us={timestamp} op={op} duration_us=10 task=7 kind={kind} begin={begin} "
+                          f"result=0 session={session_id} layout={layout} frame=3 request=4 detail=1")
+        self.cutoff(4)
+        self.finish()
+        self.assertEqual(finalize(self.output, {}, dict(status="pass"))["result"]["status"], "fail")
+        self.assertEqual(finalize(self.output, dict(missing=["device_build_verified"]), dict(status="pass"))["result"]["status"],
+                         "inconclusive")
 
     def test_stale_image_patch_after_newer_session_frame_fails(self):
         frame = dict(kind="0", session="2", layout="1", time_us="100", start_us=50, op="7")
@@ -560,6 +584,7 @@ class WorkbenchTest(unittest.TestCase):
         session = self.start()
         self.finish()
         base = finalize(self.output, {"missing": ["hardware"], "source_dirty": False}, {"status": "inconclusive"})
+        base["result"] = {"status": "pass"}
         path = self.output / "run.json"
         self.assertFalse(compare(path, path)["comparable"])
         base["metadata"].update(missing=[], hardware="Read Pico", source_dirty=False)
@@ -577,6 +602,10 @@ class WorkbenchTest(unittest.TestCase):
         other.write_text(json.dumps(base))
         self.assertTrue(compare(path, other)["comparable"])
         self.assertFalse(compare(path, other)["same_source"])
+        for status in ("fail", "inconclusive"):
+            unfinished = self.output / "unfinished.json"
+            unfinished.write_text(json.dumps(dict(base, result={"status": status})))
+            self.assertFalse(compare(path, unfinished)["comparable"])
         for key, value in (("workload", None), ("workload", "different-script"), ("provenance_verified", False)):
             changed = json.loads(json.dumps(base))
             changed["metadata"][key] = value
