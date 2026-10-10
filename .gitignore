@@ -25,3 +25,8 @@ artifacts/
 # Per-device network and synchronization credentials
 **/network.toml
 **/sync.toml
+
+# Website build output
+/web/node_modules/
+/web/dist/
+/web/.astro/

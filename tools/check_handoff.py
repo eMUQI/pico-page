@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def project_files():
     """Exclude downloaded dependencies, private data and generated build products."""
-    excluded = {'build', 'third_party', 'managed_components', 'local', 'private', 'artifacts', '__pycache__'}
+    excluded = {'build', 'third_party', 'managed_components', 'node_modules', 'local', 'private', 'artifacts', '__pycache__'}
     for directory, dirs, files in os.walk(ROOT):
         dirs[:] = [name for name in dirs if not name.startswith('.') and name not in excluded]
         for name in files:
