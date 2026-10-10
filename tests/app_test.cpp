@@ -83,6 +83,17 @@ struct Driver {
         input.event.phase = Phase::End;
         app.input(input);
     }
+    void swipe(bool next, int x = 300, int y = 480, bool queued = false) {
+        using namespace pico_page::platform;
+        const Event begin{EventKind::Touch, EventPhase::Begin, ++sequence, x, y, 1000};
+        const Event end{EventKind::Touch, EventPhase::End, sequence, x + (next ? -100 : 100), y, 651000};
+        const auto gesture = released_gesture(begin, end);
+        assert(gesture == (next ? ReleasedGesture::Next : ReleasedGesture::Previous));
+        AppInput input{{sequence, Phase::Begin, next ? Input::Next : Input::Previous}, false, x, y, queued};
+        app.input(input);
+        input.event.phase = Phase::End;
+        app.input(input);
+    }
     void hold(int x, int y) {
         ++sequence;
         app.input({{sequence, Phase::Begin, Input::TouchCenter}, true, x, y, false, true});
@@ -466,14 +477,14 @@ static void help_test(const fs::path& root, const fs::path& fixtures, bool async
         assert(app.saved_record() == saved && !app.take_network_request());
         assert(app.take_portal_action() == PortalAction::None && app.take_usb_transfer_action() == UsbTransferAction::None);
         if (index + 1 < kHelpPages.size()) {
-            if (index % 2) driver.tap(600, 1160); else driver.key(Input::K3);
+            if (index % 2) driver.tap(600, 1160); else driver.swipe(true);
             assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Overlay);
             driver.present(); assert(app.canvas().pixels() != pixels);
         }
     }
     driver.key(Input::K3); driver.tap(600, 1160); assert(!app.pending_frame());
     for (std::size_t index = 1; index < kHelpPages.size(); ++index) {
-        if (index % 2) driver.tap(60, 1160); else driver.key(Input::K1);
+        if (index % 2) driver.tap(60, 1160); else driver.swipe(false);
         driver.present(); assert(app.view() == View::Help);
     }
     assert(app.canvas().pixels() == first && app.saved_record() == saved);
@@ -485,6 +496,51 @@ static void help_test(const fs::path& root, const fs::path& fixtures, bool async
     assert(app.show_power_menu()); driver.present(); driver.tap(300, 1120); driver.present();
     assert(app.view() == View::Help && app.canvas().pixels() == first && app.saved_record() == saved);
     if (!with_book) assert(!fs::exists(root));
+}
+
+static void swipe_test(const fs::path& root, const fs::path& fixtures, bool grid) {
+    fs::create_directories(root / "Books");
+    for (int i = 0; i < 13; ++i)
+        fs::copy_file(fixtures / "swipe.epub", root / ("Books/book" + std::to_string(i) + ".epub"));
+    write(root / "PicoPage/settings.toml", std::string("schema_version = 1\n[library]\nview = '") + (grid ? "grid" : "list") + "'\n");
+    ReaderApp app(root.string(), "swipe-test", true, true); Driver driver{app};
+    assert(app.initialize()); driver.present();
+    const auto first = app.canvas().pixels();
+    driver.swipe(false); assert(!app.pending_frame() && app.canvas().pixels() == first);
+    assert(app.can_long_press_at(300, 480));
+    driver.swipe(true); assert(app.view() == View::Library); driver.present();
+    assert(app.canvas().pixels() != first && !app.saved_record());
+    driver.swipe(true); driver.present();
+    const auto last = app.canvas().pixels();
+    driver.swipe(true); assert(!app.pending_frame() && app.canvas().pixels() == last);
+    driver.swipe(false); driver.present(); driver.swipe(false); driver.present();
+    assert(app.canvas().pixels() == first);
+    opened(app, "Books/book0.epub"); driver.present();
+    const auto saved = app.saved_record();
+    const auto progress = read(root / "Books/book0.epub.picopage/progress.json");
+    driver.swipe(true);
+    assert(app.pending_frame() && app.saved_record() == saved);
+    app.complete_frame(true);
+    assert(app.save_due() && app.saved_record() == saved);
+    assert(read(root / "Books/book0.epub.picopage/progress.json") == progress);
+    driver.swipe(true, 300, 480, true);
+    assert(app.pending_frame()); driver.present();
+    assert(app.saved_record()->anchor != saved->anchor);
+    driver.tap(342, 500); driver.present(); assert(app.view() == View::Tools);
+    const auto after_turn = app.saved_record();
+    for (bool next : {false, true}) driver.swipe(next);
+    assert(!app.pending_frame() && app.view() == View::Tools && app.saved_record() == after_turn);
+    driver.tap(205, 1140); driver.present(); assert(app.view() == View::Typography);
+    const auto preview = app.canvas().pixels();
+    for (bool next : {false, true}) driver.swipe(next);
+    assert(!app.pending_frame() && app.canvas().pixels() == preview && app.saved_record() == after_turn);
+    driver.close(); driver.present();
+    if (app.view() == View::Reading) { driver.tap(342, 500); driver.present(); }
+    driver.tap(68, 1140); driver.present(); assert(app.view() == View::Contents);
+    const auto contents = app.canvas().pixels();
+    driver.swipe(true); driver.present(); assert(app.view() == View::Contents && app.canvas().pixels() != contents);
+    driver.swipe(false); driver.present(); assert(app.view() == View::Contents && app.canvas().pixels() == contents);
+    assert(app.saved_record() == after_turn);
 }
 
 static std::vector<std::uint8_t> footer_pixels(const ReaderApp& app, int left, int right) {
@@ -670,6 +726,8 @@ int main(int argc, char** argv) {
     const auto bounded = reading_footer::chapter_label(wide_label, 0);
     assert(bounded.size() == 129 && graphics::decode_utf8(bounded).size() == 43);
 
+    swipe_test(card / "SwipeList", fixtures, false);
+    swipe_test(card / "SwipeGrid", fixtures, true);
     help_test(card / "HelpNoCard", fixtures, false, false);
     help_test(card / "HelpSync", fixtures, false, true);
     help_test(card / "HelpAsync", fixtures, true, true);
