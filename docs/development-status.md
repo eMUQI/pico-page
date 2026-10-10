@@ -1,5 +1,7 @@
 # 开发状态
 
+2026-10-11 PR #39 的三项评审意见和 #42 合并前遗留的一项已修正：证据完整时已记录的失败不再被「不可判定」的状态观察掩盖；已取消的网络请求须有新增的 NetworkStage 阶段事件落在图片任务区间内才算交叠；画布导出中途帧变化归为不可判定。host Debug 与开启埋点的 ASan/UBSan 各 18/18，Python 测试 38/38，四个固件入口在干净提交 `1e2aea0` 上构建通过，Release 无诊断符号。诊断镜像 `b3c9e0c9…` 已烧录，真机上完成与取消两种同步请求的阶段事件符合预期。详情见本日「PR #39 评审修正与网络阶段事件」记录。
+
 2026-10-10 PR #42 的两项评审意见已修正：构建入口现在在构建前后核对 defaults 是否在生效 sdkconfig 中取同样的值，过期配置会报错而不是静默沿用旧分配模式；运行时文档和配置注释不再写实测数值。Python 测试 35/35，四个固件入口重建通过。详情见本日「PR #42 评审修正」记录。
 
 2026-10-10 位置映射任务的「约 40 KB 内部 RAM 瞬时占用」已定位：其中约 8 KB 是真实占用，来自 SD 卡向 PSRAM 缓冲读数据时 ESP-IDF 临时分配的 DMA 缓冲；其余 32 KB 是口径差，`internal` 剩余量含 32 KB 储备池，而 internal_min 中该池的最低值自启动起为 0。按此口径修正：改动前 TLS 握手期间主内部堆最低约 2 KB 并挤占储备池，改动后为约 18 KB（只做检查）和约 11 KB（Wi-Fi 保持时执行映射）。结论方向不变，候选文档修正未提交。详情见本日「映射任务内部 RAM 占用定位与口径修正」记录。
@@ -4266,3 +4268,16 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
 - 意见二（实测数值不应写进运行时契约）：成立。`docs/platform-runtime.md` 只保留分配位置、原因和安全后果；`firmware/sdkconfig.defaults` 的注释改为不含数值的约束说明。数值及其条件留在开发记录。
 - 验证：`python3 -m unittest discover -s tests` 35/35，新增分层 defaults 的过期与一致两种情况。用改动前备份的 Release sdkconfig 核对，报出 `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC`；当前四份生效配置核对通过。经 EIM 的 ESP-IDF 6.1 依次执行 release、performance、diagnostic 和无参数入口，全部通过，应用大小 3,369,680 / 3,371,216 / 3,403,808 / 3,392,688 B。交接检查与 diff 检查通过。
 - 未测：未重跑 host CTest 的 C++ 部分和 sanitizer，由 CI 覆盖；本批未烧录，设备仍装 `7ce3218a…`，与新构建的生效配置相同、镜像摘要不同。本地无参数入口的 sdkconfig 今后只能改动 defaults 未指定的选项。
+
+## 2026-10-11 · PR #39 评审修正与网络阶段事件
+
+- 范围：处理 PR #39 的三项评审意见，以及 PR #42 合并前未处理的一项。#42 已合并进 `feat/image-workbench-evidence`，本批提交 `1e2aea0` 在其上。固件改动只在诊断埋点：新增事件类型和同步请求的三处阶段包装，不改同步、取消或保存行为。
+- 失败不被掩盖：`finalize()` 原来只在观察结果为 pass 时才把已记录的失败升为 fail，结束时的状态观察不可判定（例如最后一帧失败使 `frame_ok=0`）会让失败只显示为 inconclusive。现在证据完整时，观察结果为 pass 或 inconclusive 都会因失败、超时、命令失败或驱动帧失败报告 fail；证据有缺口时仍为 inconclusive，skip 与 infra_error 不变。人工模式在证据完整且有失败记录时也因此报告 fail。
+- 取消请求的交叠证据：同步请求在入口检查处即被取消时，仍会产生一个 Network 区间，但没有执行联网、校时或 HTTP。固件新增 `Kind::NetworkStage`（kind=5），把联网、校时、HTTPS 三个阶段各记为一个操作，detail 为 1/2/3，request 与所属 Network 相同。工作台只在 Network 成功，或有同一 request 的阶段操作落在图片内容任务区间内时，才把它计入交叠；`image_chains` 新增 `network_stages`。旧固件没有阶段事件，已取消的请求不再能作为交叠依据。
+- 画布导出竞态：导出过程中帧或校验变化时，设备返回 `frame_not_confirmed_or_changed` 或客户端校验失败，原先被归为 infra_error。现在错误信息涉及帧变化时归为 inconclusive，其他导出错误仍向上抛出。
+- 指南措辞：`docs/diagnostic-workbench.md` 不再把「储备池最低值为 0」写成不变量，只保留 internal_min 是各堆最低值之和的语义；同时补充 kind=5、metrics 行数和上述判定规则。
+- 资源与开销：记录器每多一个类型增加 64 B 聚合计数，Performance 的 `sizeof(Recorder)` 静态断言（小于 512 B）仍通过；每个同步请求多 3 个操作即 6 个事件，不新增任务、分配、I/O 或等待。应用大小：Release 3,369,680 B（不变），Performance 3,371,536 B（加 320 B），Diagnostic 3,404,192 B（加 384 B），标准入口 3,392,688 B。Release ELF 中 `diagnostics::` 符号为 0。
+- 验证：host Debug CTest 18/18；`build/sanitized`（开启埋点，ASan/UBSan）18/18，本机未运行 LSan；Python 测试 38/38，新增取消请求有无阶段证据、失败压过不可判定观察、导出竞态与传输错误的区分。经 EIM 的 ESP-IDF 6.1 在干净提交 `1e2aea0` 上构建四个入口，来源记录 dirty=false。
+- 真机：用户已授权烧录。核对 MAC、分区表与 otadata 后，仅向 ota_0=`0x10000` 写入诊断应用（SHA-256 前缀 `b3c9e0c908d8d457`，3,404,192 B），`Hash of data verified`。`metrics` 返回 6 行。合成书上一次完成的检查：联网 3.91 秒、校时 0.28 秒、HTTPS 12.60 秒，三个阶段均成功，Network 16.80 秒成功，随后 MapDownload 成功。一次检查后约 1.3 秒取消：阶段 1 与 Network 均为 cancelled，没有阶段 2、3。采集 dropped 为 0，tx_failures 保持 1；保存修订 63 与页码未变。
+- 观察：这次启动后的第一个 HTTPS 阶段用了 12.60 秒，此前稳态约 4 秒。上一条记录中「启动后首次握手可能变慢」现在可以用阶段事件直接测量，原因未查。
+- 未测：`image-network` 入口本身需要人在设备上操作，本批没有用它重新采集一轮图片与网络交叠；新的交叠判定由单元测试覆盖，阶段事件由真机原始追踪确认。物理屏幕与实体输入未测。证据在 `.local/runs/pr39-review/` 与 `.local/device/install/pr39-review-20261011/`，本地忽略文件。
