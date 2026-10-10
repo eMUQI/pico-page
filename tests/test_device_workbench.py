@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from device_workbench import (Session, analyze, compare, finalize, refresh_check, refresh_scenario,
                               metadata_for, image_observation, image_sync, reading_flow, trend_check,
                               stale_image_patches, READING_BODY, HEADER_BACK, TOOL_TYPOGRAPHY, TOOL_SYNC,
-                              SYNC_CHECK, SYNC_CANCEL, CONTINUE_OFFLINE, FONT_SIZE, MINUS, PLUS, APPLY)
+                              SYNC_CHECK, SYNC_CANCEL, CONTINUE_OFFLINE, SYNC_STAY, FONT_SIZE, MINUS, PLUS, APPLY)
 
 
 class Serial:
@@ -54,9 +54,10 @@ class Reader:
     """Scripted stand-in for the diagnostic console: views, page state and queued trace entries."""
     def __init__(self, **faults):
         self.state = dict(view="reading", pending=0, content_busy=0, save_busy=0, save_due=0, saved=1, revision=10,
-                          page=4, pages=20, frame=1, frame_ok=1, crc32="abcd", internal=90000, largest_internal=31744,
+                          page=4, pages=20, count="idle", frame=1, frame_ok=1, crc32="abcd", internal=90000, largest_internal=31744,
                           psram=4000000, largest_psram=3000000)
         self.faults, self.font, self.draft, self.busy, self.sequence, self.entries, self.taps = faults, 0, 0, 0, 0, [], []
+        self.opens = 0
 
     def emit(self, op, kind, begin, time_us, result=0, frame=0, request=0, detail=0, session=1, layout=1):
         self.sequence += 1
@@ -76,6 +77,15 @@ class Reader:
         elif (view, point) == ("typography", APPLY):
             self.font = self.draft
             s.update(view="reading", pages=20 - 4 * self.font, page=4 - self.font + self.faults.get("drift", 0) * (self.font == 0))
+        elif (view, point) == ("sync", SYNC_CHECK) and SYNC_CHECK not in self.taps[:-1]:
+            # First check: completes, then maps the remote position; the answer shows differing positions.
+            self.emit(20, 2, 1, 10, request=7); self.emit(21, 5, 1, 11, request=7, detail=3)
+            self.emit(21, 5, 0, 20, request=7, detail=3)
+            self.emit(20, 2, 0, 21, result=self.faults.get("offline", 0), request=7)
+            self.emit(22, 3, 1, 30, request=3, detail=13); self.emit(22, 3, 0, 40, request=3, detail=13)
+        elif (view, point) == ("sync", SYNC_STAY):
+            s.update(view="sync" if self.faults.get("same") else "reading", revision=s["revision"] + self.faults.get("adopted", 0))
+        elif (view, point) == ("sync", HEADER_BACK): s["view"] = "reading"
         elif (view, point) == ("sync", SYNC_CHECK):
             self.emit(2, 2, 1, 100, request=8)
             if not self.faults.get("no_https"):
@@ -114,6 +124,7 @@ class Reader:
         elif verb.startswith("tap "):
             self.tap(tuple(map(int, verb.split()[1:])))
         elif verb.startswith("open "):
+            self.opens += 1
             s.update(view="reading", frame=s["frame"] + 1, internal=s["internal"] - self.faults.get("leak", 0))
         else:
             raise AssertionError(verb)
@@ -152,6 +163,7 @@ class WorkbenchTest(unittest.TestCase):
             observation = image_sync(session, "Books/t.epub")
         self.assertEqual(observation["status"], "pass")
         self.assertEqual(reader.taps[-3:], [SYNC_CHECK, SYNC_CANCEL, CONTINUE_OFFLINE])
+        self.assertEqual((reader.taps.count(SYNC_STAY), reader.taps.count(HEADER_BACK), reader.opens), (1, 0, 3))
         session._line(f"PP 50 OK stopped=1 queued=0 sequence={reader.sequence} dropped=0 tx_failures=0")
         session.event("cutoff", sequence=reader.sequence)
         self.finish()
@@ -160,13 +172,24 @@ class WorkbenchTest(unittest.TestCase):
         self.assertEqual(run["result"]["evidence"][0]["network_stages"], ["3"])
 
     def test_image_sync_position_change_fails_and_early_end_is_inconclusive(self):
-        with self.assertRaisesRegex(AssertionError, "moved page"):
-            session = self.start(Serial(Reader(moved=1)))
-            with patch.object(session, "capture"):
-                image_sync(session, "Books/t.epub")
-        self.finish()
-        self.output = Path(self.temp.name) / "early"
-        self.assertEqual(image_sync(self.start(Serial(Reader(no_https=1))), "Books/t.epub")["status"], "inconclusive")
+        for fault, step in ((dict(moved=1), "the cancelled sync check"), (dict(adopted=1), "the completed sync check")):
+            with self.subTest(fault=fault), self.assertRaisesRegex(AssertionError, step + " changed saved revision"):
+                self.output = Path(self.temp.name) / ("run-" + str(len(list(Path(self.temp.name).iterdir()))))
+                session = self.start(Serial(Reader(**fault)))
+                with patch.object(session, "capture"):
+                    image_sync(session, "Books/t.epub")
+            self.finish()
+        for fault in (dict(no_https=1), dict(offline=1)):
+            self.output = Path(self.temp.name) / ("run-" + str(len(list(Path(self.temp.name).iterdir()))))
+            self.assertEqual(image_sync(self.start(Serial(Reader(**fault))), "Books/t.epub")["status"], "inconclusive")
+            self.finish()
+        # An answer without a choice page is left through the header control.
+        self.output = Path(self.temp.name) / "same"
+        reader = Reader(same=1)
+        session = self.start(Serial(reader))
+        with patch.object(session, "capture"):
+            self.assertEqual(image_sync(session, "Books/t.epub")["status"], "pass")
+        self.assertEqual(reader.taps.count(HEADER_BACK), 1)
 
     def test_stale_image_patch_after_newer_session_frame_fails(self):
         frame = dict(kind="0", session="2", layout="1", time_us="100", start_us=50, op="7")

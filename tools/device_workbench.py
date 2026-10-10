@@ -22,7 +22,7 @@ PREFETCH = 256  # Content detail flag: optional work whose failure only lowers t
 # by a check of the resulting view, so a layout change ends the run instead of tapping something else.
 READING_BODY, HEADER_BACK = (342, 500), (40, 40)
 TOOL_TYPOGRAPHY, TOOL_SYNC = (205, 1150), (342, 1150)
-SYNC_CHECK, SYNC_CANCEL, CONTINUE_OFFLINE = (342, 996), (342, 1096), (342, 1128)
+SYNC_CHECK, SYNC_CANCEL, CONTINUE_OFFLINE, SYNC_STAY = (342, 996), (342, 1096), (342, 1128), (184, 799)
 FONT_SIZE, MINUS, PLUS, APPLY = (261, 824), (96, 948), (588, 948), (499, 1136)
 REQUIRED_CONDITIONS = ("hardware", "tf", "books_sha256", "cache", "network")
 
@@ -244,6 +244,11 @@ def settled(state):
     return state.get("view") == "reading" and state.get("saved") == "1" and all(state.get(k) == "0" for k in QUIET)
 
 
+def quiescent(state):
+    """Settled, and the background page count has finished, so no operation is left open at the cutoff."""
+    return settled(state) and state.get("count") == "idle"
+
+
 def wait_for(session, accept, what, timeout=None):
     """Polls status and drains the trace until accept(state); the awaited state names the timeout."""
     deadline = time.monotonic() + (timeout or session.timeout)
@@ -339,7 +344,7 @@ def reading_flow(session, book, rounds, turns):
         tap(session, READING_BODY, "tools")
         tap(session, HEADER_BACK, "library", long_wait)
         act(session, "open " + book, lambda s: s.get("view") == "reading" and s.get("pending") == "0", "book reopened", long_wait)
-        reopened = wait_for(session, lambda s: settled(s) and int(s["pages"]) > 0, "reopened page settled", long_wait)
+        reopened = wait_for(session, lambda s: quiescent(s) and int(s["pages"]) > 0, "reopened page quiescent", long_wait)
         if reopened["page"] != start["page"] or reopened["revision"] != restored["revision"]:
             raise AssertionError(f"reopening showed page {reopened['page']} revision {reopened['revision']}, "
                                  f"expected page {start['page']} revision {restored['revision']}")
@@ -348,30 +353,71 @@ def reading_flow(session, book, rounds, turns):
                 start=start, after=reopened, memory=samples, internal_drop=trend_check(samples))
 
 
+def open_operations(entries):
+    """Operation IDs that began in these trace entries and have not ended."""
+    active = set()
+    for entry in entries:
+        (active.add if entry.get("begin") == "1" else active.discard)(entry.get("op"))
+    return active
+
+
 def image_sync(session, book):
-    """Scenario 1: cancel a sync check during its HTTPS phase so that the request still runs while
-    the reading page decodes its image, then require the image chain and an unchanged position."""
+    """Scenario 1 on an image page of the test book: a completed sync check, a reopen during the image
+    decode, then a check cancelled in its HTTPS phase so that the request overlaps the restarted decode.
+
+    Requires the image chain for the final frame, no image adopted from an abandoned session, and a
+    saved revision that none of the three steps changed.
+    """
     long_wait = max(session.timeout, 60)
-    act(session, "open " + book, lambda s: s.get("view") == "reading" and s.get("pending") == "0", "book opened", long_wait)
-    before = wait_for(session, settled, "saved idle image page", long_wait)
-    tap(session, READING_BODY, "tools")
-    tap(session, TOOL_SYNC, "sync", long_wait)
-    seen = len(session.trace)
-    act(session, "tap %d %d" % SYNC_CHECK, lambda s: s.get("pending") == "0", "sync check accepted", long_wait)
-    def https_started(_):
-        return any(e.get("kind") == "5" and e.get("detail") == "3" and e.get("begin") == "1" for e in session.trace[seen:])
-    def request_ended(_):
-        return any(e.get("kind") == "2" and e.get("begin") == "0" for e in session.trace[seen:])
-    wait_for(session, lambda s: https_started(s) or request_ended(s), "HTTPS phase of the sync check", long_wait)
-    if not https_started(None):
+    opened = lambda s: s.get("view") == "reading" and s.get("pending") == "0" and s.get("saved") == "1"
+    before = act(session, "open " + book, opened, "book opened at its saved position", long_wait)
+
+    def unchanged(step):
+        # The page number is unknown until counting ends, but any saved move of position advances the revision.
+        after = wait_for(session, quiescent, "page saved and quiescent after " + step, long_wait)
+        if before["revision"] != after["revision"]:
+            raise AssertionError(f"{step} changed saved revision {before['revision']} to {after['revision']}")
+        return after
+
+    def check():
+        tap(session, READING_BODY, "tools")
+        tap(session, TOOL_SYNC, "sync", long_wait)
+        mark = len(session.trace)
+        act(session, "tap %d %d" % SYNC_CHECK, lambda s: s.get("pending") == "0", "sync check accepted", long_wait)
+        return mark
+
+    def traced(mark, kind, begin, detail=None):
+        return [e for e in session.trace[mark:] if e.get("kind") == kind and e.get("begin") == begin
+                and detail in (None, e.get("detail"))]
+
+    # 1. Whatever the server answers, the position stays until the reader chooses one.
+    mark = check()
+    wait_for(session, lambda s: traced(mark, "2", "0"), "sync request finished", long_wait)
+    if traced(mark, "2", "0")[0]["result"] != "0":
+        return dict(status="inconclusive", reason="The sync check did not succeed; network or account unavailable", before=before)
+    answered = lambda s: (s.get("view") == "sync" and s.get("pending") == "0" and s.get("content_busy") == "0"
+                          and not open_operations(session.trace[mark:]))
+    wait_for(session, answered, "sync answer shown", long_wait)
+    wait_for(session, answered, "sync answer stable", long_wait)  # a position mapping job may start after the first frame
+    stay = act(session, "tap %d %d" % SYNC_STAY, lambda s: s.get("pending") == "0" and s.get("view") in ("sync", "reading"),
+               "differing positions dismissed", long_wait)
+    if stay["view"] == "sync":
+        tap(session, HEADER_BACK, "reading", long_wait)
+    unchanged("the completed sync check")
+
+    # 2. The second open abandons the first session while its image is still decoding.
+    act(session, "open " + book, opened, "book reopened", long_wait)
+    act(session, "open " + book, opened, "book reopened during the image decode", long_wait)
+
+    # 3. Leave while the image decodes; it restarts when reading resumes and the cancelled request winds down.
+    mark = check()
+    wait_for(session, lambda s: traced(mark, "5", "1", "3") or traced(mark, "2", "0"), "HTTPS phase of the sync check", long_wait)
+    if not traced(mark, "5", "1", "3"):
         return dict(status="inconclusive", reason="The sync request ended before its HTTPS phase", before=before)
     closing = act(session, "tap %d %d" % SYNC_CANCEL, lambda s: s.get("pending") == "0"
                   and s.get("view") in ("network_closing", "sync"), "sync cancelled", long_wait)
     tap(session, CONTINUE_OFFLINE if closing["view"] == "network_closing" else HEADER_BACK, "reading", long_wait)
-    after = wait_for(session, settled, "image page saved and idle", long_wait)
-    if any(before[k] != after[k] for k in ("page", "revision")):
-        raise AssertionError(f"the cancelled sync check moved page {before['page']} revision {before['revision']} "
-                             f"to page {after['page']} revision {after['revision']}")
+    unchanged("the cancelled sync check")
     observation = image_observation(session)
     return dict(observation, before=before) if observation["status"] == "pass" else observation
 
@@ -609,7 +655,7 @@ def metadata_for(args):
     metadata["checkout_source"] = current
     metadata["host_platform"] = sys.platform
     metadata["mode"] = args.mode
-    metadata["workload"] = {"refresh": "refresh-v1:K2x1", "image-sync": "image-sync-v1:cancel-in-https",
+    metadata["workload"] = {"refresh": "refresh-v1:K2x1", "image-sync": "image-sync-v1:check,reopen,cancel-in-https",
                             "reading-flow": "reading-flow-v1:rounds=%s,turns=%s" % (getattr(args, "rounds", None), getattr(args, "turns", None))}.get(args.mode)
     hashes, config = artifacts(args.firmware) if args.firmware else ({}, None)
     metadata["artifacts_sha256"] = hashes
