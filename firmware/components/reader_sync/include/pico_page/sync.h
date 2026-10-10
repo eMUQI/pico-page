@@ -59,6 +59,12 @@ RemoteResult parse_remote(int http_status, const std::string& body);
 bool upload_confirmed(int http_status, std::string& error);
 
 /**
+ * Error of to_xpointer and from_xpointer for a chapter part outside the verified plain XHTML
+ * profile, for example one that holds an image or a table. No position in that part is mapped.
+ */
+inline constexpr char kUnsupportedStructure[] = "This chapter contains an unsupported KOReader DOM structure";
+
+/**
  * Exact mapping for the verified plain XHTML profile and configured CREngine
  * DOM version. Unsupported content returns false; percentage is never a locator.
  */

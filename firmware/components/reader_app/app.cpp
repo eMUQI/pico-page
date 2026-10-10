@@ -1232,7 +1232,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             } else if (request.kind == ContentJob::Kind::MapDownload) {
                 accept_remote_mapping(job->result.mapped_anchor, job->result.mapped_place, job->result.error);
             } else if (!job->result.error.empty()) {
-                sync_status = "这个位置暂时不能上传。";
+                upload_mapping_failed(job->result.error);
             } else if (!sync_checked || !request.record || !session.saved_record() || !(*session.saved_record() == *request.record)) {
                 cancel_sync();
                 sync_status = "阅读位置已经改变，请重新检查。";
@@ -5049,8 +5049,27 @@ struct ReaderApp::Impl final : DisplayBackend {
             } else { remote_place = place; sync_state = SyncState::Different; }
         } else {
             remote_anchor.reset(); sync_state = SyncState::Unmapped;
+            log_mapping_failure("Download", detail);
             if (memory_error(detail)) sync_status = "设备内存不足，暂时无法定位远端位置，没有跳转。";
+            else if (detail == sync::kUnsupportedStructure)
+                sync_status = "远端位置所在的章节含有图片或表格等内容，暂不支持换算成本机位置，没有跳转。";
         }
+    }
+    /**
+     * Records why a position could not be mapped. The texts are fixed and name at most a
+     * resource inside the EPUB; they hold no reading text, position or account data.
+     */
+    static void log_mapping_failure([[maybe_unused]] const char* direction, [[maybe_unused]] const std::string& detail) {
+#ifdef ESP_PLATFORM
+        ESP_LOGW("reader_sync", "%s mapping failed: %s", direction, detail.c_str());
+#endif
+    }
+    /** Reports a saved position that could not be turned into a KOReader position; nothing was sent. */
+    void upload_mapping_failed(const std::string& detail) {
+        log_mapping_failure("Upload", detail);
+        sync_status = memory_error(detail) ? "设备内存不足，暂时无法计算上传位置。" :
+            detail == sync::kUnsupportedStructure ? "这一章含有图片或表格等内容，暂不支持换算成 KOReader 的位置，没有上传。" :
+            "这个位置暂时不能上传。";
     }
     void upload() {
         if (!sync_checked || !persist() || !session.saved_record()) {
@@ -5081,7 +5100,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             !find_content(store, document, index, source, detail, ChapterLoad::Mapping, holds) ||
             !sync::to_xpointer(document, source, record.anchor, sync_config.dom_version, xpointer,
                                detail)) {
-            sync_status = memory_error(detail) ? "设备内存不足，暂时无法计算上传位置。" : "这个位置暂时不能上传。";
+            upload_mapping_failed(detail);
             draw_sync();
             overlay();
             return;

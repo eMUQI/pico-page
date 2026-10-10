@@ -1840,6 +1840,57 @@ int main(int argc, char** argv) {
         assert(compare(first + "p[4501]/text()[1].0", "0.99").first == -1);
         assert(compare(second + "h1[1]/text()[1].0", "0").first == 1);
     }
+    // A chapter with an image lies outside the exact mapping profile. Its positions are neither
+    // uploaded nor offered as a jump target, and the panel names that cause rather than the
+    // fallback for a remote position that the book does not contain.
+    for (const bool async : {false, true}) {
+        const auto root = card / (async ? "SyncUnsupportedAsync" : "SyncUnsupportedSync");
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "image-flow.epub", root / "Books/images.epub");
+        write(root / "PicoPage/sync.toml", sync_config);
+        write(root / "PicoPage/network.toml", "schema_version=2\n[[wifi]]\nssid=\"home\"\npassword=\"password\"\n");
+        ReaderApp app(root.string(), "sync-unsupported", true, async); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/images.epub"); driver.present();
+        driver.complete_content();
+        const auto saved = *app.saved_record();
+        assert(saved.anchor.resource.find("chapter1") != std::string::npos);
+        const auto upload = [&] {
+            driver.sync_view();
+            const auto request = driver.check_remote();
+            app.complete_network(request.id, 200, "{}", ""); driver.present();
+            assert(std::string(app.sync_state()) == "no-record");
+            const auto empty = app.canvas().pixels();
+            driver.tap(342, 1090); driver.present(); driver.tap(500, 1120); driver.present();
+            driver.complete_content();
+            assert(app.view() == View::Sync);
+            return app.canvas().pixels() != empty;
+        };
+        const auto remote = [&](const std::string& pointer) {
+            driver.sync_view();
+            const auto request = driver.check_remote();
+            app.complete_network(request.id, 200, R"({"progress":")" + pointer + R"(","percentage":0.5})", "");
+            driver.present(); driver.complete_content();
+            assert(app.view() == View::Sync && std::string(app.sync_state()) == "unmapped");
+            const auto pixels = app.canvas().pixels();
+            driver.tap(342, 990); driver.present(); driver.complete_content();
+            assert(app.view() == View::Reading && !app.take_network_request());
+            return pixels;
+        };
+        // The refused upload sends nothing, keeps the saved position and changes the status text.
+        assert(upload() && !app.take_network_request() && *app.saved_record() == saved);
+        driver.close(); driver.present(); driver.complete_content();
+        const auto unsupported = remote("/body[1]/DocFragment[1]/body[1]/p[1]/text()[1].0");
+        const auto missing = remote("/body[1]/DocFragment[2]/body[1]/p[77]/text()[1].0");
+        assert(unsupported != missing && *app.saved_record() == saved);
+        // The next chapter has no image; the same steps there produce the upload.
+        while (app.saved_record()->anchor.resource.find("chapter2") == std::string::npos) {
+            driver.key(Input::K3); driver.present(); driver.complete_content();
+        }
+        upload();
+        const auto sent = app.take_network_request();
+        assert(sent && sent->request.method == "PUT");
+        app.complete_network(sent->id, 200, "{}", ""); driver.present();
+    }
     {
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();

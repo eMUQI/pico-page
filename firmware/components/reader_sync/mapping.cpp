@@ -111,7 +111,7 @@ CssProfile css_profile(const Chapter& chapter) {
 }
 
 bool mapping_profile(const Chapter& chapter, CssProfile& css, std::string& error) {
-    if (!chapter.plain_dom) { error = "This chapter contains an unsupported KOReader DOM structure"; return false; }
+    if (!chapter.plain_dom) { error = kUnsupportedStructure; return false; }
     if (chapter.split_node) { error = "This chapter part divides a text node"; return false; }
     css = css_profile(chapter);
     if (!css.normal_whitespace) { error = "This chapter requires CSS whitespace or generated-content mapping"; return false; }

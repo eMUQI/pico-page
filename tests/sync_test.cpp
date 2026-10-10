@@ -42,6 +42,27 @@ int main(int argc, char** argv) {
     }
     chapter.plain_dom = false;
     assert(!sync::to_xpointer(document, chapter, emoji, 20260812, pointer, error));
+    assert(error == sync::kUnsupportedStructure);
+    {
+        // An image puts its whole chapter outside the profile: the text beside it and the image
+        // itself are refused in both directions with the error that names this cause.
+        EpubDocument images;
+        Chapter flow;
+        const auto fixture = (std::filesystem::path(argv[1]).parent_path() / "image-flow.epub").string();
+        assert(images.open(fixture, error) && images.load_chapter(0, flow, error) && !flow.images.empty());
+        std::size_t text_runs = 0, media_runs = 0;
+        for (const auto& run : flow.runs) {
+            Anchor anchor;
+            assert(flow.anchor_at(run.begin, anchor));
+            assert(!sync::to_xpointer(images, flow, anchor, 20260812, pointer, error));
+            assert(error == sync::kUnsupportedStructure);
+            ++(run.element_reference ? media_runs : text_runs);
+        }
+        assert(text_runs && media_runs);
+        Anchor refused;
+        assert(!sync::from_xpointer(images, "/body[1]/DocFragment[1]/body[1]/p[1]/text()[1].0", 20260812, refused, error));
+        assert(error == sync::kUnsupportedStructure);
+    }
     chapter.plain_dom = true;
     chapter.css_sources.push_back("p { white-space: pre-wrap; }");
     assert(!sync::to_xpointer(document, chapter, emoji, 20260812, pointer, error));
