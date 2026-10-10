@@ -19,6 +19,7 @@ inline bool long_press(const Event& begin, const Event& end) {
 /** Retains the initial target until release or an explicit long press, unless the frame changes. */
 class ReleasedTap {
 public:
+    bool pending() const { return held_.has_value(); }
     /** Returns a held touch when its threshold has elapsed without a presentation change. */
     std::optional<Event> due(std::int64_t now_us, std::uint64_t frame) const {
         if (held_ && held_->kind == EventKind::Touch && frame == frame_ &&

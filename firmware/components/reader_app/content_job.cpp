@@ -235,7 +235,7 @@ void ContentJob::run() {
         return;
     }
     if (request.kind == Kind::MapUpload || request.kind == Kind::MapDownload) { map_position(); return; }
-    if (request.kind == Kind::SleepCover) { prepare_cover(); result.cache_finished = !stop(); return; }
+    if (request.kind == Kind::SleepCover) { prepare_cover(); return; }
     if (request.kind == Kind::LibraryCovers) { library_covers(); return; }
     if (request.kind == Kind::Chapter) {
         load_chapter();
@@ -378,13 +378,19 @@ void ContentJob::prepare_cover() {
     FileStore store(request.root);
     const auto width = request.layout.width, height = request.layout.height;
     const auto count = static_cast<std::size_t>((width + 1) / 2) * height;
-    std::string cached;
-    if (store.load_cache(request.cache_name, request.cache_header.size() + count, cached) == StoreStatus::Ok &&
-        cached.compare(0, request.cache_header.size(), request.cache_header) == 0) {
-        if (cached.size() == request.cache_header.size()) return;
-        if (cached.size() == request.cache_header.size() + count) {
-            result.image = std::make_unique<graphics::Canvas>(width, height);
-            std::memcpy(result.image->data(), cached.data() + request.cache_header.size(), count); return;
+    {
+        std::string cached;
+        if (store.load_cache(request.cache_name, request.cache_header.size() + count, cached) == StoreStatus::Ok &&
+            cached.compare(0, request.cache_header.size(), request.cache_header) == 0) {
+            if (cached.size() == request.cache_header.size()) { result.cache_finished = true; return; }
+            if (cached.size() == request.cache_header.size() + count) {
+                if (request.kind != Kind::SleepCover) {
+                    result.image = std::make_unique<graphics::Canvas>(width, height);
+                    std::memcpy(result.image->data(), cached.data() + request.cache_header.size(), count);
+                }
+                result.cache_finished = true;
+                return;
+            }
         }
     }
     if (stop()) return;
@@ -395,13 +401,22 @@ void ContentJob::prepare_cover() {
     std::vector<std::uint8_t> encoded;
     std::string error;
     auto image = std::make_unique<graphics::Canvas>(width, height);
-    const bool loaded = EpubDocument::read_cover(request.path, encoded, error, stop) &&
-        graphics::render_image(*image, encoded, 0, 0, width, height, error, request.cover_crop, stop);
+    const bool read = EpubDocument::read_cover(request.path, encoded, error, stop);
+    const bool loaded = read && graphics::render_image(*image, encoded, 0, 0, width, height, error, request.cover_crop, stop);
     if (stop()) return;
+    std::vector<std::uint8_t>().swap(encoded);
     if (loaded) {
-        store.save_cache(request.cache_name, request.cache_header + std::string(image->pixels().begin(), image->pixels().end()));
-        result.image = std::move(image);
-    } else if (error.find("allocation") == std::string::npos) store.save_cache(request.cache_name, request.cache_header);
+        std::string bytes = request.cache_header;
+        bytes.append(reinterpret_cast<const char*>(image->data()), image->pixels().size());
+        result.cache_finished = store.save_cache(request.cache_name, bytes) == StoreStatus::Ok;
+        if (request.kind != Kind::SleepCover) result.image = std::move(image);
+    } else if ((read && error.find("allocation") == std::string::npos && error.find("memory") == std::string::npos) ||
+               error == "EPUB has no supported cover" || error == "Invalid internal image path" ||
+               error == "Missing EPUB image" || error == "EPUB image exceeds 2 MiB limit" ||
+               error == "Image format is not PNG or JPEG" || error == "Invalid compressed EPUB image") {
+        // Read failures may be transient; only a confirmed unusable cover gets a negative entry.
+        result.cache_finished = store.save_cache(request.cache_name, request.cache_header) == StoreStatus::Ok;
+    }
 }
 void ContentJob::open_book() {
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };

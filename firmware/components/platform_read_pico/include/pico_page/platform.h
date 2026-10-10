@@ -124,8 +124,10 @@ Battery battery();
  * The caller must finish display work, persist progress and stop network work
  * before calling. Touch and the three capacitive keys do not wake this mode.
  * The wake input is consumed; this function does not advance reading state.
+ * entered_sleep remains true after a successful sleep entry even if wake cleanup fails.
+ * An aborted preparation preserves a cancelling long press for the next poll.
  */
-bool sleep(std::string& error);
+bool sleep(std::string& error, bool& entered_sleep);
 
 /** Drops panel rails and attempts TF release after all file consumers stop. Failure does not resume I/O. */
 bool finish_power(std::string& error);

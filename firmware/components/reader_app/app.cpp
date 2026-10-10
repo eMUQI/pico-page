@@ -324,7 +324,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         prefetch_done = raster_disabled = false;
     }
     bool prefetch_due() const {
-        return view == View::Reading && !image_viewing && has_book() && card_available && !usb_prepared &&
+        return !sleep_cover_deadline && !power_menu_wait && !session.needs_save() && view == View::Reading && !image_viewing && has_book() && card_available && !usb_prepared &&
                !display.busy() && !deferred && !save_job && !bookmark_job && !foreground_job && !pending_content && !prefetch_done;
     }
     void prepare_next(const std::function<bool()>& stop) {
@@ -432,6 +432,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::optional<graphics::Canvas> power_return_canvas;
     std::vector<Hit> power_return_hits;
     View power_return_view = View::Library;
+    std::optional<View> power_menu_wait;
     std::string power_return_message;
     PowerAction power_selected = PowerAction::None;
     PowerRequest power_request;
@@ -478,6 +479,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     WifiStatus wifi_status;
     // manual_hold keeps the station up after "connect now"; wifi_hold cancels one scan or join.
     network::Hold manual_hold, sync_hold, wifi_hold, account_hold;
+    std::optional<WifiTargets> manual_target, sleep_wifi_target;
     std::optional<WifiOperation> wifi_request;
     std::uint64_t wifi_sequence = 0, wifi_worker = 0;
     WifiOperation::Kind wifi_kind = WifiOperation::Kind::Connect;
@@ -1275,6 +1277,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
 
     void stop_counting_job() {
+        sleep_cover_deadline.reset();
         if (counting_job) { counting_job->cancel(); counting_job.reset(); }
         counting_session.reset();
         font_scan.reset();
@@ -1287,6 +1290,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (request.generation != counting_generation) return;
         if (request.kind == ContentJob::Kind::SleepCover) {
             if (result.cache_finished) sleep_cover_prepared = true;
+            else defer_sleep_cover();
             return;
         }
         if (request.kind == ContentJob::Kind::PageCacheRead) {
@@ -1334,7 +1338,33 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     bool counting_loaded = false;
     bool sleep_cover_prepared = false;
-    bool sleep_cover_due() const { return async_content && has_book() && settings.sleep_screen == "cover" && !sleep_cover_prepared; }
+    std::optional<std::chrono::steady_clock::time_point> sleep_cover_deadline;
+    std::chrono::steady_clock::time_point sleep_cover_retry{};
+    void defer_sleep_cover() { sleep_cover_retry = std::chrono::steady_clock::now() + std::chrono::seconds(5); }
+    bool sleep_cover_due() const {
+        return async_content && background_content_ready() && !txt_name(book_path) &&
+               settings.sleep_screen == "cover" && !sleep_cover_prepared &&
+               std::chrono::steady_clock::now() >= sleep_cover_retry;
+    }
+    void prepare_sleep_cover() {
+        if (counting_job) return;
+        // The completed pagination worker no longer borrows this session; its font and parser can be released.
+        counting_session.reset();
+#ifdef ESP_PLATFORM
+        if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 3U * 1024 * 1024 ||
+            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 2U * 1024 * 1024)
+            clear_prefetch();
+#endif
+        struct stat info{};
+        if (stat((root + "/" + book_path).c_str(), &info) != 0) { defer_sleep_cover(); return; }
+        const auto cover = cover_entry(book_path, info, 684, 1040, true);
+        ContentJob::Request request;
+        request.kind = ContentJob::Kind::SleepCover; request.root = root; request.path = root + "/" + book_path;
+        request.cache_name = cover.name; request.cache_header = cover.header; request.cover_crop = true;
+        request.layout.width = 684; request.layout.height = 1040; request.generation = counting_generation;
+        counting_job = std::make_unique<ContentJob>(std::move(request));
+        if (!counting_job->start()) { counting_job.reset(); defer_sleep_cover(); }
+    }
     bool pages_complete = false, pages_failed = false, pages_dirty = false, pages_cache_pending = false;
 
     Impl(std::string card, std::string id)
@@ -2333,6 +2363,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         confirmed_link_return.reset();
         book_path = path;
         sleep_cover_prepared = false;
+        sleep_cover_retry = {};
         last_book = path;
         const auto configuration = loaded ? loaded->configuration : store.load_settings(path);
         settings = configuration.settings;
@@ -2648,7 +2679,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         return usage;
     }
     void reclaim_caches() {
-        if (view != View::Reading || display.busy() || content_loading) return;
+        if (view != View::Reading || display.busy() || content_loading ||
+            (counting_job && counting_job->request.kind == ContentJob::Kind::SleepCover)) return;
         const auto pressure = [&] {
             if (cache_usage().retained > cache_target) return true;
 #ifdef ESP_PLATFORM
@@ -2688,10 +2720,14 @@ struct ReaderApp::Impl final : DisplayBackend {
             defer_counting();
         }
     }
+    bool background_content_ready() const {
+        return !sleep_cover_deadline && !power_menu_wait && !session.needs_save() && view == View::Reading && !image_viewing && has_book() && card_available && !usb_prepared &&
+               !display.busy() && !deferred && !save_job && !bookmark_job && !foreground_job && !pending_content &&
+               !raster_job && !cover_job && !pending_covers;
+    }
     bool counting_due() const {
-        return view == View::Reading && !image_viewing && has_book() && card_available && !usb_prepared &&
-               !display.busy() && !deferred && !save_job && !bookmark_job && !foreground_job && !pending_content && !raster_job &&
-               (!pages_complete || (!pages_cache_disabled && (pages_cache_pending || pages_dirty || (async_content && font_identity.empty()))) || sleep_cover_due()) && !pages_failed &&
+        return background_content_ready() &&
+               (!pages_complete || (!pages_cache_disabled && (pages_cache_pending || pages_dirty || (async_content && font_identity.empty())))) && !pages_failed &&
                (counting_blocked != chapter_index || std::chrono::steady_clock::now() >= counting_retry);
     }
     /** Frees the chapter loaded for counting; its partial count resumes after a reload. */
@@ -2769,19 +2805,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
             return;
         }
-        if (pages_complete) {
-            if (!sleep_cover_due() || counting_job) return;
-            struct stat info{};
-            if (stat((root + "/" + book_path).c_str(), &info) != 0) { sleep_cover_prepared = true; return; }
-            const auto cover = cover_entry(book_path, info, 684, 1040, true);
-            ContentJob::Request request;
-            request.kind = ContentJob::Kind::SleepCover; request.root = root; request.path = root + "/" + book_path;
-            request.cache_name = cover.name; request.cache_header = cover.header; request.cover_crop = true;
-            request.layout.width = 684; request.layout.height = 1040; request.generation = counting_generation;
-            counting_job = std::make_unique<ContentJob>(std::move(request));
-            if (!counting_job->start()) { counting_job.reset(); sleep_cover_prepared = true; }
-            return;
-        }
+        if (pages_complete) return;
         if (counting_index == not_counting) {
             auto next = static_cast<std::size_t>(std::find(counted.begin(), counted.end(), false) - counted.begin());
             if (chapter_index < spine.size() && !counted[chapter_index] && chapter.resource == spine[chapter_index].resource)
@@ -3792,6 +3816,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         network::release(hold);
         hold = std::make_shared<std::atomic_bool>(false);
         wifi_worker = ++wifi_sequence;
+        if (&hold == &manual_hold) manual_target = targets;
         wifi_kind = kind;
         wifi_request = WifiOperation{kind, wifi_worker, std::move(targets), hold};
         wifi_notice.clear();
@@ -5597,6 +5622,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         case PowerMenu:
             if (!display.busy() && !active_network && !content_loading && !foreground_job && !usb_prepared && view != View::Portal) {
+                if (counting_job && counting_job->request.kind == ContentJob::Kind::SleepCover) {
+                    counting_job->cancel();
+                    power_menu_wait = view;
+                    return;
+                }
                 drain_save(); stop_covers(); stop_raster(); stop_counting_job();
                 power_return_canvas = canvas; power_return_hits = hits; power_return_view = view;
                 power_return_message = message; power_selected = PowerAction::None; power_save_failed = false;
@@ -5780,7 +5810,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         case ClearCache:
             if (!bookmark_io_ready()) return;
             abandon_content(); foreground_job.reset(); stop_covers(); stop_raster(); stop_counting_job();
-            covers.clear(); sleep_cover_prepared = false;
+            covers.clear(); sleep_cover_prepared = false; sleep_cover_retry = {};
             message = store.clear_cache() == StoreStatus::Ok ? "缓存已清理，原书与阅读记录保留" : "缓存未完全清理，请检查 TF 卡";
             draw_storage();
             break;
@@ -6328,7 +6358,10 @@ PortalAction ReaderApp::take_portal_action() {
 }
 std::uint64_t ReaderApp::portal_generation() const { return impl_->portal_generation; }
 bool ReaderApp::wifi_enabled() const { return impl_->card_available && impl_->wifi_enabled(); }
-void ReaderApp::stop_wifi() {
+void ReaderApp::stop_wifi(bool for_sleep) {
+    if (!for_sleep) impl_->sleep_wifi_target.reset();
+    else if (network::live(impl_->manual_hold) && impl_->manual_target)
+        impl_->sleep_wifi_target = impl_->manual_target;
     network::release(impl_->manual_hold);
     network::release(impl_->sync_hold);
     network::release(impl_->wifi_hold);
@@ -6414,6 +6447,7 @@ bool ReaderApp::prepare_portal(bool station) {
     impl_->portal_live = true;
     impl_->portal_open_wifi = false;
     impl_->portal_station = station;
+    if (!impl_->portal_station) impl_->manual_target.reset();
     impl_->portal_started = false;
     impl_->portal = {};
     impl_->portal_closing = false;
@@ -6478,8 +6512,9 @@ bool ReaderApp::show_power_menu() {
     if (impl_->network_worker_id || impl_->display.busy() || impl_->active_network || impl_->content_loading || impl_->foreground_job ||
         impl_->usb_prepared || impl_->view == View::Portal || impl_->view == View::PowerOff) return false;
     if (impl_->view == View::PowerMenu) return true;
+    cancel_sleep();
     impl_->control(PowerMenu);
-    return impl_->view == View::PowerMenu;
+    return impl_->view == View::PowerMenu || impl_->power_menu_wait.has_value();
 }
 PowerRequest ReaderApp::take_power_request() {
     return std::exchange(impl_->power_request, PowerRequest{});
@@ -6530,17 +6565,59 @@ void ReaderApp::show_power_off_help() {
         "请长按电源键强制关机；若连接 USB，请拔下电源线。", true);
     impl_->overlay(true);
 }
+bool ReaderApp::sleep_pending() const { return impl_->sleep_cover_deadline.has_value(); }
+void ReaderApp::cancel_sleep() {
+    if (impl_->sleep_cover_deadline) {
+        impl_->sleep_cover_deadline.reset();
+        if (impl_->counting_job) impl_->counting_job->cancel();
+    }
+    if (const auto target = std::exchange(impl_->sleep_wifi_target, std::nullopt);
+        target && impl_->card_available && impl_->wifi_enabled() && !impl_->usb_prepared && !impl_->portal_live) {
+        // A released hold cannot be reused: the worker may already have completed its teardown.
+        impl_->manual_hold = std::make_shared<std::atomic_bool>(false);
+        impl_->wifi_worker = ++impl_->wifi_sequence;
+        impl_->wifi_request = WifiOperation{WifiOperation::Kind::Connect, impl_->wifi_worker, *target, impl_->manual_hold};
+    }
+}
 bool ReaderApp::prepare_sleep() {
-    invalidate_identity_cache();
+    if (impl_->power_menu_wait) return false;
+    bool cover_attempted = false;
+    if (impl_->sleep_cover_deadline) {
+        impl_->poll_counting_job();
+        if (impl_->counting_job) {
+            // Cancellation does not release files; completion must precede storage suspension.
+            if (std::chrono::steady_clock::now() >= *impl_->sleep_cover_deadline)
+                impl_->counting_job->cancel();
+            return false;
+        }
+        impl_->sleep_cover_deadline.reset();
+        cover_attempted = true;
+    }
     if (impl_->network_worker_id || impl_->portal_live || impl_->usb_prepared || impl_->view == View::Portal || impl_->view == View::PowerMenu || impl_->view == View::PowerOff) return false;
-    if (impl_->display.busy() || impl_->active_network || !impl_->persist())
+    if (impl_->display.busy() || impl_->active_network) return false;
+    if (impl_->counting_job && impl_->counting_job->request.kind == ContentJob::Kind::SleepCover) {
+        // Adopt the in-flight cover before cleanup can join its worker on the application task.
+        impl_->sleep_cover_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         return false;
+    }
+    invalidate_identity_cache();
+    if (!impl_->persist()) return false;
     if (impl_->has_book() && !impl_->session.visible_record()) return false;
     impl_->remember_position();
     impl_->save_pages();
     impl_->clear_body_cache();
     impl_->clear_prefetch();
     impl_->release_counting();
+    impl_->resume_to_library = impl_->view == View::Library || !impl_->has_book();
+    if (!cover_attempted && impl_->async_content && impl_->has_book() && !txt_name(impl_->book_path) &&
+        impl_->settings.sleep_screen == "cover" && !impl_->sleep_cover_prepared &&
+        std::chrono::steady_clock::now() >= impl_->sleep_cover_retry) {
+        impl_->prepare_sleep_cover();
+        if (impl_->counting_job) {
+            impl_->sleep_cover_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            return false;
+        }
+    }
     const auto sync_state = impl_->sync_badge();
     impl_->cancel_sync();
     network::release(impl_->manual_hold);
@@ -6549,19 +6626,20 @@ bool ReaderApp::prepare_sleep() {
     impl_->leave_join(Impl::WifiPage::Home);
     std::fill(impl_->account.password.begin(), impl_->account.password.end(), '\0');
     impl_->account.password.clear();
-    impl_->resume_to_library = impl_->view == View::Library || !impl_->has_book();
     impl_->draw_sleep(sync_state);
     if (impl_->view != View::Sleeping) return false;
     impl_->overlay(true);
     return true;
 }
-void ReaderApp::wake() {
+void ReaderApp::wake(bool slept) {
     if (impl_->display.busy())
         return;
     impl_->wifi_status.phase = WifiPhase::Offline;
     impl_->wifi_status.manual = false;
     impl_->wifi_status.ssid.clear(); impl_->wifi_status.detail.clear();
     impl_->wifi_notice.clear();
+    if (slept) impl_->sleep_wifi_target.reset();
+    else cancel_sleep();
     if (!impl_->resume_to_library && impl_->has_book()) {
         if (impl_->async_content) impl_->open(impl_->book_path);
         else impl_->recover_body();
@@ -6605,7 +6683,8 @@ CacheUsage ReaderApp::cache_usage() const { return impl_->cache_usage(); }
 
 bool ReaderApp::content_busy() const { return !!impl_->foreground_job || impl_->pending_content.has_value(); }
 bool ReaderApp::background_due() const {
-    return !!impl_->cover_job || impl_->pending_covers.has_value() || !!impl_->raster_job || impl_->prefetch_due() || impl_->counting_due();
+    return !!impl_->cover_job || impl_->pending_covers.has_value() || !!impl_->raster_job || !!impl_->counting_job ||
+           impl_->sleep_cover_due() || impl_->prefetch_due() || impl_->counting_due();
 }
 const char *ReaderApp::background_state() const {
     if (impl_->inline_image_pending) return "image";
@@ -6616,6 +6695,8 @@ const char *ReaderApp::background_state() const {
             kind == ContentJob::Kind::Chapter ? "chapter" : "image";
     }
     if (impl_->cover_job || impl_->pending_covers) return "covers";
+    if ((impl_->counting_job && impl_->counting_job->request.kind == ContentJob::Kind::SleepCover) || impl_->sleep_cover_due())
+        return "sleep-cover";
     if (impl_->raster_job || impl_->prefetch_due()) return "prefetch";
     if (impl_->counting_blocked == impl_->chapter_index) return "waiting";
     if ((!impl_->pages_cache_disabled && impl_->pages_complete && impl_->font_identity.empty()) ||
@@ -6623,7 +6704,6 @@ const char *ReaderApp::background_state() const {
         return "font-identity";
     if (!impl_->pages_cache_disabled && !impl_->font_identity.empty() &&
         (impl_->pages_cache_pending || impl_->pages_dirty)) return "page-cache";
-    if (impl_->pages_complete && impl_->sleep_cover_due()) return "sleep-cover";
     if (!impl_->has_book() || impl_->pages_complete) return "idle";
     if (impl_->pages_failed) return "failed";
     return "counting";
@@ -6657,8 +6737,16 @@ void ReaderApp::poll_background(bool cancel) {
         if (!provision::save_connection(impl_->root, name, std::time(nullptr), error))
             impl_->wifi_notice = "连接记录未保存，请检查 TF 卡。";
     }
+    if (impl_->power_menu_wait) {
+        if (impl_->view != *impl_->power_menu_wait || !impl_->card_available) impl_->power_menu_wait.reset();
+        else if (!cancel && !impl_->counting_job && !impl_->display.busy() && !impl_->save_job &&
+                 !impl_->bookmark_job && !impl_->foreground_job && !impl_->content_loading) {
+            impl_->power_menu_wait.reset();
+            show_power_menu();
+        }
+    }
     // Returning from a panel or viewer may restore a page whose image request was cancelled.
-    if (!cancel && impl_->async_content && impl_->body_images_pending && !impl_->inline_image_pending &&
+    if (!cancel && !impl_->sleep_cover_deadline && !impl_->power_menu_wait && impl_->async_content && impl_->body_images_pending && !impl_->inline_image_pending &&
         !impl_->content_loading && !impl_->foreground_job && !impl_->pending_content &&
         impl_->view == View::Reading && !impl_->image_viewing && !impl_->display.busy() &&
         impl_->has_book() && impl_->card_available && !impl_->usb_prepared && !impl_->page.images.empty())
@@ -6669,7 +6757,8 @@ void ReaderApp::background_step(const std::function<bool()>& stop) {
     impl_->poll_raster();
     impl_->poll_counting_job();
     if (stop && stop()) { if (impl_->counting_job) impl_->counting_job->cancel(); return; }
-    if (impl_->prefetch_due()) impl_->prepare_next(stop);
+    if (impl_->sleep_cover_due()) impl_->prepare_sleep_cover();
+    else if (impl_->prefetch_due()) impl_->prepare_next(stop);
     else if (impl_->counting_due()) impl_->count_pages(stop);
 }
 void ReaderApp::show_error(const std::string &message) {

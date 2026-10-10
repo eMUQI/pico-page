@@ -5,8 +5,10 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
+#include <filesystem>
 #include <mutex>
 #include <thread>
+#include <unistd.h>
 
 namespace {
 struct Queue {
@@ -21,6 +23,7 @@ std::thread worker;
 bool fail_queue = false, fail_task = false;
 unsigned allocations = 0, creations = 0;
 std::size_t internal_free = 128 * 1024, internal_largest = 64 * 1024;
+std::size_t psram_free = 4 * 1024 * 1024, psram_largest = 3 * 1024 * 1024;
 void finish(pico_page::ContentJob& job) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (!job.done() && std::chrono::steady_clock::now() < deadline)
@@ -68,14 +71,15 @@ unsigned uxTaskGetStackHighWaterMark(void*) { return 8192; }
 void vTaskDelay(TickType_t) { std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
 void taskYIELD() { std::this_thread::yield(); }
 std::size_t heap_caps_get_free_size(std::uint32_t caps) {
-    return caps == MALLOC_CAP_SPIRAM ? 4 * 1024 * 1024 : internal_free;
+    return caps == MALLOC_CAP_SPIRAM ? psram_free : internal_free;
 }
 std::size_t heap_caps_get_largest_free_block(std::uint32_t caps) {
-    return caps == MALLOC_CAP_SPIRAM ? 3 * 1024 * 1024 : internal_largest;
+    return caps == MALLOC_CAP_SPIRAM ? psram_largest : internal_largest;
 }
 std::size_t heap_caps_get_minimum_free_size(std::uint32_t caps) { return heap_caps_get_free_size(caps); }
 
-int main() {
+int main(int argc, char** argv) {
+    assert(argc == 2);
     using pico_page::ContentJob;
     using Failure = ContentJob::StartFailure;
     fail_queue = true;
@@ -117,6 +121,68 @@ int main() {
     internal_free = 31 * 1024;
     ContentJob low_memory(request);
     assert(!low_memory.start() && low_memory.start_failure() == Failure::InternalMemory);
+    internal_free = 40 * 1024;
+    {
+        namespace fs = std::filesystem;
+        char temporary[] = "/tmp/pico-cover-worker-XXXXXX";
+        const char* directory = mkdtemp(temporary); assert(directory);
+        const fs::path root(directory), cache = root / "PicoPage/cache/covers/sleep";
+        ContentJob::Request cover;
+        cover.kind = ContentJob::Kind::SleepCover;
+        cover.root = root.string(); cover.path = (root / "book.epub").string();
+        cover.cache_name = "covers/sleep"; cover.cache_header = "PPCOVER2\nprobe\n";
+        cover.layout.width = 684; cover.layout.height = 1040; cover.cover_crop = true;
+        fs::copy_file(argv[1], cover.path);
+        for (const bool fragmented : {false, true}) {
+            psram_free = fragmented ? 4 * 1024 * 1024 : 3 * 1024 * 1024 - 1;
+            psram_largest = fragmented ? 2 * 1024 * 1024 - 1 : 3 * 1024 * 1024;
+            ContentJob deferred(cover); assert(deferred.start()); finish(deferred);
+            assert(!deferred.result.cache_finished && !deferred.result.image && !fs::exists(cache));
+        }
+        psram_free = 4 * 1024 * 1024; psram_largest = 3 * 1024 * 1024;
+        {
+            std::lock_guard<std::mutex> lock(queue->mutex);
+            queue->receive_enabled = false;
+        }
+        ContentJob cancelled_cover(cover); assert(cancelled_cover.start()); cancelled_cover.cancel();
+        {
+            std::lock_guard<std::mutex> lock(queue->mutex);
+            queue->receive_enabled = true; queue->changed.notify_one();
+        }
+        finish(cancelled_cover);
+        assert(!cancelled_cover.result.cache_finished && !fs::exists(cache));
+        fs::rename(cover.path, root / "hidden.epub");
+        ContentJob unreadable(cover); assert(unreadable.start()); finish(unreadable);
+        assert(!unreadable.result.cache_finished && !fs::exists(cache));
+        fs::rename(root / "hidden.epub", cover.path);
+        fs::create_directories(cache.parent_path());
+        fs::create_directory(cache.string() + ".tmp");
+        ContentJob unwritable(cover); assert(unwritable.start()); finish(unwritable);
+        assert(!unwritable.result.cache_finished && !fs::exists(cache));
+        fs::remove(cache.string() + ".tmp");
+        ContentJob recovered(cover); assert(recovered.start()); finish(recovered);
+        assert(recovered.result.cache_finished && !recovered.result.image);
+        assert(fs::file_size(cache) == cover.cache_header.size() + 684U * 1040U / 2);
+        const auto decodes = pico_page::graphics::image_decode_count();
+        psram_free = psram_largest = 512 * 1024;
+        ContentJob cached(cover); assert(cached.start()); finish(cached);
+        assert(cached.result.cache_finished && !cached.result.image);
+        assert(pico_page::graphics::image_decode_count() == decodes);
+        psram_free = 4 * 1024 * 1024; psram_largest = 3 * 1024 * 1024;
+        cover.path = (fs::path(argv[1]).parent_path() / "valid.epub").string();
+        cover.cache_name = "covers/no-cover";
+        ContentJob absent(cover); assert(absent.start()); finish(absent);
+        assert(absent.result.cache_finished && !absent.result.image);
+        assert(fs::file_size(root / "PicoPage/cache/covers/no-cover") == cover.cache_header.size());
+        for (const auto* kind : {"missing", "oversized", "unsupported"}) {
+            cover.path = (fs::path(argv[1]).parent_path() / (std::string(kind) + "-image-cover.epub")).string();
+            cover.cache_name = std::string("covers/") + kind;
+            ContentJob invalid(cover); assert(invalid.start()); finish(invalid);
+            assert(invalid.result.cache_finished && !invalid.result.image);
+            assert(fs::file_size(root / "PicoPage/cache" / cover.cache_name) == cover.cache_header.size());
+        }
+        fs::remove_all(root);
+    }
     assert(creations == 1 && allocations == 1);
     {
         std::lock_guard<std::mutex> lock(queue->mutex);

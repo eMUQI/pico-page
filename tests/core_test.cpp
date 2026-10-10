@@ -1,6 +1,7 @@
 #include "pico_page/core.h"
 #include "../firmware/components/platform_read_pico/usb_block_range.h"
 #include "../firmware/components/platform_read_pico/include/pico_page/released_tap.h"
+#include "../firmware/components/platform_read_pico/include/pico_page/sleep_input.h"
 #include <cstdlib>
 #include <iostream>
 #include <vector>
@@ -19,6 +20,44 @@ struct Recorder final : DisplayBackend {
 };
 
 int main() {
+    {
+        using namespace pico_page::platform;
+        SleepInput input;
+        input.begin();
+        input.accept({EventKind::K3, EventPhase::Begin, 1});
+        CHECK(input.active() && input.held() && !input.tap());
+        input.accept({EventKind::K3, EventPhase::End, 1});
+        CHECK(input.tap() && input.tap()->kind == EventKind::K3 && !input.held());
+        input.accept({EventKind::K1, EventPhase::Begin, 2});
+        input.accept({EventKind::K1, EventPhase::End, 2});
+        CHECK(input.tap()->sequence == 1);
+        input.accept({EventKind::PowerLong});
+        CHECK(input.menu());
+        input.clear();
+        CHECK(!input.active() && !input.tap() && !input.menu());
+        input.begin();
+        input.accept({EventKind::Touch, EventPhase::Begin, 3, 300, 500, 100});
+        input.accept({EventKind::Touch, EventPhase::Cancel, 3});
+        CHECK(!input.held() && !input.tap());
+        input.accept({EventKind::K2, EventPhase::Begin, 4});
+        input.accept({EventKind::InputReset});
+        CHECK(!input.active() && !input.held());
+        input.begin();
+        input.accept({EventKind::K2, EventPhase::Begin, 5});
+        input.accept({EventKind::K2, EventPhase::End, 5});
+        input.accept({EventKind::Power});
+        CHECK(input.power() && !input.tap() && !input.held());
+        input.accept({EventKind::Power});
+        CHECK(!input.power());
+        input.accept({EventKind::Power});
+        input.accept({EventKind::Touch, EventPhase::Begin, 6});
+        CHECK(!input.power() && input.held());
+        input.accept({EventKind::Power});
+        input.accept({EventKind::PowerLong});
+        CHECK(input.menu() && !input.power() && !input.held());
+        input.clear();
+        CHECK(!input.active() && !input.power());
+    }
     {
         CHECK((RefreshRegion{0, 0, 684, 1216}.fits(684, 1216)));
         CHECK(!(RefreshRegion{-1, 0, 10, 10}.fits(684, 1216)));

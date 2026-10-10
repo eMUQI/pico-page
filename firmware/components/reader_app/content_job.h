@@ -102,7 +102,9 @@ public:
         StoreStatus bookmark_status = StoreStatus::IoError;
         /** Open: loaded list. SaveBookmarks: committed list, or reloaded list after ExternalChange. */
         BookmarkList bookmarks;
-        bool last_book_saved = false, cache_finished = false;
+        bool last_book_saved = false;
+        /** SleepCover: a valid pixel or negative cache entry was read or successfully committed. */
+        bool cache_finished = false;
         std::optional<PageCache> page_cache;
         off_t file_size = 0;
         time_t file_modified = 0;

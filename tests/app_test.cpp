@@ -6,6 +6,7 @@
 #include "pico_page/document.h"
 #include "pico_page/store.h"
 #include "pico_page/provision.h"
+#include "../firmware/components/platform_read_pico/include/pico_page/sleep_input.h"
 
 #include <algorithm>
 #include <chrono>
@@ -45,6 +46,17 @@ static void opened(ReaderApp& app, const std::string& book) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Body);
+}
+static bool sleep_frame(ReaderApp& app) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (!app.prepare_sleep()) {
+        if (!app.sleep_pending()) return false;
+        app.poll_background();
+        assert(std::chrono::steady_clock::now() < deadline);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    assert(!app.sleep_pending());
+    return true;
 }
 // Reports the calling line when an expected frame is missing.
 #define present() present_at(__LINE__)
@@ -654,7 +666,7 @@ int main(int argc, char** argv) {
         txt_saved = *app.saved_record();
         driver.sync_view();
         assert(!app.take_network_request());
-        assert(app.prepare_sleep()); driver.present();
+        assert(sleep_frame(app)); driver.present();
         const auto progress = FileStore(card.string()).load_progress("Txt/sample.txt", txt_saved.book_id, txt_saved.content_revision);
         assert(progress.record && progress.record->anchor == txt_saved.anchor);
     }
@@ -735,7 +747,7 @@ int main(int argc, char** argv) {
         driver.tap(342, 500); driver.present(); driver.tap(60, 50); driver.present();
         assert(app.view() == View::Library);
         const auto saved = *app.saved_record();
-        assert(app.prepare_sleep()); driver.present();
+        assert(sleep_frame(app)); driver.present();
         assert(app.view() == View::Sleeping);
         app.wake(); driver.present();
         assert(app.view() == View::Library && *app.saved_record() == saved);
@@ -912,7 +924,7 @@ int main(int argc, char** argv) {
         const auto body_pixels = app.canvas().pixels();
         driver.tap(342, 500); driver.present(); driver.close(); driver.present();
         assert(app.canvas().pixels() == body_pixels && graphics::image_decode_count() == decodes);
-        assert(app.prepare_sleep()); driver.present();
+        assert(sleep_frame(app)); driver.present();
         assert(app.view() == View::Sleeping && *app.saved_record() == saved);
         assert(app.canvas().pixel(100, 400) == 0 && app.canvas().pixel(100, 800) == 5);
         const auto sleeping_decodes = graphics::image_decode_count();
@@ -978,7 +990,7 @@ int main(int argc, char** argv) {
         driver.close(); driver.present();
         driver.key(Input::K3); app.complete_frame(true);
         const auto unsaved = app.saved_record()->local_revision;
-        assert(app.prepare_sleep() && app.saved_record()->local_revision == unsaved + 1);
+        assert(sleep_frame(app) && app.saved_record()->local_revision == unsaved + 1);
         driver.present();
     }
     {
@@ -1285,7 +1297,27 @@ int main(int argc, char** argv) {
         assert(refreshed && refreshed->request.method == "GET" && refreshed->session != expired.session);
         app.complete_network(refreshed->id, 200, "{}", ""); driver.present();
         driver.close(); driver.present(); driver.complete_content();
-        assert(app.prepare_sleep()); driver.present();
+        std::string selection_error;
+        for (const bool after_frame : {false, true}) {
+            app.stop_wifi(true);
+            assert(!network::live(manual->cancelled));
+            // Cancellation restores the original target even if the selected network changed meanwhile.
+            assert(provision::save_selected_network(root.string(), "phone", selection_error));
+            if (after_frame) {
+                assert(sleep_frame(app)); driver.present();
+                app.wake(false); driver.present(); driver.complete_content();
+            } else app.cancel_sleep();
+            auto restored = app.take_wifi_request();
+            assert(restored && !restored->targets.automatic && restored->targets.networks.size() == 1 && restored->targets.networks[0].ssid == "home" && restored->cancelled != manual->cancelled);
+            assert(network::live(restored->cancelled));
+            app.complete_wifi(restored->id, {}, "");
+            manual = restored;
+            app.cancel_sleep();
+            assert(!app.take_wifi_request());
+        }
+        assert(provision::save_selected_network(root.string(), "home", selection_error));
+        app.stop_wifi(true);
+        assert(sleep_frame(app)); driver.present();
         assert(!network::live(manual->cancelled) && !network::live(refreshed->session));
         app.wake(); driver.present(); driver.complete_content();
         assert(!app.take_wifi_request() && !app.take_network_request());
@@ -1328,8 +1360,12 @@ int main(int argc, char** argv) {
         const auto failed = app.canvas().pixels();
         driver.tap(680, 600); assert(!app.pending_frame() && app.canvas().pixels() == failed);
         app.show_wifi({2, WifiPhase::Connected, "old", "", true}); assert(!app.pending_frame());
-        driver.tap(300, 480); driver.present();
+        std::vector<provision::SavedWifi> networks;
         std::optional<provision::SavedWifi> target; std::string error;
+        assert(provision::load_networks(root.string(), networks, error));
+        const auto phone = std::find_if(networks.begin(), networks.end(), [](const auto& n) { return n.ssid == "phone"; });
+        assert(phone != networks.end());
+        driver.tap(300, 352 + static_cast<int>(phone - networks.begin()) * 124); driver.present();
         assert(provision::load_selected_network(root.string(), target, error) && target && target->ssid == "phone");
         driver.tap(60, 50); driver.present(); assert(app.view() == View::Sync);
         // A pinned network that is out of range is not replaced; automatic selection is offered for one check.
@@ -1801,7 +1837,7 @@ int main(int argc, char** argv) {
         driver.tap(340, 710); driver.present(); driver.tap(340, 390); driver.present();
         driver.tap(600, 750); driver.present(); driver.tap(500, 1120); driver.present();
         assert(app.auto_sleep_minutes() == 15 && FileStore(card.string()).load_settings().settings.sleep_screen == "reading");
-        assert(app.prepare_sleep());
+        assert(sleep_frame(app));
         assert(app.view() == View::Sleeping && app.pending_frame()->refresh == RefreshIntent::FullClean);
         driver.present(); assert(*app.saved_record() == saved);
         driver.key(Input::K3); assert(!app.pending_frame());
@@ -1830,7 +1866,7 @@ int main(int argc, char** argv) {
         driver.key(Input::K3); assert(app.pending_frame());
         app.complete_frame(false); driver.present();
         assert(app.view() == View::Error && *app.saved_record() == saved);
-        assert(app.prepare_sleep()); driver.present();
+        assert(sleep_frame(app)); driver.present();
         app.wake(); assert(app.pending_frame()->anchor == saved.anchor); driver.present();
         assert(*app.saved_record() == saved);
     }
@@ -2210,6 +2246,39 @@ int main(int argc, char** argv) {
         write(font_path, original_font); fs::last_write_time(font_path, font_time);
     }
     {
+        using namespace pico_page::platform;
+        const auto root = card / "SleepInput";
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
+        ReaderApp app(root.string(), "sleep-input", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+        driver.complete_content();
+        for (const auto kind : {EventKind::K3, EventKind::K2, EventKind::Touch}) {
+            const auto saved = *app.saved_record();
+            const auto pixels = app.canvas().pixels();
+            assert(sleep_frame(app)); driver.present();
+            app.wake(false);
+            assert(app.view() == View::Loading);
+            SleepInput input;
+            input.begin();
+            input.accept({kind, EventPhase::Begin, 1, 342, 500});
+            input.accept({kind, EventPhase::End, 1, 342, 500});
+            driver.present(); driver.complete_content();
+            assert(input.tap() && app.view() == View::Reading && *app.saved_record() == saved);
+            // Reopening may update footer counts; the confirmed body must remain identical.
+            assert(std::equal(pixels.begin(), pixels.begin() + 1128 * app.canvas().stride(), app.canvas().pixels().begin()));
+            const auto restored_pixels = app.canvas().pixels();
+            if (kind == EventKind::Touch) driver.tap(input.tap()->x, input.tap()->y);
+            else driver.key(kind == EventKind::K3 ? Input::K3 : Input::K2);
+            if (kind == EventKind::K2)
+                assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean);
+            driver.present(); driver.complete_content();
+            if (kind == EventKind::K3) assert(app.saved_record()->anchor != saved.anchor);
+            else if (kind == EventKind::Touch) assert(app.view() == View::Tools);
+            else assert(*app.saved_record() == saved && app.canvas().pixels() == restored_pixels);
+        }
+    }
+    {
         const auto root = card / "SleepWorker";
         fs::create_directories(root / "Books"); fs::create_directories(root / "PicoPage");
         fs::copy_file(fixtures / "image-cover.epub", root / "Books/cover.epub");
@@ -2217,19 +2286,153 @@ int main(int argc, char** argv) {
         assert(app.initialize()); driver.present(); opened(app, "Books/cover.epub"); driver.present();
         driver.complete_content();
         const auto cold_decodes = graphics::image_decode_count();
-        assert(app.prepare_sleep()); driver.present();
-        assert(graphics::image_decode_count() == cold_decodes && app.view() == View::Sleeping);
+        const auto saved = *app.saved_record();
+        const auto body_pixels = app.canvas().pixels();
+        assert(!app.book_pages());
+        assert(!app.prepare_sleep() && app.sleep_pending());
+        assert(!app.pending_frame() && app.canvas().pixels() == body_pixels && *app.saved_record() == saved);
+        assert(sleep_frame(app)); driver.present();
+        assert(graphics::image_decode_count() == cold_decodes + 1 && app.view() == View::Sleeping);
+        assert(app.canvas().pixel(50, 100) == 0 && app.canvas().pixel(50, 900) == 5);
+        assert(*app.saved_record() == saved);
         app.wake(); driver.present(); driver.complete_content();
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-        while (app.background_due()) {
-            app.background_step(); app.poll_background();
-            assert(!app.pending_frame() && std::chrono::steady_clock::now() < deadline);
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
         const auto prepared_decodes = graphics::image_decode_count();
-        assert(app.prepare_sleep()); driver.present();
+        assert(sleep_frame(app)); driver.present();
         assert(graphics::image_decode_count() == prepared_decodes && app.view() == View::Sleeping);
         assert(app.canvas().pixel(50, 100) == 0 && app.canvas().pixel(50, 900) == 5);
+        app.wake(); driver.present(); driver.complete_content();
+        app.background_step();
+        while (std::string(app.background_state()) == "sleep-cover") {
+            app.poll_background();
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(graphics::image_decode_count() == prepared_decodes);
+    }
+    {
+        const auto root = card / "SleepAdopt";
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "image-cover.epub", root / "Books/cover.epub");
+        ReaderApp app(root.string(), "sleep-adopt", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/cover.epub");
+        const auto content_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        do {
+            if (app.pending_frame()) app.complete_frame(true);
+            app.poll_background();
+            assert(std::chrono::steady_clock::now() < content_deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        } while (app.content_busy() || app.pending_frame());
+        assert(app.save_due() && !app.background_due());
+        app.background_step();
+        assert(!app.background_due());
+        app.save_progress();
+        while (app.save_busy()) {
+            app.poll_background();
+            assert(std::chrono::steady_clock::now() < content_deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(!app.save_due() && std::string(app.background_state()) == "sleep-cover");
+        const auto decodes = graphics::image_decode_count();
+        const auto pixels = app.canvas().pixels();
+        app.background_step();
+        ContentJob::fail_starts_for_test(ContentJob::Kind::SleepCover, 1, ContentJob::StartFailure::TaskCreate);
+        assert(!app.prepare_sleep() && app.sleep_pending());
+        ContentJob::fail_starts_for_test(ContentJob::Kind::SleepCover, 0, ContentJob::StartFailure::TaskCreate);
+        assert(app.canvas().pixels() == pixels && !app.pending_frame());
+        assert(sleep_frame(app)); driver.present();
+        assert(graphics::image_decode_count() == decodes + 1);
+        assert(app.canvas().pixel(50, 100) == 0 && app.canvas().pixel(50, 900) == 5);
+    }
+    {
+        const auto root = card / "SleepHandoff";
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "image-cover.epub", root / "Books/cover.epub");
+        ReaderApp app(root.string(), "sleep-handoff", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/cover.epub"); driver.present();
+        driver.complete_content();
+        const auto saved = *app.saved_record();
+        const auto pixels = app.canvas().pixels();
+        // Failed publication must finish the sleep request once, without retrying indefinitely.
+        fs::remove_all(root / "PicoPage/cache/covers");
+        write(root / "PicoPage/cache/covers", "blocked");
+        assert(!app.prepare_sleep() && app.sleep_pending());
+        app.cancel_sleep();
+        assert(!app.sleep_pending() && app.view() == View::Reading);
+        assert(app.show_power_menu());
+        assert(app.view() == View::Reading && !app.pending_frame());
+        assert(!app.prepare_sleep());
+        driver.key(Input::K2);
+        assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean);
+        driver.present();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (app.view() != View::PowerMenu) {
+            app.poll_background();
+            assert(*app.saved_record() == saved);
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        driver.present(); driver.tap(300, 1120); driver.present();
+        assert(app.view() == View::Reading && app.canvas().pixels() == pixels);
+        while (std::string(app.background_state()) == "sleep-cover") {
+            app.poll_background();
+            assert(!app.pending_frame() && app.canvas().pixels() == pixels && *app.saved_record() == saved);
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        const auto retry_decodes = graphics::image_decode_count();
+        assert(app.prepare_sleep() && !app.sleep_pending()); driver.present();
+        assert(graphics::image_decode_count() == retry_decodes);
+        app.wake(); driver.present(); driver.complete_content();
+        ContentJob::fail_starts_for_test(ContentJob::Kind::SleepCover, 1, ContentJob::StartFailure::InternalMemory);
+        assert(app.prepare_sleep() && !app.sleep_pending()); driver.present();
+        assert(app.view() == View::Sleeping && *app.saved_record() == saved);
+        app.wake(); driver.present(); driver.complete_content();
+        assert(sleep_frame(app)); driver.present();
+        assert(app.view() == View::Sleeping && *app.saved_record() == saved);
+        assert(fs::is_regular_file(root / "PicoPage/cache/covers"));
+        app.wake(); driver.present(); driver.complete_content();
+        fs::remove(root / "PicoPage/cache/covers");
+        assert(sleep_frame(app)); driver.present();
+        assert(app.canvas().pixel(50, 100) == 0 && app.canvas().pixel(50, 900) == 5);
+        assert(*app.saved_record() == saved);
+    }
+    {
+        const auto root = card / "SleepRetry";
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "image-cover.epub", root / "Books/cover.epub");
+        ReaderApp app(root.string(), "sleep-retry", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/cover.epub"); driver.present();
+        driver.complete_content();
+        const auto saved = *app.saved_record();
+        const auto pixels = app.canvas().pixels();
+        fs::remove_all(root / "PicoPage/cache/covers");
+        write(root / "PicoPage/cache/covers", "blocked");
+        ContentJob::fail_starts_for_test(ContentJob::Kind::SleepCover, 1, ContentJob::StartFailure::InternalMemory);
+        app.background_step();
+        assert(std::string(app.background_state()) != "sleep-cover");
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        const auto wait_cover_attempt = [&] {
+            while (std::string(app.background_state()) != "sleep-cover") {
+                app.background_step(); app.poll_background();
+                assert(std::chrono::steady_clock::now() < deadline);
+                assert(!app.pending_frame() && app.canvas().pixels() == pixels && *app.saved_record() == saved);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            app.background_step();
+            while (std::string(app.background_state()) == "sleep-cover") {
+                app.background_step(); app.poll_background();
+                assert(std::chrono::steady_clock::now() < deadline);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        };
+        wait_cover_attempt();
+        assert(fs::is_regular_file(root / "PicoPage/cache/covers"));
+        fs::remove(root / "PicoPage/cache/covers");
+        wait_cover_attempt();
+        assert(sleep_frame(app)); driver.present();
+        assert(app.canvas().pixel(50, 100) == 0 && app.canvas().pixel(50, 900) == 5);
+        assert(*app.saved_record() == saved);
     }
     {
         fs::copy_file(fixtures / "image-flow.epub", card / "Books/prefetch-image.epub");
@@ -2313,7 +2516,7 @@ int main(int argc, char** argv) {
         const auto switched_record = app.saved_record();
         driver.complete_content();
         assert(app.canvas().pixels() == switched && app.saved_record() == switched_record);
-        assert(app.prepare_sleep()); driver.present();
+        assert(sleep_frame(app)); driver.present();
         const auto sleep_scans = identity_hash_count();
         app.wake(); driver.present();
         assert(app.view() == View::Loading && app.content_busy());
@@ -3087,16 +3290,15 @@ int main(int argc, char** argv) {
             ReaderApp app(root.string(), "bookmarks", async, async); Driver driver{app};
             assert(app.initialize()); driver.present(); opened(app, book); driver.present();
             const auto before = read(marks);
+            const auto temporary = fs::path(marks.string() + ".tmp");
+            fs::remove_all(temporary); fs::create_directory(temporary);
             tools(driver); driver.tap(634, 50);
             while (app.pending_frame()) app.complete_frame(true);
-            fs::remove(marks); fs::create_directory(marks);
             assert(app.show_power_menu()); driver.present();
             driver.tap(100, 1100); driver.present();
-            fs::remove(marks); write(marks, before);
-            assert(app.view() == View::Tools);
+            fs::remove_all(temporary);
+            assert(read(marks) == before && app.view() == View::Tools);
             driver.tap(634, 50); driver.present();
-            // The restored file differs from the state read during the failure: one reload, then the retry.
-            if (app.status() == "书签文件已在别处修改，已重新读取，请核对当前书签") { driver.tap(634, 50); driver.present(); }
             assert(app.status() == "已删除本页书签" || app.status() == "已加书签");
             assert(app.prepare_usb_transfer());
         }

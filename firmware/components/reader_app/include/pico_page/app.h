@@ -156,8 +156,9 @@ class ReaderApp {
     int auto_sleep_minutes() const;
     /** Reloads global settings when idle; uses the admitted network state, and rejects access during a bookmark commit. */
     bool wifi_enabled() const;
-    /** Requests cancellation on the application owner task without waiting for the worker. */
-    void stop_wifi();
+    /** Cancels network work on the application owner without waiting for the worker.
+     * for_sleep retains the manual target for a cancelled sleep attempt. */
+    void stop_wifi(bool for_sleep = false);
     /** Manual connection/scanning carries credentials, never borrowed card objects. */
     std::optional<WifiOperation> take_wifi_request();
     void complete_wifi(std::uint64_t id, const std::vector<provision::NearbyWifi>& nearby, const std::string& error,
@@ -192,8 +193,19 @@ class ReaderApp {
      * before its first Waiting state returns to the network page with the closing sentence.
      */
     void show_portal(const PortalStatus &status);
+    /**
+     * Saves progress and prepares a sleep frame. false with sleep_pending() means the cover
+     * worker is still handing back resources; call again from the event loop. Other false
+     * results reject sleep. Present a successful frame before suspending storage or hardware.
+     */
     bool prepare_sleep();
-    /** Opens a modal menu without changing the underlying page or its draft. Busy tasks must finish first. */
+    bool sleep_pending() const;
+    /** Cancels sleep and restores its manual Wi-Fi intent without destroying a running cover worker. */
+    void cancel_sleep();
+    /**
+     * Requests a modal menu without changing the underlying page or draft. A canceled cover
+     * worker is polled before opening; true means opened or queued. Other busy tasks reject it.
+     */
     bool show_power_menu();
     /** Displays why the menu is unavailable while preserving the current task and controls. */
     void power_unavailable(const std::string& message);
@@ -205,7 +217,8 @@ class ReaderApp {
     bool close_power_files();
     /** Draws terminal hardware-off instructions using fallback fonts; never resumes reading. */
     void show_power_off_help();
-    void wake();
+    /** Resumes reading or the library; slept=false also restores the cancelled manual Wi-Fi intent. */
+    void wake(bool slept = true);
     void card_removed();
     /**
      * True when a presented position awaits its first save attempt. Saving is left to the
