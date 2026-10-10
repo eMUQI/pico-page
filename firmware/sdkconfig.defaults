@@ -25,7 +25,8 @@ CONFIG_PM_ENABLE=y
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
-# With the Wi-Fi driver resident, an internal-RAM TLS handshake leaves about 11 KB of internal RAM.
+# With the Wi-Fi driver resident, an internal-RAM TLS handshake leaves about 2 KB in the main internal heap
+# and spills into the DMA reserve pool.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 
 # Local build layout only. Verify the device layout before any installation.
