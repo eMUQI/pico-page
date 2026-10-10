@@ -2,7 +2,9 @@
 
 ## 当前摘要（2026-10-11）
 
-文字转页 A/B/C、水波纹与屏幕选择入口已提交为 PR #50，并整合 main `d2762ba`。默认关闭、本次启动有效，只作用于正文非清屏更新；原档位、全刷和恢复路径保留。最小 epdiy 补丁只改构建副本，官方锁定与下载原件不变。整合后 host Debug、开启埋点的 ASan/UBSan 各 20/20（原 18 项，新增 2 项），标准与 Diagnostic 固件构建通过，交接检查 446 项。按用户授权继续跟进 CI、review 并在通过后合并；未连接或烧录设备。效果、残影、灰度、真实耗时与资源峰值均待真机。
+PR #51 的工作负载字号标识修正已完成本地评审，分支已整合 main `f61c089`。自动场景生成 workload 时加入字号，比较入口另要求有效的正整数字号，防止两份缺少字号的旧报告误判为可比。Python 工作台测试 36/36、CTest 对应入口和 446 项交接检查通过；最新评审修正提交仍需重新核对 CI 与 review。本批未构建或烧录固件，未新增真机验收证据。
+
+文字转页 A/B/C、水波纹与屏幕选择入口已通过 PR #50 合并到 main `f61c089`。默认关闭、本次启动有效，只作用于正文非清屏更新；原档位、全刷和恢复路径保留。最小 epdiy 补丁只改构建副本，官方锁定与下载原件不变。整合后 host Debug、开启埋点的 ASan/UBSan 各 20/20（原 18 项，新增 2 项），标准与 Diagnostic 固件构建通过，交接检查 446 项。未连接或烧录设备。效果、残影、灰度、真实耗时与资源峰值均待真机。
 
 左右轻扫翻屏/翻页已完成本地候选，基于 `718f376`，分支 `feat/swipe-pagination`。松手按 60 px、700 ms 和约 30° 判定；左滑下一页、右滑上一页，书库长按需在 28 px 范围内松手确认，正文图片长按路径保留。页脚控件、默认按键和进度保存规则不变。host Debug 与 AppleClang ASan/UBSan 各 18/18（含异步应用、列表/卡片与多屏目录），标准与 Diagnostic 固件构建、441 项交接检查均通过；PR 结果见本批记录。未烧录，真机 IN09 待验证。
 
@@ -4422,6 +4424,15 @@ D14 核对：原代码只识别 K1/K3 与正文侧区点按，未识别非触摸
 - 第五轮评审（两项，均成立，`885c582`）：workload 标识加入起始位置的 anchor；`image-sync` 要求被取消的请求以 cancelled 结束，否则为 inconclusive。只改主机工具、测试和文档，Python 测试 45/45。未重新烧录：在已安装的 `e788a48` 诊断镜像上用新工具各跑一轮，两个场景的断言均通过，但因当前源码与镜像的构建来源不符，报告结果为 inconclusive，不计为新的通过证据；`image-sync` 该轮的被取消请求终态为 cancelled，workload 标识带有 anchor。证据在 `.local/runs/image-sync-final-10/` 与 `.local/runs/reading-flow-final-10/`。
 - 第六轮评审（三项，均成立，`e323ea3`）：向后翻页后的保存须确认 anchor 已离开起始位置，翻回后的保存须回到起始 anchor；多轮内存检查加入内部 RAM 最大连续块（比首轮小超过 8,192 B 判为失败）；当前摘要不应把较早版本的通过当作最终场景定义的证据。Python 测试 45/45。在干净提交 `e323ea3` 上重建诊断固件（3,406,512 B，SHA-256 `a7ce6267d4f08e6be7fcb4307e0bf58c0c945b481533fd341f0bba0aa44bb49b`），核对设备身份与布局后写入并通过摘要校验。该镜像上 `reading-flow`（3 轮、每向 4 页）pass，1,000 个事件，66 帧以上的驱动帧 p50/p95/最大为 540/622/1,582 ms，三轮内部 RAM 均为 98,179 B、最大连续块均为 51,200 B，起止 anchor 相同，保存修订 351 至 375；`image-sync` 2 轮均 pass，同步结果 different，被取消的请求终态为 cancelled，保存修订 380 与 anchor 不变，其中 1 轮出现一次欠载并由重试恢复。来源核验通过，运行条件齐全，设备现装此镜像。证据在 `.local/runs/reading-flow-final-11/` 与 `.local/runs/image-sync-final-11-*`。当前摘要已改为按提交说明验证范围。
 
+
+## 2026-10-11 · 工作负载字号标识评审
+
+- 范围：评审分支 `fix/workload-font-size` 的 `c9d6a49`，基线为 main `d2762ba`。读取工作台场景、状态解析、元数据生成、最终比较、相关测试及固件诊断状态字段；未发现阻碍推送的缺陷。原实现提交未修改，本批仅补记评审结果。
+- 行为：`workload_place()` 在页码、总页数和 anchor 后加入 `font_px`；`reading-flow` 使用起始状态，`image-sync` 使用场景末尾确认状态。`compare()` 继续要求完整证据和一致的 workload。缺少字号的旧标识与新标识不可比较；这不构成旧报告内容的重新验收。
+- 命令与结果：macOS、Python 3.14.7；`python3 -m unittest discover -s tests -p test_device_workbench.py -v` 为 36/36；`ctest --test-dir build/host -N` 注册 18 项，本批仅运行 `ctest --test-dir build/host -R '^device_workbench$' --output-on-failure`，1/1 通过；`python3 tools/check_handoff.py` 为 441 项通过；`git diff --check main...HEAD` 通过。临时 JSON 比较检查确认同状态可比较，不同字号、不同 anchor、缺少字号的旧标识均不可比较；未新增持久测试文件。
+- 执行与资源：主机 CLI 在场景返回结果后生成包含少量字段的后缀；每次运行一次，没有新增设备任务、I/O、等待或固件内存占用。既有失败、取消及不可判定路径保持原有结果和证据收尾规则。
+- 未测与下一步：本批未运行完整 host CTest、sanitizer 或固件构建，未烧录或操作设备，没有新增性能或 KOReader 接续结论。推送并创建 PR 后，由 Linux CI 覆盖完整 host 和 sanitizer 检查。
+
 ## 2026-10-11 · PR #50 整合与复验
 
 用户明确授权推送、开 PR、按 review 修复并在检查通过后合并，明确不烧录。已创建 PR #50，整合 main `d2762ba`；文档冲突保留双方批次记录，代码自动合并后复核正文选择、串口忙态和刷新所有权。
@@ -4435,3 +4446,17 @@ D14 核对：原代码只识别 K1/K3 与正文侧区点按，未识别非触摸
 交接检查 446 项、diff 检查通过；本机日志为 `/tmp/textturn-merge-*.log`。PR 首版 `507c0b8` 的远端 host 检查通过；整合提交的 CI 与 review 另行核对，不用首版结果代替。未连接、复位或烧录设备；真机未测范围与上一批一致。
 
 PR #50 自查修正：epdiy 按波形描述符地址缓存前导保持相，而 A/B/C 原地重建共用描述符，切换后可能复用旧的首动作相号。实验效果关闭该跳相优化，确保文字表执行完整 37 相；默认 GL16/Gray8 保持原行为。水波纹单拍原本不参与跳相。修正后标准与 Diagnostic 固件均重新构建通过，交接与 diff 检查通过；真实屏幕仍未测。日志为 `/tmp/textturn-review-firmware.log` 与 `/tmp/textturn-review-diagnostic.log`。
+
+
+## 2026-10-11 · PR #51 整合 main
+
+PR #51 的 `983f568` 已通过 push 与 pull_request 两次 Linux CI，覆盖完整 host、ASan/UBSan/LSan 和交接检查；Codex review 对该提交完成，返回赞同反应，没有评审或行内问题。合并前 main 新增 PR #50，导致开发状态摘要与追加记录冲突。本批将 main `f61c089` 合入分支，保留双方记录，并把 PR #50 的当前摘要更新为已合并；工作台工具和测试没有冲突，也未修改固件逻辑。
+
+整合后本地重跑 `python3 -m unittest discover -s tests -p test_device_workbench.py`，36/36 通过；`python3 tools/check_handoff.py` 为 446 项通过；`git diff --check` 通过。未重复本地完整 host、sanitizer 或固件构建，未连接或烧录设备。新提交必须重新通过 CI 和 review 后才合并，不能使用整合前的结果代替。
+
+
+## 2026-10-11 · PR #51 评审修正：拒绝旧报告字号缺失
+
+Codex 对 `5fa458a` 的评审指出：原提交只使新报告携带字号，两份旧自动场景报告的标识仍可能相同，`compare()` 会错误返回可比较。本批在比较入口同时检查两份 `image-sync` 或 `reading-flow` 报告，要求 workload 以有效正整数 `font_px` 字段结束；缺失、空值、零、负数或无效字符均拒绝。刷新场景沿用其既有标识规则。只改主机工具与文档，没有新增设备 I/O、任务、等待或固件内存开销。
+
+扩展现有 `test_compare_conditions`，覆盖两份旧报告、旧报告与新报告、有效相同字号和不同字号；新增断言在修正前复现失败，修正后通过。`python3 -m unittest discover -s tests -p test_device_workbench.py` 为 36/36；`ctest --test-dir build/host -R '^device_workbench$' --output-on-failure` 为 1/1；交接检查为 446 项，PR 相对 main 的 diff 检查通过。未新增测试框架，未运行固件构建或真机验证；新提交仍须通过 CI 与重新评审后合并。
