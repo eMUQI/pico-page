@@ -44,24 +44,53 @@ int main(int argc, char** argv) {
     assert(!sync::to_xpointer(document, chapter, emoji, 20260812, pointer, error));
     assert(error == sync::kUnsupportedStructure);
     {
-        // An image puts its whole chapter outside the profile: the text beside it and the image
-        // itself are refused in both directions with the error that names this cause.
+        // Element outside the profile, here a table: every position of the chapter is refused
+        // in both directions with the error that names this cause.
+        EpubDocument tables;
+        Chapter refused_chapter;
+        const auto fixtures = std::filesystem::path(argv[1]).parent_path();
+        assert(tables.open((fixtures / "table-chapter.epub").string(), error) && tables.load_chapter(0, refused_chapter, error));
+        assert(!refused_chapter.plain_dom && !refused_chapter.runs.empty());
+        for (const auto& run : refused_chapter.runs) {
+            Anchor anchor;
+            assert(refused_chapter.anchor_at(run.begin, anchor));
+            assert(!sync::to_xpointer(tables, refused_chapter, anchor, 20260812, pointer, error));
+            assert(error == sync::kUnsupportedStructure);
+        }
+        Anchor refused;
+        assert(!sync::from_xpointer(tables, "/body[1]/DocFragment[1]/body[1]/p[1]/text()[1].0", 20260812, refused, error));
+        assert(error == sync::kUnsupportedStructure);
+
+        // An image stays inside the profile. Text beside it maps as before and the image maps as
+        // its element at offset zero. The pinned CREngine resolves these paths to the same
+        // nodes; tools/check_koreader_mapping.py repeats that comparison.
         EpubDocument images;
         Chapter flow;
-        const auto fixture = (std::filesystem::path(argv[1]).parent_path() / "image-flow.epub").string();
-        assert(images.open(fixture, error) && images.load_chapter(0, flow, error) && !flow.images.empty());
-        std::size_t text_runs = 0, media_runs = 0;
-        for (const auto& run : flow.runs) {
-            Anchor anchor;
-            assert(flow.anchor_at(run.begin, anchor));
-            assert(!sync::to_xpointer(images, flow, anchor, 20260812, pointer, error));
-            assert(error == sync::kUnsupportedStructure);
-            ++(run.element_reference ? media_runs : text_runs);
+        assert(images.open((fixtures / "image-flow.epub").string(), error) && images.load_chapter(0, flow, error));
+        assert(flow.plain_dom && flow.images.size() == 2);
+        const Anchor before{flow.resource, "/html[1]/body[1]/p[1]/text()[1]", 0};
+        for (int version : {20240114, 20260812}) {
+            Anchor recovered;
+            sync::PartPosition place;
+            std::uint32_t visible = 0;
+            assert(sync::to_xpointer(images, flow, before, version, pointer, error));
+            assert(pointer == "/body[1]/DocFragment[1]/body[1]/p[1]/text()[1].0");
+            for (std::size_t i = 0; i < flow.images.size(); ++i) {
+                const auto expected = "/body[1]/DocFragment[1]/body[1]/img[" + std::to_string(i + 1) + "].0";
+                assert(sync::to_xpointer(images, flow, flow.images[i].source, version, pointer, error) && pointer == expected);
+                assert(sync::from_xpointer(images, pointer, version, recovered, error, {}, &place));
+                assert(recovered == flow.images[i].source && flow.offset_for(recovered, visible));
+                assert(place.part == flow.part && place.offset == visible && visible == flow.images[i].begin);
+            }
+            // The engine omits a first index in the earlier DOM version.
+            assert(sync::from_xpointer(images, "/body/DocFragment[1]/body/img.0", version, recovered, error));
+            assert(recovered == flow.images[0].source);
+            // An image position has no offset other than zero, and the image must exist.
+            assert(!sync::from_xpointer(images, "/body[1]/DocFragment[1]/body[1]/img[1].1", version, recovered, error));
+            assert(!sync::from_xpointer(images, "/body[1]/DocFragment[1]/body[1]/img[3].0", version, recovered, error));
+            assert(!sync::from_xpointer(images, "/body[1]/DocFragment[1]/body[1]/p[1]/img[1].0", version, recovered, error));
+            assert(recovered == Anchor{});
         }
-        assert(text_runs && media_runs);
-        Anchor refused;
-        assert(!sync::from_xpointer(images, "/body[1]/DocFragment[1]/body[1]/p[1]/text()[1].0", 20260812, refused, error));
-        assert(error == sync::kUnsupportedStructure);
     }
     chapter.plain_dom = true;
     chapter.css_sources.push_back("p { white-space: pre-wrap; }");

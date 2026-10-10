@@ -60,13 +60,15 @@ bool upload_confirmed(int http_status, std::string& error);
 
 /**
  * Error of to_xpointer and from_xpointer for a chapter part outside the verified plain XHTML
- * profile, for example one that holds an image or a table. No position in that part is mapped.
+ * profile, for example one that holds a table. No position in that part is mapped.
  */
 inline constexpr char kUnsupportedStructure[] = "This chapter contains an unsupported KOReader DOM structure";
 
 /**
  * Exact mapping for the verified plain XHTML profile and configured CREngine
  * DOM version. Unsupported content returns false; percentage is never a locator.
+ * A text anchor maps to a text node and offset; the anchor of an img element maps to that
+ * element at offset zero. Other media anchors are refused.
  */
 bool to_xpointer(const EpubDocument& document, const Chapter& chapter, const Anchor& anchor,
                  int dom_version, std::string& xpointer, std::string& error);

@@ -1840,17 +1840,18 @@ int main(int argc, char** argv) {
         assert(compare(first + "p[4501]/text()[1].0", "0.99").first == -1);
         assert(compare(second + "h1[1]/text()[1].0", "0").first == 1);
     }
-    // A chapter with an image lies outside the exact mapping profile. Its positions are neither
+    // A chapter with a table lies outside the exact mapping profile. Its positions are neither
     // uploaded nor offered as a jump target, and the panel names that cause rather than the
     // fallback for a remote position that the book does not contain.
     for (const bool async : {false, true}) {
         const auto root = card / (async ? "SyncUnsupportedAsync" : "SyncUnsupportedSync");
         fs::create_directories(root / "Books");
-        fs::copy_file(fixtures / "image-flow.epub", root / "Books/images.epub");
+        fs::copy_file(fixtures / "table-chapter.epub", root / "Books/table.epub");
+        fs::copy_file(fixtures / "image-cover.epub", root / "Books/cover.epub");
         write(root / "PicoPage/sync.toml", sync_config);
         write(root / "PicoPage/network.toml", "schema_version=2\n[[wifi]]\nssid=\"home\"\npassword=\"password\"\n");
         ReaderApp app(root.string(), "sync-unsupported", true, async); Driver driver{app};
-        assert(app.initialize()); driver.present(); opened(app, "Books/images.epub"); driver.present();
+        assert(app.initialize()); driver.present(); opened(app, "Books/table.epub"); driver.present();
         driver.complete_content();
         const auto saved = *app.saved_record();
         assert(saved.anchor.resource.find("chapter1") != std::string::npos);
@@ -1882,14 +1883,31 @@ int main(int argc, char** argv) {
         const auto unsupported = remote("/body[1]/DocFragment[1]/body[1]/p[1]/text()[1].0");
         const auto missing = remote("/body[1]/DocFragment[2]/body[1]/p[77]/text()[1].0");
         assert(unsupported != missing && *app.saved_record() == saved);
-        // The next chapter has no image; the same steps there produce the upload.
+        // The next chapter has no table; the same steps there produce the upload.
         while (app.saved_record()->anchor.resource.find("chapter2") == std::string::npos) {
             driver.key(Input::K3); driver.present(); driver.complete_content();
         }
         upload();
-        const auto sent = app.take_network_request();
+        auto sent = app.take_network_request();
         assert(sent && sent->request.method == "PUT");
         app.complete_network(sent->id, 200, "{}", ""); driver.present();
+
+        // A page that begins with an image is uploaded as that image element, and the same
+        // element position coming back from the server is recognised as the saved position.
+        const std::string image_position = "/body[1]/DocFragment[1]/body[1]/img[1].0";
+        opened(app, "Books/cover.epub"); driver.present(); driver.complete_content();
+        const auto cover = *app.saved_record();
+        assert(cover.anchor.node == "/html[1]/body[1]/img[1]" && cover.anchor.offset == 0);
+        upload();
+        sent = app.take_network_request();
+        assert(sent && sent->request.method == "PUT" && sent->request.body.find(image_position) != std::string::npos);
+        app.complete_network(sent->id, 200, "{}", ""); driver.present();
+        driver.close(); driver.present(); driver.complete_content();
+        driver.sync_view();
+        const auto again = driver.check_remote();
+        app.complete_network(again.id, 200, R"({"progress":")" + image_position + R"(","percentage":0})", "");
+        driver.present(); driver.complete_content();
+        assert(app.view() == View::Sync && std::string(app.sync_state()) == "same" && *app.saved_record() == cover);
     }
     {
         ReaderApp app(card.string()); Driver driver{app};

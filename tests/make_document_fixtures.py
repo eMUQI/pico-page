@@ -98,6 +98,39 @@ def generate(directory: Path) -> None:
     write_fixture(directory / "complex-svg-cover.epub", entries)
     entries["EPUB/chapter1.xhtml"] = '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>图片前的正文。</p><img src="cover.png" alt="真实图片"/><p>图片后的正文。</p><img src="missing.png" alt="缺失图片"/><p>末尾正文。</p></body></html>'
     write_fixture(directory / "image-flow.epub", entries)
+    # A table keeps its whole chapter outside the exact KOReader position mapping.
+    table = fixture_entries()
+    table["EPUB/chapter1.xhtml"] = ('<html xmlns="http://www.w3.org/1999/xhtml"><body><p>表格之前的正文。</p>'
+                                    '<table><tr><td>单元格</td></tr></table><p>表格之后的正文。</p></body></html>')
+    write_fixture(directory / "table-chapter.epub", table)
+    # Image and rule placements for the KOReader position mapping; the reference engine check
+    # reads the same file. Block containers mix images with paragraphs and bare text on purpose.
+    placements = dict(entries)
+    placements["EPUB/chapter1.xhtml"] = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>图片</title></head><body>
+<h1>图片与正文</h1>
+<p>段落文字之前。<img src="cover.png" alt="行内图片"/>段落文字之后。</p>
+<p><img src="cover.png" alt="独占段落"/></p>
+<p>
+  <img src="cover.png" alt="前后有空白"/>
+  空白之后的文字。</p>
+<div><img src="cover.png" alt="块内图片"/></div>
+<div>
+<img src="cover.png" alt="块内首图"/>
+<p>块内段落。</p>
+<img src="cover.png" alt="段间图片"/>
+<p>块内第二段。</p>
+</div>
+<img src="cover.png" alt="正文层图片"/>
+<p>正文层图片之后。</p>
+<hr/>
+<p>分隔线之后。<a href="chapter2.xhtml"><img src="cover.png" alt="链接图片"/></a>结尾。</p>
+<ul><li><img src="cover.png" alt="列表图片"/>列表文字。</li></ul>
+<p><img src="cover.png" alt="连续一"/> <img src="cover.png" alt="连续二"/>
+<img src="cover.png" alt="连续三"/>三图之后。</p>
+<p>''' + "图片之后的长段落用于分出多页。" * 120 + '''</p>
+<p><em><img src="cover.png" alt="强调内图片"/>强调文字。</em></p>
+</body></html>'''
+    write_fixture(directory / "image-mapping.epub", placements)
     entries["EPUB/chapter1.xhtml"] = '<html><body><p>第一章正文。</p></body></html>'
     entries["EPUB/chapter2.xhtml"] = '<html><body><img src="cover.png" alt="章节图片"/><p>第二章正文。</p></body></html>'
     write_fixture(directory / "next-chapter-image.epub", entries)

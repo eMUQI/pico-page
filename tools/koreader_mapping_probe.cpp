@@ -14,6 +14,20 @@ namespace {
 void require(bool okay, const std::string& detail) {
     if (!okay) { std::cerr << detail << '\n'; std::exit(1); }
 }
+// An image anchor names the element; every other anchor names a text node.
+bool image_anchor(const pico_page::Anchor& anchor) { return anchor.node.find("text()") == std::string::npos; }
+// The engine node must be the img element whose src names the same file as the native image.
+void require_image(ldomNode* node, const pico_page::Chapter& chapter, const pico_page::Anchor& source, const std::string& pointer) {
+    require(node && node->isElement() && node->getNodeName() == "img", "Reference element is not an image at " + pointer);
+    const std::string src = UnicodeToUtf8(node->getAttributeValue("src")).c_str();
+    const auto name = src.substr(src.find_last_of('/') + 1);
+    for (const auto& image : chapter.images) {
+        if (!(image.source == source) || image.resource.empty()) continue;
+        require(image.resource.size() >= name.size() &&
+                image.resource.compare(image.resource.size() - name.size(), name.size(), name) == 0,
+                "Reference image differs at " + pointer);
+    }
+}
 }
 
 // This host-only verifier links the unmodified external CREngine, never the firmware.
@@ -39,7 +53,7 @@ int main(int argc, char** argv) {
             require(view.LoadDocument(argv[1]), "Reference EPUB load failed");
             view.Render();
             require(view.getDocument()->getDOMVersionRequested() == static_cast<unsigned>(version), "DOM version mismatch");
-            std::size_t checked = 0, reversed = 0, bookmarks = 0, retained = 0;
+            std::size_t checked = 0, reversed = 0, bookmarks = 0, retained = 0, images = 0;
             std::map<std::string, std::size_t> skipped, bookmark_skipped;
             for (std::size_t index = 0; index < native.spine().size(); ++index) {
                 for (std::uint32_t part = 0;; ++part) {
@@ -57,14 +71,23 @@ int main(int argc, char** argv) {
                             ++skipped[error]; continue;
                         }
                         auto reference = view.getDocument()->createXPointer(Utf8ToUnicode(pointer.c_str()));
-                        require(!reference.isNull() && reference.getNode()->isText(), "Reference cannot resolve " + pointer);
-                        const auto text = reference.getNode()->getText();
-                        require(reference.getOffset() >= 0 && reference.getOffset() < text.length(), "Reference offset outside node");
-                        require(static_cast<char32_t>(text[reference.getOffset()]) == chapter.text[pos], "Reference text mismatch at " + pointer);
-                        if (step > 1 || pos % 53 == 0 || pos + 1 == chapter.text.size()) {
+                        const bool image = image_anchor(source);
+                        require(!reference.isNull(), "Reference cannot resolve " + pointer);
+                        if (image) {
+                            // Every scalar of the placeholder shares the element; its first one counts the image.
+                            require_image(reference.getNode(), chapter, source, pointer);
+                            pico_page::Anchor before;
+                            if (!pos || !chapter.anchor_at(pos - 1, before) || !(before == source)) ++images;
+                        } else {
+                            require(reference.getNode()->isText(), "Reference is not text at " + pointer);
+                            const auto text = reference.getNode()->getText();
+                            require(reference.getOffset() >= 0 && reference.getOffset() < text.length(), "Reference offset outside node");
+                            require(static_cast<char32_t>(text[reference.getOffset()]) == chapter.text[pos], "Reference text mismatch at " + pointer);
+                        }
+                        if (image || step > 1 || pos % 53 == 0 || pos + 1 == chapter.text.size()) {
                             pico_page::Anchor recovered;
                             const auto actual = UnicodeToUtf8(reference.toString());
-                            require(pico_page::sync::from_xpointer(native, actual.c_str(), version, recovered, error), error);
+                            require(pico_page::sync::from_xpointer(native, actual.c_str(), version, recovered, error), error + ": " + actual.c_str());
                             require(source == recovered, "Source round trip mismatch");
                             ++reversed;
                             view.goToBookmark(reference);
@@ -80,10 +103,13 @@ int main(int argc, char** argv) {
                                 require(native.find_chapter_part(resumed_index, resumed_chapter, error, pico_page::ChapterLoad::Reading,
                                     [&](const pico_page::Chapter& candidate) { return candidate.offset_for(recovered, visible); }), error);
                                 require(resumed_chapter.offset_for(recovered, visible), "Engine bookmark source missing");
-                                require(resumed.getNode()->isText(), "Engine bookmark expected text");
-                                const auto resumed_text = resumed.getNode()->getText();
-                                require(resumed.getOffset() >= 0 && resumed.getOffset() < resumed_text.length(), "Engine bookmark text offset");
-                                require(resumed_chapter.text[visible] == static_cast<char32_t>(resumed_text[resumed.getOffset()]), "Engine bookmark reverse text mismatch");
+                                if (image_anchor(recovered)) require_image(resumed.getNode(), resumed_chapter, recovered, resume_pointer.c_str());
+                                else {
+                                    require(resumed.getNode()->isText(), "Engine bookmark expected text");
+                                    const auto resumed_text = resumed.getNode()->getText();
+                                    require(resumed.getOffset() >= 0 && resumed.getOffset() < resumed_text.length(), "Engine bookmark text offset");
+                                    require(resumed_chapter.text[visible] == static_cast<char32_t>(resumed_text[resumed.getOffset()]), "Engine bookmark reverse text mismatch");
+                                }
                                 ++bookmarks;
                             } else ++bookmark_skipped[error + ": " + resume_pointer.c_str()];
                         }
@@ -96,7 +122,7 @@ int main(int argc, char** argv) {
             require(checked > 0, "No supported positions compared");
             std::cout << "DOM " << version << ", " << size << " px: " << checked
                       << '/' << retained << " source/CREngine scalars (step=" << step << "), " << reversed
-                      << " reverse positions, " << bookmarks << " engine bookmarks passed" << std::endl;
+                      << " reverse positions, " << bookmarks << " engine bookmarks passed, " << images << " images" << std::endl;
             for (const auto& [reason, count] : skipped)
                 std::cout << "UNSUPPORTED " << count << ' ' << reason << std::endl;
             if (!bookmark_skipped.empty()) {

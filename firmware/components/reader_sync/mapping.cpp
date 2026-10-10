@@ -46,8 +46,10 @@ bool block_tag(const std::string& tag) {
            tag == "footer" || tag == "nav" || tag == "blockquote" || tag == "ul" || tag == "ol" || tag == "li";
 }
 bool supported_structure(const std::vector<Segment>& parts) {
-    if (parts.size() < 4 || parts[0].name != "html" || parts[0].index != 1 ||
-        parts[1].name != "body" || parts[1].index != 1 || parts.back().name != "text()") return false;
+    // Text directly in the body is not covered; an image there is.
+    const bool image = parts.size() >= 3 && parts.back().name == "img";
+    if (parts.size() < (image ? 3U : 4U) || parts[0].name != "html" || parts[0].index != 1 ||
+        parts[1].name != "body" || parts[1].index != 1 || (parts.back().name != "text()" && !image)) return false;
     bool inline_parent = false, anchor_parent = false;
     for (std::size_t i = 2; i + 1 < parts.size(); ++i) {
         const auto& tag = parts[i].name;
@@ -166,6 +168,14 @@ bool to_xpointer(const EpubDocument& document, const Chapter& chapter, const Anc
         !chapter.offset_for(anchor, visible)) { error = "Position is not retained in this chapter"; return false; }
     CssProfile css;
     if (!mapping_profile(chapter, css, error)) return false;
+    std::vector<Segment> element;
+    if (parse_path(anchor.node, element) && element.back().name == "img") {
+        // CREngine addresses an image as its element at offset zero. The boxing nodes it inserts
+        // around inline content are not part of an XPointer in the supported DOM versions.
+        if (!supported_structure(element)) { error = "Unsupported source node structure"; return false; }
+        xpointer = "/body[1]/DocFragment[" + std::to_string(spine + 1) + ']' + canonical(element, 1) + ".0";
+        return true;
+    }
     const auto node = std::find_if(chapter.source_nodes.begin(), chapter.source_nodes.end(),
                                  [&](const auto& item) { return item.node == anchor.node; });
     if (node == chapter.source_nodes.end()) { error = "Source text node is unavailable"; return false; }
@@ -190,15 +200,39 @@ bool from_xpointer(EpubDocument& document, const std::string& xpointer, int dom_
     std::uint32_t offset = 0;
     std::vector<Segment> parts;
     if (dot == std::string::npos || !number(std::string_view(xpointer).substr(dot + 1), offset) ||
-        !parse_path(std::string_view(xpointer).substr(0, dot), parts) || parts.size() < 5 ||
+        !parse_path(std::string_view(xpointer).substr(0, dot), parts) ||
+        parts.size() < (parts.back().name == "img" ? 4U : 5U) ||
         parts[0].name != "body" || parts[0].index != 1 || parts[1].name != "DocFragment" ||
-        parts[2].name != "body" || parts[2].index != 1 || parts.back().name != "text()" ||
+        parts[2].name != "body" || parts[2].index != 1 || (parts.back().name != "text()" && parts.back().name != "img") ||
         parts[1].index > document.spine().size()) {
         error = "Unsupported or invalid KOReader text XPointer"; return false;
     }
     const auto index = static_cast<std::size_t>(parts[1].index - 1);
     Chapter chapter;
     const std::string source = "/html[1]" + canonical(parts, 2);
+    const auto report = [&](std::uint32_t visible) {
+        if (place) *place = {chapter.part, visible, static_cast<std::uint32_t>(chapter.text.size()), chapter.last_part};
+    };
+    if (parts.back().name == "img") {
+        // An element position: the image itself, which is how CREngine reports a page that begins with one.
+        std::vector<Segment> element;
+        const auto holds = [&](const Chapter& candidate) {
+            return std::any_of(candidate.images.begin(), candidate.images.end(),
+                               [&](const DocumentImage& image) { return image.source.node == source; });
+        };
+        CssProfile css;
+        std::uint32_t visible = 0;
+        if (offset || !parse_path(source, element) || !supported_structure(element) ||
+            !document.find_chapter_part(index, chapter, error, ChapterLoad::Mapping, holds, stop) ||
+            !mapping_profile(chapter, css, error) || !chapter.offset_for({chapter.resource, source, 0}, visible)) {
+            if (error.empty() || error.rfind("Chapter part is not available", 0) == 0)
+                error = "KOReader image position cannot be mapped exactly";
+            return false;
+        }
+        anchor = {chapter.resource, source, 0};
+        report(visible);
+        return true;
+    }
     const std::string_view parent(source.data(), source.rfind('/'));
     const auto locate = [&](const Chapter& candidate, const CssProfile& css) -> const SourceTextNode* {
         for (const auto& item : candidate.source_nodes) {
@@ -226,7 +260,7 @@ bool from_xpointer(EpubDocument& document, const std::string& xpointer, int dom_
     std::uint32_t visible = 0;
     if (!chapter.offset_for(candidate, visible)) { error = "KOReader position is not retained in the reading text"; return false; }
     anchor = std::move(candidate);
-    if (place) *place = {chapter.part, visible, static_cast<std::uint32_t>(chapter.text.size()), chapter.last_part};
+    report(visible);
     return true;
 }
 
