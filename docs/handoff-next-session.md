@@ -1,5 +1,7 @@
 # Pico Page 后续开发交接
 
+> 历史交接（2026-10-06）。下文的「当前」「最新」、设备状态、取消备份决定及刷写授权均仅指该次任务，不是现在的操作授权或通用安装步骤。请从[开发入口](../CODEX_START.md)和[开发状态的当前摘要](development-status.md)接续；不得直接复用下列设备端口、偏移或命令。
+
 > 当前增量：原稿还原与全局 K2 候选已获用户明确授权烧录，OTA0 写入与摘要校验成功。最新验收结果见开发状态。
 > 最新构建、USB 已安装版本和本轮验证以 docs/development-status.md 顶部为准；下方离线镜像记录是较早批次。
 
@@ -16,7 +18,7 @@
 
 ## 当前安装与设备状态
 
-- 串口 `/dev/cu.usbmodem1101`；操作前重新确认，同一时刻只使用一个串口客户端。
+- 串口 `/dev/cu.TARGET_DEVICE`；操作前重新确认，同一时刻只使用一个串口客户端。
 - ESP32-S3 rev v0.2、8 MiB PSRAM、16 MiB Flash；安全启动和 Flash 加密未启用。
 - 实测分区：nvs `0x9000/24K`、phy `0xf000/4K`、ota_0 `0x10000/4M`、ota_1 `0x410000/4M`、otadata `0x810000/8K`。
 - 有效应用槽为 OTA0，现有 bootloader 为 IDF v6.1。仅向 `0x10000` 写入应用，禁止直接运行生成的完整 flash 命令。
@@ -84,9 +86,9 @@ python3 tools/check_handoff.py
 git diff --check
 ```
 
-- EIM `/opt/homebrew/bin/eim`；IDF `/Users/wulu/.espressif/v6.1/esp-idf` 有用户局部修改，保持原样。
-- Python/esptool `/Users/wulu/.espressif/tools/python/v6.1/venv/bin/python`。
-- 应用安装命令：`python -m esptool --chip esp32s3 --port /dev/cu.usbmodem1101 --baud 115200 --before usb-reset --after hard-reset write-flash 0x10000 <新的应用bin>`。
+- EIM `/opt/homebrew/bin/eim`；IDF `~/.espressif/v6.1/esp-idf` 有用户局部修改，保持原样。
+- Python/esptool `~/.espressif/tools/python/v6.1/venv/bin/python`。
+- 应用安装命令：`python -m esptool --chip esp32s3 --port /dev/cu.TARGET_DEVICE --baud 115200 --before usb-reset --after hard-reset write-flash 0x10000 <新的应用bin>`。
 - `tools/device_console.py` 实现不重置打开及诊断协议。先读协议，不能随意重试可变操作。
 - `.local/device/install/final_validation.py` 是本轮一次性验收脚本，会操作书籍及排版；后续运行前检查当前设备与用户操作状态。
 - 原设计 49 个文件保持原样。工作目录大量新增实现尚未提交，不执行 reset/clean。

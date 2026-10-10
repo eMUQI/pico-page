@@ -1,6 +1,6 @@
 # Read Pico 运行时适配
 
-日期：2026-10-06。实现位于 `firmware/components/platform_read_pico/`。本页记录当前代码和编译检查；屏幕、TF 卡、输入及睡眠仍需真机验证。
+更新日期：2026-10-10。实现位于 `firmware/components/platform_read_pico/`。本页记录当前代码和编译检查；屏幕、TF 卡、输入及睡眠仍需真机验证。
 
 ## 接口与所有权
 
@@ -42,9 +42,9 @@
 
 输入帧每行 342 字节，偶数 x 位于低半字节，奇数 x 位于高半字节，0 为黑色、15 为白色。平台将竖屏坐标变换为官方 1216×684 原生缓冲：`native_x = y`、`native_y = 683 - x`，对应上游 `EPD_ROT_INVERTED_PORTRAIT`。触摸控制器的显示区坐标直接采用竖屏坐标。
 
-首次呈现、上次刷新失败后的恢复和 `full_clean=true` 均调用 `epd_clear()` 的物理黑白清理周期，再执行 `MODE_GC16` 全像素更新。该路径禁用前导保持跳过，不检查图像是否相同。普通更新采用 `MODE_GL16` 全像素路径，使上游白底补偿覆盖未变化像素。每次更新检查面板 PGOOD、故障状态、VCOM 读回值和波形返回值；失败后基准帧失效，下次执行清理恢复。供数队列不足时把后续像素时钟降为官方支持的 12 MHz；没有把失败帧确认成成功。
+首次呈现、上次刷新失败后的恢复和 `full_clean=true` 均调用 `epd_clear_checked()` 的物理黑白清理周期，再执行 `MODE_GC16` 全像素更新。该路径禁用前导保持跳过，不检查图像是否相同。普通更新按请求使用全屏或限定区域，正文波形可选择默认波形或 Gray8；全刷与恢复始终建立完整基准。每次更新检查面板 PGOOD、故障状态、VCOM 读回值和波形返回值；失败后基准帧失效，下次执行清理恢复。健康供电下发生行队列欠载时，把像素时钟降为 12 MHz，并对同一目标最多执行一次清屏和 GC16 重画；仅在恢复成功后确认呈现，重试失败则报告失败。
 
-`epd_clear()` 在锁定版本中返回 `void`，不能单独确认清理周期的驱动结果。适配层随后检查 GC16 返回值及电源状态，但仍无法读取像素确认成像；真机检查不可省略。默认时钟为官方初始化使用的 18 MHz。更新后 8 秒无新帧时，由 `poll()` 关闭面板高压。
+构建时应用的 epdiy 补丁提供 `epd_clear_checked()`，适配层检查清屏和后续 GC16 的结果及电源状态；仍无法读取像素确认成像，真机检查不可省略。默认时钟为官方初始化使用的 18 MHz。更新后 8 秒无新帧时，由 `poll()` 关闭面板高压。
 
 三个电容键不是 ESP32 GPIO 按键，识别区域来自同一 commit 的 `main/ui/ui_menu.h`：触摸原始 y ≥ 1300，K1/K2/K3 的 x 分别为 `[0,160)`、`[160,320)`、`[320,480)`。显示区为 x < 684、y < 1216；中间未定义区域不触发动作。这些边界来自上游硬件实现，尚未在用户设备上实测。
 
@@ -72,7 +72,7 @@ PMU `KEY_LONG` 打开菜单，`KEY_SHORT` 仍进入浅睡；同次长按的重�
 
 `connect_network()`、`http_request()`、`disconnect_network()` 在独立网络任务中串行执行。应用先显示连接状态，再分派用户明确发起的同步请求。打开书籍、翻页和启动不会自动联网。睡眠前应用必须等待网络任务结束并断开网络，不在传输中切断其对象或电源。
 
-`connect_network()` 接收网络名称和密码，不读文件。应用在分派同步/手动连接前读取目标凭据快照；手机会话在 worker 内读取 TF 卡的 `PicoPage/network.toml`（该解析在 host 上有测试）。最多保存 5 个网络，名称不重复：
+`connect_network()` 接收网络名称和密码，不读文件。应用在分派同步/手动连接前读取目标凭据快照；网络 worker 使用应用传入的凭据快照；`PicoPage/network.toml` 的解析在 host 上有测试。最多保存 5 个网络，名称不重复：
 
 ```toml
 schema_version = 2
@@ -107,7 +107,7 @@ HTTP 只接受 HTTPS GET/PUT/POST，使用 ESP-IDF 系统证书包和主机名�
 
 ## 在设备上添加网络和验证账户
 
-手机配置会话已删除（D37）；`start_portal_server()`、配置网页和表单解析不再存在。流程和界面见 [UI 实现](ui-implementation.md) 第 18 节。
+手机配置会话已删除（D37）；`start_portal_server()`、配置网页和表单解析不再存在。流程和界面见 [UI 实现](ui-implementation.md) 第 21 节。
 
 - 扫描：`WifiOperation::Kind::Scan`。worker 启动站点接口并扫描一次，返回最多 20 个名称、信号强度和是否开放，随后释放无线。
 - 添加或更新密码：`WifiOperation::Kind::Join`。worker 用键盘输入的凭据建立一条独立连接，成功或失败后都释放无线。应用任务只在连接成功、且用户没有取消时，用 `save_network_edit()` 把网络写入 `network.toml`，并记录连接时间。取消后迟到的成功结果按请求编号丢弃，不写卡。已满 5 个时只接受已保存网络的密码更新。
@@ -122,19 +122,19 @@ HTTP 只接受 HTTPS GET/PUT/POST，使用 ESP-IDF 系统证书包和主机名�
 - 经设备热点：`start_access_point()` 以 APSTA 模式开启热点，名称为 `PicoPage-` 加 MAC 末两字节，WPA2，每次会话随机生成 8 位密码，最多 2 台设备，地址 192.168.4.1；另有一个任务在 UDP 53 端口把所有 A 记录查询答为热点地址。`start_upload_server()` 在 `GET /` 提供传书页，其他路径 303 跳转到它。
 - 经已保存的 Wi-Fi：按连接方式选网，已经在线时复用当前连接；不开热点，也不运行名称服务。会话中若站点连接失效，传书服务结束，设备返回「网络与传输」并显示断线原因。`start_upload_server()` 只在 `GET /<6 位随机路径>` 提供传书页，其余路径返回提示页；设备屏幕的二维码和文字地址都包含这段路径。连接失败时不进入会话页，网络页显示原因。
 - 两种方式都在页面中注入本次会话的 32 位十六进制令牌；`POST /check`、`POST /upload` 必须带该令牌。拒绝时按原因返回状态码：400（文件名）、409（同名）、413（大小）、415（格式）只涉及这一本，传书页继续下一本；403（会话无效）、500、503、507 等停下整批。
-- 上传/校验 handler 在开始和结束时通过回调记录单调活动时间及阶段，两者与 worker 的到期检查共用会话锁。即使短请求在两次轮询间完成也重新计时；handler 运行时不按空闲到期，结束后 10 分钟无活动才结束服务。自动休眠也可取消上传，先由文件事务回滚或完成提交，stop_portal_server() 返回后才释放网络及卡。取消/失败不增加已保存数；已进入提交边界的完整文件仍以真实提交结果为准。
+- 上传/校验 handler 在开始和结束时通过回调记录单调活动时间及阶段，两者与 worker 的到期检查共用会话锁。即使短请求在两次轮询间完成也重新计时；handler 运行时不按空闲到期，结束后 10 分钟无活动才结束服务。传书会话暂停自动休眠；电源键请求休眠时结束会话，先由文件事务回滚或完成提交，stop_portal_server() 返回后才释放网络及卡。取消/失败不增加已保存数；已进入提交边界的完整文件仍以真实提交结果为准。
 - 每本书提交并回读校验后，HTTP 任务回调网络任务，设备状态区更新为「已保存 N 本 · 最近：书名」。书名过长时设备截短显示；完整的逐本结果可在浏览器中查看。
 
 预算（按输入上限推得，未在真机测量）：HTTP 任务栈 8 KiB，DNS 任务栈 4 KiB（其中收发缓冲 528 字节），网络任务沿用原有 16 KiB；二维码两个 407 字节缓冲。Wi-Fi 驱动在 APSTA 下和 TLS 握手占用的内部 RAM 没有数字，必须在真机上读 `status` 的 `internal`、`largest_internal`。固件比版本 E 增加 103,008 字节。
 
 已知限制：连接其他信道的网络时热点会跟着换信道，手机可能短暂掉线；连接等待可取消，但驱动调用、HTTP I/O 和文件提交期间只能在返回后的安全边界退出。热点密码在射频开启前生成，`esp_random()` 此时是伪随机数，另混入了点击时刻。
 
-本轮只编译网络调用路径，没有读取真实 Wi-Fi/账户凭据，没有向真实同步服务发请求，也没有在真机上开过热点。
+早期平台接入阶段只编译网络调用路径，未连接真实服务或开启设备热点。后续设备及同步证据见开发状态，不以这条历史结论描述当前验证范围。
 
 ## 来源、许可与验证
 
-来源：[MindReset/read_pico_firmware](https://github.com/MindReset/read_pico_firmware/tree/5f3406deec33304de8801046db583dec7c49e55b)。初始化、按键区域和浅睡流程参考该 commit 的 `read_pico_init.c`、`read_pico_board.c`、`main/display.c`、`main/sleep.c` 及 `main/ui/ui_menu.h`。关机直接调用同一 commit 的 `components/read_pico_pmu/read_pico_pmu.c` 公开接口，其 Apache-2.0 许可与依赖不变。适配源文件保留上游 Apache-2.0 版权与许可标识，组件目录附完整 `LICENSE`，文件头标明本项目变更。没有修改锁定 BSP。EPDiy 的 LGPL-3.0-or-later 义务继续适用，详见 [BSP 审查](bsp-review.md)。
+来源：[MindReset/read_pico_firmware](https://github.com/MindReset/read_pico_firmware/tree/5f3406deec33304de8801046db583dec7c49e55b)。初始化、按键区域和浅睡流程参考该 commit 的 `read_pico_init.c`、`read_pico_board.c`、`main/display.c`、`main/sleep.c` 及 `main/ui/ui_menu.h`。关机直接调用同一 commit 的 `components/read_pico_pmu/read_pico_pmu.c` 公开接口，其 Apache-2.0 许可与依赖不变。适配源文件保留上游 Apache-2.0 版权与许可标识，组件目录附完整 `LICENSE`，文件头标明本项目变更。锁定 BSP 的下载原件保持不变，构建副本应用项目补丁。EPDiy 的 LGPL-3.0-or-later 义务继续适用，详见 [BSP 审查](bsp-review.md)。
 
 实际完成：复用当前 `firmware/build/compile_commands.json` 的 Xtensa 工具链、包含路径和配置，以 C++17 单独编译 `platform.cpp` 和 `network.cpp`，均退出码 0，最新输出为忽略目录 `.local/review-platform.cpp.o`、`.local/review-network.cpp.o`。完整固件构建结果由 [开发状态](development-status.md) 统一记录，单独目标编译不代替链接验证。
 
-已通过 ROM/esptool 读取芯片、安全状态、Flash 容量与分区表，详见 [设备检查记录](device-validation.md)。尚未执行本项目运行时的校准读取、刷写、屏幕成像、触摸热区、TF 插拔及写入、浅睡电流和真实唤醒。当前代码没有提供这些测试的成功占位。
+已通过 ROM/esptool 读取芯片、安全状态、Flash 容量与分区表，详见 [设备检查记录](device-validation.md)。后续记录包含工厂校准读取、应用刷写及部分显示、存储和唤醒验证；实体触摸、光学效果、TF 故障与浅睡电流等仍须按验收表逐项核对，不能以驱动返回成功代替。

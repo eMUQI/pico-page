@@ -1,8 +1,10 @@
 # 开发环境与硬件记录
 
-核查日期：2026-10-06。工作目录：`/Users/wulu/workspace/pico-page`。现有 ESP-IDF/EIM 已复用；本轮没有安装、升级或修改全局工具链。
+本页工具链和设备表记录 2026-10-06 的特定 macOS 环境，路径已脱敏，不代表当前机器状态，也不是刷写授权。2026-10-10 的干净 Linux 工具链及后续构建记录见[开发状态](development-status.md)。通用构建入口见 [README](../README.md#构建固件)；操作前核对本机工具链、实际配置和目标设备。
 
-最新 `sh tools/build_firmware.sh` 完整构建成功，应用镜像已写入实测 `ota_0` 区域并通过摘要校验。已确认 PMU、工厂 VCOM 读取、SD、PSRAM、书库及两本 EPUB 的设备阅读路径；完整字体和书籍已导入并读回 CRC。最后的重启与画布验证见设备验证页。这不是全部功能验收；物理目视、触摸、睡眠与设备 Wi-Fi/HTTPS 同步仍待验证。用户已明确取消完整备份，目前无审批阻塞。改动未提交、推送或发布。
+核查日期：2026-10-06。工作目录：`~/workspace/pico-page`。现有 ESP-IDF/EIM 已复用；本轮没有安装、升级或修改全局工具链。
+
+该次 `sh tools/build_firmware.sh` 完整构建成功，应用镜像已写入实测 `ota_0` 区域并通过摘要校验。已确认 PMU、工厂 VCOM 读取、SD、PSRAM、书库及两本 EPUB 的设备阅读路径；完整字体和书籍已导入并读回 CRC。最后的重启与画布验证见设备验证页。这不是全部功能验收；物理目视、触摸、睡眠与设备 Wi-Fi/HTTPS 同步仍待验证。用户已明确取消完整备份，目前无审批阻塞。改动未提交、推送或发布。
 
 ## 本机工具链
 
@@ -11,10 +13,10 @@
 | 主机 / shell | macOS 27.0（26A428），arm64 / zsh |
 | host 编译器 | Apple clang 21.0.0，`clang-2100.1.1.101` |
 | EIM | `/opt/homebrew/bin/eim`，0.19.0；已选择 v6.1 |
-| ESP-IDF | `/Users/wulu/.espressif/v6.1/esp-idf`；`idf.py --version` 为 `ESP-IDF v6.1-dirty` |
+| ESP-IDF | `~/.espressif/v6.1/esp-idf`；`idf.py --version` 为 `ESP-IDF v6.1-dirty` |
 | IDF commit | `fff9895c82d744c7237be8847347bdd1b07c6643`，tag `v6.1` |
-| EIM 激活脚本 | `/Users/wulu/.espressif/tools/activate_idf_v6.1.sh` |
-| Python | `/Users/wulu/.espressif/tools/python/v6.1/venv/bin/python`，3.14.7 |
+| EIM 激活脚本 | `~/.espressif/tools/activate_idf_v6.1.sh` |
+| Python | `~/.espressif/tools/python/v6.1/venv/bin/python`，3.14.7 |
 | CMake / Ninja | 4.4.3 / 1.12.1 |
 | 交叉编译器 | `xtensa-esp-elf-g++`，GCC 15.2.0，`esp-15.2.0_20251204` |
 | 官方 BSP commit | `5f3406deec33304de8801046db583dec7c49e55b`，组件与许可见 [BSP 审查](bsp-review.md) |
@@ -22,7 +24,7 @@
 
 本机另有 EIM 管理的 v5.5.4、v5.5.5、v6.0.3。本轮未切换全局选择。普通 PATH 中没有 `idf.py`；通过 EIM 可以使用已安装的 v6.1。
 
-IDF 源码原先就有一处已跟踪修改：`components/esp_system/ld/ld.ext_ram.sections` 将 `_ext_ram_on_same_bus` 分支的地址表达式包在 `MAX(ABSOLUTE(.), ...)` 中。文件 SHA-256：`2fdfc21bfb7e0d31d7c30260c6739169fe0809fb52fd9a66dcaf036f7711178f`。另有未跟踪的 `tools/requirements/requirements.merged.txt`。这些内容均保留原样；本次本机结果不能描述为「干净的官方 v6.1 环境已验证」，干净环境复现仍待后续执行。
+IDF 源码原先就有一处已跟踪修改：`components/esp_system/ld/ld.ext_ram.sections` 将 `_ext_ram_on_same_bus` 分支的地址表达式包在 `MAX(ABSOLUTE(.), ...)` 中。文件 SHA-256：`2fdfc21bfb7e0d31d7c30260c6739169fe0809fb52fd9a66dcaf036f7711178f`。另有未跟踪的 `tools/requirements/requirements.merged.txt`。这些内容均保留原样；本次本机结果不能描述为「干净的官方 v6.1 环境已验证」，这是该次 macOS 构建的限制；2026-10-10 的干净 Linux 复现见开发状态。
 
 ## 已执行的环境命令
 
@@ -31,8 +33,8 @@ eim --version
 eim --log-file .local/eim.log --do-not-track true list
 eim --log-file .local/eim.log --do-not-track true run "idf.py --version" v6.1
 eim --log-file .local/eim.log --do-not-track true run "python --version && cmake --version && ninja --version && xtensa-esp-elf-g++ --version" v6.1
-git -C /Users/wulu/.espressif/v6.1/esp-idf rev-parse HEAD
-git -C /Users/wulu/.espressif/v6.1/esp-idf status --short
+git -C ~/.espressif/v6.1/esp-idf rev-parse HEAD
+git -C ~/.espressif/v6.1/esp-idf status --short
 sh -n tools/build_firmware.sh tools/setup_bsp.sh
 ```
 
@@ -65,7 +67,7 @@ sh tools/build_firmware.sh
 
 ## 设备与分区
 
-已通过 `/dev/cu.usbmodem1101` 自动进入下载模式，读回 ESP32-S3 revision v0.2、8 MiB PSRAM、16 MiB Flash 和安全状态；Secure Boot / Flash Encryption 未启用。实际分区含 `ota_0` / `ota_1` 两个 4 MiB 槽，分区表读取及解析成功。早期完整备份首次传输失败，重试曾因自动审批服务用量限制而未执行；用户随后明确取消完整备份，目前无审批阻塞。已按实测布局仅在 `ota_0` 的 `0x10000` 写入应用，写入摘要校验通过。原 bootloader、分区表、NVS、otadata 与工厂 VCOM/PMU 校准未改，TF 未格式化。此前首版启动已确认 PMU、工厂 VCOM 读取、SD、PSRAM 与书库全刷完成。完整资源已导入并验证，离线开书、翻页、排版、保存和切书恢复已实测通过。完整证据、实际偏移及当前进展见 [设备检查记录](device-validation.md)。
+已通过 `/dev/cu.TARGET_DEVICE` 自动进入下载模式，读回 ESP32-S3 revision v0.2、8 MiB PSRAM、16 MiB Flash 和安全状态；Secure Boot / Flash Encryption 未启用。实际分区含 `ota_0` / `ota_1` 两个 4 MiB 槽，分区表读取及解析成功。早期完整备份首次传输失败，重试曾因自动审批服务用量限制而未执行；用户随后明确取消完整备份，目前无审批阻塞。已按实测布局仅在 `ota_0` 的 `0x10000` 写入应用，写入摘要校验通过。原 bootloader、分区表、NVS、otadata 与工厂 VCOM/PMU 校准未改，TF 未格式化。此前首版启动已确认 PMU、工厂 VCOM 读取、SD、PSRAM 与书库全刷完成。完整资源已导入并验证，离线开书、翻页、排版、保存和切书恢复已实测通过。完整证据、实际偏移及当前进展见 [设备检查记录](device-validation.md)。
 
 本地 `firmware/partitions.build.csv` 仍只用于编译，不能覆盖实际分区。物理目视显示效果、触摸/按键、TF 保存、睡眠/唤醒与功耗仍待验收。
 
@@ -122,4 +124,4 @@ python3 tools/check_koreader_mapping.py
 固件加入联网后超过最初 1 MiB 诊断构建分区。现在使用本地 `firmware/partitions.build.csv` 的 4 MiB 单应用构建配置（与设备 ota_0 槽同大），完整 `idf.py build` 可通过。这只是构建配置，与已读回的双槽设备布局不同；生成的 flash_args 不可当作已确认的安装方案。主应用任务栈为 32 KiB，网络工作任务为 16 KiB。普通分配阈值设为 0，优先使用 PSRAM；内部预留保持 32 KiB。设备离线路径的堆、最大连续块和栈采样见 device-validation，不作为所有内容的峰值保证。
 
 
-早期诊断/EPUB 增量重建曾因 IDF 依赖管理器调用 psutil 的 `sysctl` 查询被沙箱拒绝，日志 `.local/firmware-current.log`。随后已完成授权环境中的完整构建；当前构建结果以 `.local/firmware-metrics-cache.log` 和本页顶部镜像摘要为准。没有修改全局 IDF；构建通过不代表尚未执行的设备功能已经验收。
+早期诊断/EPUB 增量重建曾因 IDF 依赖管理器调用 psutil 的 `sysctl` 查询被沙箱拒绝，日志 `.local/firmware-current.log`。随后已完成授权环境中的完整构建；该历史批次结果见 `.local/firmware-metrics-cache.log`；后续批次以开发状态中对应日期、commit 和镜像摘要为准。没有修改全局 IDF；构建通过不代表尚未执行的设备功能已经验收。

@@ -4,7 +4,7 @@
 
 在仓库执行 `sh tools/run_host.sh`。它使用当前工程的原生 C++ 阅读逻辑，打开 684 × 1216 灰阶画布。显示窗口只是硬件显示接口的替代，不代表墨水屏波形、残影、触摸或耗电已经验收。
 
-依赖：CMake 3.20+、C/C++17 编译器、Python 3.11+、pkg-config、SDL2、OpenSSL 和 libcurl。本机现有环境已验证。Linux 可用系统包 `libsdl2-dev libssl-dev libcurl4-openssl-dev pkg-config`；远端 CI 尚未执行。字体及 FreeType 由 `tools/setup_fonts.py` 下载固定版本并核对 SHA-256，不会安装或替换全局工具链。
+依赖：CMake 3.20+、C/C++17 编译器、Python 3.11+、pkg-config、SDL2、OpenSSL 和 libcurl。本机现有环境已验证。Linux 可用系统包 `libsdl2-dev libssl-dev libcurl4-openssl-dev pkg-config`；Linux host CI 已有运行记录，具体批次见开发状态；CI 不验证 SDL 交互和真机行为。字体及 FreeType 由 `tools/setup_fonts.py` 下载固定版本并核对 SHA-256，不会安装或替换全局工具链。
 
 1. 启动后，书库直接显示 `Books/` 内的书和文件夹；如需阅读子文件夹中的书，先进入对应文件夹。
 2. 点击一本 EPUB，等待正文显示。成功显示后才写入进度。
@@ -53,7 +53,7 @@ PicoPage/sync.toml              私密 KOSync 配置，可选
 
 ## 初版限制
 
-- 按章解压和解析，当前页优先排版；单章有明确资源上限。首次原文件 SHA-256 校验需要顺序读整书。
+- 正文采用有界分段解析，当前页优先排版；有效长章节可跨段处理，不因整章超过单段预算而拒绝。首次原文件 SHA-256 校验需要顺序读整书。
 - EPUB 样式使用统一正文排版。PNG、基线 JPEG 及受支持的简单 SVG 图片容器作为独立内容块参与分页，按原图比例绘制；图片前后的文字可排在同一页，文字不环绕图片，只含一张图片的章节使用整个正文区域。缺失、损坏或不支持的图片显示明确占位，保留媒体元素锚点，允许继续阅读。具体图片资源限制见 [图片实现](image-runtime.md)；表格、复杂 SVG 和 CSS 仍有降级或拒绝范围。
 - 已有列表/封面卡片、目录折叠、电量状态、单本详情、USB 文件传输和 Wi-Fi 传书；Wi-Fi 密码和同步账户的设备端输入尚未在真机验证。设备短按电源使用浅睡，不等于断电关机。
 - 设备屏幕方向、物理全刷、触摸热区、SD 异常、内存峰值、掉电恢复与睡眠耗电均待真机验证。
