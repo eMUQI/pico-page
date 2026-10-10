@@ -139,4 +139,4 @@ ctest --test-dir build/host --output-on-failure
 
 共享内容路径的开启配置可用 `-DPICO_PAGE_HOST_TRACE_EVENTS=ON`；它同时启用 metrics。ASan/UBSan/LSan 应覆盖此配置和现有异步应用/内容 worker 回归。正式固件关闭验证应同时检查 sdkconfig.h、ELF/map 和 reader_core archive：Release 无 diagnostics 记录器/调用符号；Performance 无 64 事件数组；Diagnostic 有固定容量实例。
 
-真机 A/B 使用同 commit、同设备、同 TF/书籍摘要、同冷/热缓存和同电源/无线条件。分别构建 Release/Performance，单独记录翻页、图片和同步的外部观测时延、内部/PSRAM 最低余量、连续块、各任务余栈；不要用 Diagnostic 串口查询期间的耗时冒充纯 Performance。Release 无内部追踪，需相同外部计时或调试器方法。保留原始样本、数量、p50/p95/p99/max，重复多轮；目前没有真机百分比开销数据。还需验证观察命令不阻止停留保存、休眠/USB 断连能报告缺口，以及 K2 全刷的实体屏幕效果。
+真机 A/B 使用同 commit、同设备、同 TF/书籍摘要、同冷/热缓存和同电源/无线条件。分别构建 Release/Performance，单独记录翻页、图片和同步的外部观测时延、内部/PSRAM 最低余量、连续块、各任务余栈；不要用 Diagnostic 串口查询期间的耗时冒充纯 Performance。Release 无内部追踪，需相同外部计时或调试器方法。保留原始样本、数量、p50/p95/p99/max，重复多轮。首轮同条件数据见 `docs/development-status.md` 的 2026-10-10「PR #39：Release/Performance 真机 A/B」记录：两模式中位数差异与单样本散布同量级，未得出可分辨的百分比开销。还需验证观察命令不阻止停留保存、休眠/USB 断连能报告缺口，以及 K2 全刷的实体屏幕效果。
