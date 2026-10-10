@@ -54,10 +54,22 @@ class Reader:
     """Scripted stand-in for the diagnostic console: views, page state and queued trace entries."""
     def __init__(self, **faults):
         self.state = dict(view="reading", pending=0, content_busy=0, save_busy=0, save_due=0, saved=1, revision=10,
-                          page=4, pages=20, count="idle", frame=1, frame_ok=1, crc32="abcd", internal=90000, largest_internal=31744,
+                          page=4, pages=20, count="idle", sync="unchecked", frame=1, frame_ok=1, crc32="abcd", internal=90000, largest_internal=31744,
                           psram=4000000, largest_psram=3000000)
         self.faults, self.font, self.draft, self.busy, self.sequence, self.entries, self.taps = faults, 0, 0, 0, 0, [], []
-        self.opens = 0
+        self.opens, self.decode, self.clock = 0, None, 1000
+
+    def decoding(self, result=None):
+        """Starts the image decode of the page just shown, or ends the running one with result."""
+        if not self.faults.get("image"):
+            return
+        self.clock += 10
+        if result is None:
+            self.decode = 100 + self.clock
+            self.emit(self.decode, 3, 1, self.clock, request=4, detail=2)
+        elif self.decode:
+            self.emit(self.decode, 3, 0, self.clock, result=result, request=4, detail=2)
+            self.decode = None
 
     def emit(self, op, kind, begin, time_us, result=0, frame=0, request=0, detail=0, session=1, layout=1):
         self.sequence += 1
@@ -68,7 +80,9 @@ class Reader:
     def tap(self, point):
         s, view = self.state, self.state["view"]
         self.taps.append(point)
-        if (view, point) == ("reading", READING_BODY): s["view"] = "tools"
+        if (view, point) == ("reading", READING_BODY):
+            s["view"] = "tools"
+            self.decoding(2)  # leaving the page abandons its decode
         elif (view, point) == ("tools", TOOL_TYPOGRAPHY): s["view"], self.draft = "typography", self.font
         elif (view, point) == ("tools", TOOL_SYNC): s["view"] = "sync"
         elif (view, point) == ("tools", HEADER_BACK): s["view"] = "library"
@@ -83,10 +97,13 @@ class Reader:
             self.emit(21, 5, 0, 20, request=7, detail=3)
             self.emit(20, 2, 0, 21, result=self.faults.get("offline", 0), request=7)
             self.emit(22, 3, 1, 30, request=3, detail=13); self.emit(22, 3, 0, 40, request=3, detail=13)
-        elif (view, point) == ("sync", SYNC_STAY):
-            s.update(view="sync" if self.faults.get("same") else "reading", revision=s["revision"] + self.faults.get("adopted", 0))
-        elif (view, point) == ("sync", HEADER_BACK): s["view"] = "reading"
+            s["sync"] = "failed" if self.faults.get("offline") else self.faults.get("answer", "different")
+        elif (view, point) in (("sync", SYNC_STAY), ("sync", HEADER_BACK)):
+            if (point == SYNC_STAY) != (s["sync"] == "different"): raise AssertionError((s["sync"], point))
+            s.update(view="reading", revision=s["revision"] + self.faults.get("adopted", 0) * (point == SYNC_STAY))
+            self.decoding(); self.decoding(0)
         elif (view, point) == ("sync", SYNC_CHECK):
+            s["sync"] = "unchecked"
             self.emit(2, 2, 1, 100, request=8)
             if not self.faults.get("no_https"):
                 self.emit(3, 5, 1, 110, request=8, detail=3)
@@ -125,6 +142,9 @@ class Reader:
             self.tap(tuple(map(int, verb.split()[1:])))
         elif verb.startswith("open "):
             self.opens += 1
+            self.decoding(2)
+            self.decoding()
+            if self.faults.get("fast_decode"): self.decoding(0)
             s.update(view="reading", frame=s["frame"] + 1, internal=s["internal"] - self.faults.get("leak", 0))
         else:
             raise AssertionError(verb)
@@ -157,11 +177,11 @@ class WorkbenchTest(unittest.TestCase):
         self.assertEqual(trend_check([dict(internal=9000), dict(internal=5000), dict(internal=9000)]), 4000)
 
     def test_image_sync_cancels_in_https_and_requires_chain_and_position(self):
-        reader = Reader()
+        reader = Reader(image=1)
         session = self.start(Serial(reader))
         with patch.object(session, "capture"):
             observation = image_sync(session, "Books/t.epub")
-        self.assertEqual(observation["status"], "pass")
+        self.assertEqual((observation["status"], observation["sync_answer"]), ("pass", "different"))
         self.assertEqual(reader.taps[-3:], [SYNC_CHECK, SYNC_CANCEL, CONTINUE_OFFLINE])
         self.assertEqual((reader.taps.count(SYNC_STAY), reader.taps.count(HEADER_BACK), reader.opens), (1, 0, 3))
         session._line(f"PP 50 OK stopped=1 queued=0 sequence={reader.sequence} dropped=0 tx_failures=0")
@@ -175,21 +195,29 @@ class WorkbenchTest(unittest.TestCase):
         for fault, step in ((dict(moved=1), "the cancelled sync check"), (dict(adopted=1), "the completed sync check")):
             with self.subTest(fault=fault), self.assertRaisesRegex(AssertionError, step + " changed saved revision"):
                 self.output = Path(self.temp.name) / ("run-" + str(len(list(Path(self.temp.name).iterdir()))))
-                session = self.start(Serial(Reader(**fault)))
+                session = self.start(Serial(Reader(image=1, **fault)))
                 with patch.object(session, "capture"):
                     image_sync(session, "Books/t.epub")
             self.finish()
-        for fault in (dict(no_https=1), dict(offline=1)):
-            self.output = Path(self.temp.name) / ("run-" + str(len(list(Path(self.temp.name).iterdir()))))
-            self.assertEqual(image_sync(self.start(Serial(Reader(**fault))), "Books/t.epub")["status"], "inconclusive")
-            self.finish()
+        # HTTP success with an answer the application rejected, a failed request, a decode that ended before
+        # the second reopen, and a request that never reached HTTPS all leave the run undecided.
+        for fault, reason in ((dict(answer="failed"), "valid answer: failed"), (dict(offline=1), "did not succeed"),
+                              (dict(fast_decode=1), "finished before the second reopen"), (dict(no_https=1), "before its HTTPS phase")):
+            with self.subTest(fault=fault):
+                self.output = Path(self.temp.name) / ("run-" + str(len(list(Path(self.temp.name).iterdir()))))
+                reader = Reader(image=1, **fault)
+                result = image_sync(self.start(Serial(reader)), "Books/t.epub")
+                self.assertEqual(result["status"], "inconclusive")
+                self.assertIn(reason, result["reason"])
+                self.assertEqual(reader.state["view"], "reading")
+                self.finish()
         # An answer without a choice page is left through the header control.
         self.output = Path(self.temp.name) / "same"
-        reader = Reader(same=1)
+        reader = Reader(image=1, answer="same")
         session = self.start(Serial(reader))
         with patch.object(session, "capture"):
-            self.assertEqual(image_sync(session, "Books/t.epub")["status"], "pass")
-        self.assertEqual(reader.taps.count(HEADER_BACK), 1)
+            self.assertEqual(image_sync(session, "Books/t.epub")["sync_answer"], "same")
+        self.assertEqual((reader.taps.count(SYNC_STAY), reader.taps.count(HEADER_BACK)), (0, 1))
 
     def test_stale_image_patch_after_newer_session_frame_fails(self):
         frame = dict(kind="0", session="2", layout="1", time_us="100", start_us=50, op="7")

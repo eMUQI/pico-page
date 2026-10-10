@@ -171,7 +171,7 @@ void status(std::uint32_t id, const ReaderApp &app, bool card_available) {
     const auto pages = app.book_pages();
     const auto caches = app.cache_usage();
     const auto input = platform::input_diagnostics();
-    reply("PP %lu OK view=%s pending=%d card=%d saved=%d revision=%llu page=%lu pages=%lu count=%s "
+    reply("PP %lu OK view=%s pending=%d card=%d saved=%d revision=%llu page=%lu pages=%lu count=%s sync=%s "
           "content_busy=%d save_busy=%d save_due=%d largest_psram=%u frame=%llu frame_ok=%d "
           "purpose=%d clean=%d bytes=%u crc32=%08lx heap=%u min_heap=%u internal=%u "
           "largest_internal=%u "
@@ -182,7 +182,7 @@ void status(std::uint32_t id, const ReaderApp &app, bool card_available) {
           static_cast<unsigned long>(id), view_name(app.view()), !!app.pending_frame(),
           card_available, !!app.saved_record(), static_cast<unsigned long long>(revision),
           static_cast<unsigned long>(pages ? pages->page : 0),
-          static_cast<unsigned long>(pages ? pages->total : 0), app.background_state(),
+          static_cast<unsigned long>(pages ? pages->total : 0), app.background_state(), app.sync_state(),
           app.content_busy(), app.save_busy(), app.save_due(),
           static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)),
           static_cast<unsigned long long>(frame_number), frame_success,

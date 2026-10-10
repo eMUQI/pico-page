@@ -400,20 +400,25 @@ def image_sync(session, book):
     if traced(mark, "2", "0")[0]["result"] != "0":
         tap(session, HEADER_BACK, "reading", long_wait)
         return dict(status="inconclusive", reason="The sync check did not succeed; network or account unavailable", before=before)
-    answered = lambda s: (s.get("view") == "sync" and s.get("pending") == "0" and s.get("content_busy") == "0"
-                          and not open_operations(session.trace[mark:]))
-    wait_for(session, answered, "sync answer shown", long_wait)
-    # A position mapping job can start just after the first answer frame; require the idle state on a second poll.
-    wait_for(session, answered, "sync answer stable", long_wait)
-    stay = act(session, "tap %d %d" % SYNC_STAY, lambda s: s.get("pending") == "0" and s.get("view") in ("sync", "reading"),
-               "differing positions dismissed", long_wait)
-    if stay["view"] == "sync":
-        tap(session, HEADER_BACK, "reading", long_wait)
+    # A successful request only shows that HTTP completed; the application must also have parsed a valid
+    # answer. The state stays "unchecked" while a found position is still being mapped.
+    answer = wait_for(session, lambda s: s.get("view") == "sync" and s.get("pending") == "0" and s.get("content_busy") == "0"
+                      and s.get("sync") != "unchecked" and not open_operations(session.trace[mark:]),
+                      "sync answer applied", long_wait)["sync"]
+    tap(session, SYNC_STAY if answer == "different" else HEADER_BACK, "reading", long_wait)
+    if answer not in ("no-record", "same", "different", "unmapped"):
+        return dict(status="inconclusive", reason="The sync check did not produce a valid answer: " + str(answer), before=before)
     unchanged("the completed sync check")
 
     # 2. The second open abandons the first session while its image is still decoding.
+    mark = len(session.trace)
     act(session, "open " + book, opened, "book reopened", long_wait)
+    wait_for(session, lambda s: traced(mark, "3", "1", "2"), "image decode of the reopened session", long_wait)
+    decode = traced(mark, "3", "1", "2")[0]["op"]
     act(session, "open " + book, opened, "book reopened during the image decode", long_wait)
+    wait_for(session, lambda s: decode not in open_operations(session.trace[mark:]), "abandoned image decode ended", long_wait)
+    if [e for e in traced(mark, "3", "0", "2") if e["op"] == decode][0]["result"] != "2":
+        return dict(status="inconclusive", reason="The image decode finished before the second reopen", before=before)
 
     # 3. Leave while the image decodes; it restarts when reading resumes and the cancelled request winds down.
     mark = check()
@@ -426,7 +431,7 @@ def image_sync(session, book):
     tap(session, CONTINUE_OFFLINE if closing["view"] == "network_closing" else HEADER_BACK, "reading", long_wait)
     unchanged("the cancelled sync check")
     observation = image_observation(session)
-    return dict(observation, before=before) if observation["status"] == "pass" else observation
+    return dict(observation, before=before, sync_answer=answer) if observation["status"] == "pass" else observation
 
 
 def percentile(samples, p):
@@ -663,8 +668,10 @@ def metadata_for(args):
     metadata["checkout_source"] = current
     metadata["host_platform"] = sys.platform
     metadata["mode"] = args.mode
-    metadata["workload"] = {"refresh": "refresh-v1:K2x1", "image-sync": "image-sync-v1:check,reopen,cancel-in-https",
-                            "reading-flow": "reading-flow-v1:rounds=%s,turns=%s" % (getattr(args, "rounds", None), getattr(args, "turns", None))}.get(args.mode)
+    book = getattr(args, "book", None)
+    metadata["workload"] = {"refresh": "refresh-v1:K2x1", "image-sync": f"image-sync-v2:check,reopen,cancel-in-https:book={book}",
+                            "reading-flow": "reading-flow-v1:rounds=%s,turns=%s:book=%s" % (
+                                getattr(args, "rounds", None), getattr(args, "turns", None), book)}.get(args.mode)
     hashes, config = artifacts(args.firmware) if args.firmware else ({}, None)
     metadata["artifacts_sha256"] = hashes
     if config and config.is_file():
@@ -770,6 +777,10 @@ def main():
                 session.drain()
             if args.mode == "image-network":
                 result = image_observation(session)
+        # Runs are comparable only for the same book and page range; the start is known once the scenario has run.
+        place = result.get("start") or result.get("after")
+        if args.mode in ("image-sync", "reading-flow") and place:
+            metadata["workload"] += f":page={place.get('page')}/{place.get('pages')}"
         session.cutoff()
     except AssertionError as exc:
         result = dict(status="fail", reason=str(exc))

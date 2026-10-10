@@ -245,6 +245,12 @@ class ReaderApp {
      * "failed" after a chapter could not be read or laid out. The string is static.
      */
     const char *background_state() const;
+    /**
+     * Diagnostic name of the sync panel's last result: "unchecked", "no-record", "same", "different",
+     * "unmapped", "uploaded", "uncertain", "unauthorized", "failed", "link-failed" or "config-changed".
+     * Starting a check resets it to "unchecked" until the answer is applied. The string is static.
+     */
+    const char *sync_state() const;
     CacheUsage cache_usage() const;
     /**
      * Accepts worker results; image completion may queue a body frame. cancel stops statistics
