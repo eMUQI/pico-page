@@ -1,0 +1,173 @@
+---
+const { locale = "zh-CN" } = Astro.props;
+---
+<!doctype html>
+<html lang={locale}>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f3f3f0">
+    <meta name="description" content="Pico Page 是墨水屏阅读器上的阅读固件。直接读取 TF 卡上的 EPUB 和 TXT，并可与 KOReader 互相接续阅读位置。目前支持 Read Pico。">
+    <title>Pico Page · 墨水屏阅读固件</title>
+    <link rel="stylesheet" href="./assets/styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到正文</a>
+    <header class="site-header wrap">
+      <a class="wordmark" href="./" aria-label="Pico Page 首页">Pico Page<span class="brand-period">.</span></a>
+      <nav aria-label="主导航">
+        <a href="#screens">界面</a><a href="#features">功能</a><a href="#devices">设备</a><a href="#install">安装</a>
+        <!-- TODO: 文档站建好后，把“文档”改为站内地址。 -->
+        <a class="source-link ext" href="https://github.com/eMUQI/pico-page#文档">文档</a><a class="ext" href="https://github.com/eMUQI/pico-page">GitHub</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero wrap" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">READING FIRMWARE FOR E-INK</p>
+          <h1 id="hero-title">小墨水屏上的<br>阅读固件。</h1>
+          <p class="hero-description">直接读 TF 卡上的 EPUB 和 TXT，<br class="desktop-break">与 KOReader 互相接续阅读位置。</p>
+          <div class="actions">
+            <a class="button primary" href="#install">安装固件</a><a class="text-link" href="#screens">看看界面</a>
+          </div>
+          <p class="hero-footnote">目前支持 Read Pico。</p>
+        </div>
+        <figure class="hero-figure">
+          <div class="hero-screens">
+            <img class="screen back" src="./assets/screens/library.png" width="684" height="1216" alt="书库首页，卡片视图，顶部显示继续阅读">
+            <img class="screen front" src="./assets/screens/reading.png" width="684" height="1216" alt="正文页，中英文混排，底部显示进度和电量">
+          </div>
+          <figcaption>界面还原，演示数据，非设备实拍</figcaption>
+        </figure>
+      </section>
+
+      <section id="screens" class="screens wrap" aria-labelledby="screens-title">
+        <h2 id="screens-title">为墨水屏设计的界面。</h2>
+        <p class="section-lead">只用黑、白和几档灰。每一屏都照着墨水屏的刷新方式来画。</p>
+        <div class="screens-layout">
+          <div class="screen-index" role="group" aria-label="选择界面">
+            <button type="button" aria-pressed="true" data-screen="library" data-alt="书库首页，卡片视图，顶部显示继续阅读"><strong>书库</strong><span>打开就是你的书和文件夹，列表或封面卡片两种视图。</span></button>
+            <button type="button" aria-pressed="false" data-screen="reading" data-alt="正文页，中英文混排，底部显示进度和电量"><strong>正文</strong><span>整页都留给文字。按键或点击屏幕两侧翻页。</span></button>
+            <button type="button" aria-pressed="false" data-screen="tools" data-alt="正文页打开阅读工具，底部有目录、排版、同步、刷新、全刷"><strong>阅读工具</strong><span>点一下正文中部，目录、排版、同步和刷新都在这里。</span></button>
+            <button type="button" aria-pressed="false" data-screen="typography" data-alt="排版面板，正在预览 40 px 字号，尚未应用"><strong>排版</strong><span>字体、字号、行距先预览，满意了再应用。</span></button>
+            <button type="button" aria-pressed="false" data-screen="sync" data-alt="同步确认页，询问是否用本机位置替换远端"><strong>同步</strong><span>何时同步由你决定，上传前会再问一次。</span></button>
+            <button type="button" aria-pressed="false" data-screen="sleep" data-alt="休眠画面，显示书籍封面和已保存状态"><strong>休眠</strong><span>休眠画面可选书籍封面、当前正文或简洁屏保。</span></button>
+          </div>
+          <figure class="screen-stage">
+            <img id="screen-preview" class="screen" src="./assets/screens/library.png" width="684" height="1216" alt="书库首页，卡片视图，顶部显示继续阅读">
+            <figcaption>界面还原，演示数据，非设备实拍</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section id="features" class="features" aria-labelledby="features-title">
+        <div class="wrap">
+          <h2 id="features-title">书在 TF 卡上，进度也在。</h2>
+          <p class="section-lead">阅读进度和设置都是 TF 卡上的普通文件，可以在电脑上查看、备份和修改。</p>
+          <div class="feature-grid">
+            <article>
+              <h3>阅读</h3>
+              <ul>
+                <li>直接打开 EPUB 和 TXT，不用在电脑上预先转换。</li>
+                <li>目录、书签，以及书内链接的跳转与返回。</li>
+                <li>显示书中的图片，长按可以单独查看。</li>
+              </ul>
+            </article>
+            <article>
+              <h3>KOReader 位置接续</h3>
+              <ul>
+                <li>和 KOReader 互相接续同一本 EPUB 的阅读位置。</li>
+                <li>设备不会自己跳页，也不会自己上传。</li>
+                <li>位置对不准时不跳转，不按百分比猜。</li>
+              </ul>
+            </article>
+            <article>
+              <h3>排版与刷新</h3>
+              <ul>
+                <li>字体、字号、行距可调，可以放入自己的字体。</li>
+                <li>每本书可以有自己的排版设置。</li>
+                <li>清晰、均衡、快速三档刷新模式。</li>
+              </ul>
+            </article>
+            <article>
+              <h3>传书</h3>
+              <ul>
+                <li>USB：电脑把设备识别为可移动磁盘。</li>
+                <li>Wi-Fi：用手机或电脑的浏览器上传。</li>
+              </ul>
+            </article>
+          </div>
+
+          <div class="keys" aria-label="默认按键">
+            <div><kbd>K1</kbd><span>上一页</span></div>
+            <div><kbd>K2</kbd><span>全刷当前画面</span></div>
+            <div><kbd>K3</kbd><span>下一页</span></div>
+          </div>
+          <p class="keys-note">有残影时按一下 K2，在任何页面都可以。</p>
+
+          <details class="limits">
+            <summary>暂不支持</summary>
+            <ul>
+              <li>PDF、批注、高亮和词典。</li>
+              <li>TXT 的 KOReader 位置接续。TXT 只在本机保存进度。</li>
+              <li>表格和复杂版式的 EPUB 会简化显示。</li>
+            </ul>
+          </details>
+        </div>
+      </section>
+
+      <section id="devices" class="hardware wrap" aria-labelledby="devices-title">
+        <h2 id="devices-title">支持的设备。</h2>
+        <p class="section-lead">目前支持 Read Pico。</p>
+        <dl class="specs">
+          <div><dt>屏幕</dt><dd>4.7 英寸</dd><dd class="spec-detail">单色墨水屏，684 × 1216</dd></div>
+          <div><dt>灰阶</dt><dd>16 级</dd><dd class="spec-detail">封面和插图也能显示</dd></div>
+          <div><dt>操作</dt><dd>触摸 + 按键</dd><dd class="spec-detail">触摸屏和三个翻页键</dd></div>
+          <div><dt>存储</dt><dd>TF 卡</dd><dd class="spec-detail">FAT 文件系统</dd></div>
+        </dl>
+      </section>
+
+      <section id="install" class="install" aria-labelledby="install-title">
+        <div class="wrap install-layout">
+          <div>
+            <h2 id="install-title">安装固件。</h2>
+            <p class="section-lead">用一根 USB 数据线，在浏览器里完成安装。</p>
+            <!-- TODO: 第一版通过真机验收并确定各设备的写入范围后，在此接入固件下载和浏览器烧录，并启用按钮。 -->
+            <div class="actions">
+              <button class="button" type="button" disabled>在浏览器中安装</button><span class="pending">即将开放</span>
+            </div>
+          </div>
+          <ol class="steps">
+            <li><strong>连接设备</strong><span>用支持数据传输的 USB 线把设备连到电脑。</span></li>
+            <li><strong>安装固件</strong><span>在浏览器中选择设备并写入固件。</span></li>
+            <li><strong>放入书籍</strong><span>把 EPUB 或 TXT 放进 TF 卡的 Books/ 文件夹。</span></li>
+          </ol>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer wrap">
+      <p>Pico Page</p>
+      <p>
+        <a href="https://github.com/eMUQI/pico-page#文档">文档</a>
+        <a href="https://github.com/eMUQI/pico-page">GitHub</a>
+        <a href="https://github.com/eMUQI/pico-page/issues">反馈问题</a>
+        <a href="https://quotaframe.com">QuotaFrame</a>
+      </p>
+    </footer>
+
+    <script is:inline>
+      const preview = document.getElementById("screen-preview");
+      const buttons = document.querySelectorAll(".screen-index button");
+      buttons.forEach((button) =>
+        button.addEventListener("click", () => {
+          buttons.forEach((b) => b.setAttribute("aria-pressed", b === button));
+          preview.src = `./assets/screens/${button.dataset.screen}.png`;
+          preview.alt = button.dataset.alt;
+          preview.scrollIntoView({ block: "nearest" });
+        }),
+      );
+    </script>
+  </body>
+</html>

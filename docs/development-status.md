@@ -1,5 +1,7 @@
 # 开发状态
 
+2026-10-10 新增项目网页初稿，现位于 `web/`（Astro 7.3.4 静态站，结构与 QuotaFrame 的 `web/` 一致），本机 `npm run build` 通过并用 Chrome 无头模式查看渲染，未提交、未部署。未改固件与共享代码。详情见本日“项目网页初稿”记录。
+
 2026-10-10 根目录 README 已在分支 `docs/readme-rewrite`（基于 main `f25852c`）按正式项目的结构重写，仅改文档，未改代码、未构建固件、未烧录。已提交为 PR #31，交接检查与远端 host CI 通过，自动 review 的 2 条 P2 已修正。详情见本日“README 重写”记录。
 
 2026-10-10 PR #28 最终 head `1d05da7` 的两个 CI 均通过，review 已完成并提出 3 条有效意见。
@@ -3914,3 +3916,33 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
   合并树与已验证 head 的文件无差异，本次不重复 host/sanitizer 或固件构建；交接检查及 diff 检查通过。
 - 未再次连接、复位或烧录设备。PR 合并及 CI/review 通过不代表 USB 故障已解决，PW05/PW06 的实体输入、
   USB 重新枚举、MSC 退出及真实资源专项仍待用户有空时验证。
+
+## 2026-10-10 · 项目网页初稿
+
+- 变更：新增 `site/index.html`、`site/assets/styles.css` 和 `site/assets/screens/` 下 6 张界面图。
+  界面图从被 Git 忽略的 `artifacts/ui-review-20261008/png/` 原样复制（demo-grid、demo-reading、demo-tools、
+  05-typography-002、13-confirmation-001、12-sleep-001），为 host 桌面版渲染、合成数据，页面上已标注“非设备实拍”。
+  页面文案取自根目录 README 的功能、限制、验证状态和硬件表，未新增能力或数值；不提供固件下载或烧录入口。
+- 设计：与 QuotaFrame 保持同一骨架（带句点的字标、英文小标签、细线分区、系统无衬线字体），
+  改用直角、2 px 墨色线和反白选中态，强调色为墨蓝。未使用衬线标题和暖色强调，以区别于 CrossMux 网站。
+- 命令/环境：macOS，Google Chrome 无头模式截图，1280 px 桌面、390 px 手机、深色模式各一次；
+  `python3 tools/check_handoff.py` 与 `git diff --check`。
+- 结果：三种渲染无横向溢出，界面切换脚本未在浏览器中手动点击验证。检查结果见交接说明。
+- 未测项：真实手机浏览器、Safari/Firefox、读屏、英文版、部署与域名。未做 host/固件构建（未改相关代码）。
+- 下一步：待用户确认视觉方向后再决定是否补英文版、设备实拍和部署方式。
+- 追加（同日）：按用户要求预留“安装”和“文档”两节及导航入口。安装一节的浏览器烧录按钮为禁用状态并标注“尚未开放”，
+  只链接 README 的构建说明并照搬“烧录前必读”三条，未提供固件、偏移量或烧录命令；文档一节暂时链接仓库内的 Markdown。
+  Chrome 无头模式重新截图检查了 1280 px 与 390 px 两种宽度。
+- 追加（同日）：按用户意见，“文档”改为导航栏和页脚中的链接（暂指向仓库 README 的文档索引），删除页面内的文档一节；
+  首屏标题、标签和硬件一节不再使用“第一版只适配 Read Pico”这类面向开发的表述，硬件一节改为“支持的设备。目前支持 Read Pico。”。
+  Chrome 无头模式重新截图检查了 1280 px 与 390 px 的首屏。
+- 追加（同日）：按用户要求改为产品发布视角。页面删除“验证状态”一节、烧录前必读面板、K2 的否定式规则说明、
+  主控/框架/BSP 规格和许可证状态说明，“当前限制”缩为面向用户的“暂不支持”三条；安装一节改为三步流程，
+  按钮仍为禁用并标注“即将开放”。这些内容仍以根目录 README 和 `docs/` 为准，页面不代表功能已通过真机验收。
+  页面不含固件、偏移量或烧录命令。Chrome 无头模式重新截图检查了 1280 px 整页与 390 px 整页。
+- 追加（同日）：按用户要求把 `site/` 迁到 `web/`，改为 Astro 7.3.4 静态站（Node v26.7.0，npm 11.19.0）。
+  `src/pages/index.astro` 引用 `src/components/HomePage.astro`，样式与界面图放在 `public/assets/`，无自定义构建脚本；
+  `.gitignore` 新增 `/web/node_modules/`、`/web/dist/`、`/web/.astro/`。`npm install --ignore-scripts` 与 `npm run build` 通过，
+  生成 1 个页面；`dist/index.html` 的 1280 px 整页截图与迁移前逐字节一致。未加英文路由、文档页和浏览器烧录，CI 未加网站构建。
+  `tools/check_handoff.py` 的排除目录新增 `node_modules`：安装依赖后它扫描到 `web/node_modules/` 内第三方 Markdown 的失效链接而失败（148 项），
+  排除后恢复通过。该目录已被 Git 忽略，CI 中不存在。
