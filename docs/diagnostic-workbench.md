@@ -57,6 +57,8 @@ sh tools/build_firmware.sh diagnostic
 
 `status/metrics/trace/trace_start/trace_stop/screen/ls/file` 是观察命令，不重置主循环空闲计时；否则连续采集会阻止延迟保存、分页和休眠。它们仍可能占用串口和 CRC 计算时间，Diagnostic 性能不等同于 Performance。保留原 `PP 0 FRAME` 主动通知和所有已有导入安全限制。trace 导出失败仍通过 tx_failures 和序号缺口暴露，不能悄悄丢失后显示通过。
 
+翻页候选通过现有 `device_console.py waveform default|A|B|C|ripple` 或设备「翻页效果」页选择。它是改变选择的命令，不属于观察命令；忙态拒绝。单串口所有权不变，切换与工作台采集分开进行，不同时打开两个串口客户端。详见 [候选对比步骤](console-runtime.md#翻页效果候选对比)。
+
 ## 持续采集与人工标记
 
 先准备独立的测试卡目录，素材优先使用 host 构建生成的 `build/host/document-fixtures/`；不要覆盖用户书籍或配置。安装候选固件需单独核对真实设备与分区，本工具不刷机。关闭其他串口程序，再运行（需 pyserial；当前 CLI 面向 Linux/macOS）：

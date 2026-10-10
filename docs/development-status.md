@@ -2,6 +2,8 @@
 
 ## 当前摘要（2026-10-11）
 
+文字转页 A/B/C、水波纹与屏幕选择入口已提交为 PR #50，并整合 main `d2762ba`。默认关闭、本次启动有效，只作用于正文非清屏更新；原档位、全刷和恢复路径保留。最小 epdiy 补丁只改构建副本，官方锁定与下载原件不变。整合后 host Debug、开启埋点的 ASan/UBSan 各 20/20（原 18 项，新增 2 项），标准与 Diagnostic 固件构建通过，交接检查 446 项。按用户授权继续跟进 CI、review 并在通过后合并；未连接或烧录设备。效果、残影、灰度、真实耗时与资源峰值均待真机。
+
 左右轻扫翻屏/翻页已完成本地候选，基于 `718f376`，分支 `feat/swipe-pagination`。松手按 60 px、700 ms 和约 30° 判定；左滑下一页、右滑上一页，书库长按需在 28 px 范围内松手确认，正文图片长按路径保留。页脚控件、默认按键和进度保存规则不变。host Debug 与 AppleClang ASan/UBSan 各 18/18（含异步应用、列表/卡片与多屏目录），标准与 Diagnostic 固件构建、441 项交接检查均通过；PR 结果见本批记录。未烧录，真机 IN09 待验证。
 
 ### 诊断工作台与回归场景（Issue #37）
@@ -12,7 +14,7 @@ PR #38、#39 和 #42 已合并到 main（`5cf2ae9`）：三种构建模式、有
 
 ### 2026-10-10 文档核对摘要
 
-本次核对的源码基线为 `5f22009`。本地提交历史已包含 PR #35 和 PR #38 的合并；下方旧摘要中的「未合并」「未推送」描述的是各批次当时状态，不再表示当前代码状态。本次未查询远端 CI 的实时状态。
+此前文档核对的源码基线为 `5f22009`。本地提交历史已包含 PR #35 和 PR #38 的合并；下方旧摘要中的「未合并」「未推送」描述的是各批次当时状态，不再表示当前代码状态。本次未查询远端 CI 的实时状态。
 
 现有代码包含 EPUB/TXT 阅读、分页缓存、文件配置与进度、网络设置与传书、KOSync 和诊断工作台。历史记录包含 host、sanitizer、固件构建及部分真机证据，必须按记录的版本和范围使用。2026-10-09 有实际双向接续操作证据；完整异常路径、重复稳定性、实体输入、显示效果和资源峰值仍按验收表逐项确认，不能统称首版已验收。
 
@@ -4207,6 +4209,27 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
 ## 2026-10-10 · 文档 PR 评审接续
 
 用户进一步要求跟进评审、修复问题并在检查通过后合并。本次据此继续提交、推送和创建文档 PR；上一条审批阻塞记录仅描述此前状态。提交前复核修正归档导语中的决定编号，K2 全局全刷对应 D03；原始任务正文未改。验证结果以本批检查和 PR 对应提交为准。
+
+## 2026-10-11 · 文字转页、水波纹与实验选择入口
+
+范围：用户指定独立工作树，从本地 main `5f22009` 建立 `feat/text-turn-waveform`；未改另一主工作目录。该本地 main 落后于工作树初始的远端 main `718f376`，差异仅为文档/网站说明，交付前已整合远端 main `718f376`，保留其资料脱敏与当前摘要，未更改已验证的实现代码。用户追加开启/选择入口和 kiikoread 水波纹，并明确允许最小 epdiy 构建副本补丁；仍不烧录、擦除、改分区或校准，不改 BSP 锁定。
+
+变更：平台纯函数从初始化后的官方 GL16 生成 A/B/C，独立选项、容量检查、单份 2,368 字节内部 RAM LUT；核对官方 `e0470_phase_action()` 与 `epd_waveform.h`。新增水波纹为倒置竖屏、固定右向左 16 条带，每条 37 相，共 52 拍，保留 FULL 扫描，不复制上游 FAST 和忙等。驱动逐行 LUT 补丁只应用于构建副本，原欠载补丁与基准恢复保留。刷新页增加选择入口，串口 `waveform default|A|B|C|ripple` 共用状态；默认关闭、不写配置、重启关闭，仅正文非清屏更新采用候选。来源/许可见 dependency-review、bsp-review，验收新增 DP06/DP07。
+
+执行与资源：无新增任务/队列。应用任务在同步呈现之间重建，EPD 生产者只读；驱动汇合生产者并清扫描回调后返回，调用方每拍清借用指针。map 确认文字 LUT 位于内部 `.dram1`，0x940 字节；水波纹行索引同在内部 `.dram1`，0x2ac 字节。水波纹另按需分配 37,888 字节、16 字节对齐 PSRAM，37 个内部指针及固定描述符；关闭/切换到文字转页时释放。分配失败记录日志、取消实验选择并回退原档位。重建最多扫描 256 条文字序列或生成 37×256 个水波纹查找项；不可取消区间为原 37 相事务或完整 52 拍事务及既有恢复，实际毫秒上限、RAM/PSRAM 峰值与任务余栈未测。
+
+环境：macOS、AppleClang 21、EIM 管理的 ESP-IDF v6.1，commit `fff9895c82d744c7237be8847347bdd1b07c6643`。保留既有 `components/esp_system/ld/ld.ext_ram.sections` 修改和未跟踪 merged requirements，没有改全局工具链。新工作树通过 `sh tools/setup_bsp.sh` 和 `python3 tools/setup_fonts.py` 准备固定 BSP、FreeType、字体；沙箱 DNS/进程查询限制后在授权环境完成，未通过缺资源跳过测试。官方 BSP `5f3406deec33304de8801046db583dec7c49e55b` 的组件差异为空。
+
+host：依次运行 `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host -N`、`ctest --test-dir build/host --output-on-failure`，全部成功；注册数从 18 增至 20，无减少，保留 Node、异步 app 和 ESP 模式 content_worker。新增合成 LUT 测试覆盖 A/B/C、全部独立选项、动作序列、对角线、白色目标、全保持/满长、0 相、超长/溢出、空指针、重叠及输出哨兵。水波纹测试对 52 个拍点分别注入失败，验证借用清理、失败不提交 back buffer、成功提交、分配/源表失败与释放。app 在同步和异步模式验证入口选择、返回、K2、重启默认和配置不变。替身不证明真实中断/DMA或面板成像。
+
+sanitizer：按 environment.md 配置 `build/sanitized`，另加 `-DPICO_PAGE_HOST_TRACE_EVENTS=ON`；完整 ASan/UBSan CTest 20/20。本机 AppleClang 运行时不支持 LSan，不宣称已做泄漏检查。host 构建有既有第三方弃用和系统 dylib 部署版本警告，未修改依赖掩盖。
+
+固件：`sh tools/build_firmware.sh` 成功；激活同一已有 IDF 后 `sh tools/build_firmware.sh diagnostic` 成功。标准 sdkconfig 关闭诊断，Diagnostic 确认控制台/metrics/trace 开启；日志和 map 覆盖新平台、LUT、水波纹、主入口、串口和逐行相位路径。标准应用 3,375,920 字节，SHA-256 `dbfacd1ab97e377c1292c12132a5ac69f7a4a94f6788a7202ad61678d547fc2c`；Diagnostic 3,410,608 字节，SHA-256 `f757b3b7a9d271f18ab2ae11ecbc5207a95f42311af0af207c5e61c17d7c3891`。构建成功不是设备安装证明。
+
+资料与视觉：`python3 tools/check_handoff.py` 整合 main 前 428 项、整合后 443 项通过；`git diff --check` 通过。host headless 使用合成 EPUB 导出 `artifacts/text-turn/` 三张实现截图，检查布局、热区与选中状态，未改原设计。日志在本机 `/tmp/textturn-*.log` 与构建目录的 Testing/log 中。没有使用个人书籍、凭据或设备日志。
+
+未测与下一步：未连接/烧录设备。默认 GL16 与 A/B/C 的白场、连续翻页至下次全刷前残影、抗锯齿灰度、带图页、水波纹条带、耗时、实体输入及真实欠载恢复均未测，产物为候选。按 console-runtime 的同书同位置步骤从 K2 全刷开始逐组比较，用相同旧计时配置、`tools/summarize_reader_perf.py` 的 panel_draw 汇总、照片或录像、原始日志和资源采样留证。37 相相同不等于真机耗时已证明相同；水波纹 52 拍独立计量。FreeInk 清对角线的注释矛盾和 C 对 1–14 级灰度的风险仍待真机判断。
+
 ## 2026-10-10 · Issue #37：图片采用与网络交叠证据
 
 - 范围：从干净的 main `5f22009` 在当前 checkout 建立 `feat/image-workbench-evidence`，不创建 worktree。远端 PR #38 已合并；上方该 PR 的历史记录保留当时状态。本批作为阶段 C 场景 1 的第一部分，保留 issue 开放，不宣称完成完整回归工作台。
@@ -4398,3 +4421,17 @@ D14 核对：原代码只识别 K1/K3 与正文侧区点按，未识别非触摸
 - 第四轮评审（三项，均成立，`e788a48`）：重开后的位置应以源位置而不是页码核对；同步检查因网络或服务不可用失败时应保持不可判定；字号还原应直接断言。固件 `status` 新增 `anchor`（已保存位置的资源、节点与偏移的 CRC32）和 `font_px`，对应访问器同样只在 host 和带诊断控制台的固件中定义，Release 仍为 3,370,496 B。场景 2 比较 anchor、字号、保存修订和页码；场景 1 的位置保护同时比较 anchor；前提未满足的失败操作列为 excused，其他失败仍按规则判定。Python 测试 45/45，host Debug CTest 18/18。在干净提交 `e788a48` 上重建诊断固件（3,406,512 B，SHA-256 `c99f375654bb2b6a2eae0bc05ab0d5d4502544746f3b466f84af355bcefa11c8`），核对设备身份与布局后写入并通过摘要校验。该镜像上 `reading-flow`（3 轮、每向 4 页）pass，1,000 个事件，三轮内部 RAM 均为 98,179 B，起止 anchor 相同、字号 46 px、保存修订 301 至 325；`image-sync` 2 轮均 pass，同步结果 different，保存修订 330 和 anchor 不变，未出现欠载。来源核验通过，设备现装此镜像。证据在 `.local/runs/reading-flow-final-09/` 与 `.local/runs/image-sync-final-09-*`。本轮未运行 sanitizer 配置，由 CI 覆盖。
 - 第五轮评审（两项，均成立，`885c582`）：workload 标识加入起始位置的 anchor；`image-sync` 要求被取消的请求以 cancelled 结束，否则为 inconclusive。只改主机工具、测试和文档，Python 测试 45/45。未重新烧录：在已安装的 `e788a48` 诊断镜像上用新工具各跑一轮，两个场景的断言均通过，但因当前源码与镜像的构建来源不符，报告结果为 inconclusive，不计为新的通过证据；`image-sync` 该轮的被取消请求终态为 cancelled，workload 标识带有 anchor。证据在 `.local/runs/image-sync-final-10/` 与 `.local/runs/reading-flow-final-10/`。
 - 第六轮评审（三项，均成立，`e323ea3`）：向后翻页后的保存须确认 anchor 已离开起始位置，翻回后的保存须回到起始 anchor；多轮内存检查加入内部 RAM 最大连续块（比首轮小超过 8,192 B 判为失败）；当前摘要不应把较早版本的通过当作最终场景定义的证据。Python 测试 45/45。在干净提交 `e323ea3` 上重建诊断固件（3,406,512 B，SHA-256 `a7ce6267d4f08e6be7fcb4307e0bf58c0c945b481533fd341f0bba0aa44bb49b`），核对设备身份与布局后写入并通过摘要校验。该镜像上 `reading-flow`（3 轮、每向 4 页）pass，1,000 个事件，66 帧以上的驱动帧 p50/p95/最大为 540/622/1,582 ms，三轮内部 RAM 均为 98,179 B、最大连续块均为 51,200 B，起止 anchor 相同，保存修订 351 至 375；`image-sync` 2 轮均 pass，同步结果 different，被取消的请求终态为 cancelled，保存修订 380 与 anchor 不变，其中 1 轮出现一次欠载并由重试恢复。来源核验通过，运行条件齐全，设备现装此镜像。证据在 `.local/runs/reading-flow-final-11/` 与 `.local/runs/image-sync-final-11-*`。当前摘要已改为按提交说明验证范围。
+
+## 2026-10-11 · PR #50 整合与复验
+
+用户明确授权推送、开 PR、按 review 修复并在检查通过后合并，明确不烧录。已创建 PR #50，整合 main `d2762ba`；文档冲突保留双方批次记录，代码自动合并后复核正文选择、串口忙态和刷新所有权。
+
+整合后依次重跑 host Debug 配置、构建、CTest 注册与完整测试，仍为 20/20；开启埋点的 AppleClang ASan/UBSan 为 20/20，不声称本机 LSan。标准入口首次被新 defaults 检查拒绝：旧生成配置缺少 main 的 PSRAM TLS 选项，备份后重新生成。随后编译成功但因编译期间修改交接文档而未通过来源登记；固定文件快照后重跑标准与 Diagnostic 入口均成功，两个配置均采用新的 defaults。
+
+构建产物 `firmware/build/pico_page.bin`：3,376,816 字节，SHA-256 `bfdff6966abd4ba0b452990f44465a565bd6ec2892c8c395fa7397b5de385180`。
+
+构建产物 `build/firmware-diagnostic/pico_page.bin`：3,413,856 字节，SHA-256 `7d424e51264571150cfe40249b40e83953e51c260a7017e25d506f9768a57c6b`。
+
+交接检查 446 项、diff 检查通过；本机日志为 `/tmp/textturn-merge-*.log`。PR 首版 `507c0b8` 的远端 host 检查通过；整合提交的 CI 与 review 另行核对，不用首版结果代替。未连接、复位或烧录设备；真机未测范围与上一批一致。
+
+PR #50 自查修正：epdiy 按波形描述符地址缓存前导保持相，而 A/B/C 原地重建共用描述符，切换后可能复用旧的首动作相号。实验效果关闭该跳相优化，确保文字表执行完整 37 相；默认 GL16/Gray8 保持原行为。水波纹单拍原本不参与跳相。修正后标准与 Diagnostic 固件均重新构建通过，交接与 diff 检查通过；真实屏幕仍未测。日志为 `/tmp/textturn-review-firmware.log` 与 `/tmp/textturn-review-diagnostic.log`。

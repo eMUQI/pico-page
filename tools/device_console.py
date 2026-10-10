@@ -173,6 +173,8 @@ def main():
     parser.add_argument("--timeout", type=float, default=30)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status")
+    waveform = commands.add_parser("waveform")
+    waveform.add_argument("variant", choices=("default", "A", "B", "C", "ripple"))
     listing = commands.add_parser("ls")
     listing.add_argument("path", nargs="?", default=".")
     listing.add_argument("--offset", type=int, default=0)
@@ -208,6 +210,7 @@ def main():
         else:
             command = args.command
             if command == "ls": command += f" {args.offset} {args.path}"
+            elif command == "waveform": command += f" {args.variant}"
             elif command == "key": command += f" {args.key}"
             elif command == "swipe": command += f" {args.direction}"
             elif command in ("tap", "hold"): command += f" {args.x} {args.y}"
