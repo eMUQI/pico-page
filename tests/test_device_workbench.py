@@ -54,6 +54,7 @@ class Reader:
     """Scripted stand-in for the diagnostic console: views, page state and queued trace entries."""
     def __init__(self, **faults):
         self.state = dict(view="reading", pending=0, content_busy=0, save_busy=0, save_due=0, saved=1, revision=10,
+                          anchor="00000004", font_px=38,
                           page=4, pages=20, count="idle", sync="unchecked", frame=1, frame_ok=1, crc32="abcd", internal=90000, largest_internal=31744,
                           psram=4000000, largest_psram=3000000)
         self.faults, self.font, self.draft, self.busy, self.sequence, self.entries, self.taps = faults, 0, 0, 0, 0, [], []
@@ -93,6 +94,8 @@ class Reader:
         elif (view, point) == ("typography", APPLY):
             self.font = self.draft
             s.update(view="reading", pages=20 - 4 * self.font, page=4 - self.font + self.faults.get("drift", 0) * (self.font == 0))
+            if not (self.faults.get("sticky") and self.font == 0):  # sticky: the reverse step is shown but not applied
+                s["font_px"] = 38 + 2 * self.font
         elif (view, point) == ("sync", SYNC_CHECK) and SYNC_CHECK not in self.taps[:-1]:
             # First check: completes, then maps the remote position; the answer shows differing positions.
             self.emit(20, 2, 1, 10, request=7); self.emit(21, 5, 1, 11, request=7, detail=3)
@@ -142,6 +145,7 @@ class Reader:
             step = 1 if verb == "key K3" else -1
             s.update(page=s["page"] + step * (1 + self.faults.pop("skip", 0)), frame=s["frame"] + 1,
                      revision=s["revision"] + (0 if self.faults.get("unsaved") else 1))
+            s["anchor"] = "%08x" % s["page"]
         elif verb.startswith("tap "):
             self.tap(tuple(map(int, verb.split()[1:])))
         elif verb.startswith("open "):
@@ -149,6 +153,8 @@ class Reader:
             self.decoding(2)
             self.decoding()
             if self.faults.get("fast_decode"): self.decoding(0)
+            if self.faults.get("anchor_drift") and self.opens > 1:
+                s["anchor"] = "0000ffff"  # reopening restores the same page number at a different source position
             s.update(view="reading", frame=s["frame"] + 1, internal=s["internal"] - self.faults.get("leak", 0))
         else:
             raise AssertionError(verb)
@@ -168,7 +174,8 @@ class WorkbenchTest(unittest.TestCase):
 
     def test_reading_flow_rejects_skips_unsaved_turns_drift_and_leaks(self):
         for fault, message in ((dict(skip=2), "moved page"), (dict(unsaved=1), "saved revision did not advance"),
-                               (dict(drift=1), "reverting the font size"), (dict(leak=5000), "internal RAM fell")):
+                               (dict(drift=1), "reverting the font size"), (dict(leak=5000), "internal RAM fell"),
+                               (dict(sticky=1), "left the size at"), (dict(anchor_drift=1), "reopening showed anchor=0000ffff")):
             with self.subTest(fault=fault):
                 self.output = Path(self.temp.name) / ("run-" + str(len(list(Path(self.temp.name).iterdir()))))
                 with self.assertRaisesRegex(AssertionError, message):
@@ -189,6 +196,12 @@ class WorkbenchTest(unittest.TestCase):
         result = reading_flow(self.start(Serial(Reader(skip=1))), "Books/t.epub", 1, 1)
         self.assertEqual(result["status"], "inconclusive")
         self.assertIn("not aligned with a counted page", result["reason"])
+        self.finish()
+        # Firmware that does not report the anchor and font size cannot support the position assertions.
+        self.output = Path(self.temp.name) / "old-firmware"
+        reader = Reader()
+        del reader.state["anchor"]
+        self.assertEqual(reading_flow(self.start(Serial(reader)), "Books/t.epub", 1, 1)["status"], "inconclusive")
         self.finish()
         # The scenario opens the named book itself, wherever the device was; too close to the end is a skip.
         self.output = Path(self.temp.name) / "library"
@@ -243,6 +256,19 @@ class WorkbenchTest(unittest.TestCase):
                 self.assertIn(reason, result["reason"])
                 self.assertEqual(reader.state["view"], "reading")
                 self.finish()
+        # A failed request is an unmet prerequisite: its recorded failure does not turn the run into a failure,
+        # but any other failure in the same capture still does.
+        self.output = Path(self.temp.name) / "prerequisite"
+        reader = Reader(image=1, offline=1)
+        session = self.start(Serial(reader))
+        result = image_sync(session, "Books/t.epub")
+        session.drain()
+        self.assertEqual(result["excused"], ["20"])
+        session._line(f"PP 50 OK stopped=1 queued=0 sequence={reader.sequence} dropped=0 tx_failures=0")
+        session.event("cutoff", sequence=reader.sequence)
+        self.finish()
+        self.assertEqual(finalize(self.output, dict(mode="image-sync"), result)["result"]["status"], "inconclusive")
+        self.assertEqual(finalize(self.output, dict(mode="image-sync"), dict(result, excused=[]))["result"]["status"], "fail")
         # An answer without a choice page is left through the header control.
         self.output = Path(self.temp.name) / "same"
         reader = Reader(image=1, answer="same")

@@ -6703,6 +6703,7 @@ const char *ReaderApp::sync_state() const {
                                             "uncertain", "unauthorized", "failed", "link-failed", "config-changed"};
     return names[static_cast<unsigned>(impl_->sync_state)];
 }
+int ReaderApp::font_size_px() const { return impl_->settings.font_size_px; }
 #endif
 const char *ReaderApp::background_state() const {
     if (impl_->inline_image_pending) return "image";

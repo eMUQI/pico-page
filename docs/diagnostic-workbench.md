@@ -53,7 +53,7 @@ sh tools/build_firmware.sh diagnostic
 - `PP <id> trace`：取出最多 8 个事件作为 ENTRY，OK 返回上述队列/丢失状态。耗时与输出发生在显式命令处理时，不在事件写入路径中。
 - `PP <id> trace_start`：在记录器临界区中开始新窗口，清空旧计数和事件；此前的任务 token 不计入新窗口。`trace_stop` 在同一临界区冻结事件与计数并返回含 `stopped=1` 的 metrics。仍在执行的业务任务正常继续，但在截止点计为 unfinished；后续操作不进入该窗口。主机收到截止序号后排空到该序号，才结束采集。
 - metrics 与 trace 的整次响应共用 20 ms 传输等待预算；计入 IDF 驱动对 TX 互斥锁和环形缓冲的两次等待。超出后非阻塞发送，失败计入 tx_failures；该预算不包含任务被抢占和格式化的墙钟时间。
-- status 新增 content_busy、save_busy、save_due，以及同步面板最近一次结果 sync（unchecked、no-record、same、different、unmapped、uploaded、uncertain、unauthorized、failed、link-failed、config-changed；开始检查时回到 unchecked）。pending=0 只说明无待呈现帧。
+- status 新增 content_busy、save_busy、save_due、已保存位置的身份 anchor（资源、节点与偏移的 CRC32，不输出路径或正文）、生效正文字号 font_px，以及同步面板最近一次结果 sync（unchecked、no-record、same、different、unmapped、uploaded、uncertain、unauthorized、failed、link-failed、config-changed；开始检查时回到 unchecked）。pending=0 只说明无待呈现帧。
 
 `status/metrics/trace/trace_start/trace_stop/screen/ls/file` 是观察命令，不重置主循环空闲计时；否则连续采集会阻止延迟保存、分页和休眠。它们仍可能占用串口和 CRC 计算时间，Diagnostic 性能不等同于 Performance。保留原 `PP 0 FRAME` 主动通知和所有已有导入安全限制。trace 导出失败仍通过 tx_failures 和序号缺口暴露，不能悄悄丢失后显示通过。
 
@@ -130,7 +130,7 @@ python3 tools/device_workbench.py --port /dev/ttyACM0 \
 3. 再次进入同步并检查，等到 HTTPS 阶段事件（NetworkStage detail=3）开始后点「取消同步」，在「正在结束同步」页点「继续离线阅读」。正文恢复后图片重新解码，此时被取消的请求尚未退出。断言保存修订不变。
 4. 导出并校验画布，冻结记录器。结果须满足人工入口的同一条图片证据链（见下节），并且 `analysis.stale_image_patches` 为空：没有任何图片在更新会话或排版的帧已呈现之后被采用。该项不为空时，证据和运行条件完整才判为 fail，否则为 inconclusive。
 
-请求在 HTTPS 阶段之前就结束、检查未成功或没有形成交叠时，结果为 inconclusive，不是 fail。等待期间设备进入错误页（例如帧失败后的「屏幕更新失败」）时，场景立即以 fail 结束并照常冻结记录器，使已记录的失败按完整证据判定。第 3 步有意让正文重画落在 TLS 握手期间，这是已知会偶发 EPD 行队列欠载的时序；出现时结果为 fail 并保留驱动日志，这是场景的检出，不是工具故障。页码在计数完成前未知，因此位置保护用保存修订判断：任何已保存的位置变化都会使修订递增。本入口不验证同步结果内容、上传、采用远端位置或 KOReader 往返。
+请求在 HTTPS 阶段之前就结束、检查未成功或没有形成交叠时，结果为 inconclusive，不是 fail。等待期间设备进入错误页（例如帧失败后的「屏幕更新失败」）时，场景立即以 fail 结束并照常冻结记录器，使已记录的失败按完整证据判定。第 3 步有意让正文重画落在 TLS 握手期间，这是已知会偶发 EPD 行队列欠载的时序；出现时结果为 fail 并保留驱动日志，这是场景的检出，不是工具故障。页码在计数完成前未知，因此位置保护用保存修订和 anchor 判断。检查因网络、账户或服务不可用而失败时，这是前提未满足：场景把该请求及其阶段的失败标为 excused，结果保持 inconclusive；同一轮中的其他失败仍按规则判定。本入口不验证同步结果内容、上传、采用远端位置或 KOReader 往返。
 
 ### 场景 2：翻页、改字号与重开（`--mode reading-flow`）
 
@@ -146,8 +146,8 @@ python3 tools/device_workbench.py --port /dev/ttyACM0 \
 每一轮：
 
 1. 向后翻 `--turns` 页，每页等待帧完成并断言页码恰好加一、驱动成功。从恢复或跳转得到的位置出发时，一页可能跨两个已统计页，页码会重复或跳过一次；出现这种情况时结果为 inconclusive，其他页码变化为 fail；停留后等待保存，断言保存修订增加。再向前翻回，断言回到起始页且再次保存。
-2. 进入排版，字号加一档并应用，等待重新分页；再减一档并应用。字号已是最大档时加一档不产生变化，场景改为先减后加；两个方向都不产生变化时判为 fail。断言页码和总页数回到起始值。
-3. 返回书库并重新打开测试书，断言页码与起始页相同、保存修订与返回书库前相同。
+2. 进入排版，字号加一档并应用，等待重新分页并断言 font_px 确实变化；再减一档并应用。字号已是最大档时加一档不产生变化，场景改为先减后加；两个方向都不产生变化时判为 fail。断言 font_px、anchor、页码和总页数回到起始值。
+3. 返回书库并重新打开测试书，断言 anchor、保存修订、font_px 和页码与返回书库前相同。页码不能唯一确定位置，以 anchor 为准。
 4. 记录稳定态的内部 RAM、PSRAM 及其最大连续块。
 
 所有轮次结束后，后续轮次的内部 RAM 稳定值比首轮低超过 4,096 B 时判为 fail。PSRAM 中的缓存会正常增长，只记录不断言。

@@ -252,6 +252,8 @@ class ReaderApp {
      * Defined for host builds and for firmware with the diagnostic console.
      */
     const char *sync_state() const;
+    /** Effective body font size in pixels for the open book. Defined where sync_state() is. */
+    int font_size_px() const;
     CacheUsage cache_usage() const;
     /**
      * Accepts worker results; image completion may queue a body frame. cancel stops statistics

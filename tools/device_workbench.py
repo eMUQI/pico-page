@@ -332,6 +332,8 @@ def reading_flow(session, book, rounds, turns):
     # Open the named book so that every round, and the workload identity, refer to the same material.
     act(session, "open " + book, lambda s: s.get("view") == "reading" and s.get("pending") == "0", "book opened", long_wait)
     start = wait_for(session, lambda s: quiescent(s) and int(s["pages"]) > 0, "saved idle page with a page count", long_wait)
+    if "anchor" not in start or "font_px" not in start:
+        return dict(status="inconclusive", reason="This firmware does not report the saved anchor and font size", start=start)
     if int(start["page"]) + turns > int(start["pages"]):
         return dict(status="skip", reason="The saved position is fewer than --turns pages before the end of the book")
     try:
@@ -359,8 +361,13 @@ def rounds_of_reading(session, book, rounds, turns, start, long_wait):
         if applied["view"] == "typography":
             tap(session, PANEL_CLOSE, "reading", long_wait)
             return False
-        wait_for(session, lambda s: settled(s) and int(s["pages"]) > 0, "repagination after typography change", long_wait)
+        after = wait_for(session, lambda s: settled(s) and int(s["pages"]) > 0, "repagination after typography change", long_wait)
+        if after["font_px"] == size["font_px"]:
+            raise AssertionError(f"applying a font-size step left the size at {after['font_px']} px")
+        size.update(font_px=after["font_px"])
         return True
+
+    size = dict(font_px=start["font_px"])
 
     samples, reopened = [], start
     for _ in range(rounds):
@@ -380,16 +387,19 @@ def rounds_of_reading(session, book, rounds, turns, start, long_wait):
         if not resize(reverse):
             raise AssertionError("the font size could not be restored")
         restored = wait_for(session, lambda s: settled(s) and int(s["pages"]) > 0, "restored typography", long_wait)
-        if (restored["page"], restored["pages"]) != (start["page"], start["pages"]):
-            raise AssertionError(f"reverting the font size left page {restored['page']}/{restored['pages']}, "
-                                 f"expected {start['page']}/{start['pages']}")
+        same = ("font_px", "anchor", "page", "pages")
+        if any(restored[k] != start[k] for k in same):
+            raise AssertionError("reverting the font size left " + ", ".join(f"{k}={restored[k]}" for k in same)
+                                 + "; expected " + ", ".join(f"{k}={start[k]}" for k in same))
         tap(session, READING_BODY, "tools")
         tap(session, HEADER_BACK, "library", long_wait)
         act(session, "open " + book, lambda s: s.get("view") == "reading" and s.get("pending") == "0", "book reopened", long_wait)
         reopened = wait_for(session, lambda s: quiescent(s) and int(s["pages"]) > 0, "reopened page quiescent", long_wait)
-        if reopened["page"] != start["page"] or reopened["revision"] != restored["revision"]:
-            raise AssertionError(f"reopening showed page {reopened['page']} revision {reopened['revision']}, "
-                                 f"expected page {start['page']} revision {restored['revision']}")
+        # The page number does not identify a position within a counted page; the anchor does.
+        same = ("anchor", "revision", "font_px", "page")
+        if any(reopened[k] != restored[k] for k in same):
+            raise AssertionError("reopening showed " + ", ".join(f"{k}={reopened[k]}" for k in same)
+                                 + "; expected " + ", ".join(f"{k}={restored[k]}" for k in same))
         samples.append(memory(reopened))
     return dict(status="pass", scope="injected_input_app_state_and_driver_only", rounds=rounds, turns=turns,
                 start=start, after=reopened, memory=samples, internal_drop=trend_check(samples))
@@ -418,8 +428,9 @@ def image_sync(session, book):
     def unchanged(step):
         # The page number is unknown until counting ends, but any saved move of position advances the revision.
         after = wait_for(session, quiescent, "page saved and quiescent after " + step, long_wait)
-        if before["revision"] != after["revision"]:
-            raise AssertionError(f"{step} changed saved revision {before['revision']} to {after['revision']}")
+        if any(before.get(k) != after.get(k) for k in ("revision", "anchor")):
+            raise AssertionError(f"{step} changed saved revision {before['revision']} to {after['revision']} "
+                                 f"or anchor {before.get('anchor')} to {after.get('anchor')}")
         return after
 
     def check():
@@ -438,7 +449,9 @@ def image_sync(session, book):
     wait_for(session, lambda s: traced(mark, "2", "0"), "sync request finished", long_wait)
     if traced(mark, "2", "0")[0]["result"] != "0":
         tap(session, HEADER_BACK, "reading", long_wait)
-        return dict(status="inconclusive", reason="The sync check did not succeed; network or account unavailable", before=before)
+        # An unreachable network or service is an unmet prerequisite, so these failures do not decide the verdict.
+        return dict(status="inconclusive", reason="The sync check did not succeed; network or account unavailable", before=before,
+                    excused=[e["op"] for kind in ("2", "5") for e in traced(mark, kind, "0") if e["result"] in ("1", "3")])
     # A successful request only shows that HTTP completed; the application must also have parsed a valid
     # answer. The state stays "unchecked" while a found position is still being mapped.
     answer = wait_for(session, lambda s: s.get("view") == "sync" and s.get("pending") == "0" and s.get("content_busy") == "0"
@@ -551,6 +564,7 @@ def analyze(output):
     """Conservative offline analysis. Missing starts/ends or drops invalidate percentiles."""
     active, counts, optional, samples = {}, Counter(), Counter(), defaultdict(list)
     gaps, last_seq, metric_active, failures = [], None, {}, 0
+    failed_operations = []
     event_count = 0
     last_queued = 0
     last_device_sequence = None
@@ -567,6 +581,7 @@ def analyze(output):
                 active.clear()
                 counts.clear()
                 optional.clear()
+                failed_operations.clear()
                 samples.clear()
                 metric_active.clear()
                 composition.clear()
@@ -632,7 +647,10 @@ def analyze(output):
                 result = int(f["result"])
                 # Optional prefetches are tallied apart, so that neither their failures nor their
                 # successes move the verdict or the failure rate of the mandatory operations.
-                (optional if f["kind"] == "3" and int(f["detail"]) & PREFETCH else counts)[OUTCOMES[result]] += 1
+                prefetch = f["kind"] == "3" and int(f["detail"]) & PREFETCH
+                (optional if prefetch else counts)[OUTCOMES[result]] += 1
+                if result in (1, 3) and not prefetch:
+                    failed_operations.append(f["op"])
                 composition[f'{f["kind"]}:{f["detail"]}:{result}'] += 1
                 samples[f["kind"]].append(int(f["duration_us"]))
     if cutoff is None:
@@ -654,7 +672,7 @@ def analyze(output):
                                    p99_us=None if gaps else percentile(values, .99))
     completed = sum(counts[k] for k in OUTCOMES)
     return dict(counts={k: counts[k] for k in (*OUTCOMES, "unfinished", "command_failure", "command_timeout", "busy")},
-                optional={k: optional[k] for k in OUTCOMES},
+                optional={k: optional[k] for k in OUTCOMES}, failed_operations=failed_operations,
                 gaps=sorted(set(gaps)), distributions=distributions, events=event_count,
                 composition=dict(composition), frame_failures=failures,
                 image_chains=image_evidence(operations), stale_image_patches=stale_image_patches(operations),
@@ -668,7 +686,10 @@ def finalize(output, metadata, result):
     except (KeyError, ValueError, TypeError) as exc:
         analysis = dict(gaps=["malformed_structured_evidence"], error=str(exc), counts={}, distributions={}, events=0)
         result = dict(status="infra_error", reason="Cannot parse complete structured evidence")
-    failed = analysis["counts"] and (analysis["counts"]["failure"] or analysis["counts"]["timeout"]
+    # A scenario may name the operation failures that only show an unmet prerequisite, such as an
+    # unreachable sync service; every other recorded failure still decides the verdict.
+    excused = set(result.get("excused", ()))
+    failed = analysis["counts"] and (any(op not in excused for op in analysis["failed_operations"])
                                      or analysis["counts"]["command_failure"] or analysis["frame_failures"])
     incomplete = analysis["gaps"] or not analysis["events"] or metadata.get("missing")
     if result["status"] == "pass" and incomplete:
