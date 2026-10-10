@@ -1,6 +1,6 @@
 # 开发状态
 
-2026-10-10 PR #39 的 Release/Performance 真机 A/B 首轮已完成：同一提交 `260a3df`、设备、TF 和合成图片书，按 Release→Performance→Performance→Release 各采一块，共 140 个计时样本，驱动帧无失败，20 次同步检查均为 HTTP 200。开图、缓存重画、K2 全刷和文字翻页的两模式中位数相差 0.1%–0.8%，与单样本散布同量级，未分辨出指标开关的时延开销；Performance 启动时内部 RAM 少 352 B，应用大 1,536 B。计时为 JTAG 主机侧口径，不是实体触摸到屏幕的时延。两种模式在首次同步后内部 RAM 历史最低剩余均约 11 KB，需单独跟进。设备现装 Release 固件。详情见本日「PR #39：Release/Performance 真机 A/B」记录。
+2026-10-10 PR #39 的 Release/Performance 真机 A/B 首轮已完成：同一提交 `260a3df`、设备、TF 和合成图片书，按 Release→Performance→Performance→Release 各采一块，共 140 个计时样本，驱动帧无失败，20 次同步检查均为 HTTP 200。开图、缓存重画、K2 全刷和文字翻页的两模式中位数相差 0.1%–0.8%，与单样本散布同量级，未分辨出指标开关的时延开销；Performance 启动时内部 RAM 少 352 B，应用大 1,536 B。计时为 JTAG 主机侧口径，不是实体触摸到屏幕的时延。两种模式在首次同步后内部 RAM 历史最低剩余均约 11 KB，需单独跟进。采样后设备已按授权烧回诊断固件 `5d53d163…`，书库、TF 和首帧正常。详情见本日「PR #39：Release/Performance 真机 A/B」与「A/B 后恢复诊断固件」记录。
 
 2026-10-10 PR #39 的诊断固件 `260a3df` 已按授权烧录并完成图片加载与同步取消交叠实测：有效轮次中两任务区间交叠 5.153021 秒，正文图片解码、画布采用、驱动帧及最终画布对应，保存修订保持为 1。采集无缺口、无驱动帧失败；另有一次后台图片任务失败，整体报告保留 fail，尚未全部验收。详情见本日「PR #39：诊断固件与图片同步交叠实测」记录。
 
@@ -4198,3 +4198,12 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
 - 证据：`.local/ab-perf/` 下的 `report.html`、`analysis.json`、`samples.csv`、`conditions.json`、各块 `samples.jsonl` 与同名 GDB 日志、烧录日志。均为本地忽略文件，不提交。
 - 收尾：脚本结束后两个核心停在输入分发点，无残留断点；已通过 OpenOCD 恢复运行，连续 8 秒保持 running 后关闭 OpenOCD。设备现装 Release 固件，无诊断控制台，停在合成图片书第 1 页。恢复后未核对实体屏幕和触摸响应。本批只改文档，执行交接检查与 diff 检查；未重跑 host 或固件构建。
 - 未测与下一步：实体触摸时延、屏幕残影、功耗、休眠和长期压力未覆盖；未在不带调试器的条件下复核时延。内部 RAM 在同步期间降至约 11 KB、pico_touch 余栈 2,080 B 需单独定位峰值来源并核对余量目标，这两项与指标开关无关。场景 2（连续翻页/字号/重开）、真实 KOReader 双向往返和 #37 其余项目仍待推进。
+
+## 2026-10-10 · A/B 后恢复诊断固件
+
+- 授权与范围：用户在 A/B 记录提交（`dd06a9e`）后明确授权烧录。只把设备从 Release 恢复为 A/B 之前已安装并验证过的诊断应用，未重新构建，固件源码未改。
+- 镜像：`build/firmware-diagnostic/pico_page.bin`，3,403,808 B，SHA-256 `5d53d163e3ea509126c792e602b12ce1cf7a65b834ef75b9d22d069acb85a7f4`，来源记录为干净提交 `260a3df`。`dd06a9e` 相对该提交只改了两份文档。
+- 安装：EIM 的 ESP-IDF 6.1 Python 环境，esptool 5.3.1，端口 `/dev/cu.usbmodem1101`。写入前核对芯片为 ESP32-S3 rev0.2、MAC `14:c1:9f:d0:18:b8`，读回的分区表与 otadata 和本日 PR #39 安装时的副本逐字节一致。仅向 ota_0=`0x10000` 写应用，25.6 秒完成，`Hash of data verified`。未改分区、bootloader、NVS、otadata 或校准。
+- 结果：RTS 复位后诊断口无应答，与本日上一次安装的现象相同；执行一次 watchdog reset 后，`status` 返回书库视图、card=1、首帧 frame_ok=1、电量 100%、input_overflows=0。只做了这一次只读查询，未操作书籍、网络或输入。
+- 证据：`.local/device/install/pr39-ab-restore-20261010/` 的 `preflight.log`、`otadata.log`、`flash.log`、`reset.log`、`boot-status.log` 及读回的分区表与 otadata。本地忽略文件，不提交。
+- 未测与下一步：未核对实体屏幕与触摸；未开书，A/B 结束时保存的修订 57 未在诊断固件下复核。RTS 复位后停在下载模式的现象已出现两次，后续安装可直接使用 watchdog reset。A/B 记录列出的内部 RAM 低水位和 pico_touch 余栈仍待定位。
