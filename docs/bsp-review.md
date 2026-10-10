@@ -4,13 +4,9 @@
 
 ## 来源与复用范围
 
-官方仓库：[MindReset/read_pico_firmware](https://github.com/MindReset/read_pico_firmware)。
-锁定 commit：`5f3406deec33304de8801046db583dec7c49e55b`（2026-10-06 由 `28cde682a4468a581c278761922724f57d976418` 升级，见下方“VCOM 门控”）。
-`tools/setup_bsp.sh` 下载完整源码到忽略目录，固件只引用下面九个组件。
-本项目没有修改这些组件；没有纳入上游 `main/`、工厂校准、字体、图片、书库、网络传书和搜索代码。
+官方仓库：[MindReset/read_pico_firmware](https://github.com/MindReset/read_pico_firmware)。锁定 commit：`5f3406deec33304de8801046db583dec7c49e55b`（2026-10-06 由 `28cde682a4468a581c278761922724f57d976418` 升级，见下方「VCOM 门控」）。`tools/setup_bsp.sh` 下载完整源码到忽略目录，固件只引用下面九个组件。本项目没有修改这些组件；没有纳入上游 `main/`、工厂校准、字体、图片、书库、网络传书和搜索代码。
 
-以该 commit 的各组件 `CMakeLists.txt`、`idf_component.yml`、`LICENSE` 和实现文件核对；
-组件版本标签不能代替实际源码锁。下面的 tree SHA 都来自同一完整 commit。
+以该 commit 的各组件 `CMakeLists.txt`、`idf_component.yml`、`LICENSE` 和实现文件核对；组件版本标签不能代替实际源码锁。下面的 tree SHA 都来自同一完整 commit。
 
 | 组件 | 直接用途与依赖 | 组件许可 | Git tree SHA |
 |---|---|---|---|
@@ -24,13 +20,9 @@
 | `sy7636a` | 显示电源；GPIO/I2C、timer、FreeRTOS、esp_rom | Apache-2.0 | `b29885c27b115bfeb092d305bfcbe67e51ff05aa` |
 | `pwm_audio` | 蜂鸣器后端；GPIO/GPTimer/LEDC、heap | Apache-2.0 | `c95f0d30b6b8c78f05a47b520709529d49d7bbc2` |
 
-`epdiy` 是上游在 v2.0.0 基础上裁剪、修改的版本；保留的 LCD 渲染路径、差分优化和队列修正
-记录在其 `LICENSE`。不能仅依据仓库顶层 Apache-2.0 把它重新标成 Apache。
-`pwm_audio` 是 Espressif 组件的裁剪副本，原始版权声明在该组件中保留。
+`epdiy` 是上游在 v2.0.0 基础上裁剪、修改的版本；保留的 LCD 渲染路径、差分优化和队列修正记录在其 `LICENSE`。不能仅依据仓库顶层 Apache-2.0 把它重新标成 Apache。`pwm_audio` 是 Espressif 组件的裁剪副本，原始版权声明在该组件中保留。
 
-ESP-IDF 锁为 v6.1 commit `fff9895c82d744c7237be8847347bdd1b07c6643`，
-本机既有修改见环境记录。IDF 的 GPIO、I2C、LCD、SPI Flash、HAL 等 Espressif 原始代码主要是
-Apache-2.0；同时核对了 `docs/en/COPYRIGHT.rst` 与以下非统一许可路径：
+ESP-IDF 锁为 v6.1 commit `fff9895c82d744c7237be8847347bdd1b07c6643`，本机既有修改见环境记录。IDF 的 GPIO、I2C、LCD、SPI Flash、HAL 等 Espressif 原始代码主要是 Apache-2.0；同时核对了 `docs/en/COPYRIGHT.rst` 与以下非统一许可路径：
 
 - `components/fatfs/src/ff.c`：FatFs R0.16，ChaN 的 BSD 风格许可，保留版权、条件和免责声明。
 - `components/sdmmc/sdmmc_common.c`：OpenBSD 来源的 ISC 风格许可；SDMMC 其他 Espressif 文件另有 Apache-2.0 标头。
@@ -39,32 +31,21 @@ Apache-2.0；同时核对了 `docs/en/COPYRIGHT.rst` 与以下非统一许可路
 - `components/esp_libc/COPYING.NEWLIB`、`COPYING.picolibc`：按文件划分的多项宽松许可，不能合并标记为 Apache-2.0。
 - `components/mbedtls/mbedtls/LICENSE`：Apache-2.0 OR GPL-2.0-or-later，本轮采用 Apache-2.0；由 IDF 系统组件间接引入。
 
-源码版权以文件标头为准。[IDF 版权清单](https://github.com/espressif/esp-idf/blob/v6.1/docs/en/COPYRIGHT.rst)
-提供 SDK 汇总；本轮没有复制或再分发 SDK。最终二进制发布前仍需依据链接产物补齐随包许可与工具链运行库通知。
+源码版权以文件标头为准。[IDF 版权清单](https://github.com/espressif/esp-idf/blob/v6.1/docs/en/COPYRIGHT.rst)提供 SDK 汇总；本轮没有复制或再分发 SDK。最终二进制发布前仍需依据链接产物补齐随包许可与工具链运行库通知。
 
 ## 初始化与数据边界
 
-`read_pico_init()` 会初始化 EPD、启动 SD 探测、设置 18 MHz 显示时钟及 1290 mV 默认 VCOM，
-随后初始化 PMU、触摸和加速度计。官方应用在 `main/app_main.c::resolve_vcom_at_boot()`
-另外调用 `read_pico_pmu_vcom_get()`，再将读到的工厂值交给显示驱动；这一步不在 BSP 初始化内部。
-因此当前入口不调用 `read_pico_init()`，也不复用其默认校准兜底路径。
-后续适配必须先验证 PMU 读取与失败处置，不调用 `read_pico_pmu_vcom_set()` 或工厂标定入口。
+`read_pico_init()` 会初始化 EPD、启动 SD 探测、设置 18 MHz 显示时钟及 1290 mV 默认 VCOM，随后初始化 PMU、触摸和加速度计。官方应用在 `main/app_main.c::resolve_vcom_at_boot()` 另外调用 `read_pico_pmu_vcom_get()`，再将读到的工厂值交给显示驱动；这一步不在 BSP 初始化内部。因此当前入口不调用 `read_pico_init()`，也不复用其默认校准回退路径。后续适配必须先验证 PMU 读取与失败处置，不调用 `read_pico_pmu_vcom_set()` 或工厂标定入口。
 
-`read_pico_sd.c` 的普通挂载路径不自动格式化，但它包含显式格式化入口，并会建立演示资源目录。
-本轮没有调用探测、挂载或格式化函数；真实 TF 接入要明确控制这些副作用。
-`read_pico` 的 `WHOLE_ARCHIVE` 用于保留 Flash HPM 覆盖表；本轮保留上游构建定义，
-不启用依赖具体 Flash 芯片的 120 MHz 实验配置。
+`read_pico_sd.c` 的普通挂载路径不自动格式化，但它包含显式格式化入口，并会建立演示资源目录。本轮没有调用探测、挂载或格式化函数；真实 TF 接入要明确控制这些副作用。`read_pico` 的 `WHOLE_ARCHIVE` 用于保留 Flash HPM 覆盖表；本轮保留上游构建定义，不启用依赖具体 Flash 芯片的 120 MHz 实验配置。
 
-编译配置采用上游 `sdkconfig.ci` 的 ESP32-S3、16 MB Flash、Octal PSRAM 80 MHz、USB Serial/JTAG
-等构建基线，不把它作为当前硬件的测量结果。上游产品配置中的 120 MHz 时序、波形和 VCOM 未移植为本项目运行策略。
+编译配置采用上游 `sdkconfig.ci` 的 ESP32-S3、16 MB Flash、Octal PSRAM 80 MHz、USB Serial/JTAG 等构建基线，不把它作为当前硬件的测量结果。上游产品配置中的 120 MHz 时序、波形和 VCOM 未移植为本项目运行策略。
 
 ## VCOM 门控（上游 `5f3406d`，2026-10-06）
 
-上游提交“feat: enhance VCOM control during scanning”只修改 `components/read_pico/read_pico_board.c`（18 行），
-其余八个组件的 tree SHA 不变。内容：
+上游提交「feat: enhance VCOM control during scanning」只修改 `components/read_pico/read_pico_board.c`（18 行），其余八个组件的 tree SHA 不变。内容：
 
-- 面板电源轨上电后，IO 扩展器上的 `VCOM_EN` 跟随扫描模式位 `ep_mode`：开始扫描时拉高，扫描结束后拉低；
-  断电前恢复原来的控制方式。上游说明：电源轨保持上电而 VCOM 长开，会把画面慢慢压黑，在阳光下表现为发灰。
+- 面板电源轨上电后，IO 扩展器上的 `VCOM_EN` 跟随扫描模式位 `ep_mode`：开始扫描时拉高，扫描结束后拉低；断电前恢复原来的控制方式。上游说明：电源轨保持上电而 VCOM 长开，会把画面慢慢压黑，在阳光下表现为发灰。
 - `VCOM_EN` 由低变高后等待 2 毫秒再开始扫描。
 
 对本项目的影响：
@@ -78,24 +59,10 @@ Apache-2.0；同时核对了 `docs/en/COPYRIGHT.rst` 与以下非统一许可路
 
 ## 分区与发布待办
 
-上游 `partitions_16M.csv` 是单 factory 应用加数据区，没有 OTA 双槽。
-这只说明所锁源码的分区安排，不说明用户设备当前分区。Pico Page 没有复制该 CSV；
-本地单应用分区仅用于构建。现已读回设备为两个 4 MiB OTA 槽，
-与上游及本地 CSV 均不同；当前启动槽和完整备份仍未核验，见 device-validation.md。
+上游 `partitions_16M.csv` 是单 factory 应用加数据区，没有 OTA 双槽。这只说明所锁源码的分区安排，不说明用户设备当前分区。Pico Page 没有复制该 CSV；本地单应用分区仅用于构建。现已读回设备为两个 4 MiB OTA 槽，与上游及本地 CSV 均不同；当前启动槽和完整备份仍未核验，见 device-validation.md。
 
-未来分发 Apache-2.0 组件时应附完整许可、保留版权和适用 NOTICE，并标明修改。
-分发包含 epdiy 的静态链接固件时，应按 LGPL-3.0 第 4 节准备 LGPL/GPL 文本、库来源与修改记录、
-可重新链接所需源码或对象及必要安装信息；不能只放一个上游链接就宣称完成义务。
-本项目整体许可证仍待决定，本轮只在本地构建。
-条款依据：[Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0)、
-[LGPL-3.0-or-later 文本](https://spdx.org/licenses/LGPL-3.0-or-later.html)。
+未来分发 Apache-2.0 组件时应附完整许可、保留版权和适用 NOTICE，并标明修改。分发包含 epdiy 的静态链接固件时，应按 LGPL-3.0 第 4 节准备 LGPL/GPL 文本、库来源与修改记录、可重新链接所需源码或对象及必要安装信息；不能只放一个上游链接就宣称完成义务。本项目整体许可证仍待决定，本轮只在本地构建。条款依据：[Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0)、[LGPL-3.0-or-later 文本](https://spdx.org/licenses/LGPL-3.0-or-later.html)。
 
 ## EPD 欠载诊断适配（2026-10-09）
 
-仍锁定 `5f3406deec33304de8801046db583dec7c49e55b`，不修改下载目录。
-构建将 `epdiy` 复制至 `build/pico_bsp/epdiy`，应用
-`firmware/patches/epdiy-underrun-diagnostics.patch`：在已有欠载分支增加 4 个原子计数/行号字段，
-区分无效生产者、空队列和扫描未消费完；ISR 只记录数值，汇合生产者后由调用任务输出日志。
-新增同步 `epd_clear_checked()` 返回清屏扫描的累计错误，避免后续绘制重置错误而误认清屏成功。
-诊断与检查接口不改变波形、预填、时钟或调度。原 LGPL-3.0-or-later 许可和分发义务保留，
-源码补丁与锁定来源一并保留；组件版本未变，依赖锁只更新构建路径变化对应的 manifest hash。
+仍锁定 `5f3406deec33304de8801046db583dec7c49e55b`，不修改下载目录。构建将 `epdiy` 复制至 `build/pico_bsp/epdiy`，应用 `firmware/patches/epdiy-underrun-diagnostics.patch`：在已有欠载分支增加 4 个原子计数/行号字段，区分无效生产者、空队列和扫描未消费完；ISR 只记录数值，汇合生产者后由调用任务输出日志。新增同步 `epd_clear_checked()` 返回清屏扫描的累计错误，避免后续绘制重置错误而误认清屏成功。诊断与检查接口不改变波形、预填、时钟或调度。原 LGPL-3.0-or-later 许可和分发义务保留，源码补丁与锁定来源一并保留；组件版本未变，依赖锁只更新构建路径变化对应的 manifest hash。

@@ -1,10 +1,8 @@
 # 开发状态
 
-2026-10-10 Issue #30 第 5 节“按需休眠封面”候选已提交为 PR #35（分支 `refactor/on-demand-sleep-cover`，基于 main `dd5ff76`，代码提交 `5c57dc3`），未合并：
-阅读期间不再调度休眠封面，休眠请求才由内容 worker 检查缓存、未命中再生成；删除预生成判定、已准备标志和重试计时。
-host Debug 与 ASan/UBSan 各 14/14，ESP-IDF 6.1 标准固件构建通过；`3693369` 的远端 host 工作流通过，自动 review 未提出意见。未烧录、未连接设备。
-首次无缓存锁屏与热缓存锁屏耗时、预取命中率、资源峰值和功耗均待真机对比。PR #34（阶段 A 收尾）已正常合并为 `dd5ff76`。
-详情见本日“按需休眠封面”记录。
+2026-10-10 Issue #30 第 5 节「按需休眠封面」候选已提交为 PR #35（分支 `refactor/on-demand-sleep-cover`，基于 main `dd5ff76`，代码提交 `5c57dc3`），未合并：阅读期间不再调度休眠封面，休眠请求才由内容 worker 检查缓存、未命中再生成；删除预生成判定、已准备标志和重试计时。host Debug 与 ASan/UBSan 各 14/14，ESP-IDF 6.1 标准固件构建通过；`3693369` 的远端 host 工作流通过，自动 review 未提出意见。未烧录、未连接设备。首次无缓存锁屏与热缓存锁屏耗时、预取命中率、资源峰值和功耗均待真机对比。PR #34（阶段 A 收尾）已正常合并为 `dd5ff76`。详情见本日「按需休眠封面」记录。
+
+2026-10-10 现行 Markdown 文档已按 Tech-Doc-Style-Chinese 整理：41 个文件展开段落硬换行，弯引号改为直角引号，并修正 `docs/runtime.md`、`docs/usb-storage-runtime.md`、`tests/README.md`、`examples/README.md` 中与现状不符的说明。仅改文档，未改代码、未构建、未烧录。详情见本日「文档风格整理」记录。
 
 2026-10-10 Issue #30 阶段 A 收尾已提交为 PR #34（分支 `fix/issue-30-stage-a`，基于 main `995421f`；代码提交 `2c45058`、`7281719`），未合并：逐条回退 PR #29 的修复核对回归覆盖，
 补上“等待封面 worker 交还期间不派发 Wi-Fi 重连”的 host 回归；样本生成改为每次构建运行一次生成器，不再维护不完整的输出清单；
@@ -116,6 +114,15 @@ EPD 行队列欠载（1024）：网络请求阶段与状态画面刷新重叠，
 2026-10-09 Issue #21 本地候选：阅读页脚左侧独立切换页码/总页数、章节、两位小数百分比；
 右侧独立切换电量/北京时间时钟。host Debug 与 ASan/UBSan/LSan 完整 CTest 各 13/13，标准固件构建通过。
 已核对合成书籍的实际 host 绘制，真机触摸、电量、联网校时和刷新效果待验收；按用户要求整理 PR，未烧录。
+
+## 2026-10-10 · 文档风格整理
+
+- 变更：对 42 个现行 Markdown 文件按 Tech-Doc-Style-Chinese 整理。用该规范的 `unwrap_md_paragraphs.py` 展开 41 个文件共 725 处段落硬换行；把正文中的 848 个弯引号改为直角引号「」，嵌套处用『』，代码块、行内代码和链接目标不变；「落盘」「闭环」「链路」「兜底」改为具体说法；5 处文件名放进行内代码。`AGENTS.md` 的「面向用户的说明」增加一条引号与换行约定。
+- 事实修正：`docs/usb-storage-runtime.md` 的入口由设置的「文件导入」改为「设置 → 网络与传输」的「开启 USB 传输」（依据 `app.cpp` 与 `help_content.h`）。`docs/runtime.md` 删除「未进行烧录」等过期状态并指向设备检查记录，图片分页改为与 `docs/image-runtime.md` 一致，补上 Wi-Fi 传书，进入详情改为长按书库中的书，排版面板一步拆为列表。`tests/README.md` 补上 `content_worker`，入口写为 13 个固定入口加 1 个依赖 Node.js 的 `wifi_upload_page`（依据 `CMakeLists.txt` 的 `add_test` 与 `if(NODE_EXECUTABLE)`；后一点来自 PR #32 自动 review 的 P2）。`examples/README.md` 改为 `settings.toml` 已用于界面和正文排版，`integrations.toml` 固件不读取。
+- 未改范围：`docs/archive/`、`docs/design/original/`和本文件的历史记录保持原样；`web/README.md` 已符合约定，未改动；固件界面字符串中的弯引号未改。
+- 命令与环境：本机 macOS，在仓库根目录执行。规范自带的 `lint_copy_rules.py` 对合并 main 后的 43 个文件（含 `web/README.md`）报告 error=0、warning=0、style=3（3 处均为 `claude.ai` 网址）；`unwrap_md_paragraphs.py --check` 通过；`python3 tools/check_handoff.py` 通过（416 项）；`git diff --check` 通过。
+- 未测项：未运行 host 构建、CTest 和固件构建，本批没有改动代码。展开后的段落没有逐个文件人工通读，只抽查了 `AGENTS.md`、`docs/runtime.md`、`docs/wifi-transfer.md`、`docs/usb-storage-runtime.md` 和各 README。`examples/README.md` 中「锚点编码仍需 G1 对照后冻结」是否仍成立未核对。
+- 下一步：确认固件界面文案是否也改用直角引号。
 
 ## 2026-10-10 · README 重写
 
@@ -4010,48 +4017,40 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
   提出 1 条 P1：本批未更新 `docs/development-status.md`。该意见成立于被审阅的提交；记录因需要 PR 编号而在开 PR 后单独提交为 `4e69ae8`，
   内容已包含变更、命令/环境、结果、未测项和下一步，无需再改代码。已回复并请求对最新提交复审。
 
+## 2026-10-10 · PR #32 合并冲突处理
+
+- 变更：合入最新 main，保留文档风格整理与 PR #34 的两条顶部摘要及各自完整记录。冲突仅涉及本文件；未修改固件或共享核心源码。
+- 命令与环境：云端 Linux，`python3 tools/check_handoff.py`、`git diff --check`。交接检查通过（416 项），diff 检查通过。
+- 未测项：本次未在本地运行 host、sanitizer 或固件构建，未烧录；合并前检查最新提交的远端 Host checks。
+- 下一步：远端检查通过后合并 PR #32。
+
 ## 2026-10-10 · PR #34 合并
 
-- PR #34 在最新提交 `38948f2` 上的远端 host 工作流（push 与 pull_request 两次运行）通过，自动复审未提出意见；按用户“没有意见后合并”的要求正常合并为 `dd5ff76`。
+- PR #34 在最新提交 `38948f2` 上的远端 host 工作流（push 与 pull_request 两次运行）通过，自动复审未提出意见；按用户「没有意见后合并」的要求正常合并为 `dd5ff76`。
 - 未烧录。A1 的主循环派发次序与 A2 的实体长按时序仍待真机验证。
 
 ## 2026-10-10 · 按需休眠封面（Issue #30 第 5 节）
 
-- 范围：只实施 Issue #30 第 5 节的调度变更，不改内容任务的所有权结构（阶段 B）和休眠状态表达（阶段 C）。
-  改动文件：`firmware/components/reader_app/app.cpp`、`tests/app_test.cpp`、`docs/decisions.md`、`docs/architecture.md`、`docs/acceptance.md`。
-- 共同根因：休眠封面在阅读期间被排在预取和页数统计之前，低频的休眠操作占用了内容 worker、TF I/O 和 PSRAM；
-  为支持后台准备又引入了“已准备”标志、重试计时和回收特判。
+- 范围：只实施 Issue #30 第 5 节的调度变更，不改内容任务的所有权结构（阶段 B）和休眠状态表达（阶段 C）。改动文件：`firmware/components/reader_app/app.cpp`、`tests/app_test.cpp`、`docs/decisions.md`、`docs/architecture.md`、`docs/acceptance.md`。
+- 共同根因：休眠封面在阅读期间被排在预取和页数统计之前，低频的休眠操作占用了内容 worker、TF I/O 和 PSRAM；为支持后台准备又引入了「已准备」标志、重试计时和回收特判。
 - 变更：
-  - `background_step()`、`background_due()`、`background_state()` 不再因封面“到期”而调度或报告封面任务；`background_state()` 仅在封面任务在途时返回 `sleep-cover`。
+  - `background_step()`、`background_due()`、`background_state()` 不再因封面「到期」而调度或报告封面任务；`background_state()` 仅在封面任务在途时返回 `sleep-cover`。
   - `prepare_sleep()` 中原有的按需路径成为唯一路径：保存已呈现进度并释放正文缓存、预取和统计资源后，由内容 worker 检查封面缓存，未命中再读取并解码。
-- 删除：`sleep_cover_due()`；`sleep_cover_prepared`（每次开书都会清零，唤醒后的异步重开也会，去掉预生成后不再影响任何路径）；
-  `sleep_cover_retry` 与 `defer_sleep_cover()`（只为后台重试限速）；`prepare_sleep_cover()` 内的低内存释放预取和分页会话释放（唯一的调用者已先行释放）；
-  `finish_open()`、清缓存分支中对上述状态的复位。
-- 保留：取消休眠后接续在途封面任务、5 秒取消请求预算、等 worker 交还文件后才绘制锁屏、封面任务在途时 `reclaim_caches()` 的豁免、
-  `power_menu_wait`、缓存与负缓存格式、worker 端的 PSRAM 准入门槛。`counting_job` 槽位与 `counting_generation` 的共用留给阶段 B。
+- 删除：`sleep_cover_due()`；`sleep_cover_prepared`（每次开书都会清零，唤醒后的异步重开也会，去掉预生成后不再影响任何路径）；`sleep_cover_retry` 与 `defer_sleep_cover()`（只为后台重试限速）；`prepare_sleep_cover()` 内的低内存释放预取和分页会话释放（唯一的调用者已先行释放）；`finish_open()`、清缓存分支中对上述状态的复位。
+- 保留：取消休眠后接续在途封面任务、5 秒取消请求预算、等 worker 交还文件后才绘制锁屏、封面任务在途时 `reclaim_caches()` 的豁免、`power_menu_wait`、缓存与负缓存格式、worker 端的 PSRAM 准入门槛。`counting_job` 槽位与 `counting_generation` 的共用留给阶段 B。
 - 预算与回退：
   - 执行上下文：封面读取与解码仍在既有内容 worker；应用任务只发起、轮询和绘制，没有新增任务或队列。
-  - 峰值内存：单次尝试的构成不变（684×1040 的 4 位灰度画布 355,680 字节、不超过 2 MiB 的原图数据及解码器内部分配）。
-    尝试只发生在休眠请求释放正文缓存、预取和统计资源之后，不再与阅读期预取同时存活。未在设备上测量。
+  - 峰值内存：单次尝试的构成不变（684×1040 的 4 位灰度画布 355,680 字节、不超过 2 MiB 的原图数据及解码器内部分配）。尝试只发生在休眠请求释放正文缓存、预取和统计资源之后，不再与阅读期预取同时存活。未在设备上测量。
   - 最长不可取消区间：不变，为单次 TF 读取或缓存提交；5 秒是取消请求预算，不是总耗时上限。
   - 失败回退：无封面、损坏、内存不足、超时取消、任务启动失败或缓存提交失败时显示书名并休眠；每次休眠请求只尝试一次，阅读期间不重试。
 - 行为变化（待真机确认）：
-  - 热缓存休眠：缓存校验原先在阅读期间由后台完成，现在在休眠请求时进行，进入休眠前多一次 worker 读缓存（约 356 KB）与一次轮询往返；
-    绘制锁屏时应用任务仍读取一次缓存，这一点与此前相同。耗时未测量。
+  - 热缓存休眠：缓存校验原先在阅读期间由后台完成，现在在休眠请求时进行，进入休眠前多一次 worker 读缓存（约 356 KB）与一次轮询往返；绘制锁屏时应用任务仍读取一次缓存，这一点与此前相同。耗时未测量。
   - 冷缓存生成途中取消休眠并立即再次请求休眠：接续的是已被取消的任务，本次可能显示书名，下一次休眠请求重新生成。
   - 缓存提交持续失败时，每次休眠请求解码一次；此前显式休眠在 5 秒重试间隔内直接回退。
-- 测试：`SleepWorker` 断言空闲阅读（保存、预取、统计直至完成）不启动封面任务、不写封面缓存、不解码；
-  `SleepAdopt` 断言重复请求接续被取消的任务（让新任务启动失败，只有接续才能保持等待），且下一次请求能补齐封面；
-  `SleepHandoff` 断言缓存提交失败时每次请求恰好解码一次；删除只覆盖后台重试间隔的 `SleepRetry`。
-  另在 `background_step()` 中临时恢复阅读期封面启动，`app` 测试失败，随后恢复源码。
-- 命令/环境：macOS，AppleClang，Unix Makefiles；`cmake --build build/host --parallel 4`、`ctest --test-dir build/host`；
-  `build/sanitized`（`-fsanitize=address,undefined`）同样构建并运行完整 CTest；`sh tools/build_firmware.sh`（EIM，ESP-IDF 6.1.0）；
-  `python3 tools/check_handoff.py`；`git diff --check`。
-- 结果：host Debug 14/14；ASan/UBSan 14/14；两者 CTest 注册项均为 14。固件构建通过并重新编译了 `reader_app/app.cpp`，
-  `pico_page.bin` 为 0x33de50 字节，最小应用分区剩余 19%；链接映射中已无 `sleep_cover_due`。本机 macOS 未运行 LSan。
-- 未测项：未烧录、未连接设备。Issue #30 第 5 节的新增验收均待真机：首次无缓存与热缓存锁屏耗时、大型/渐进 JPEG、慢卡、
-  连续翻页预取命中率的前后对比、资源峰值、功耗，以及封面准备期间短按、长按电源、K2 和触摸的实体时序。
-  host 只证明调度与状态逻辑，不代表真机耗时或资源结果。
+- 测试：`SleepWorker` 断言空闲阅读（保存、预取、统计直至完成）不启动封面任务、不写封面缓存、不解码；`SleepAdopt` 断言重复请求接续被取消的任务（让新任务启动失败，只有接续才能保持等待），且下一次请求能补齐封面；`SleepHandoff` 断言缓存提交失败时每次请求恰好解码一次；删除只覆盖后台重试间隔的 `SleepRetry`。另在 `background_step()` 中临时恢复阅读期封面启动，`app` 测试失败，随后恢复源码。
+- 命令/环境：macOS，AppleClang，Unix Makefiles；`cmake --build build/host --parallel 4`、`ctest --test-dir build/host`；`build/sanitized`（`-fsanitize=address,undefined`）同样构建并运行完整 CTest；`sh tools/build_firmware.sh`（EIM，ESP-IDF 6.1.0）；`python3 tools/check_handoff.py`；`git diff --check`。
+- 结果：host Debug 14/14；ASan/UBSan 14/14；两者 CTest 注册项均为 14。固件构建通过并重新编译了 `reader_app/app.cpp`，`pico_page.bin` 为 0x33de50 字节，最小应用分区剩余 19%；链接映射中已无 `sleep_cover_due`。本机 macOS 未运行 LSan。
+- 未测项：未烧录、未连接设备。Issue #30 第 5 节的新增验收均待真机：首次无缓存与热缓存锁屏耗时、大型/渐进 JPEG、慢卡、连续翻页预取命中率的前后对比、资源峰值、功耗，以及封面准备期间短按、长按电源、K2 和触摸的实体时序。host 只证明调度与状态逻辑，不代表真机耗时或资源结果。
 - 下一步：推送并提交 PR（`Refs #30`），跟进远端 CI 与 review；合并后开始阶段 B 的只读分析。
-- 追加（同日）：已提交为 PR #35。`3693369` 上远端 host 工作流的 push 与 pull_request 两次运行（Linux，各含 host Debug 与 ASan/UBSan/LSan 步骤）通过；
-  自动 review 审阅 `3693369` 后未提出意见。PR 改变固件行为，是否在真机验证前合并待用户决定。
+- 追加（同日）：已提交为 PR #35。`3693369` 上远端 host 工作流的 push 与 pull_request 两次运行（Linux，各含 host Debug 与 ASan/UBSan/LSan 步骤）通过；自动 review 审阅 `3693369` 后未提出意见。PR 改变固件行为，是否在真机验证前合并待用户决定。
+- 追加（同日）：合并前 main 合入了 PR #32（文档风格整理，`2a1954a`），与本分支在 `docs/architecture.md` 和本文件冲突。已把 main 合入分支：`docs/architecture.md` 采用 main 的展开段落文本并重新写入按需准备的说明；本文件保留双方的顶部摘要和完整记录；本批新增的记录与 `docs/decisions.md` 的条目改为直角引号、展开硬换行。PR #32 只改 Markdown，本次合入未改代码与测试。

@@ -4,16 +4,13 @@
 
 ---
 
-请开始开发 **Pico Page**，目标硬件是 Read Pico，框架优先 ESP-IDF。
-这是正式开始实现，不是要求再写一轮完整设计，也不是只做网页样机。
+请开始开发 **Pico Page**，目标硬件是 Read Pico，框架优先 ESP-IDF。这是正式开始实现，不是要求再写一轮完整设计，也不是只做网页样机。
 
 先读取根目录 `AGENTS.md`，再按顺序读：
 1. `docs/decisions.md` 与 `docs/development-status.md`
 2. `docs/architecture.md`、`docs/storage.md`
 3. `docs/ui-implementation.md`、`docs/milestones.md` 的 G0/G1a
-4. `docs/acceptance.md` 对应测试，以及 `docs/references.md` 的源码入口
-需要实现具体页面时，再查 `docs/design/original/` 相应 PNG、tokens 和动作说明。
-不要把全部旧档案当作同等优先级需求。
+4. `docs/acceptance.md` 对应测试，以及 `docs/references.md` 的源码入口需要实现具体页面时，再查 `docs/design/original/` 相应 PNG、tokens 和动作说明。不要把全部旧档案当作同等优先级需求。
 
 已确定，不需要重新询问：
 - 使用现有设计稿，不重做视觉设计，不要求设计师先修完再开发。
@@ -26,34 +23,20 @@
 
 这次任务完成 G0 和 G1a 的可执行部分：
 
-A. 检查已有仓库和 Git 改动，保护现有文件。找到本机现有 ESP-IDF/EIM 工具链，
-   核对官方 Read Pico BSP 的版本、驱动依赖和构建要求，记录准确路径、版本和 commit。
-   不擅自升级全局工具链，不照搬其他固件的分区/烧录偏移。
+A. 检查已有仓库和 Git 改动，保护现有文件。找到本机现有 ESP-IDF/EIM 工具链，核对官方 Read Pico BSP 的版本、驱动依赖和构建要求，记录准确路径、版本和 commit。不擅自升级全局工具链，不照搬其他固件的分区/烧录偏移。
 
-B. 建立最小 ESP-IDF 工程和 host 测试入口。只建立当前需要的模块；不要为每个模块创建线程，
-   不要生成一堆空实现再宣称“架构完成”。优先把纯逻辑与 ESP-IDF、GUI 隔离。
+B. 建立最小 ESP-IDF 工程和 host 测试入口。只建立当前需要的模块；不要为每个模块创建线程，不要生成一堆空实现再宣称「架构完成」。优先把纯逻辑与 ESP-IDF、GUI 隔离。
 
-C. 实现并运行小型端到端 host 测试：输入映射 → session → recording display → 文件存储。
-   至少证明：正文 K2 请求真正的全刷且不改变阅读位置；面板 K2 关闭/取消不穿透；
-   失败/过期 FramePresented 不推进进度；清理缓存保留原书、配置、记录和必要 prepared 资源；
-   配置解析失败保留原文件。mock 是测试工具，不冒充真机驱动完成。
+C. 实现并运行小型端到端 host 测试：输入映射 → session → recording display → 文件存储。至少证明：正文 K2 请求真正的全刷且不改变阅读位置；面板 K2 关闭/取消不穿透；失败/过期 FramePresented 不推进进度；清理缓存保留原书、配置、记录和必要 prepared 资源；配置解析失败保留原文件。mock 是测试工具，不冒充真机驱动完成。
 
-D. 针对最小 EPUB/KOSync 位置验证选择具体切入点，检查 CrossPoint 的位置映射源码及其依赖/许可证。
-   使用自己生成的测试书和实际 KOReader 输出建立对照；没有实际输出时记录未验证，不编造预期 XPointer。
-   只验证最小转换路径，不在这一轮集成整个 CrossPoint 应用、所有网络 UI 或完整书库功能。
+D. 针对最小 EPUB/KOSync 位置验证选择具体切入点，检查 CrossPoint 的位置映射源码及其依赖/许可证。使用自己生成的测试书和实际 KOReader 输出建立对照；没有实际输出时记录未验证，不编造预期 XPointer。只验证最小转换路径，不在这一轮集成整个 CrossPoint 应用、所有网络 UI 或完整书库功能。
 
-E. 实际运行可执行的检查，把命令、退出结果、工具版本和未测试项记录到文档。
-   更新 `docs/development-status.md`、`docs/environment.md` 和依赖审查记录。
-   本轮报告：完成了什么、运行了哪些测试、哪些仍被硬件/网络/许可阻塞、下一步最小任务是什么。
+E. 实际运行可执行的检查，把命令、退出结果、工具版本和未测试项记录到文档。更新 `docs/development-status.md`、`docs/environment.md` 和依赖审查记录。本轮报告：完成了什么、运行了哪些测试、哪些仍被硬件/网络/许可阻塞、下一步最小任务是什么。
 
-没有连接硬件或缺少工具时，完成独立的 host 工作，不停在“请先准备好一切”，也不把硬件门槛标成通过。
-本任务授权本地代码/文档修改与测试；不自动发布或 push，不刷写设备、擦除 Flash/TF、改分区或工厂校准。
-达到 G0/G1a 的可执行交付后报告，不一口气把全部后续功能铺成占位页面。
+没有连接硬件或缺少工具时，完成独立的 host 工作，不停在「请先准备好一切」，也不把硬件门槛标成通过。本任务授权本地代码/文档修改与测试；不自动发布或 push，不刷写设备、擦除 Flash/TF、改分区或工厂校准。达到 G0/G1a 的可执行交付后报告，不一口气把全部后续功能铺成占位页面。
 
 ---
 
 ## 后续接续任务模板
 
-继续 Pico Page。读取 `AGENTS.md` 和 `docs/development-status.md`，复核相关 Git 差异，
-按 `docs/milestones.md` 推进下一项未完成的小任务。保留现有设计与正文 K2 全刷。
-运行相应验收测试，更新开发状态与真实证据；不重复规划整项目，不把未运行测试写成通过。
+继续 Pico Page。读取 `AGENTS.md` 和 `docs/development-status.md`，复核相关 Git 差异，按 `docs/milestones.md` 推进下一项未完成的小任务。保留现有设计与正文 K2 全刷。运行相应验收测试，更新开发状态与真实证据；不重复规划整项目，不把未运行测试写成通过。
