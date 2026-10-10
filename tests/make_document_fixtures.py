@@ -12,6 +12,14 @@ def generate(directory: Path) -> None:
     (directory / "invalid.txt").write_bytes(b"valid\xffinvalid")
     (directory / "gb18030.txt").write_bytes(("甲" * 24575 + "😀\ue587" + "乙" * 500 + "\r\n末尾").encode("gb18030"))
     write_fixture(directory / "valid.epub")
+    for kind, label in (("empty-label", ""), ("whitespace-label", " \t\n "),
+                        ("long-label", "甲" * 10922)):
+        labeled = fixture_entries()
+        labeled["EPUB/nav.xhtml"] = labeled["EPUB/nav.xhtml"].replace('>第一章</a>', '>' + label + '</a>')
+        write_fixture(directory / (kind + ".epub"), labeled)
+    nonlinear = fixture_entries()
+    nonlinear["EPUB/package.opf"] = nonlinear["EPUB/package.opf"].replace('<itemref idref="two"/>', '<itemref idref="two" linear="no"/>')
+    write_fixture(directory / "nonlinear-footer.epub", nonlinear)
     entries = fixture_entries()
     entries["META-INF/container.xml"] = entries["META-INF/container.xml"].replace(
         "EPUB/package.opf", "EPUB/缺失的书目.opf")

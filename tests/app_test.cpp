@@ -494,15 +494,31 @@ static std::vector<std::uint8_t> footer_pixels(const ReaderApp& app, int left, i
     return pixels;
 }
 
-static void footer_test(const fs::path& root, const fs::path& fixtures, bool asynchronous) {
+static void footer_test(const fs::path& root, const fs::path& fixtures, bool asynchronous,
+                        const std::string& fixture = "valid.epub", const std::string& title = "第一章") {
     fs::create_directories(root / "Books");
-    fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
+    fs::copy_file(fixtures / fixture, root / "Books/book.epub");
     ReaderApp app(root.string(), "footer-test", true, asynchronous); Driver driver{app};
     assert(app.initialize()); driver.present();
     app.set_battery(75);
     opened(app, "Books/book.epub"); driver.present();
     // Dismiss any first-open notice, then return to the default page-count mode.
-    for (int i = 0; i < 3; ++i) { driver.tap(36, 1160); driver.present(); }
+    for (int i = 0; i < 4; ++i) { driver.tap(36, 1160); driver.present(); }
+    if (fixture == "empty-label.epub" || fixture == "whitespace-label.epub") {
+        driver.tap(342, 500); driver.present();
+        assert(app.view() == View::Tools);
+        graphics::Canvas expected;
+        graphics::Font font; assert(font.open_fallback() && font.size(30));
+        int x = 132;
+        for (auto scalar : graphics::decode_utf8(title)) {
+            font.draw(expected, scalar, x, 14 + font.metrics().ascender, 1, true);
+            x += font.advance(scalar);
+        }
+        for (int y = 14; y < 55; ++y)
+            for (int column = 132; column < 400; ++column)
+                assert(app.canvas().pixel(column, y) == expected.pixel(column, y));
+        driver.close(); driver.present();
+    }
     const auto saved = app.saved_record();
     const auto progress = read(root / "Books/book.epub.picopage/progress.json");
     const auto body = app.canvas().pixels();
@@ -513,6 +529,25 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
         assert(read(root / "Books/book.epub.picopage/progress.json") == progress);
         assert(std::equal(body.begin(), body.begin() + 1128 * app.canvas().stride(), app.canvas().pixels().begin()));
         assert(!app.take_network_request());
+    };
+    const auto expect_text = [&](const std::string& value) {
+        graphics::Canvas expected;
+        graphics::Font font; assert(font.open_fallback() && font.size(24));
+        int x = 36, width = 0;
+        const auto scalars = graphics::decode_utf8(value);
+        for (auto scalar : scalars) width += font.advance(scalar);
+        const int available = width > 476 ? 476 - font.advance(U'…') : 476;
+        for (const auto scalar : scalars) {
+            if (x - 36 + font.advance(scalar) > available) {
+                font.draw(expected, U'…', x, 1156 + font.metrics().ascender, 3);
+                break;
+            }
+            font.draw(expected, scalar, x, 1156 + font.metrics().ascender, 3);
+            x += font.advance(scalar);
+        }
+        for (int y = 1128; y < 1216; ++y)
+            for (int column = 0; column < 540; ++column)
+                assert(app.canvas().pixel(column, y) == expected.pixel(column, y));
     };
     const auto toggle = [&](int x) {
         driver.tap(x, 1160);
@@ -527,18 +562,20 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
         driver.present(); unchanged();
     };
     toggle(36);
-    const auto chapters = footer_pixels(app, 0, 540);
-    assert(chapters != page_waiting && footer_pixels(app, 540, 684) == battery);
-    toggle(600);
-    assert(footer_pixels(app, 0, 540) == chapters && footer_pixels(app, 540, 684) != battery);
-    toggle(600);
-    assert(footer_pixels(app, 0, 540) == chapters && footer_pixels(app, 540, 684) == battery);
-    toggle(539);
     const auto estimated = footer_pixels(app, 0, 540);
-    assert(estimated != chapters && footer_pixels(app, 540, 684) == battery);
+    assert(estimated != page_waiting && footer_pixels(app, 540, 684) == battery);
     toggle(540);
-    assert(footer_pixels(app, 0, 540) == estimated);
+    assert(footer_pixels(app, 0, 540) == estimated && footer_pixels(app, 540, 684) != battery);
     toggle(600);
+    assert(footer_pixels(app, 0, 540) == estimated && footer_pixels(app, 540, 684) == battery);
+    toggle(539);
+    const auto chapters = footer_pixels(app, 0, 540);
+    assert(chapters != estimated && footer_pixels(app, 540, 684) == battery);
+    expect_text("第 1 章 / 共 2 章");
+    toggle(36);
+    const auto chapter_name = footer_pixels(app, 0, 540);
+    assert(chapter_name != chapters && footer_pixels(app, 540, 684) == battery);
+    expect_text(title);
     toggle(36);
     assert(footer_pixels(app, 0, 540) == page_waiting && footer_pixels(app, 540, 684) == battery);
     const auto pixels = app.canvas().pixels();
@@ -559,19 +596,10 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     }
     const auto counted = app.book_pages();
     assert(counted && counted->total > 0 && app.canvas().pixels() == pixels);
-    toggle(36); toggle(36);
+    toggle(36);
     // Check the rendered text against the known page fraction, including its fractional digits.
     const auto value = reading_footer::percent(static_cast<double>(counted->page) / counted->total);
-    graphics::Canvas expected;
-    graphics::Font font; assert(font.open_fallback() && font.size(24));
-    int x = 36;
-    for (const auto scalar : graphics::decode_utf8(value)) {
-        font.draw(expected, scalar, x, 1156 + font.metrics().ascender, 3);
-        x += font.advance(scalar);
-    }
-    for (int y = 1128; y < 1216; ++y)
-        for (int column = 0; column < 540; ++column)
-            assert(app.canvas().pixel(column, y) == expected.pixel(column, y));
+    expect_text(value);
     toggle(600);
     toggle(36);
     assert(footer_pixels(app, 0, 540) != page_waiting);
@@ -579,6 +607,17 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     assert(footer_pixels(app, 540, 684) == battery);
     unchanged();
 
+    if (fixture == "nonlinear-footer.epub") {
+        driver.tap(342, 500); driver.present();
+        driver.tap(68, 1140); driver.present();
+        assert(app.view() == View::Contents);
+        driver.tap(300, 522 + 92 + 46); driver.present(); driver.complete_content();
+        assert(app.view() == View::Reading && app.saved_record()->anchor.resource.find("chapter2") != std::string::npos);
+        // Chapters -> chapter name -> pages -> percentage, with one extra cycle to clear notices.
+        for (int i = 0; i < 7; ++i) { driver.tap(36, 1160); driver.present(); }
+        expect_text("100.00%");
+        return;
+    }
     driver.tap(36, 1160);
     assert(app.pending_frame() && app.pending_frame()->region);
     app.complete_frame(false);
@@ -595,6 +634,13 @@ int main(int argc, char** argv) {
     const char* directory = mkdtemp(temporary); assert(directory);
     const fs::path card(directory), fixtures(argv[1]);
     assert(reading_footer::percent(0) == "0.00%");
+    assert(reading_footer::percent(.2697, false) == "27%");
+    assert(reading_footer::percent(.2649, false) == "26%");
+    assert(reading_footer::percent(.265, false) == "27%");
+    assert(reading_footer::percent(0, false) == "0%");
+    assert(reading_footer::percent(1, false) == "100%");
+    assert(reading_footer::percent(-1, false) == "0%" && reading_footer::percent(2, false) == "100%");
+    assert(reading_footer::percent(std::numeric_limits<double>::quiet_NaN(), false) == "—");
     assert(reading_footer::percent(.05) == "5.00%");
     assert(reading_footer::percent(.2137) == "21.37%");
     assert(reading_footer::percent(1.0 / 3) == "33.33%");
@@ -609,6 +655,21 @@ int main(int argc, char** argv) {
     assert(reading_footer::clock(provision::clock_floor, -300) == "19:00");
     footer_test(card / "FooterSync", fixtures, false);
     footer_test(card / "FooterAsync", fixtures, true);
+    for (bool async : {false, true}) {
+        const auto suffix = async ? "Async" : "Sync";
+        footer_test(card / ("FooterEmpty" + std::string(suffix)), fixtures, async, "empty-label.epub", "第 1 章");
+        footer_test(card / ("FooterWhitespace" + std::string(suffix)), fixtures, async, "whitespace-label.epub", "第 1 章");
+        footer_test(card / ("FooterLong" + std::string(suffix)), fixtures, async, "long-label.epub",
+                    std::string("甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲…"));
+        footer_test(card / ("FooterNonlinear" + std::string(suffix)), fixtures, async, "nonlinear-footer.epub");
+    }
+    assert(reading_footer::chapter_label({}, 2) == "第 3 章");
+    assert(reading_footer::chapter_label(std::string(32768, 'x'), 0) == std::string(128, 'x') + "…");
+    std::string wide_label;
+    for (int i = 0; i < 100; ++i) wide_label += "甲";
+    const auto bounded = reading_footer::chapter_label(wide_label, 0);
+    assert(bounded.size() == 129 && graphics::decode_utf8(bounded).size() == 43);
+
     help_test(card / "HelpNoCard", fixtures, false, false);
     help_test(card / "HelpSync", fixtures, false, true);
     help_test(card / "HelpAsync", fixtures, true, true);

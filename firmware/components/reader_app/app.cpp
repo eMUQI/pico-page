@@ -1635,8 +1635,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     std::string chapter_label() const {
         for (const auto &item : document.toc())
-            if (item.resource == chapter.resource) return item.label;
-        return "第 " + std::to_string(chapter_index + 1) + " 章";
+            if (item.resource == chapter.resource) return reading_footer::chapter_label(item.label, chapter_index);
+        return reading_footer::chapter_label({}, chapter_index);
     }
     std::uint32_t total_pages() const {
         std::size_t total = 0;
@@ -1724,10 +1724,12 @@ struct ReaderApp::Impl final : DisplayBackend {
         switch (footer_position) {
         case reading_footer::Position::Chapters:
             return "第 " + std::to_string(chapter_index + 1) + " 章 / 共 " + std::to_string(document.spine().size()) + " 章";
+        case reading_footer::Position::ChapterName:
+            return chapter_label();
         case reading_footer::Position::Percent:
             if (const auto current = current_page())
                 return reading_footer::percent(static_cast<double>(current) / total_pages());
-            return reading_footer::percent(estimated_fraction(page.end)) + " · 估算";
+            return reading_footer::percent(estimated_fraction(page.end), pages_complete);
         case reading_footer::Position::Pages:
             if (const auto current = current_page())
                 return std::to_string(current) + " / " + std::to_string(total_pages());
@@ -6090,9 +6092,10 @@ struct ReaderApp::Impl final : DisplayBackend {
                                             ? reading_footer::Device::Clock : reading_footer::Device::Battery;
                     } else {
                         switch (footer_position) {
-                        case reading_footer::Position::Pages: footer_position = reading_footer::Position::Chapters; break;
-                        case reading_footer::Position::Chapters: footer_position = reading_footer::Position::Percent; break;
-                        case reading_footer::Position::Percent: footer_position = reading_footer::Position::Pages; break;
+                        case reading_footer::Position::Pages: footer_position = reading_footer::Position::Percent; break;
+                        case reading_footer::Position::Chapters: footer_position = reading_footer::Position::ChapterName; break;
+                        case reading_footer::Position::ChapterName: footer_position = reading_footer::Position::Pages; break;
+                        case reading_footer::Position::Percent: footer_position = reading_footer::Position::Chapters; break;
                         }
                     }
                     footer();
