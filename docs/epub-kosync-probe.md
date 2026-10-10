@@ -1,5 +1,7 @@
 # EPUB 与 KOSync 最小探针
 
+> 历史阶段记录。本文的环境、实现范围和未测结论仅适用于记录日期；当前实现及验证进展见[开发状态](development-status.md)，不得复用历史操作授权。
+
 核查日期：2026-10-05。状态：`pass_host_only`，仅身份计算、所选章节文本解析和源位置映射。没有正文分页、字体渲染、Read Pico 正文显示、原生 XPointer 转换或真实 KOSync 往返结果。
 
 ## 本轮内容路径
@@ -82,6 +84,6 @@ python3 tools/epub_probe.py /tmp/pico-page-probe.epub --spine 1 > /tmp/pico-page
 
 ## 尚缺的实际证据
 
-只读检查在 PATH、`/Applications`、`~/Applications` 未找到 KOReader 启动程序，`/Users/wulu/workspace/koreader` 是空目录。本机有 LuaJIT 和 SDL2，但这不等于存在可运行的 KOReader。进程查询受当前执行环境限制，未把查询失败当作「没有任何 KOReader 进程」的证据。本轮未安装客户端、未操作个人 EPUB 或 `.sdr`、未联系 KOSync 服务，也没有账户凭据。
+只读检查在 PATH、`/Applications`、`~/Applications` 未找到 KOReader 启动程序，`~/workspace/koreader` 是空目录。本机有 LuaJIT 和 SDL2，但这不等于存在可运行的 KOReader。进程查询受当前执行环境限制，未把查询失败当作「没有任何 KOReader 进程」的证据。本轮未安装客户端、未操作个人 EPUB 或 `.sdr`、未联系 KOSync 服务，也没有账户凭据。
 
 下一步最小验证：在实际 KOReader 打开上述未修改合成 EPUB，记录客户端版本、DOM 版本、原书摘要、正文片段和真实 progress；至少取第一章的非 BMP/内联文本点、第二章跨章点及一次回读。先逐项核对源节点/文本偏移，再实现受限 XPointer 转换，并用不同字号做双向对照。没有这些输出前，SYNC01–SYNC03 的原生位置兼容门槛保持 `not_run`；不能用本探针自造路径作唯一预期值。

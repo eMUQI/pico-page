@@ -1,6 +1,6 @@
 # Pico Page 网站
 
-Astro 静态站，结构与 QuotaFrame 的 `web/` 一致。
+Astro 静态站，用于介绍 Pico Page 的功能、限制和开发状态。
 
 ```sh
 npm ci --prefix web --ignore-scripts

@@ -4,7 +4,7 @@
 
 ## 来源与复用范围
 
-官方仓库：[MindReset/read_pico_firmware](https://github.com/MindReset/read_pico_firmware)。锁定 commit：`5f3406deec33304de8801046db583dec7c49e55b`（2026-10-06 由 `28cde682a4468a581c278761922724f57d976418` 升级，见下方「VCOM 门控」）。`tools/setup_bsp.sh` 下载完整源码到忽略目录，固件只引用下面九个组件。本项目没有修改这些组件；没有纳入上游 `main/`、工厂校准、字体、图片、书库、网络传书和搜索代码。
+官方仓库：[MindReset/read_pico_firmware](https://github.com/MindReset/read_pico_firmware)。锁定 commit：`5f3406deec33304de8801046db583dec7c49e55b`（2026-10-06 由 `28cde682a4468a581c278761922724f57d976418` 升级，见下方「VCOM 门控」）。`tools/setup_bsp.sh` 下载完整源码到忽略目录，固件只引用下面九个组件。下载原件不修改；构建副本应用 checked SD release 和 epdiy 欠载诊断/清屏检查补丁，见下方修改记录；没有纳入上游 `main/`、工厂校准、字体、图片、书库、网络传书和搜索代码。
 
 以该 commit 的各组件 `CMakeLists.txt`、`idf_component.yml`、`LICENSE` 和实现文件核对；组件版本标签不能代替实际源码锁。下面的 tree SHA 都来自同一完整 commit。
 

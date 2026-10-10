@@ -1,5 +1,7 @@
 # USB File Transfer Implementation Plan
 
+> 历史设计或执行计划，保留用于追溯。本文任务指令不自动授权当前操作；现行决定和实现状态以仓库根目录 AGENTS.md、docs/decisions.md 与 docs/development-status.md 为准。
+
 > 后续决定：2026-10-06 用户将 K2 更新为所有可交互页面全刷；下文涉及 K2 取消/关闭的历史约定已被 docs/decisions.md 覆盖。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

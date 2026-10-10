@@ -18,15 +18,15 @@ ESP-IDF FatFs 的 `rename` 不覆盖已有目标。host 和固件都执行「保
 
 主机对发布目录执行 `fsync`；ESP-IDF FAT VFS 不提供目录文件描述符，因此只执行文件 `fsync`。真实 TF 卡掉电、移卡、满卡和控制器缓存行为尚待真机验证，不承诺保存最后一次触摸。当前类要求单一文件 I/O 执行者，挂载/卸载与 USB 文件所有权移交由调用者串行协调。没有实现挂载代次或异步队列；不能据此标记 ST08 已通过。
 
-JSON schema_version 为 1；`local_revision` 使用十进制字符串，避免 double 丢失 uint64 精度。`anchor.offset` 为 Unicode 标量偏移数字。读取最多 16 KiB，检查字段、UTF-8、整数范围、版本及身份。此格式是 G1a 的最小实现，未宣称冻结 EPUB 源位置映射或 KOReader 兼容格式。
+普通进度记录的 `schema_version` 为 1；清除进度的墓碑记录为 2，包含 `state: "cleared"`；`local_revision` 使用十进制字符串，避免 double 丢失 uint64 精度。`anchor.offset` 为 Unicode 标量偏移数字。读取最多 16 KiB，检查字段、UTF-8、整数范围、版本及身份。此格式是 G1a 的最小实现，未宣称冻结 EPUB 源位置映射或 KOReader 兼容格式。
 
 ## TOML 配置
 
 读取顺序：内置默认 → `PicoPage/settings.toml` → `<完整书名>.picopage/settings.toml`。本书只叠加出现的字段，因此只有字号覆盖时，重新加载仍继承全局字体变化。缺失文件采用上层值；语法、UTF-8、类型、范围、未知字段或新 schema 错误时整层回退，返回文件路径、字段或解析器行号及原因，保留原文件。
 
-当前支持：`reader.font`、`font_size_px`、`line_height`、`margin_x_px`、`paragraph_gap_lines`、`indent_chars`，以及 `display.refresh_preset`。全局另支持 `library.roots`、`library.view`、`network.wifi_enabled` 与 `power.auto_sleep_minutes`。`network.wifi_enabled` 为布尔值，默认 `true`；单书不可覆盖。关闭后禁止同步、热点配网和两种 Wi-Fi 传书，保留网络及同步账户文件。配置无效时网络入口拒绝启动，修正原文件后可重试。`power.auto_sleep_minutes` 是无输入后自动休眠的分钟数，范围 0–240，默认 10，0 表示关闭；单书配置中出现 `power` 表按未知字段处理。此项只能在 TF 卡上编辑，启动或开书时读取。字号当前界限为 12–96 px，行高 1–3，水平边距 0–160 px；这些是输入校验界限，不是已经完成的视觉范围验收。文件最多 32 KiB，扫描根最多 16 项。段距为 0–1 行，默认 0；首行缩进为 0–2 字，默认 2。旧配置缺少这两个字段时采用默认值。用户 TOML 中 `/Books` 表示卡根目录，输出内部规范化为 `Books`，不会访问 host `/Books`。字体偏好原样保留；字体可用性和运行时回退由字体/渲染模块处理。
+当前支持：`reader.font`、`font_size_px`、`line_height`、`margin_x_px`、`paragraph_gap_lines`、`indent_chars`，以及 `display.refresh_preset`、`display.balanced_full_refresh_pages`、`display.fast_full_refresh_pages`，后两项的取值范围均为 1–30 页。全局另支持 `library.roots`、`library.view`、`network.wifi_enabled`、`power.auto_sleep_minutes` 与 `power.sleep_screen`。`network.wifi_enabled` 为布尔值，默认 `true`；单书不可覆盖。关闭后禁止同步、账号验证和两种 Wi-Fi 传书，保留网络及同步账户文件。配置无效时网络入口拒绝启动，修正原文件后可重试。`power.auto_sleep_minutes` 是无输入后自动休眠的分钟数，范围 0–240，默认 10，0 表示关闭；单书配置中出现 `power` 表按未知字段处理。设备设置页可保存自动休眠时长和休眠画面；也可在 TF 卡上编辑，启动或开书时读取。`power.sleep_screen` 接受 `cover`、`reading`、`simple`。字号当前界限为 12–96 px，行高 1–3，水平边距 0–160 px；这些是输入校验界限，不是已经完成的视觉范围验收。文件最多 32 KiB，扫描根最多 16 项。段距为 0–1 行，默认 0；首行缩进为 0–2 字，默认 2。旧配置缺少这两个字段时采用默认值。用户 TOML 中 `/Books` 表示卡根目录，输出内部规范化为 `Books`，不会访问 host `/Books`。字体偏好原样保留；字体可用性和运行时回退由字体/渲染模块处理。
 
-`settings_snapshot()` 捕获全局和本书的原始字节及其有效值。`apply_settings()` 在写入前比较两层原文，外部修改、创建或删除文件均返回 `ExternalChange`。语法、版本或字段无效时拒绝保存，不把读取阶段的回退值覆盖到原文件。写回只接受上述阅读和显示字段；`library` 字段通过此接口只读。
+`settings_snapshot()` 捕获全局和本书的原始字节及其有效值。`apply_settings()` 在写入前比较两层原文，外部修改、创建或删除文件均返回 `ExternalChange`。语法、版本或字段无效时拒绝保存，不把读取阶段的回退值覆盖到原文件。写回接受上述阅读和显示字段；全局配置还可写 `library.view`、`network.wifi_enabled` 和 `power` 字段。`library.roots` 通过此接口只读。
 
 写回根据 TOML 解析器的源行列定位值，仅替换发生变化的单行值，保留字段顺序、空白及注释。删除覆盖时保留该行注释；新增字段插入对应表，缺少表时新增表。行内表、多行字符串及无法确认范围的表示法返回明确失败，保留原文件。变更后的完整文本再次经过相同语法和字段校验，然后执行临时文件同步、逐字节读回、备份及发布。普通读取不自动恢复设置备份，避免有意删除的配置或覆盖项被旧备份重新启用；`.bak` 可供手工恢复。
 
@@ -38,7 +38,7 @@ JSON schema_version 为 1；`local_revision` 使用十进制字符串，避免 d
 
 ## 缓存边界
 
-`clear_cache()` 仅移除 `PicoPage/cache` 下的内容，保留目录本身；不接触原书、伴随进度/设置、封面、`prepared` 或 `PicoPage/data`。host 拒绝根/路径上的符号链接；缓存内部链接只删除链接本身。嵌套清理最多 32 层，遇到错误返回失败，可能已清除部分缓存。调用前必须停止使用缓存的任务。协议不支持另一进程同时改动挂载目录；不将 TOCTOU 检查冒充并发写入隔离。
+`clear_cache()` 仅移除 `PicoPage/cache` 下的内容，保留目录本身；不接触原书、伴随进度/设置、用户封面、`prepared` 或 `PicoPage/data`。host 拒绝根/路径上的符号链接；缓存内部链接只删除链接本身。嵌套清理最多 32 层，遇到错误返回失败，可能已清除部分缓存。生成的封面缓存位于此缓存目录内，会一并清除；调用前必须停止使用缓存的任务。协议不支持另一进程同时改动挂载目录；不将 TOCTOU 检查冒充并发写入隔离。
 
 ## Host 验证
 
