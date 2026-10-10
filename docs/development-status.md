@@ -2,7 +2,7 @@
 
 ## 当前摘要（2026-10-11）
 
-文字转页 A/B/C 与用户追加的水波纹、屏幕选择入口已在 `feat/text-turn-waveform` 完成本地候选，并整合远端 main `718f376`。默认关闭、本次启动有效，只作用于正文非清屏更新；原档位、全刷和恢复路径保留。用户授权的最小 epdiy 补丁只改构建副本，官方锁定与下载原件不变。host Debug、开启埋点的 ASan/UBSan 各 20/20（原 18 项，新增 2 项），标准与 Diagnostic 固件构建通过，交接检查 428 项通过。未烧录；效果、残影、灰度、真实耗时与资源峰值均待真机。尚未推送或开 PR，远端操作授权边界待确认；详情见末尾本批记录。
+文字转页 A/B/C 与用户追加的水波纹、屏幕选择入口已在 `feat/text-turn-waveform` 完成本地候选，并整合远端 main `718f376`。默认关闭、本次启动有效，只作用于正文非清屏更新；原档位、全刷和恢复路径保留。用户授权的最小 epdiy 补丁只改构建副本，官方锁定与下载原件不变。host Debug、开启埋点的 ASan/UBSan 各 20/20（原 18 项，新增 2 项），标准与 Diagnostic 固件构建通过，交接检查在整合 main 后为 443 项通过。未烧录；效果、残影、灰度、真实耗时与资源峰值均待真机。尚未推送或开 PR，远端操作授权边界待确认；详情见末尾本批记录。
 
 此前文档核对的源码基线为 `5f22009`。本地提交历史已包含 PR #35 和 PR #38 的合并；下方旧摘要中的「未合并」「未推送」描述的是各批次当时状态，不再表示当前代码状态。本次未查询远端 CI 的实时状态。
 
@@ -4200,6 +4200,6 @@ sanitizer：按 environment.md 配置 `build/sanitized`，另加 `-DPICO_PAGE_HO
 
 固件：`sh tools/build_firmware.sh` 成功；激活同一已有 IDF 后 `sh tools/build_firmware.sh diagnostic` 成功。标准 sdkconfig 关闭诊断，Diagnostic 确认控制台/metrics/trace 开启；日志和 map 覆盖新平台、LUT、水波纹、主入口、串口和逐行相位路径。标准应用 3,375,920 字节，SHA-256 `dbfacd1ab97e377c1292c12132a5ac69f7a4a94f6788a7202ad61678d547fc2c`；Diagnostic 3,410,608 字节，SHA-256 `f757b3b7a9d271f18ab2ae11ecbc5207a95f42311af0af207c5e61c17d7c3891`。构建成功不是设备安装证明。
 
-资料与视觉：`python3 tools/check_handoff.py` 428 项通过；`git diff --check` 通过。host headless 使用合成 EPUB 导出 `artifacts/text-turn/` 三张实现截图，检查布局、热区与选中状态，未改原设计。日志在本机 `/tmp/textturn-*.log` 与构建目录的 Testing/log 中。没有使用个人书籍、凭据或设备日志。
+资料与视觉：`python3 tools/check_handoff.py` 整合 main 前 428 项、整合后 443 项通过；`git diff --check` 通过。host headless 使用合成 EPUB 导出 `artifacts/text-turn/` 三张实现截图，检查布局、热区与选中状态，未改原设计。日志在本机 `/tmp/textturn-*.log` 与构建目录的 Testing/log 中。没有使用个人书籍、凭据或设备日志。
 
 未测与下一步：未连接/烧录设备。默认 GL16 与 A/B/C 的白场、连续翻页至下次全刷前残影、抗锯齿灰度、带图页、水波纹条带、耗时、实体输入及真实欠载恢复均未测，产物为候选。按 console-runtime 的同书同位置步骤从 K2 全刷开始逐组比较，用相同旧计时配置、`tools/summarize_reader_perf.py` 的 panel_draw 汇总、照片或录像、原始日志和资源采样留证。37 相相同不等于真机耗时已证明相同；水波纹 52 拍独立计量。FreeInk 清对角线的注释矛盾和 C 对 1–14 级灰度的风险仍待真机判断。
