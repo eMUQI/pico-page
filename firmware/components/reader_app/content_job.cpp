@@ -152,7 +152,8 @@ bool ContentJob::start() {
     if (started_) return false;
     PP_DIAGNOSTIC(
         measurement_ = diagnostics::begin(diagnostics::Kind::Content,
-            {0, 0, 0, request.generation, static_cast<std::uint32_t>(request.kind)});
+            {request.diagnostic_session, request.diagnostic_layout, 0, request.generation,
+             static_cast<std::uint32_t>(request.kind)});
         struct StartGuard {
             ContentJob& job;
             ~StartGuard() {
@@ -355,6 +356,8 @@ void ContentJob::render_image() {
                      box.resource.c_str(), box.resource.empty() ? "Empty image resource" : detail.c_str());
 #endif
             result.failed_images.push_back(box.begin);
+        } else {
+            PP_DIAGNOSTIC(++result.decoded_images;)
         }
     }
     std::vector<std::uint8_t>().swap(bytes);

@@ -7,7 +7,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from device_workbench import Session, analyze, compare, finalize, refresh_check, refresh_scenario, metadata_for
+from device_workbench import (Session, analyze, compare, finalize, refresh_check, refresh_scenario,
+                              metadata_for, image_observation)
 
 
 class Serial:
@@ -48,6 +49,106 @@ def trace(seq, op=1, begin=1, result=0):
 
 
 class WorkbenchTest(unittest.TestCase):
+    def image_trace(self, *, overlap=True, content_result=0, patch_result=0, frame_result=0,
+                    decoded=1, generation=4, frame_request=9, network_result=0, stage=None):
+        session = self.start()
+        # Arrival order follows device monotonic time, including the independent network worker.
+        events = [(1, 3, 1, 100, 0, 0, 4, 2), (2, 2, 1, 150 if overlap else 210, 0, 0, 8, 0),
+                  (1, 3, 0, 200, content_result, 0, 4, 2), (2, 2, 0, 300, network_result, 0, 8, 0),
+                  (3, 4, 1, 310, 0, 9, generation, decoded), (3, 4, 0, 320, patch_result, 9, generation, decoded),
+                  (4, 0, 1, 330, 0, 22, frame_request, 1), (4, 0, 0, 400, frame_result, 22, frame_request, 1)]
+        if stage:  # (begin_us, end_us, request): one NetworkStage operation of the station phase
+            events += [(5, 5, 1, stage[0], 0, 0, stage[2], 1), (5, 5, 0, stage[1], network_result, 0, stage[2], 1)]
+        for seq, (op, kind, begin, timestamp, result, frame, request, detail) in enumerate(sorted(events, key=lambda e: e[3]), 1):
+            session._line(f"PP 1 ENTRY seq={seq} time_us={timestamp} op={op} duration_us=10 task=7 "
+                          f"kind={kind} begin={begin} result={result} session=1 layout=2 frame={frame} request={request} detail={detail}")
+        self.cutoff(len(events))
+        self.finish()
+
+    def test_image_network_chain_requires_decode_adoption_and_matching_frame(self):
+        self.image_trace()
+        run = finalize(self.output, dict(mode="image-network"), dict(status="pass", after=dict(frame="22")))
+        self.assertEqual(run["result"]["status"], "pass")
+        self.assertEqual(run["result"]["evidence"][0]["network_ops"], ["2"])
+        self.assertEqual(finalize(self.output, dict(mode="image-network"),
+                                 dict(status="pass", after=dict(frame="23")))["result"]["status"], "inconclusive")
+
+    def test_image_network_missing_failed_or_stale_evidence_cannot_pass(self):
+        for changes in (dict(overlap=False), dict(content_result=2), dict(patch_result=1),
+                        dict(frame_result=1), dict(decoded=0), dict(generation=5), dict(frame_request=10)):
+            with self.subTest(changes=changes):
+                self.output = Path(self.temp.name) / ("run-" + str(len(list(Path(self.temp.name).iterdir()))))
+                self.image_trace(**changes)
+                run = finalize(self.output, dict(mode="image-network"), dict(status="pass", after=dict(frame="22")))
+                self.assertNotEqual(run["result"]["status"], "pass")
+
+    def test_cancelled_network_overlaps_only_with_a_recorded_phase(self):
+        # result 2 = cancelled. Without a phase the request may have stopped at its entry guard.
+        cases = ((None, "inconclusive", []), ((160, 190, 8), "pass", ["5"]),
+                 ((160, 190, 9), "inconclusive", ["5"]), ((205, 290, 8), "inconclusive", []))
+        for stage, expected, stages in cases:
+            with self.subTest(stage=stage):
+                self.output = Path(self.temp.name) / ("run-" + str(len(list(Path(self.temp.name).iterdir()))))
+                self.image_trace(network_result=2, stage=stage)
+                run = finalize(self.output, dict(mode="image-network"), dict(status="pass", after=dict(frame="22")))
+                self.assertEqual(run["result"]["status"], expected)
+                self.assertEqual(run["analysis"]["image_chains"][0]["network_stages"], stages)
+
+    def test_recorded_failure_outranks_inconclusive_observation(self):
+        self.image_trace(frame_result=1)
+        observation = dict(status="inconclusive", reason="End on a saved, idle image page with a successful frame")
+        run = finalize(self.output, dict(mode="image-network"), observation)
+        self.assertEqual(run["result"]["status"], "fail")
+        self.assertEqual(run["result"]["assertion"], observation)
+        # Missing run conditions or evidence gaps still leave the run undecided; a skipped precondition is not a failure.
+        self.assertEqual(finalize(self.output, dict(mode="image-network", missing=["device_build_verified"]),
+                                  observation)["result"]["status"], "inconclusive")
+        self.output = Path(self.temp.name) / "gap"
+        session = self.start()
+        session._line(trace(1).strip())
+        session._line(trace(3, begin=0, result=1).strip())
+        self.cutoff(3)
+        self.finish()
+        self.assertEqual(finalize(self.output, {}, observation)["result"]["status"], "inconclusive")
+        self.output = Path(self.temp.name) / "skip"
+        self.image_trace(frame_result=1)
+        self.assertEqual(finalize(self.output, {}, dict(status="skip", reason="x"))["result"]["status"], "skip")
+
+    def test_capture_race_is_inconclusive_but_transport_fault_propagates(self):
+        state = dict(view="reading", frame_ok="1", saved="1", pending="0", content_busy="0", save_busy="0",
+                     save_due="0", frame="22", revision="3", crc32="abcd", bytes="415872")
+        def reply(port, command):
+            _, ident, verb = command
+            if verb.startswith("screen"):
+                port.feed(f"PP {ident} ERROR frame_not_confirmed_or_changed\n".encode())
+            else:
+                port.feed((f"PP {ident} OK " + " ".join(f"{k}={v}" for k, v in state.items()) + "\n").encode())
+        session = self.start(Serial(reply))
+        result = image_observation(session)
+        self.assertEqual(result["status"], "inconclusive")
+        self.assertIn("frame_not_confirmed_or_changed", result["reason"])
+        with patch.object(session, "capture", side_effect=RuntimeError("Device response line exceeds the protocol limit")):
+            with self.assertRaises(RuntimeError):
+                image_observation(session)
+
+    def test_image_observation_requires_idle_and_unchanged_capture(self):
+        state = dict(view="reading", frame_ok="1", saved="1", pending="0", content_busy="0",
+                     save_busy="0", save_due="0", frame="22", revision="3", crc32="abcd")
+        def reply(port, command):
+            _, ident, verb = command
+            self.assertEqual(verb, "status")
+            port.feed((f"PP {ident} OK " + " ".join(f"{k}={v}" for k, v in state.items()) + "\n").encode())
+        session = self.start(Serial(reply))
+        with patch.object(session, "capture"):
+            self.assertEqual(image_observation(session)["status"], "pass")
+        state["content_busy"] = "1"
+        with patch.object(session, "capture") as capture:
+            self.assertEqual(image_observation(session)["status"], "inconclusive")
+            capture.assert_not_called()
+        state["content_busy"] = "0"
+        with patch.object(session, "capture", side_effect=lambda _: state.update(frame="23")):
+            self.assertEqual(image_observation(session)["status"], "inconclusive")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.output = Path(self.temp.name) / "run"
@@ -309,6 +410,16 @@ class WorkbenchTest(unittest.TestCase):
         session._line("PP 2 ENTRY kind=0 active=0")
         session._line("PP 2 OK queued=0 sequence=2 dropped=0 tx_failures=0")
         self.assertIn("device_cutoff_missing", self.finish()["gaps"])
+
+    def test_stale_sdkconfig_is_reported_against_layered_defaults(self):
+        from firmware_provenance import unapplied_defaults
+        root = Path(self.temp.name)
+        (root / "base").write_text("# note\nCONFIG_A=y\nCONFIG_B=y\nCONFIG_NAME=\"x\"\nCONFIG_OFF=n\n# CONFIG_UNSET is not set\n")
+        (root / "mode").write_text("CONFIG_B=n\nCONFIG_C=y\n")
+        (root / "sdkconfig").write_text("CONFIG_A=y\n# CONFIG_B is not set\nCONFIG_NAME=\"x\"\nCONFIG_UNSET=y\n")
+        self.assertEqual(unapplied_defaults(root / "sdkconfig", [root / "base", root / "mode"]), ["CONFIG_C", "CONFIG_UNSET"])
+        (root / "sdkconfig").write_text("CONFIG_A=y\nCONFIG_C=y\nCONFIG_NAME=\"x\"\n")
+        self.assertEqual(unapplied_defaults(root / "sdkconfig", [root / "base", root / "mode"]), [])
 
     def test_build_provenance_rejects_stale_binary_and_source(self):
         from firmware_provenance import artifacts

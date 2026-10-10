@@ -14,7 +14,7 @@
 #endif
 
 namespace pico_page::diagnostics {
-enum class Kind : unsigned { Frame, Input, Network, Content, Count };
+enum class Kind : unsigned { Frame, Input, Network, Content, ImagePatch, NetworkStage, Count };
 enum class Outcome : unsigned { Success, Failure, Cancelled, Timeout, Count };
 struct Context {
     std::uint64_t session = 0, layout = 0, frame = 0, request = 0;

@@ -1,6 +1,6 @@
 # 诊断构建与回归工作台
 
-这是 Issue #37 的首批 A+B 候选。它提供编译隔离、操作计数、有界事件、持续串口采集、人工标记和 K2 全刷状态回归。未完成图片与同步交叠、连续改字号与重开恢复的场景编排；不能用当前报告宣称这两组场景或物理屏幕已验收。
+这是 Issue #37 的分阶段实现。PR #38 已交付编译隔离、操作计数、有界事件、持续串口采集、人工标记和 K2 全刷状态回归。阶段 C 第一批补充正文图片的解码、画布采用、驱动提交关联，以及人工操作时的网络交叠检查。完整场景编排、同步位置保护断言、连续改字号与重开恢复仍未完成；不能用当前报告宣称这些场景或物理屏幕已验收。
 
 ## 构建
 
@@ -12,7 +12,7 @@ sh tools/build_firmware.sh performance
 sh tools/build_firmware.sh diagnostic
 ```
 
-每种模式使用独立的 `build/firmware-<mode>/` 和其中的 `sdkconfig`，由通用 defaults 加 `firmware/configs/<mode>.defaults` 生成。没有参数的原构建入口不变，仍使用本地 `firmware/sdkconfig`。模式目录首次配置后也会保留生成的 sdkconfig；修改 defaults 时，应移走该模式目录再重新构建，或显式更新其配置。核对 `build/firmware-<mode>/config/sdkconfig.h`，不能只凭文件夹名称判断模式。
+每种模式使用独立的 `build/firmware-<mode>/` 和其中的 `sdkconfig`，由通用 defaults 加 `firmware/configs/<mode>.defaults` 生成。没有参数的原构建入口不变，仍使用本地 `firmware/sdkconfig`。模式目录首次配置后也会保留生成的 sdkconfig，已有的 sdkconfig 优先于 defaults。构建入口在构建前后核对 `firmware/sdkconfig.defaults` 与模式 defaults 中的每一项是否在生效 sdkconfig 中取同样的值，不一致时报错并列出选项；此时移走该 sdkconfig 重新生成，或显式更新它。无参数入口的本地 `firmware/sdkconfig` 同样受此核对，本地只能改动 defaults 未指定的选项。核对 `build/firmware-<mode>/config/sdkconfig.h`，不能只凭文件夹名称判断模式。
 
 | 模式 | 控制台 | PERF_METRICS | TRACE_EVENTS | LEGACY_PERF_LOG |
 |---|---|---|---|---|
@@ -34,18 +34,22 @@ sh tools/build_firmware.sh diagnostic
 | 1 Input | 实体输入经 App 的 Begin/End 分发 | 路由函数返回，不保证该输入被业务接受；不包括触摸采样等待 |
 | 2 Network | 同步 HTTP 请求的联网/校时/请求包装函数 | 无错误且 HTTP 2xx，不代表位置映射、保存或双向接续成功；不包括 Wi-Fi 管理和传书服务 |
 | 3 Content | 首次 start 尝试至拒绝或 worker 返回，包含排队 | 无已报告错误/失败图片；保存任务另检查提交状态，不代表图片已用于画布 |
+| 4 ImagePatch | 正文渐进图片通过当前页身份检查后，复制像素至画布并请求局部刷新 | 所有图片均已采用且刷新请求被接收；必须再关联 Frame 成功，才确认驱动提交 |
+| 5 NetworkStage | 同步请求内的一个阶段：detail=1 联网，2 校时，3 HTTPS 请求；request 与所属 Network 相同 | 该阶段的包装函数返回成功；HTTP 阶段成功只表示传输完成，状态码仍由 Network 判断 |
 
 内容任务拒绝创建、资源不足、失败、取消均纳入计数。重复调用已开始任务的 start 不产生第二次操作。取消以现有取消标志判断；对于不可取消的保存，这表示完成时观察到了取消请求，仍需检查实际保存状态。result 编码为 success=0、failure=1、cancelled=2、timeout=3。记录器支持显式超时，当前固件包装层没有独立的超时原因类型，网络超时计入 failure；主机命令超时独立统计。不能从 timeout=0 推断网络从未超时。
 
-每项聚合保存 started、active、四类终态数、所有终态的 total_us/max_us。未完成操作保留 active。时间单位是设备单调微秒，父子操作的墙钟不能相加。资源低水位在显式 metrics 查询时读取 ESP-IDF 已有的内部 RAM/PSRAM 历史最低余量；status 仍可查询连续块和应用/输入任务余栈。不在每次操作结束时扫描任务栈；内容和网络任务最低余栈仍需调试器或旧诊断配置专项采样。
+每项聚合保存 started、active、四类终态数、所有终态的 total_us/max_us。未完成操作保留 active。时间单位是设备单调微秒，父子操作的墙钟不能相加。资源低水位在显式 metrics 查询时读取 ESP-IDF 已有的内部 RAM/PSRAM 历史最低余量。internal_min 是各内部堆（含 `CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL` 储备池）各自历史最低值之和，各堆的最低值出现在不同时刻，因此它不是某一时刻的总余量，也不能与 `internal` 剩余量直接相减来估算瞬时占用；需要瞬时值时按堆分别读取；status 仍可查询连续块和应用/输入任务余栈。不在每次操作结束时扫描任务栈；内容和网络任务最低余栈仍需调试器或旧诊断配置专项采样。
 
-事件含 seq、time_us、op、duration_us、task、kind、begin、result、session、layout、frame、request、detail。op 和 seq 是本次启动单调递增 ID；任务 ID 是固件任务句柄的整数表示。Frame 携带原始会话/排版代次、实际呈现序号和 frame token request，detail 为 FramePurpose。Content 的 request 是内容 generation，detail 为 ContentJob::Kind；Network 的 request 是网络操作 ID，Input 是实体输入序号。没有来源的上下文填 0，不伪造书籍/排版身份，不输出书名、路径或正文。跨内容 generation 到当前画布的关联和图片确实参与绘制的事件留给场景 C。
+事件含 seq、time_us、op、duration_us、task、kind、begin、result、session、layout、frame、request、detail。op 和 seq 是本次启动单调递增 ID；任务 ID 是固件任务句柄的整数表示。Frame 携带原始会话/排版代次、实际呈现序号和 frame token request，detail 为 FramePurpose。Content 的 request 是内容 generation，detail 为 ContentJob::Kind；Network 的 request 是网络操作 ID，Input 是实体输入序号。没有来源的上下文填 0，不伪造书籍/排版身份，不输出书名、路径或正文。
+
+渐进图片 Content（detail=2）另携带来源正文的 session/layout。ImagePatch 沿用这些代次和内容 generation，frame 是局部刷新使用的 UI token request，可与后续 Frame 的 request 关联；不是物理呈现序号。detail 是本次任务成功解码的图片数；灰阶缓存命中为 0，不能据此声称本轮执行了解码。失败图片的提示画布仍会提交，但 ImagePatch 为 failure。旧结果在现有身份检查处被拒绝，不产生 ImagePatch。开启配置在现有请求上增加固定标量，不新增任务、队列、I/O 或等待；关闭配置删除这些字段和记录调用。
 
 ## 协议扩展
 
 仅启用对应开关时提供：
 
-- `PP <id> metrics`：4 行 ENTRY 聚合计数和一行 OK，后者含 schema=1、queued、dropped、sequence、tx_failures、internal_min、psram_min。
+- `PP <id> metrics`：每个 kind 一行 ENTRY 聚合计数（当前 6 行）和一行 OK，后者含 schema=1、queued、dropped、sequence、tx_failures、internal_min、psram_min。字段结构保持不变，先后新增 kind=4 和 kind=5；旧主机工具不识别这些事件，需使用同一源码配套的工具。新工具可以读取旧固件，但不能为缺少 ImagePatch 的记录确认图片链路，也不能把缺少 NetworkStage 的已取消请求算作网络交叠。
 - `PP <id> trace`：取出最多 8 个事件作为 ENTRY，OK 返回上述队列/丢失状态。耗时与输出发生在显式命令处理时，不在事件写入路径中。
 - `PP <id> trace_start`：在记录器临界区中开始新窗口，清空旧计数和事件；此前的任务 token 不计入新窗口。`trace_stop` 在同一临界区冻结事件与计数并返回含 `stopped=1` 的 metrics。仍在执行的业务任务正常继续，但在截止点计为 unfinished；后续操作不进入该窗口。主机收到截止序号后排空到该序号，才结束采集。
 - metrics 与 trace 的整次响应共用 20 ms 传输等待预算；计入 IDF 驱动对 TX 互斥锁和环形缓冲的两次等待。超出后非阻塞发送，失败计入 tx_failures；该预算不包含任务被抢占和格式化的墙钟时间。
@@ -106,6 +110,23 @@ python3 tools/device_workbench.py --compare .local/runs/base/run.json .local/run
 
 原始日志可能含路径、服务地址等隐私。结果默认放在已忽略的 `.local/` 下；不要将真实日志、书籍内容、账号或完整 sdkconfig 未经检查提交仓库。
 
+## 图片与网络交叠：人工操作、自动检查证据
+
+此入口只验证阶段 C 场景 1 的图片证据链，不验证远端位置采用、双向接续、所有取消路径或长期稳定性。先将构建生成的 `image-flow.epub` 放入隔离测试卡目录；首页含有效的灰阶图片，后续页含故意缺失的图片，正常成功采集应停在首页。首次采集前在 metadata 记录实际素材摘要和缓存条件，使用受控测试同步账户，不修改生产账户或用户书籍。工具不上传素材、不删除缓存、不自动输入凭据。
+
+```sh
+python3 tools/device_workbench.py --port /dev/ttyACM0 \
+  --firmware build/firmware-diagnostic --metadata .local/test-conditions.json \
+  --output .local/runs/image-network-001 --mode image-network
+```
+
+1. 开始采集后，在设备上打开测试图片页，按正常界面操作发起同步、取消或返回正文。忙态限制保持不变。
+2. 可以输入 `mark 简短说明` 标记观察到的问题。结束前回到目标图文页，等待图片补刷和进度保存完成，再输入 `end`。
+3. 工具检查正文、保存和任务状态，导出并校验当前画布，再冻结、排空记录器。画布导出前后的帧号、CRC、修订号或视图变化时，结果为 inconclusive；导出过程中设备或工具因帧变化拒绝继续时同样为 inconclusive，其他导出错误仍是 infra_error。
+4. 报告的 `analysis.image_chains` 列出内容、图片采用、驱动帧及交叠网络操作的 ID。只有成功 Content、同一 session/layout/generation 的成功 ImagePatch、对应成功 Frame 和本轮截图帧全部相符，且该内容任务区间与网络任务区间严格相交，才具备通过依据。网络任务须为成功，或有同一 request 的 NetworkStage 落在该内容任务区间内：在入口处即被取消的请求也会留下一个 Network 区间，但没有执行联网、校时或 HTTP，不能当作交叠。`network_stages` 列出这些阶段操作的 ID。detail=0 的缓存命中不满足本入口的解码要求。
+
+没有实际交叠、旧固件没有 ImagePatch、帧不匹配、漏事件或未完成任务均不可判定。证据和运行条件都完整时，已记录的失败、超时或驱动帧失败报告 fail，即使结束时的状态观察本身不可判定；证据有缺口、没有事件或缺少必需的条件与来源记录时仍为 inconclusive，与通过路径使用同一完整性判断。人工操作不使用固定 sleep 假设交叠，也不作为固定性能工作负载参与版本比较。真实交叠可能难以触发，需要重复独立采集；未触发不能伪造通过，也不能据此断言业务存在故障。网络操作仍仅证明 HTTP 包装函数运行，不证明同步正确。画布与驱动结果不证明物理屏幕。
+
 ## 可执行验证与真机待测
 
 ```sh
@@ -119,4 +140,4 @@ ctest --test-dir build/host --output-on-failure
 
 共享内容路径的开启配置可用 `-DPICO_PAGE_HOST_TRACE_EVENTS=ON`；它同时启用 metrics。ASan/UBSan/LSan 应覆盖此配置和现有异步应用/内容 worker 回归。正式固件关闭验证应同时检查 sdkconfig.h、ELF/map 和 reader_core archive：Release 无 diagnostics 记录器/调用符号；Performance 无 64 事件数组；Diagnostic 有固定容量实例。
 
-真机 A/B 使用同 commit、同设备、同 TF/书籍摘要、同冷/热缓存和同电源/无线条件。分别构建 Release/Performance，单独记录翻页、图片和同步的外部观测时延、内部/PSRAM 最低余量、连续块、各任务余栈；不要用 Diagnostic 串口查询期间的耗时冒充纯 Performance。Release 无内部追踪，需相同外部计时或调试器方法。保留原始样本、数量、p50/p95/p99/max，重复多轮；目前没有真机百分比开销数据。还需验证观察命令不阻止停留保存、休眠/USB 断连能报告缺口，以及 K2 全刷的实体屏幕效果。
+真机 A/B 使用同 commit、同设备、同 TF/书籍摘要、同冷/热缓存和同电源/无线条件。分别构建 Release/Performance，单独记录翻页、图片和同步的外部观测时延、内部/PSRAM 最低余量、连续块、各任务余栈；不要用 Diagnostic 串口查询期间的耗时冒充纯 Performance。Release 无内部追踪，需相同外部计时或调试器方法。保留原始样本、数量、p50/p95/p99/max，重复多轮。首轮同条件数据见 `docs/development-status.md` 的 2026-10-10「PR #39：Release/Performance 真机 A/B」记录：两模式中位数差异与单样本散布同量级，未得出可分辨的百分比开销。还需验证观察命令不阻止停留保存、休眠/USB 断连能报告缺口，以及 K2 全刷的实体屏幕效果。

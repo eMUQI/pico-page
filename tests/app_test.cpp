@@ -1172,6 +1172,9 @@ int main(int argc, char** argv) {
         fs::copy_file(fixtures / "valid.epub", root / "Books/text.epub");
         ReaderApp app(root.string(), "progressive", true, true); Driver driver{app};
         assert(app.initialize()); driver.present();
+#ifdef CONFIG_PICO_PAGE_TRACE_EVENTS
+        diagnostics::start();
+#endif
         const auto decodes = graphics::image_decode_count();
         opened(app, "Books/images.epub");
         assert(app.view() == View::Reading && app.content_busy());
@@ -1228,6 +1231,18 @@ int main(int argc, char** argv) {
         // The second page has a missing image: failure is confined to its image box.
         wait_patch();
         const auto region = *app.pending_frame()->region;
+#ifdef CONFIG_PICO_PAGE_TRACE_EVENTS
+        diagnostics::Event image_event;
+        bool failed_patch = false;
+        while (diagnostics::pop(image_event)) {
+            if (image_event.kind == diagnostics::Kind::ImagePatch && !image_event.begin) {
+                assert(image_event.outcome == diagnostics::Outcome::Failure);
+                failed_patch = true;
+            }
+        }
+        assert(failed_patch && diagnostics::snapshot().dropped == 0);
+        diagnostics::start();
+#endif
         assert(region.x == 37);
         assert(app.canvas().pixels() != second_placeholder);
         for (int y = 0; y < 1216; ++y) for (int x = 0; x < 684; ++x) {
@@ -1246,6 +1261,26 @@ int main(int argc, char** argv) {
         wait_patch();
         assert(app.canvas().pixel(120, 200) == 0 && app.canvas().pixel(120, 500) == 5);
         const auto first_region = *app.pending_frame()->region;
+#ifdef CONFIG_PICO_PAGE_TRACE_EVENTS
+        std::optional<diagnostics::Event> decoded;
+        bool confirmed_patch = false;
+        while (diagnostics::pop(image_event)) {
+            if (image_event.kind == diagnostics::Kind::Content && !image_event.begin &&
+                image_event.context.detail == static_cast<unsigned>(ContentJob::Kind::Image))
+                decoded = image_event;
+            if (image_event.kind == diagnostics::Kind::ImagePatch && !image_event.begin) {
+                assert(decoded && decoded->outcome == diagnostics::Outcome::Success);
+                assert(image_event.outcome == diagnostics::Outcome::Success && image_event.context.detail > 0);
+                assert(image_event.context.session && image_event.context.layout);
+                assert(image_event.context.session == decoded->context.session &&
+                       image_event.context.layout == decoded->context.layout &&
+                       image_event.context.request == decoded->context.request);
+                assert(image_event.context.frame == app.pending_frame()->token.request);
+                confirmed_patch = true;
+            }
+        }
+        assert(confirmed_patch && diagnostics::snapshot().dropped == 0);
+#endif
         for (int y = first_region.y; y < first_region.y + first_region.height; ++y) {
             for (int x : {first_region.x - 1, first_region.x + first_region.width}) {
                 const auto packed = first_placeholder[std::size_t(y) * 342 + x / 2];
@@ -1284,10 +1319,17 @@ int main(int argc, char** argv) {
         driver.present();
         // A late image result cannot repaint a different book.
         opened(app, "Books/images.epub"); app.complete_frame(true); app.poll_background();
+#ifdef CONFIG_PICO_PAGE_TRACE_EVENTS
+        diagnostics::start();
+#endif
         opened(app, "Books/text.epub"); driver.present();
         const auto text_pixels = app.canvas().pixels();
         driver.complete_content();
         assert(app.view() == View::Reading && app.canvas().pixels() == text_pixels);
+#ifdef CONFIG_PICO_PAGE_TRACE_EVENTS
+        while (diagnostics::pop(image_event)) assert(image_event.kind != diagnostics::Kind::ImagePatch);
+        assert(diagnostics::snapshot().dropped == 0);
+#endif
     }
     ReadingRecord image_record, after_image;
     {
