@@ -145,6 +145,39 @@ int main() {
     }
     {
         using namespace pico_page::platform;
+        const Event begin{EventKind::Touch, EventPhase::Begin, 1, 300, 400, 1000};
+        const auto classify = [&](int dx, int dy, int ms) {
+            return released_gesture(begin, {EventKind::Touch, EventPhase::End, 1,
+                                           300 + dx, 400 + dy, 1000 + ms * 1000});
+        };
+        CHECK(classify(59, 59, 900) == ReleasedGesture::Tap);
+        CHECK(classify(-59, -59, 100) == ReleasedGesture::Tap);
+        CHECK(classify(60, 0, 700) == ReleasedGesture::Previous);
+        CHECK(classify(-60, 0, 700) == ReleasedGesture::Next);
+        CHECK(classify(60, 0, 701) == ReleasedGesture::Ignore);
+        CHECK(classify(173, 100, 700) == ReleasedGesture::Previous);
+        CHECK(classify(172, 100, 700) == ReleasedGesture::Ignore);
+        CHECK(classify(-173, -100, 700) == ReleasedGesture::Next);
+        CHECK(classify(0, 60, 100) == ReleasedGesture::Ignore);
+        CHECK(classify(60, 60, 100) == ReleasedGesture::Ignore);
+        CHECK(classify(0, 0, -1) == ReleasedGesture::Ignore);
+        for (const int sign : {-1, 1}) {
+            CHECK(long_press(begin, {EventKind::Touch, EventPhase::End, 1, 300 + sign * 28, 400, 601000}));
+            CHECK(!long_press(begin, {EventKind::Touch, EventPhase::End, 1, 300 + sign * 29, 400, 601000}));
+            CHECK(long_press(begin, {EventKind::Touch, EventPhase::End, 1, 300, 400 + sign * 28, 601000}));
+            CHECK(!long_press(begin, {EventKind::Touch, EventPhase::End, 1, 300, 400 + sign * 29, 601000}));
+        }
+        Event returned{EventKind::Touch, EventPhase::End, 1, 300, 400, 601000};
+        returned.max_x = 329;
+        CHECK(!long_press(begin, returned));
+        SleepInput resumed;
+        resumed.begin();
+        resumed.accept(begin);
+        resumed.accept({EventKind::Touch, EventPhase::End, 1, 200, 400, 651000});
+        CHECK(resumed.tap() && released_gesture(*resumed.tap(), resumed.end()) == ReleasedGesture::Next);
+    }
+    {
+        using namespace pico_page::platform;
         ReleasedTap taps;
         CHECK(!taps.accept({EventKind::K3, EventPhase::Begin, 1}, 1));
         CHECK(!taps.accept({EventKind::InputReset, EventPhase::Cancel, 9}, 1));

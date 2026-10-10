@@ -106,3 +106,14 @@ GB18030 解码表的来源与复核（2026-10-07）：`firmware/components/reade
 
 - `CONFIG_FATFS_VFS_FSTAT_BLKSIZE=4096` 经真机对照后未采用：顺序读没有可见收益，字形的随机小块读取变慢，新页准备时间增加约六成。官方建议针对顺序吞吐，不适用于本项目的字体访问方式。
 - 字宽改用 FreeType 自带的 `FT_Get_Advance`（[接口说明](https://freetype.org/freetype2/docs/reference/ft2-quick_advance.html)），属于已固定版本 FreeType 的公开接口，没有新增依赖。与 freeink-sdk 的结论一致：不使用 `FT_LOAD_NO_HINTING`，而是复现带 hinting 加载时的取整结果，并用全字符比对确认一致。
+
+## 2026-10-10 · 左右轻扫规则参考（2026-10-11 完成复核）
+
+本批只借鉴规则，分类及派发代码独立实现，未复制第三方代码、未引入依赖。屏幕布局、默认按键与确认语义沿用 Pico Page。
+
+| 来源 | 版本与许可 | 参考范围与取舍 |
+|---|---|---|
+| [CrossMux](https://github.com/0x1abin/crossmux/tree/3fb809f6ceeb753a7c40fef86dee7c9d40eabdf3) | `3fb809f`，MIT；本地源码与 LICENSE 已读 | `src/MappedInputManager.cpp`、`docs/contributing/touch-and-ui.md`：轻扫不激活下方条目，方向经集中入口派发；不采用其边缘返回/主页手势 |
+| [FreeInk SDK InputManager](https://github.com/0x1abin/freeink-sdk/tree/e8bfe8c/libs/hardware/InputManager) | `e8bfe8c`，MIT；源码、头文件及 LICENSE 已读 | `TOUCH_SWIPE_MIN_PX=60`、`TOUCH_SWIPE_MAX_MS=700`、`TOUCH_TAP_SLOP_PX=28`；按下点作为点按目标。采用规则，不移植采样器或 SDK |
+| [KOReader 手势识别](https://github.com/koreader/koreader/blob/master/frontend/device/gesturedetector.lua)、[菜单方向](https://github.com/koreader/koreader/blob/master/frontend/ui/widget/menu.lua) | master，2026-10-10 在线读取，AGPL-3.0；只参考行为 | `gesturedetector.lua` 的约 30°–60° 对角带和超时不认定轻扫；`menu.lua` 左滑下一页。Pico Page 的慢拖直接忽略，不采用 KOReader 的对角全刷、循环或纵向关闭 |
+| Espressif [esp_lcd_touch](https://components.espressif.com/components/espressif/esp_lcd_touch)、[esp_lvgl_port](https://components.espressif.com/components/espressif/esp_lvgl_port)、[touch_slider_sensor](https://docs.espressif.com/projects/esp-iot-solution/en/latest/touch/touch_slider_sensor.html) | 官方组件/文档，2026-10-11 复核 | 前者提供坐标读取；LVGL port 的输入依赖 LVGL；slider 面向电容触摸通道。在这三项中没有适合当前非 LVGL 坐标事件路径直接复用的轻扫实现，因此不增加依赖 |

@@ -178,6 +178,8 @@ def main():
     listing.add_argument("--offset", type=int, default=0)
     key = commands.add_parser("key")
     key.add_argument("key", choices=("K1", "K2", "K3"))
+    swipe = commands.add_parser("swipe")
+    swipe.add_argument("direction", choices=("left", "right"))
     for name in ("tap", "hold"):
         tap = commands.add_parser(name)
         tap.add_argument("x", type=int)
@@ -207,6 +209,7 @@ def main():
             command = args.command
             if command == "ls": command += f" {args.offset} {args.path}"
             elif command == "key": command += f" {args.key}"
+            elif command == "swipe": command += f" {args.direction}"
             elif command in ("tap", "hold"): command += f" {args.x} {args.y}"
             elif command in ("open", "file"): command += f" {args.path}"
             state, entries = console.request(command)

@@ -112,6 +112,11 @@ def generate(directory: Path) -> None:
     entries["EPUB/nav.xhtml"] = entries["EPUB/nav.xhtml"].replace(
         '<li><a href="chapter2.xhtml">', '<li><a href="chapter1.xhtml#late">后段</a></li><li><a href="chapter2.xhtml">')
     write_fixture(directory / "multi-part.epub", entries)
+    swipe = dict(entries)
+    swipe["EPUB/nav.xhtml"] = swipe["EPUB/nav.xhtml"].replace(
+        '<li><a href="chapter1.xhtml">第一章</a></li>',
+        "".join(f'<li><a href="chapter1.xhtml">目录条目 {number}</a></li>' for number in range(30)))
+    write_fixture(directory / "swipe.epub", swipe)
     entries["EPUB/chapter1.xhtml"] = entries["EPUB/chapter1.xhtml"].replace("<p>第0段", '<p><a href="#late">后段</a>第0段', 1)
     write_fixture(directory / "multi-part-link.epub", entries)
 

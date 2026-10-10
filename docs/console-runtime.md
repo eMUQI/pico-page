@@ -11,7 +11,7 @@
 1. 在应用任务调用 `console::initialize(error)`。它安装带 8 KiB 接收、2 KiB 发送缓冲的官方 USB 驱动，将现有控制台绑定到该驱动。协议使用 `usb_serial_jtag_read_bytes(..., 0)` 非阻塞读取；回复采用独立有界缓冲，一次入队整行，避免日志 VFS 逐字节尽力发送造成回复不完整。
 2. 所有显示调用完成后、`app.complete_frame()` 之前，调用 `console::frame_completed(frame, actual_result)`。结果必须来自真实平台调用。
 3. 每轮主循环调用 `console::poll(app, card_root, input_sequence, actions_allowed, input_allowed)`。物理输入与诊断输入共用一个递增序号；物理释放和取消沿用对应按下的序号。
-4. 有网络工作、休眠请求或物理触摸尚未结束时，传入 `actions_allowed=false`，拒绝直接开书和开始导入。仅网络工作忙且无物理接触/休眠请求时，另传 `input_allowed=true`，允许 `key/tap/hold` 走实体输入相同的应用路由，用于验证 K2 和取消；在途显示帧及资源导入仍拒绝输入。`status`、目录列表与屏幕分块仍可读取。挂载不可用时传入空 `card_root`。
+4. 有网络工作、休眠请求或物理触摸尚未结束时，传入 `actions_allowed=false`，拒绝直接开书和开始导入。仅网络工作忙且无物理接触/休眠请求时，另传 `input_allowed=true`，允许 `key/tap/hold/swipe` 走实体输入相同的应用路由，用于验证 K2 和取消；在途显示帧及资源导入仍拒绝输入。`status`、目录列表与屏幕分块仍可读取。挂载不可用时传入空 `card_root`。
 5. `console::transfer_active()` 为真时，暂缓新的物理输入、网络分派与休眠。已被吞下的物理接触持续吞到释放；断卡事件仍需处理。已有导入的 data/commit/abort 不依赖 `actions_allowed`，否则事务会被自己的保护条件阻塞。
 
 组件不调用 `complete_frame()`，不跳过 App 的呈现确认、保存或输入路由。关闭配置后，三个入口保留空实现，不读取输入、不安装 USB 驱动、不输出诊断结果。
@@ -98,3 +98,7 @@ python3 tools/device_console.py --port /dev/cu.TARGET_DEVICE capture .local/devi
 实体触摸和 K1/K2/K3 在释放后派发一次动作，保留按下时的目标；取消不派发。按住期间若提交过其他画面，释放时取消手势，避免命中新页面控件。完整手势结束后才进入同步排版、刷新与保存，避免刷屏期间漏读释放导致下一次按下被当成持续按住。刷新仍为同步事务。独立的采样任务在刷新期间继续记录触摸；其中只有紧接着翻页的一次翻页点击会在刷新后补执行，其余在刷新期间开始的输入被丢弃。串口 `key` / `tap` 是应用层注入，不能证明触摸控制器的实体检测正常。
 
 `Input` 日志记录实体序列、类型、阶段和坐标；`Input dispatch` 记录是否为刷新期间的输入（`queued`）、从抬起到派发的等待时间（`waited`）和排版/动作准备耗时；`Input superseded` 表示同一次刷新期间被更晚点击取代的点击；`Frame complete` 分别记录画布转换、面板供电、波形及呈现后保存耗时，单位毫秒。这些日志不输出正文、锚点或凭据。USB 文件传输期间日志仍按原规则停止。
+
+## 2026-10-11 · 轻扫动作注入
+
+`python3 tools/device_console.py --port <串口> swipe left` 注入下一页，`swipe right` 注入上一页；设备协议为 `swipe left|right`。命令直接发送非触摸的 `Input::Next/Previous`，沿用应用上下文与忙碌限制，不模拟采样、坐标、时长或物理轻扫识别，不作为阈值或真机手感的验收证据。
