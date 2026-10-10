@@ -769,6 +769,11 @@ def metadata_for(args):
     return metadata
 
 
+def workload_place(state):
+    """Workload suffix naming where and in which typography a scenario ran; page numbers alone do not."""
+    return ":page={page}/{pages}:anchor={anchor}:font_px={font_px}".format(**{k: state.get(k) for k in ("page", "pages", "anchor", "font_px")})
+
+
 def compare(first, second):
     left, right = (json.loads(Path(p).read_text()) for p in (first, second))
     keys = (*REQUIRED_CONDITIONS, "source_dirty", "effective_sdkconfig", "mode", "workload")
@@ -865,7 +870,7 @@ def main():
         # Runs are comparable only for the same book and page range; the start is known once the scenario has run.
         place = result.get("start") or result.get("after")
         if args.mode in ("image-sync", "reading-flow") and place:
-            metadata["workload"] += f":page={place.get('page')}/{place.get('pages')}:anchor={place.get('anchor')}"
+            metadata["workload"] += workload_place(place)
         session.cutoff()
     except AssertionError as exc:
         result = dict(status="fail", reason=str(exc))

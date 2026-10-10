@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from device_workbench import (Session, analyze, compare, finalize, refresh_check, refresh_scenario,
-                              metadata_for, image_observation, image_sync, reading_flow, trend_check,
+                              metadata_for, image_observation, image_sync, reading_flow, trend_check, workload_place,
                               stale_image_patches, READING_BODY, HEADER_BACK, TOOL_TYPOGRAPHY, TOOL_SYNC,
                               SYNC_CHECK, SYNC_CANCEL, CONTINUE_OFFLINE, SYNC_STAY, FONT_SIZE, MINUS, PLUS, APPLY, PANEL_CLOSE)
 
@@ -295,6 +295,12 @@ class WorkbenchTest(unittest.TestCase):
         self.assertEqual(finalize(self.output, {}, dict(status="pass"))["result"]["status"], "fail")
         self.assertEqual(finalize(self.output, dict(missing=["device_build_verified"]), dict(status="pass"))["result"]["status"],
                          "inconclusive")
+
+    def test_workload_place_separates_position_and_typography(self):
+        state = dict(page="7", pages="12", anchor="8dccb332", font_px="46")
+        self.assertEqual(workload_place(state), ":page=7/12:anchor=8dccb332:font_px=46")
+        self.assertNotEqual(workload_place(state), workload_place(dict(state, font_px="48")))
+        self.assertNotEqual(workload_place(state), workload_place(dict(state, anchor="00000000")))
 
     def test_stale_image_patch_after_newer_session_frame_fails(self):
         frame = dict(kind="0", session="2", layout="1", time_us="100", start_us=50, op="7")
