@@ -50,17 +50,19 @@ def trace(seq, op=1, begin=1, result=0):
 
 class WorkbenchTest(unittest.TestCase):
     def image_trace(self, *, overlap=True, content_result=0, patch_result=0, frame_result=0,
-                    decoded=1, generation=4, frame_request=9):
+                    decoded=1, generation=4, frame_request=9, network_result=0, stage=None):
         session = self.start()
         # Arrival order follows device monotonic time, including the independent network worker.
         events = [(1, 3, 1, 100, 0, 0, 4, 2), (2, 2, 1, 150 if overlap else 210, 0, 0, 8, 0),
-                  (1, 3, 0, 200, content_result, 0, 4, 2), (2, 2, 0, 300, 0, 0, 8, 0),
+                  (1, 3, 0, 200, content_result, 0, 4, 2), (2, 2, 0, 300, network_result, 0, 8, 0),
                   (3, 4, 1, 310, 0, 9, generation, decoded), (3, 4, 0, 320, patch_result, 9, generation, decoded),
                   (4, 0, 1, 330, 0, 22, frame_request, 1), (4, 0, 0, 400, frame_result, 22, frame_request, 1)]
+        if stage:  # (begin_us, end_us, request): one NetworkStage operation of the station phase
+            events += [(5, 5, 1, stage[0], 0, 0, stage[2], 1), (5, 5, 0, stage[1], network_result, 0, stage[2], 1)]
         for seq, (op, kind, begin, timestamp, result, frame, request, detail) in enumerate(sorted(events, key=lambda e: e[3]), 1):
             session._line(f"PP 1 ENTRY seq={seq} time_us={timestamp} op={op} duration_us=10 task=7 "
                           f"kind={kind} begin={begin} result={result} session=1 layout=2 frame={frame} request={request} detail={detail}")
-        self.cutoff(8)
+        self.cutoff(len(events))
         self.finish()
 
     def test_image_network_chain_requires_decode_adoption_and_matching_frame(self):
@@ -79,6 +81,53 @@ class WorkbenchTest(unittest.TestCase):
                 self.image_trace(**changes)
                 run = finalize(self.output, dict(mode="image-network"), dict(status="pass", after=dict(frame="22")))
                 self.assertNotEqual(run["result"]["status"], "pass")
+
+    def test_cancelled_network_overlaps_only_with_a_recorded_phase(self):
+        # result 2 = cancelled. Without a phase the request may have stopped at its entry guard.
+        cases = ((None, "inconclusive", []), ((160, 190, 8), "pass", ["5"]),
+                 ((160, 190, 9), "inconclusive", ["5"]), ((205, 290, 8), "inconclusive", []))
+        for stage, expected, stages in cases:
+            with self.subTest(stage=stage):
+                self.output = Path(self.temp.name) / ("run-" + str(len(list(Path(self.temp.name).iterdir()))))
+                self.image_trace(network_result=2, stage=stage)
+                run = finalize(self.output, dict(mode="image-network"), dict(status="pass", after=dict(frame="22")))
+                self.assertEqual(run["result"]["status"], expected)
+                self.assertEqual(run["analysis"]["image_chains"][0]["network_stages"], stages)
+
+    def test_recorded_failure_outranks_inconclusive_observation(self):
+        self.image_trace(frame_result=1)
+        observation = dict(status="inconclusive", reason="End on a saved, idle image page with a successful frame")
+        run = finalize(self.output, dict(mode="image-network"), observation)
+        self.assertEqual(run["result"]["status"], "fail")
+        self.assertEqual(run["result"]["assertion"], observation)
+        # Evidence gaps still leave the run undecided, and a skipped precondition is not a failure.
+        self.output = Path(self.temp.name) / "gap"
+        session = self.start()
+        session._line(trace(1).strip())
+        session._line(trace(3, begin=0, result=1).strip())
+        self.cutoff(3)
+        self.finish()
+        self.assertEqual(finalize(self.output, {}, observation)["result"]["status"], "inconclusive")
+        self.output = Path(self.temp.name) / "skip"
+        self.image_trace(frame_result=1)
+        self.assertEqual(finalize(self.output, {}, dict(status="skip", reason="x"))["result"]["status"], "skip")
+
+    def test_capture_race_is_inconclusive_but_transport_fault_propagates(self):
+        state = dict(view="reading", frame_ok="1", saved="1", pending="0", content_busy="0", save_busy="0",
+                     save_due="0", frame="22", revision="3", crc32="abcd", bytes="415872")
+        def reply(port, command):
+            _, ident, verb = command
+            if verb.startswith("screen"):
+                port.feed(f"PP {ident} ERROR frame_not_confirmed_or_changed\n".encode())
+            else:
+                port.feed((f"PP {ident} OK " + " ".join(f"{k}={v}" for k, v in state.items()) + "\n").encode())
+        session = self.start(Serial(reply))
+        result = image_observation(session)
+        self.assertEqual(result["status"], "inconclusive")
+        self.assertIn("frame_not_confirmed_or_changed", result["reason"])
+        with patch.object(session, "capture", side_effect=RuntimeError("Device response line exceeds the protocol limit")):
+            with self.assertRaises(RuntimeError):
+                image_observation(session)
 
     def test_image_observation_requires_idle_and_unchanged_capture(self):
         state = dict(view="reading", frame_ok="1", saved="1", pending="0", content_busy="0",

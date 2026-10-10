@@ -234,6 +234,7 @@ def image_evidence(operations):
     """Join decoded content, adopted pixels and the independently completed driver frame."""
     images = [op for op in operations if op["kind"] == "3" and op["detail"] == "2"]
     networks = [op for op in operations if op["kind"] == "2"]
+    stages = [op for op in operations if op["kind"] == "5"]
     frames = [op for op in operations if op["kind"] == "0" and op["detail"] == "1"]
     chains = []
     for patch in (op for op in operations if op["kind"] == "4"):
@@ -241,14 +242,20 @@ def image_evidence(operations):
                         and op["result"] == "0" and int(op["time_us"]) <= patch["start_us"]), None)
         frame = next((op for op in frames if op["request"] == patch["frame"]
                       and op["start_us"] >= int(patch["time_us"])), None)
-        overlap = [] if content is None else [op["op"] for op in networks
-            if max(op["start_us"], content["start_us"]) < min(int(op["time_us"]), int(content["time_us"]))]
+        during = lambda op: content is not None and (
+            max(op["start_us"], content["start_us"]) < min(int(op["time_us"]), int(content["time_us"])))
+        # A request cancelled at its entry guard still emits a Network interval although no radio,
+        # clock or HTTP work ran; only a success or a recorded phase proves that networking overlapped.
+        phases = [op for op in stages if during(op)]
+        overlap = [op["op"] for op in networks if during(op)
+                   and (op["result"] == "0" or any(phase["request"] == op["request"] for phase in phases))]
         confirmed = bool(content and frame and patch["result"] == frame["result"] == "0"
                          and int(patch["session"]) > 0 and int(patch["layout"]) > 0)
         chains.append(dict(content_op=content["op"] if content else None, patch_op=patch["op"],
                            frame_op=frame["op"] if frame else None, frame=frame["frame"] if frame else None,
                            session=patch["session"], layout=patch["layout"], generation=patch["request"],
-                           decoded_images=int(patch["detail"]), network_ops=overlap, confirmed=confirmed))
+                           decoded_images=int(patch["detail"]), network_ops=overlap,
+                           network_stages=[op["op"] for op in phases], confirmed=confirmed))
     return chains
 
 
@@ -269,7 +276,13 @@ def image_observation(session):
     if (after.get("view") != "reading" or after.get("frame_ok") != "1" or after.get("saved") != "1"
             or any(after.get(k) != "0" for k in ("pending", "content_busy", "save_busy", "save_due"))):
         return dict(status="inconclusive", reason="End on a saved, idle image page with a successful frame", after=after)
-    session.capture(session.output / "canvas.pgm")
+    try:
+        session.capture(session.output / "canvas.pgm")
+    except RuntimeError as exc:
+        # The device and the client both refuse a frame that changes mid-export; other errors are transport faults.
+        if "frame" not in str(exc).lower():
+            raise
+        return dict(status="inconclusive", reason="Page changed during canvas capture: " + str(exc), after=after)
     confirmed, _ = session.request("status")
     if any(after.get(k) != confirmed.get(k) for k in ("frame", "crc32", "revision", "view")):
         return dict(status="inconclusive", reason="Page changed during canvas capture", after=confirmed)
@@ -335,7 +348,7 @@ def analyze(output):
             event_count += 1
             sequence, operation = int(f["seq"]), int(f["op"])
             if (sequence <= 0 or operation <= 0 or f["begin"] not in ("0", "1") or
-                    not 0 <= int(f["kind"]) < 5 or not 0 <= int(f["result"]) < len(OUTCOMES) or
+                    not 0 <= int(f["kind"]) < 6 or not 0 <= int(f["result"]) < len(OUTCOMES) or
                     int(f["time_us"]) < 0 or int(f["duration_us"]) < 0):
                 raise ValueError("Invalid structured event fields")
             if last_seq is not None and sequence != last_seq + 1:
@@ -391,11 +404,13 @@ def finalize(output, metadata, result):
     except (KeyError, ValueError, TypeError) as exc:
         analysis = dict(gaps=["malformed_structured_evidence"], error=str(exc), counts={}, distributions={}, events=0)
         result = dict(status="infra_error", reason="Cannot parse complete structured evidence")
-    if result["status"] == "pass":
-        if analysis["gaps"] or not analysis["events"] or metadata.get("missing"):
-            result = dict(status="inconclusive", reason="Incomplete evidence or run conditions", assertion=result)
-        elif analysis["counts"]["failure"] or analysis["counts"]["timeout"] or analysis["counts"]["command_failure"] or analysis["frame_failures"]:
-            result = dict(status="fail", reason="Failure observed during the run", assertion=result)
+    failed = analysis["counts"] and (analysis["counts"]["failure"] or analysis["counts"]["timeout"]
+                                     or analysis["counts"]["command_failure"] or analysis["frame_failures"])
+    if result["status"] == "pass" and (analysis["gaps"] or not analysis["events"] or metadata.get("missing")):
+        result = dict(status="inconclusive", reason="Incomplete evidence or run conditions", assertion=result)
+    elif result["status"] in ("pass", "inconclusive") and failed and not analysis["gaps"]:
+        # A recorded failure in complete evidence outranks an observation that could not be judged.
+        result = dict(status="fail", reason="Failure observed during the run", assertion=result)
     if metadata.get("mode") == "image-network":
         result = image_network_check(analysis, result)
     run = dict(schema=1, metadata=metadata, result=result, analysis=analysis)

@@ -35,10 +35,11 @@ sh tools/build_firmware.sh diagnostic
 | 2 Network | 同步 HTTP 请求的联网/校时/请求包装函数 | 无错误且 HTTP 2xx，不代表位置映射、保存或双向接续成功；不包括 Wi-Fi 管理和传书服务 |
 | 3 Content | 首次 start 尝试至拒绝或 worker 返回，包含排队 | 无已报告错误/失败图片；保存任务另检查提交状态，不代表图片已用于画布 |
 | 4 ImagePatch | 正文渐进图片通过当前页身份检查后，复制像素至画布并请求局部刷新 | 所有图片均已采用且刷新请求被接收；必须再关联 Frame 成功，才确认驱动提交 |
+| 5 NetworkStage | 同步请求内的一个阶段：detail=1 联网，2 校时，3 HTTPS 请求；request 与所属 Network 相同 | 该阶段的包装函数返回成功；HTTP 阶段成功只表示传输完成，状态码仍由 Network 判断 |
 
 内容任务拒绝创建、资源不足、失败、取消均纳入计数。重复调用已开始任务的 start 不产生第二次操作。取消以现有取消标志判断；对于不可取消的保存，这表示完成时观察到了取消请求，仍需检查实际保存状态。result 编码为 success=0、failure=1、cancelled=2、timeout=3。记录器支持显式超时，当前固件包装层没有独立的超时原因类型，网络超时计入 failure；主机命令超时独立统计。不能从 timeout=0 推断网络从未超时。
 
-每项聚合保存 started、active、四类终态数、所有终态的 total_us/max_us。未完成操作保留 active。时间单位是设备单调微秒，父子操作的墙钟不能相加。资源低水位在显式 metrics 查询时读取 ESP-IDF 已有的内部 RAM/PSRAM 历史最低余量。internal_min 是各内部堆各自历史最低值之和，不是某一时刻的总余量；`CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL` 的 32 KB 储备池自启动起最低值为 0，因此 internal_min 基本只反映主内部堆，不能与含储备池的 `internal` 剩余量直接相减来估算瞬时占用；status 仍可查询连续块和应用/输入任务余栈。不在每次操作结束时扫描任务栈；内容和网络任务最低余栈仍需调试器或旧诊断配置专项采样。
+每项聚合保存 started、active、四类终态数、所有终态的 total_us/max_us。未完成操作保留 active。时间单位是设备单调微秒，父子操作的墙钟不能相加。资源低水位在显式 metrics 查询时读取 ESP-IDF 已有的内部 RAM/PSRAM 历史最低余量。internal_min 是各内部堆（含 `CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL` 储备池）各自历史最低值之和，各堆的最低值出现在不同时刻，因此它不是某一时刻的总余量，也不能与 `internal` 剩余量直接相减来估算瞬时占用；需要瞬时值时按堆分别读取；status 仍可查询连续块和应用/输入任务余栈。不在每次操作结束时扫描任务栈；内容和网络任务最低余栈仍需调试器或旧诊断配置专项采样。
 
 事件含 seq、time_us、op、duration_us、task、kind、begin、result、session、layout、frame、request、detail。op 和 seq 是本次启动单调递增 ID；任务 ID 是固件任务句柄的整数表示。Frame 携带原始会话/排版代次、实际呈现序号和 frame token request，detail 为 FramePurpose。Content 的 request 是内容 generation，detail 为 ContentJob::Kind；Network 的 request 是网络操作 ID，Input 是实体输入序号。没有来源的上下文填 0，不伪造书籍/排版身份，不输出书名、路径或正文。
 
@@ -48,7 +49,7 @@ sh tools/build_firmware.sh diagnostic
 
 仅启用对应开关时提供：
 
-- `PP <id> metrics`：5 行 ENTRY 聚合计数和一行 OK，后者含 schema=1、queued、dropped、sequence、tx_failures、internal_min、psram_min。字段结构保持不变，新增 kind=4；旧主机工具不识别此事件，需使用候选源码配套的工具。新工具可以读取旧固件，但不能为缺少 ImagePatch 的记录确认图片链路。
+- `PP <id> metrics`：每个 kind 一行 ENTRY 聚合计数（当前 6 行）和一行 OK，后者含 schema=1、queued、dropped、sequence、tx_failures、internal_min、psram_min。字段结构保持不变，先后新增 kind=4 和 kind=5；旧主机工具不识别这些事件，需使用同一源码配套的工具。新工具可以读取旧固件，但不能为缺少 ImagePatch 的记录确认图片链路，也不能把缺少 NetworkStage 的已取消请求算作网络交叠。
 - `PP <id> trace`：取出最多 8 个事件作为 ENTRY，OK 返回上述队列/丢失状态。耗时与输出发生在显式命令处理时，不在事件写入路径中。
 - `PP <id> trace_start`：在记录器临界区中开始新窗口，清空旧计数和事件；此前的任务 token 不计入新窗口。`trace_stop` 在同一临界区冻结事件与计数并返回含 `stopped=1` 的 metrics。仍在执行的业务任务正常继续，但在截止点计为 unfinished；后续操作不进入该窗口。主机收到截止序号后排空到该序号，才结束采集。
 - metrics 与 trace 的整次响应共用 20 ms 传输等待预算；计入 IDF 驱动对 TX 互斥锁和环形缓冲的两次等待。超出后非阻塞发送，失败计入 tx_failures；该预算不包含任务被抢占和格式化的墙钟时间。
@@ -121,10 +122,10 @@ python3 tools/device_workbench.py --port /dev/ttyACM0 \
 
 1. 开始采集后，在设备上打开测试图片页，按正常界面操作发起同步、取消或返回正文。忙态限制保持不变。
 2. 可以输入 `mark 简短说明` 标记观察到的问题。结束前回到目标图文页，等待图片补刷和进度保存完成，再输入 `end`。
-3. 工具检查正文、保存和任务状态，导出并校验当前画布，再冻结、排空记录器。画布导出前后的帧号、CRC、修订号或视图变化时，结果为 inconclusive。
-4. 报告的 `analysis.image_chains` 列出内容、图片采用、驱动帧及交叠网络操作的 ID。只有成功 Content、同一 session/layout/generation 的成功 ImagePatch、对应成功 Frame 和本轮截图帧全部相符，且该内容任务区间与网络任务区间严格相交，才具备通过依据。detail=0 的缓存命中不满足本入口的解码要求。
+3. 工具检查正文、保存和任务状态，导出并校验当前画布，再冻结、排空记录器。画布导出前后的帧号、CRC、修订号或视图变化时，结果为 inconclusive；导出过程中设备或工具因帧变化拒绝继续时同样为 inconclusive，其他导出错误仍是 infra_error。
+4. 报告的 `analysis.image_chains` 列出内容、图片采用、驱动帧及交叠网络操作的 ID。只有成功 Content、同一 session/layout/generation 的成功 ImagePatch、对应成功 Frame 和本轮截图帧全部相符，且该内容任务区间与网络任务区间严格相交，才具备通过依据。网络任务须为成功，或有同一 request 的 NetworkStage 落在该内容任务区间内：在入口处即被取消的请求也会留下一个 Network 区间，但没有执行联网、校时或 HTTP，不能当作交叠。`network_stages` 列出这些阶段操作的 ID。detail=0 的缓存命中不满足本入口的解码要求。
 
-没有实际交叠、旧固件没有 ImagePatch、帧不匹配、漏事件或未完成任务均不可判定；已记录的失败按原规则报告 fail。人工操作不使用固定 sleep 假设交叠，也不作为固定性能工作负载参与版本比较。真实交叠可能难以触发，需要重复独立采集；未触发不能伪造通过，也不能据此断言业务存在故障。网络操作仍仅证明 HTTP 包装函数运行，不证明同步正确。画布与驱动结果不证明物理屏幕。
+没有实际交叠、旧固件没有 ImagePatch、帧不匹配、漏事件或未完成任务均不可判定。证据完整时，已记录的失败、超时或驱动帧失败报告 fail，即使结束时的状态观察本身不可判定；证据有缺口时仍为 inconclusive。人工操作不使用固定 sleep 假设交叠，也不作为固定性能工作负载参与版本比较。真实交叠可能难以触发，需要重复独立采集；未触发不能伪造通过，也不能据此断言业务存在故障。网络操作仍仅证明 HTTP 包装函数运行，不证明同步正确。画布与驱动结果不证明物理屏幕。
 
 ## 可执行验证与真机待测
 
