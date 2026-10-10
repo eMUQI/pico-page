@@ -320,7 +320,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         prefetch_done = raster_disabled = false;
     }
     bool prefetch_due() const {
-        return !sleep_cover_deadline && !session.needs_save() && view == View::Reading && !image_viewing && has_book() && card_available && !usb_prepared &&
+        return !sleep_cover_deadline && !power_menu_wait && !session.needs_save() && view == View::Reading && !image_viewing && has_book() && card_available && !usb_prepared &&
                !display.busy() && !deferred && !save_job && !bookmark_job && !foreground_job && !pending_content && !prefetch_done;
     }
     void prepare_next(const std::function<bool()>& stop) {
@@ -428,6 +428,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::optional<graphics::Canvas> power_return_canvas;
     std::vector<Hit> power_return_hits;
     View power_return_view = View::Library;
+    std::optional<View> power_menu_wait;
     std::string power_return_message;
     PowerAction power_selected = PowerAction::None;
     PowerRequest power_request;
@@ -2670,7 +2671,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
     }
     bool background_content_ready() const {
-        return !sleep_cover_deadline && !session.needs_save() && view == View::Reading && !image_viewing && has_book() && card_available && !usb_prepared &&
+        return !sleep_cover_deadline && !power_menu_wait && !session.needs_save() && view == View::Reading && !image_viewing && has_book() && card_available && !usb_prepared &&
                !display.busy() && !deferred && !save_job && !bookmark_job && !foreground_job && !pending_content &&
                !raster_job && !cover_job && !pending_covers;
     }
@@ -4903,6 +4904,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         case PowerMenu:
             if (!display.busy() && !active_network && !content_loading && !foreground_job && !usb_prepared && view != View::Portal) {
+                if (counting_job && counting_job->request.kind == ContentJob::Kind::SleepCover) {
+                    counting_job->cancel();
+                    power_menu_wait = view;
+                    return;
+                }
                 drain_save(); stop_covers(); stop_raster(); stop_counting_job();
                 power_return_canvas = canvas; power_return_hits = hits; power_return_view = view;
                 power_return_message = message; power_selected = PowerAction::None; power_save_failed = false;
@@ -5748,7 +5754,7 @@ bool ReaderApp::show_power_menu() {
     if (impl_->view == View::PowerMenu) return true;
     cancel_sleep();
     impl_->control(PowerMenu);
-    return impl_->view == View::PowerMenu;
+    return impl_->view == View::PowerMenu || impl_->power_menu_wait.has_value();
 }
 PowerRequest ReaderApp::take_power_request() {
     return std::exchange(impl_->power_request, PowerRequest{});
@@ -5814,6 +5820,7 @@ void ReaderApp::cancel_sleep() {
     }
 }
 bool ReaderApp::prepare_sleep() {
+    if (impl_->power_menu_wait) return false;
     bool cover_attempted = false;
     if (impl_->sleep_cover_deadline) {
         impl_->poll_counting_job();
@@ -5963,8 +5970,16 @@ void ReaderApp::poll_background(bool cancel) {
         if (!provision::save_connection(impl_->root, name, std::time(nullptr), error))
             impl_->wifi_notice = "连接记录未保存，已选目标不变。请检查 TF 卡。";
     }
+    if (impl_->power_menu_wait) {
+        if (impl_->view != *impl_->power_menu_wait || !impl_->card_available) impl_->power_menu_wait.reset();
+        else if (!cancel && !impl_->counting_job && !impl_->display.busy() && !impl_->save_job &&
+                 !impl_->bookmark_job && !impl_->foreground_job && !impl_->content_loading) {
+            impl_->power_menu_wait.reset();
+            show_power_menu();
+        }
+    }
     // Returning from a panel or viewer may restore a page whose image request was cancelled.
-    if (!cancel && !impl_->sleep_cover_deadline && impl_->async_content && impl_->body_images_pending && !impl_->inline_image_pending &&
+    if (!cancel && !impl_->sleep_cover_deadline && !impl_->power_menu_wait && impl_->async_content && impl_->body_images_pending && !impl_->inline_image_pending &&
         !impl_->content_loading && !impl_->foreground_job && !impl_->pending_content &&
         impl_->view == View::Reading && !impl_->image_viewing && !impl_->display.busy() &&
         impl_->has_book() && impl_->card_available && !impl_->usb_prepared && !impl_->page.images.empty())

@@ -2087,7 +2087,21 @@ int main(int argc, char** argv) {
         assert(!app.prepare_sleep() && app.sleep_pending());
         app.cancel_sleep();
         assert(!app.sleep_pending() && app.view() == View::Reading);
+        assert(app.show_power_menu());
+        assert(app.view() == View::Reading && !app.pending_frame());
+        assert(!app.prepare_sleep());
+        driver.key(Input::K2);
+        assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean);
+        driver.present();
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (app.view() != View::PowerMenu) {
+            app.poll_background();
+            assert(*app.saved_record() == saved);
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        driver.present(); driver.tap(300, 1120); driver.present();
+        assert(app.view() == View::Reading && app.canvas().pixels() == pixels);
         while (std::string(app.background_state()) == "sleep-cover") {
             app.poll_background();
             assert(!app.pending_frame() && app.canvas().pixels() == pixels && *app.saved_record() == saved);

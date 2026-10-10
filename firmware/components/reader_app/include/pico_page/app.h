@@ -187,7 +187,10 @@ class ReaderApp {
     bool sleep_pending() const;
     /** Cancels sleep and restores its manual Wi-Fi intent without destroying a running cover worker. */
     void cancel_sleep();
-    /** Opens a modal menu without changing the underlying page or its draft. Busy tasks must finish first. */
+    /**
+     * Requests a modal menu without changing the underlying page or draft. A canceled cover
+     * worker is polled before opening; true means opened or queued. Other busy tasks reject it.
+     */
     bool show_power_menu();
     /** Displays why the menu is unavailable while preserving the current task and controls. */
     void power_unavailable(const std::string& message);
