@@ -314,11 +314,15 @@ def memory(state):
     return {k: int(state[k]) for k in ("internal", "largest_internal", "psram", "largest_psram")}
 
 
-def trend_check(samples, internal_limit=4096):
-    """Steady-state internal RAM after later rounds must not fall below the first round by more than the limit."""
+def trend_check(samples, internal_limit=4096, block_limit=8192):
+    """Steady-state internal RAM of later rounds must stay within the limits of the first round.
+
+    Free bytes catch a leak; the largest free block catches fragmentation that leaves the total unchanged.
+    """
     drop = samples[0]["internal"] - min(sample["internal"] for sample in samples)
-    if drop > internal_limit:
-        raise AssertionError(f"internal RAM fell {drop} B across rounds")
+    block = samples[0]["largest_internal"] - min(sample["largest_internal"] for sample in samples)
+    if drop > internal_limit or block > block_limit:
+        raise AssertionError(f"internal RAM fell {drop} B and its largest free block {block} B across rounds")
     return drop
 
 
@@ -374,9 +378,12 @@ def rounds_of_reading(session, book, rounds, turns, start, long_wait):
         for _ in range(turns):
             turn(session, "K3", 1)
         forward = saved_after(reopened, "forward position saved")
+        if forward["anchor"] == start["anchor"]:
+            raise AssertionError("the forward save advanced the revision but kept the starting anchor")
         for _ in range(turns):
             turn(session, "K1", -1)
-        saved_after(forward, "start position saved again")
+        if saved_after(forward, "start position saved again")["anchor"] != start["anchor"]:
+            raise AssertionError("turning back did not save the starting anchor again")
         # At the largest size the first step is clamped and leaves nothing to apply; then go down and back up.
         if resize(PLUS):
             reverse = MINUS

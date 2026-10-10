@@ -146,7 +146,8 @@ class Reader:
             step = 1 if verb == "key K3" else -1
             s.update(page=s["page"] + step * (1 + self.faults.pop("skip", 0)), frame=s["frame"] + 1,
                      revision=s["revision"] + (0 if self.faults.get("unsaved") else 1))
-            s["anchor"] = "%08x" % s["page"]
+            if not self.faults.get("stale_anchor"):  # stale_anchor: the revision advances over the old record
+                s["anchor"] = "%08x" % s["page"]
         elif verb.startswith("tap "):
             self.tap(tuple(map(int, verb.split()[1:])))
         elif verb.startswith("open "):
@@ -176,7 +177,8 @@ class WorkbenchTest(unittest.TestCase):
     def test_reading_flow_rejects_skips_unsaved_turns_drift_and_leaks(self):
         for fault, message in ((dict(skip=2), "moved page"), (dict(unsaved=1), "saved revision did not advance"),
                                (dict(drift=1), "reverting the font size"), (dict(leak=5000), "internal RAM fell"),
-                               (dict(sticky=1), "left the size at"), (dict(anchor_drift=1), "reopening showed anchor=0000ffff")):
+                               (dict(sticky=1), "left the size at"), (dict(anchor_drift=1), "reopening showed anchor=0000ffff"),
+                               (dict(stale_anchor=1), "kept the starting anchor")):
             with self.subTest(fault=fault):
                 self.output = Path(self.temp.name) / ("run-" + str(len(list(Path(self.temp.name).iterdir()))))
                 with self.assertRaisesRegex(AssertionError, message):
@@ -216,7 +218,10 @@ class WorkbenchTest(unittest.TestCase):
         reader.state["page"] = 20
         self.assertEqual(reading_flow(self.start(Serial(reader)), "Books/t.epub", 1, 1)["status"], "skip")
         self.finish()
-        self.assertEqual(trend_check([dict(internal=9000), dict(internal=5000), dict(internal=9000)]), 4000)
+        sample = lambda internal, block=30000: dict(internal=internal, largest_internal=block)
+        self.assertEqual(trend_check([sample(9000), sample(5000), sample(9000)]), 4000)
+        with self.assertRaisesRegex(AssertionError, "largest free block 9000 B"):
+            trend_check([sample(9000), sample(9000, 21000)])
 
     def test_image_sync_cancels_in_https_and_requires_chain_and_position(self):
         reader = Reader(image=1)
