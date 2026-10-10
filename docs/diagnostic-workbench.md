@@ -12,7 +12,7 @@ sh tools/build_firmware.sh performance
 sh tools/build_firmware.sh diagnostic
 ```
 
-每种模式使用独立的 `build/firmware-<mode>/` 和其中的 `sdkconfig`，由通用 defaults 加 `firmware/configs/<mode>.defaults` 生成。没有参数的原构建入口不变，仍使用本地 `firmware/sdkconfig`。模式目录首次配置后也会保留生成的 sdkconfig；修改 defaults 时，应移走该模式目录再重新构建，或显式更新其配置。核对 `build/firmware-<mode>/config/sdkconfig.h`，不能只凭文件夹名称判断模式。
+每种模式使用独立的 `build/firmware-<mode>/` 和其中的 `sdkconfig`，由通用 defaults 加 `firmware/configs/<mode>.defaults` 生成。没有参数的原构建入口不变，仍使用本地 `firmware/sdkconfig`。模式目录首次配置后也会保留生成的 sdkconfig，已有的 sdkconfig 优先于 defaults。构建入口在构建前后核对 `firmware/sdkconfig.defaults` 与模式 defaults 中的每一项是否在生效 sdkconfig 中取同样的值，不一致时报错并列出选项；此时移走该 sdkconfig 重新生成，或显式更新它。无参数入口的本地 `firmware/sdkconfig` 同样受此核对，本地只能改动 defaults 未指定的选项。核对 `build/firmware-<mode>/config/sdkconfig.h`，不能只凭文件夹名称判断模式。
 
 | 模式 | 控制台 | PERF_METRICS | TRACE_EVENTS | LEGACY_PERF_LOG |
 |---|---|---|---|---|

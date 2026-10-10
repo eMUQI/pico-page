@@ -1,5 +1,7 @@
 # 开发状态
 
+2026-10-10 PR #42 的两项评审意见已修正：构建入口现在在构建前后核对 defaults 是否在生效 sdkconfig 中取同样的值，过期配置会报错而不是静默沿用旧分配模式；运行时文档和配置注释不再写实测数值。Python 测试 35/35，四个固件入口重建通过。详情见本日「PR #42 评审修正」记录。
+
 2026-10-10 位置映射任务的「约 40 KB 内部 RAM 瞬时占用」已定位：其中约 8 KB 是真实占用，来自 SD 卡向 PSRAM 缓冲读数据时 ESP-IDF 临时分配的 DMA 缓冲；其余 32 KB 是口径差，`internal` 剩余量含 32 KB 储备池，而 internal_min 中该池的最低值自启动起为 0。按此口径修正：改动前 TLS 握手期间主内部堆最低约 2 KB 并挤占储备池，改动后为约 18 KB（只做检查）和约 11 KB（Wi-Fi 保持时执行映射）。结论方向不变，候选文档修正未提交。详情见本日「映射任务内部 RAM 占用定位与口径修正」记录。
 
 2026-10-10 TLS 分配已改到 PSRAM（`CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y`，候选未提交）并在真机对照实测：TLS 会话期间内部 RAM 剩余由 33.5 KB 升到约 60 KB，最大连续块最低由 7.9 KB 升到 31.7 KB，只做检查时的历史最低由 10,964 B 升到 27,344 B；稳态同步耗时未变慢，检查、位置映射和上传在新固件上均成功。四个固件构建入口通过。新的最低点约 20 KB 来自位置映射任务。另确认两项既有问题：真实书位置无法映射上传，远端前后关系判断口径不一致。设备现装新诊断镜像 `7ce3218a…`。详情见本日「TLS 分配改到 PSRAM 并实测」记录。
@@ -4257,3 +4259,10 @@ G0 的硬件门槛、G1b 原生定位、G2 阅读界面、G3 同步和 G4 发布
 - 过程中的问题：首次 GDB 连接时 OpenOCD 自动探测 Flash 失败并拒绝连接，设备停在暂停态；以 `reset run` 恢复，随后用 `ESP_FLASH_SIZE 0` 关闭探测。全部内存分配上的断点追踪每次命中约 0.27 秒，240 秒内未能覆盖完整的开书过程，改用显式能力分配入口后完成。一次观察点脚本因参数错误退出并使设备暂停，已手动恢复。这些复位和暂停发生在书库或已保存的正文位置，保存修订 63 未变。
 - 状态与收尾：OpenOCD 已关闭，无残留断点，设备运行于书库，internal 98,759 B。证据在 `.local/runs/alloc-trace-01/`（脚本、分配记录、各堆读数、OpenOCD 与 GDB 日志），本地忽略文件。
 - 未测与下一步：未在 TLS 握手期间直接读取各堆（改动前的主内部堆最低值为推算）；未测 Release 固件。可跟进：每次从 SD 读到 PSRAM 缓冲都要分配、复制、释放一个 8 KB 内部缓冲，对读取耗时和内部 RAM 的影响未量化；工作台若要报告可比较的低水位，应按堆分别读取或改报主内部堆。
+
+## 2026-10-10 · PR #42 评审修正
+
+- 意见一（过期 sdkconfig 使新 default 失效）：成立。已有的 `firmware/sdkconfig` 或 `build/firmware-<mode>/sdkconfig` 优先于 defaults，更新后直接构建会得到仍用内部 RAM 分配 TLS 的固件。`tools/firmware_provenance.py` 新增核对：`begin` 在已有 sdkconfig 时、`finish` 在构建后，逐项比较 `firmware/sdkconfig.defaults` 与模式 defaults（后者覆盖前者，`=n` 与「is not set」等价）和生效 sdkconfig，不一致时报错并列出选项。不自动删除配置，由开发者移走或显式更新。
+- 意见二（实测数值不应写进运行时契约）：成立。`docs/platform-runtime.md` 只保留分配位置、原因和安全后果；`firmware/sdkconfig.defaults` 的注释改为不含数值的约束说明。数值及其条件留在开发记录。
+- 验证：`python3 -m unittest discover -s tests` 35/35，新增分层 defaults 的过期与一致两种情况。用改动前备份的 Release sdkconfig 核对，报出 `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC`；当前四份生效配置核对通过。经 EIM 的 ESP-IDF 6.1 依次执行 release、performance、diagnostic 和无参数入口，全部通过，应用大小 3,369,680 / 3,371,216 / 3,403,808 / 3,392,688 B。交接检查与 diff 检查通过。
+- 未测：未重跑 host CTest 的 C++ 部分和 sanitizer，由 CI 覆盖；本批未烧录，设备仍装 `7ce3218a…`，与新构建的生效配置相同、镜像摘要不同。本地无参数入口的 sdkconfig 今后只能改动 defaults 未指定的选项。
