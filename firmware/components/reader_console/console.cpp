@@ -457,7 +457,7 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
               static_cast<unsigned>(count), data.c_str());
         return;
     }
-    const bool input_command = word == "key" || word == "tap" || word == "hold";
+    const bool input_command = word == "key" || word == "tap" || word == "hold" || word == "swipe";
     if ((!actions_allowed && !(input_allowed && input_command)) || app.pending_frame() || transfer) {
         error(id, "busy");
         return;
@@ -473,8 +473,8 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
             error(id, "open_failed");
             return;
         }
-    } else if (word == "key" || word == "tap" || word == "hold") {
-        AppInput event{{0, Phase::Begin, Input::TouchCenter}, word != "key", 0, 0, false, word == "hold"};
+    } else if (word == "key" || word == "tap" || word == "hold" || word == "swipe") {
+        AppInput event{{0, Phase::Begin, Input::TouchCenter}, word == "tap" || word == "hold", 0, 0, false, word == "hold"};
         std::string_view first, second, extra;
         if (!token(input, first)) {
             error(id, "missing_input");
@@ -487,6 +487,12 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
                 error(id, "invalid_touch");
                 return;
             }
+        } else if (word == "swipe") {
+            if (!input.empty() || (first != "left" && first != "right")) {
+                error(id, "invalid_swipe");
+                return;
+            }
+            event.event.input = first == "left" ? Input::Next : Input::Previous;
         } else {
             if (!input.empty() || (first != "K1" && first != "K2" && first != "K3")) {
                 error(id, "invalid_key");

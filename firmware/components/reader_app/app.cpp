@@ -5913,6 +5913,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                     --library_page;
                 else if (id == Next && (library_page + 1) * library_page_size() < entries.size())
                     ++library_page;
+                else return;
                 draw_library();
             } else if (view == View::WifiSettings) {
                 if (wifi_page != WifiPage::Add) return;
@@ -6063,16 +6064,17 @@ struct ReaderApp::Impl final : DisplayBackend {
             return;
         }
         const bool preserve_prefetch = view == View::Reading &&
-            ((!input.touch && (input.event.input == Input::K3 || input.event.input == Input::K2)) ||
+            ((!input.touch && (input.event.input == Input::K3 || input.event.input == Input::Next || input.event.input == Input::K2)) ||
              (input.touch && input.x >= 479 && input.y < footer_top));
         if (!preserve_prefetch) clear_prefetch();
         if (input.queued) {
             const bool turn_touch = input.touch && input.y < footer_top && (input.x < 205 || input.x >= 479);
-            const bool turn_key = !input.touch && (input.event.input == Input::K1 || input.event.input == Input::K3);
+            const auto action = input.touch ? Action::None : MapInput(context(), input.event.input);
+            const bool turn_key = action == Action::PreviousPage || action == Action::NextPage;
             if (view != View::Reading || !turned || (!turn_touch && !turn_key))
                 return;
             // Links are not followed: the contact was aimed at the page that has been replaced.
-            turn(turn_touch ? input.x >= 479 : input.event.input == Input::K3);
+            turn(turn_touch ? input.x >= 479 : action == Action::NextPage);
             return;
         }
         turned = false;

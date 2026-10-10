@@ -1,6 +1,7 @@
 #pragma once
 
 #include "platform.h"
+#include <cstdlib>
 #include <optional>
 
 namespace pico_page::platform {
@@ -11,9 +12,40 @@ namespace pico_page::platform {
  */
 inline constexpr std::int64_t kLongPressUs = 600 * 1000;
 
-/** True when the contact that began with begin and was released by end lasted a long press. */
+/** Gesture distances are portrait pixels and duration is microseconds; confirm on the device. */
+inline constexpr int kSwipeMinPx = 60;
+inline constexpr std::int64_t kSwipeMaxUs = 700 * 1000;
+inline constexpr int kLongPressSlopPx = 28;
+/** Integer approximation of tan(60 degrees), limiting deviation from horizontal to 30 degrees. */
+inline constexpr int kSwipeAngleRatio = 173;
+inline constexpr int kSwipeAngleScale = 100;
+
+enum class ReleasedGesture { Tap, Previous, Next, Ignore };
+
+/** Classifies a released touch using endpoint displacement, without changing contact ownership. */
+inline ReleasedGesture released_gesture(const Event& begin, const Event& end) {
+    if (begin.kind != EventKind::Touch || end.kind != EventKind::Touch ||
+        begin.phase != EventPhase::Begin || end.phase != EventPhase::End ||
+        begin.sequence != end.sequence || end.time_us < begin.time_us) return ReleasedGesture::Ignore;
+    const auto dx = static_cast<std::int64_t>(end.x) - begin.x;
+    const auto dy = static_cast<std::int64_t>(end.y) - begin.y;
+    const auto ax = std::abs(dx), ay = std::abs(dy);
+    if (ax < kSwipeMinPx && ay < kSwipeMinPx) return ReleasedGesture::Tap;
+    if (ax >= kSwipeMinPx && end.time_us - begin.time_us <= kSwipeMaxUs &&
+        ax * kSwipeAngleScale >= ay * kSwipeAngleRatio)
+        return dx < 0 ? ReleasedGesture::Next : ReleasedGesture::Previous;
+    return ReleasedGesture::Ignore;
+}
+
+/** Released long presses must remain within the per-axis slop throughout the sampled contact. */
 inline bool long_press(const Event& begin, const Event& end) {
-    return begin.kind == EventKind::Touch && end.time_us - begin.time_us >= kLongPressUs;
+    return begin.kind == EventKind::Touch && end.time_us - begin.time_us >= kLongPressUs &&
+        std::abs(static_cast<std::int64_t>(end.x) - begin.x) <= kLongPressSlopPx &&
+        std::abs(static_cast<std::int64_t>(end.y) - begin.y) <= kLongPressSlopPx &&
+        std::abs(static_cast<std::int64_t>(end.min_x) - begin.x) <= kLongPressSlopPx &&
+        std::abs(static_cast<std::int64_t>(end.max_x) - begin.x) <= kLongPressSlopPx &&
+        std::abs(static_cast<std::int64_t>(end.min_y) - begin.y) <= kLongPressSlopPx &&
+        std::abs(static_cast<std::int64_t>(end.max_y) - begin.y) <= kLongPressSlopPx;
 }
 
 /** Retains the initial target until release or an explicit long press, unless the frame changes. */
