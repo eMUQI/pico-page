@@ -1743,7 +1743,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         case reading_footer::Position::Percent:
             if (const auto current = current_page())
                 return reading_footer::percent(static_cast<double>(current) / total_pages());
-            return reading_footer::percent(estimated_fraction(page.end)) + " · 估算";
+            return reading_footer::percent(estimated_fraction(page.end), false);
         case reading_footer::Position::Pages:
             if (const auto current = current_page())
                 return std::to_string(current) + " / " + std::to_string(total_pages());

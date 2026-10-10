@@ -12,9 +12,11 @@ enum class Position { Pages, Chapters, Percent };
 enum class Device { Battery, Clock };
 inline constexpr int device_left = 540;
 
-/** Formats a whole-book fraction as a rounded percentage with two decimal places. */
-inline std::string percent(double fraction) {
+/** Formats a rounded whole-book percentage; uncounted pages use whole percent. */
+inline std::string percent(double fraction, bool pages_counted = true) {
     if (!std::isfinite(fraction)) return "—";
+    if (!pages_counted)
+        return std::to_string(static_cast<int>(std::round(std::clamp(fraction, 0.0, 1.0) * 100))) + "%";
     const auto hundredths = static_cast<int>(std::round(std::clamp(fraction, 0.0, 1.0) * 10000));
     char value[16];
     std::snprintf(value, sizeof(value), "%d.%02d%%", hundredths / 100, hundredths % 100);

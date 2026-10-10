@@ -595,6 +595,13 @@ int main(int argc, char** argv) {
     const char* directory = mkdtemp(temporary); assert(directory);
     const fs::path card(directory), fixtures(argv[1]);
     assert(reading_footer::percent(0) == "0.00%");
+    assert(reading_footer::percent(.2697, false) == "27%");
+    assert(reading_footer::percent(.2649, false) == "26%");
+    assert(reading_footer::percent(.265, false) == "27%");
+    assert(reading_footer::percent(0, false) == "0%");
+    assert(reading_footer::percent(1, false) == "100%");
+    assert(reading_footer::percent(-1, false) == "0%" && reading_footer::percent(2, false) == "100%");
+    assert(reading_footer::percent(std::numeric_limits<double>::quiet_NaN(), false) == "—");
     assert(reading_footer::percent(.05) == "5.00%");
     assert(reading_footer::percent(.2137) == "21.37%");
     assert(reading_footer::percent(1.0 / 3) == "33.33%");
