@@ -258,6 +258,9 @@ def wait_for(session, accept, what, timeout=None):
         session.drain()
         if accept(state):
             return state
+        if state.get("view") == "error":
+            # The application replaces the page with its error page after a failed frame or a fatal fault.
+            raise AssertionError("the device showed its error page while waiting for " + what)
         if time.monotonic() >= deadline:
             raise TimeoutError(what)
 
@@ -755,13 +758,19 @@ def main():
             raise RuntimeError("Cannot establish trace baseline")
         session.event("baseline", dropped=int(baseline["dropped"]), tx_failures=int(baseline["tx_failures"]),
                       sequence=int(baseline["sequence"]))
-        if args.mode == "refresh":
-            result = refresh_scenario(session)
-        elif args.mode == "image-sync":
-            result = image_sync(session, args.book)
-        elif args.mode == "reading-flow":
-            result = reading_flow(session, args.book, args.rounds, args.turns)
-        else:
+        try:
+            if args.mode == "refresh":
+                result = refresh_scenario(session)
+            elif args.mode == "image-sync":
+                result = image_sync(session, args.book)
+            elif args.mode == "reading-flow":
+                result = reading_flow(session, args.book, args.rounds, args.turns)
+        except AssertionError as exc:
+            # Keep the verdict and still freeze the recorder below: a recorded failure is judged on complete evidence.
+            result = dict(status="fail", reason=str(exc))
+        except TimeoutError as exc:
+            result = dict(status="inconclusive", reason="Timeout: " + str(exc))
+        if args.mode not in ("refresh", "image-sync", "reading-flow"):
             print("Recording. Enter 'mark short description' to mark a problem; 'end' to finish.")
             if args.mode == "image-network":
                 print("Use the device to overlap image loading with network sync, then return to the saved image page. "

@@ -110,6 +110,8 @@ class Reader:
             else:
                 self.emit(2, 2, 0, 120, result=1, request=8)
         elif (view, point) == ("sync", SYNC_CANCEL): s["view"] = "network_closing"
+        elif (view, point) == ("network_closing", CONTINUE_OFFLINE) and self.faults.get("frame_fails"):
+            s.update(view="error", frame_ok=0)  # the body frame failed and the application shows its error page
         elif (view, point) == ("network_closing", CONTINUE_OFFLINE):
             s.update(view="reading", frame=21, revision=s["revision"] + self.faults.get("moved", 0))  # 22 once this tap is counted
             # The image decodes while the cancelled request is still inside its HTTPS phase.
@@ -199,6 +201,10 @@ class WorkbenchTest(unittest.TestCase):
                 with patch.object(session, "capture"):
                     image_sync(session, "Books/t.epub")
             self.finish()
+        self.output = Path(self.temp.name) / "error-page"
+        with self.assertRaisesRegex(AssertionError, "error page while waiting for view reading"):
+            image_sync(self.start(Serial(Reader(image=1, frame_fails=1))), "Books/t.epub")
+        self.finish()
         # HTTP success with an answer the application rejected, a failed request, a decode that ended before
         # the second reopen, and a request that never reached HTTPS all leave the run undecided.
         for fault, reason in ((dict(answer="failed"), "valid answer: failed"), (dict(offline=1), "did not succeed"),
