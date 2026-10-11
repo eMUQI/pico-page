@@ -434,6 +434,15 @@ kbd {
   color: var(--muted);
 }
 
+.font-download {
+  margin-top: 40px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+.font-download .actions {
+  flex-wrap: wrap;
+}
+
 /* Footer */
 .site-footer {
   display: flex;
