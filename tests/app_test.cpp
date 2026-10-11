@@ -846,7 +846,7 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         assert(app.view() == View::Error && app.status().find("LockScreens") != std::string::npos);
         if (app.pending_frame()) driver.present();
         driver.close(); driver.present();
-        for (const auto point : {std::pair{150, 240}, std::pair{480, 240}, std::pair{150, 350}}) {
+        for (const auto& point : {std::pair{150, 240}, std::pair{480, 240}, std::pair{150, 350}}) {
             driver.tap(600, 50); driver.present(); driver.tap(340, 710); driver.present();
             driver.tap(point.first, point.second); driver.present(); driver.tap(500, 1120); driver.present();
             assert(sleep_frame(app)); driver.present(); app.wake(); driver.present(); app.poll_background();
