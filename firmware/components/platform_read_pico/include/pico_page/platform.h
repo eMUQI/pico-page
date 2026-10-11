@@ -147,6 +147,10 @@ bool finish_power(std::string& error);
 /** Requests PMU power-off after a final-frame and finish_power attempt, including release failure. */
 bool power_off(std::string& error);
 
+/** Attempts deferred RTC persistence on the application task at an idle boundary.
+ * May block for BSP command retries; failures are logged without changing system time. */
+void persist_clock();
+
 /** Where connect_network() or synchronize_clock() stopped. Link carries the Wi-Fi driver's disconnect reason. */
 struct ConnectFailure {
     enum class Stage { None, Setup, Link, Address, Clock } stage = Stage::None;
@@ -174,8 +178,9 @@ bool connect_network(const std::string& ssid, const std::string& password, std::
                      ConnectFailure* failure = nullptr, bool clock = true, const std::atomic_bool* cancelled = nullptr);
 
 /**
- * Sets the system clock over SNTP after connect_network(). Blocks for up to 10 s. false when
- * no link is up or the clock is still before 2024; the link stays up either way.
+ * Waits up to 10 s for SNTP on a connection until its first successful sync, even with RTC time.
+ * Timeout may use an already valid system clock. Returns false on cancellation, missing link
+ * or a clock before 2024; the link stays up either way. Actual SNTP updates queue RTC persistence.
  */
 bool synchronize_clock(std::string& error, ConnectFailure* failure = nullptr, const std::atomic_bool* cancelled = nullptr);
 

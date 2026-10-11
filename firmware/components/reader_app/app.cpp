@@ -2513,7 +2513,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         canvas.fill_rect(0, footer_top, 684, 88, 15);
         text(notice().empty() ? footer_position_text() : message, 36, 1156, 24, 476, 3);
         if (footer_device == reading_footer::Device::Clock) {
-            // The device clock is calibrated by the existing on-demand network flow.
+            // The system clock is restored from RTC or calibrated by on-demand networking.
             center(reading_footer::clock(std::time(nullptr), 8 * 60), reading_footer::device_left, 1156,
                    684 - reading_footer::device_left, 24, 3);
         } else {

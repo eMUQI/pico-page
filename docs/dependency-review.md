@@ -128,3 +128,7 @@ GB18030 解码表的来源与复核（2026-10-07）：`firmware/components/reade
 | [FreeInk SDK InputManager](https://github.com/0x1abin/freeink-sdk/tree/e8bfe8c/libs/hardware/InputManager) | `e8bfe8c`，MIT；源码、头文件及 LICENSE 已读 | `TOUCH_SWIPE_MIN_PX=60`、`TOUCH_SWIPE_MAX_MS=700`、`TOUCH_TAP_SLOP_PX=28`；按下点作为点按目标。采用规则，不移植采样器或 SDK |
 | [KOReader 手势识别](https://github.com/koreader/koreader/blob/master/frontend/device/gesturedetector.lua)、[菜单方向](https://github.com/koreader/koreader/blob/master/frontend/ui/widget/menu.lua) | master，2026-10-10 在线读取，AGPL-3.0；只参考行为 | `gesturedetector.lua` 的约 30°–60° 对角带和超时不认定轻扫；`menu.lua` 左滑下一页。Pico Page 的慢拖直接忽略，不采用 KOReader 的对角全刷、循环或纵向关闭 |
 | Espressif [esp_lcd_touch](https://components.espressif.com/components/espressif/esp_lcd_touch)、[esp_lvgl_port](https://components.espressif.com/components/espressif/esp_lvgl_port)、[touch_slider_sensor](https://docs.espressif.com/projects/esp-iot-solution/en/latest/touch/touch_slider_sensor.html) | 官方组件/文档，2026-10-11 复核 | 前者提供坐标读取；LVGL port 的输入依赖 LVGL；slider 面向电容触摸通道。在这三项中没有适合当前非 LVGL 坐标事件路径直接复用的轻扫实现，因此不增加依赖 |
+
+## 2026-10-11 · PMU RTC 接入
+
+RTC 沿用已锁定的 MindReset BSP `5f3406deec33304de8801046db583dec7c49e55b`，参考该提交的 PMU 演示、自检、驱动及协议文档；不新增第三方依赖。`read_pico_pmu`（Apache-2.0）构建副本新增 TIME_GET 响应长度与快照有效性校验，原件不变，补丁随源码保留；源码版权与许可证继续保留。实现和修改范围见 [BSP 审查](bsp-review.md#rtc-响应校验与接入2026-10-11)。未复制 PMU 工厂标定、自检时间来源或额外驱动。

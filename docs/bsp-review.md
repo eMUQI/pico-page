@@ -71,3 +71,9 @@ ESP-IDF 锁为 v6.1 commit `fff9895c82d744c7237be8847347bdd1b07c6643`，本机�
 ## 2026-10-11 · 实验水波纹逐行相位补丁
 
 用户明确授权在构建副本加入 `firmware/patches/epdiy-row-phases.patch`，顺序在原欠载补丁之后；官方锁定和下载原件不变。新增单相差分扫描的逐行 LUT 借用接口，只用于 Read Pico 倒置竖屏的 16 条带水波纹；关闭时原查找路径不变。生产者汇合后清除上下文，调用方每拍返回后清除全局借用，失败不提交 back buffer，仍由平台原清屏恢复处理。来源、许可与裁剪范围见 [依赖记录](dependency-review.md#2026-10-11--文字转页与水波纹候选)。该候选的真机欠载、灰阶、残影与时延待验收，不把编译或故障替身通过视为面板验收。
+
+## RTC 响应校验与接入（2026-10-11）
+
+实现前核对锁定官方源码的 `main/apps/app_pmu.c`、`main/factory/pmu_selftest.c`、`components/read_pico_pmu/read_pico_pmu.c` 与协议文档。官方演示通过 `TIME_SYNC` 写 UTC 秒并用 `TIME_GET` 读回；自检检查 `time_ok`、`time_synced` 和秒差。Pico Page 使用相同公开协议，时钟来源采用真实 SNTP 回包，不移植工厂自检的时间来源。官方文档的 PMU 复位失效与 LSI 漂移限制保留。
+
+`firmware/patches/read-pico-rtc-response.patch` 仅修改构建副本的 `read_pico_pmu.c`：每次 `TIME_GET` 开始清除 `time_ok`；成功响应必须恰为协议规定的 8 字节才更新快照，否则返回 `ESP_ERR_INVALID_RESPONSE`。防止旧快照或 CRC 正确但长度不足的响应被当作本次有效时间。官方 commit、下载原件和组件 tree SHA 不变。组件仍为 Apache-2.0，保留源文件版权与许可证；新增适配由项目实现，不引入新依赖或复制工厂校准代码。
