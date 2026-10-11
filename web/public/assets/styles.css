@@ -434,13 +434,69 @@ kbd {
   color: var(--muted);
 }
 
-.font-download {
+.resource-block {
   margin-top: 40px;
   padding-top: 24px;
   border-top: 1px solid var(--line);
 }
-.font-download .actions {
+.resources .actions {
   flex-wrap: wrap;
+}
+
+/* Download resources */
+.resources {
+  padding-block: 72px 80px;
+}
+.resource-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+.resource-heading .button {
+  flex-shrink: 0;
+}
+.lockscreen-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 20px;
+}
+.lockscreen-preview, .lockscreen-preview img {
+  display: block;
+  width: 100%;
+}
+.lockscreen-preview img {
+  height: auto;
+  border: 1px solid var(--line);
+}
+.lockscreen-grid figcaption {
+  letter-spacing: 0;
+  font-size: 12px;
+}
+.lockscreen-grid strong {
+  display: block;
+  color: var(--ink);
+  font-weight: 500;
+}
+.lockscreen-grid figcaption a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  gap: 12px;
+}
+.resource-instructions {
+  margin-top: 24px;
+  font-size: 14px;
+}
+.resource-instructions summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.resource-instructions p {
+  max-width: 60em;
+  color: var(--muted);
+  margin-top: 12px;
 }
 
 /* Footer */
@@ -532,7 +588,7 @@ code {
   .wrap {
     width: calc(100% - 40px);
   }
-  .site-header a:not(.ext, .wordmark) {
+  .site-header a:not(.ext, .wordmark, .resource-nav) {
     display: none;
   }
   nav .source-link {
@@ -544,6 +600,14 @@ code {
   .feature-grid,
   .install-layout {
     grid-template-columns: 1fr;
+  }
+  .resource-heading {
+    align-items: start;
+    flex-direction: column;
+  }
+  .lockscreen-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px 16px;
   }
   .hero {
     gap: 48px;
