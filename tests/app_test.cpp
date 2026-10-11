@@ -655,6 +655,82 @@ static void layout_review_test(const fs::path& root, const fs::path& fixtures, c
     }
 }
 
+static void release_review_test(const fs::path& root, const fs::path& fixtures, bool async) {
+    fs::create_directories(root / "Books");
+    ReaderApp app(root.string(), "release-review", true, async); Driver driver{app};
+    assert(app.initialize()); driver.present();
+    // An empty root library lists the ways to add books; the third row only describes one.
+    driver.tap(300, 620); assert(!app.pending_frame() && app.view() == View::Library);
+    driver.tap(300, 350); assert(app.take_usb_transfer_action() == UsbTransferAction::Start);
+    driver.tap(300, 840); driver.present(); assert(app.view() == View::Help);
+    driver.tap(60, 50); driver.present(); assert(app.view() == View::Library);
+    driver.tap(600, 50); driver.present(); assert(app.view() == View::Settings);
+    driver.tap(300, 1030); driver.present(); assert(app.view() == View::About);
+    driver.refresh();
+    driver.tap(60, 50); driver.present(); assert(app.view() == View::Settings);
+    driver.tap(60, 50); driver.present(); assert(app.view() == View::Library);
+    // A hotspot that never started reports its reason on the network page, which leads back here.
+    driver.tap(300, 480); assert(app.take_portal_action() == PortalAction::Upload);
+    driver.portal({PortalPhase::Closed, "", "", "", "设备热点没有启动，请重试。", "", 0, ""}); driver.present();
+    assert(app.view() == View::Import && app.status() == "设备热点没有启动，请重试。");
+    driver.tap(60, 50); driver.present(); assert(app.view() == View::Library);
+
+    fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
+    opened(app, "Books/book.epub"); driver.present();
+    driver.tap(342, 500); driver.present(); assert(app.view() == View::Tools);
+    // The strip between the body and the toolbar closes the tools; the last cell ends at the edge.
+    driver.tap(342, 1046); driver.present(); driver.complete_content(); assert(app.view() == View::Reading);
+    driver.tap(342, 500); driver.present(); assert(app.view() == View::Tools);
+    driver.tap(683, 1150);
+    assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::ManualRefresh);
+    driver.present(); driver.close(); driver.present(); driver.complete_content();
+
+    // Unsaved progress turns the settings footer into the retry control.
+    const auto save = [&] {
+        app.save_progress();
+        while (app.save_busy()) { app.poll_background(); std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+        if (app.pending_frame()) driver.present();
+    };
+    const auto saved = app.saved_record();
+    const auto sidecar = root / "Books/book.epub.picopage";
+    fs::remove_all(sidecar); write(sidecar, "not a directory");
+    driver.key(Input::K3); driver.present(); driver.complete_content(); save();
+    assert(app.view() == View::Error && app.saved_record() == saved);
+    driver.tap(100, 1100); driver.present(); assert(app.view() == View::Settings);
+    driver.tap(342, 1160); driver.present(); assert(app.view() == View::Error && app.saved_record() == saved);
+    driver.tap(100, 1100); driver.present(); assert(app.view() == View::Settings);
+    fs::remove(sidecar);
+    driver.tap(342, 1160); driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && !(app.saved_record() == saved));
+
+    // With Wi-Fi off, the upload row opens the network page, which returns to the library.
+    const fs::path offline = root.string() + "Offline";
+    fs::create_directories(offline / "Books");
+    write(offline / "PicoPage/settings.toml", "schema_version=1\n[network]\nwifi_enabled=false\n");
+    ReaderApp disabled(offline.string(), "release-review-offline", true, async); Driver offline_driver{disabled};
+    assert(disabled.initialize()); offline_driver.present();
+    offline_driver.tap(300, 480); offline_driver.present();
+    assert(disabled.view() == View::Import && disabled.take_portal_action() == PortalAction::None);
+    // Wi-Fi settings opened from that page return to it, also after Wi-Fi is turned on.
+    offline_driver.tap(342, 700); offline_driver.present(); assert(disabled.view() == View::WifiSettings);
+    offline_driver.tap(300, 288); offline_driver.present(); assert(disabled.wifi_enabled());
+    offline_driver.tap(60, 50); offline_driver.present(); assert(disabled.view() == View::Import);
+    offline_driver.tap(60, 50); offline_driver.present(); assert(disabled.view() == View::Library);
+
+    // A long library directory keeps its last components; the leading ones give way to the instruction.
+    const auto first_use = [&](const char* name, const std::string& library) {
+        const fs::path card = root.string() + name;
+        fs::create_directories(card / library);
+        write(card / "PicoPage/settings.toml", "schema_version=1\n[library]\nroots=['" + library + "']\n");
+        ReaderApp app(card.string(), "release-review-roots", true, async); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        assert(app.view() == View::Library);
+        return app.canvas().pixels();
+    };
+    const auto trimmed = first_use("RootA", std::string(40, 'a') + "/Shelf/Books");
+    assert(trimmed == first_use("RootB", std::string(40, 'b') + "/Shelf/Books"));
+    assert(trimmed != first_use("RootC", std::string(40, 'a') + "/Shelf/Texts"));
+}
 static void swipe_test(const fs::path& root, const fs::path& fixtures, bool grid) {
     fs::create_directories(root / "Books");
     for (int i = 0; i < 15; ++i)
@@ -1062,6 +1138,8 @@ int main(int argc, char** argv) {
     help_test(card / "HelpNoCard", fixtures, false, false);
     help_test(card / "HelpSync", fixtures, false, true);
     help_test(card / "HelpAsync", fixtures, true, true);
+    release_review_test(card / "ReleaseReviewSync", fixtures, false);
+    release_review_test(card / "ReleaseReviewAsync", fixtures, true);
     network_setup_test(card / "NetworkSetupSync", fixtures, false);
     network_setup_test(card / "NetworkSetupAsync", fixtures, true);
     for (bool async : {false, true}) {

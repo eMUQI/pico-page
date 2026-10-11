@@ -41,7 +41,8 @@ enum class View {
     Help,
     TextEntry,
     PageEffects,
-    LockScreens
+    LockScreens,
+    About
 };
 enum class PageEffect { Off, TextTurnA, TextTurnB, TextTurnC, Ripple };
 enum class PowerAction { None, Shutdown, Restart };
