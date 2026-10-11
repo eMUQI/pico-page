@@ -799,12 +799,39 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         driver.complete_content();
         driver.tap(342, 500); driver.present(); driver.tap(50, 50); driver.present();
         driver.tap(600, 50); driver.present(); driver.tap(340, 710); driver.present();
-        app.background_step();
-        assert(std::string(app.background_state()) == "sleep-cover");
+        assert(app.view() == View::PowerSettings);
+        const auto prepare_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (std::string(app.background_state()) != "sleep-cover") {
+            app.poll_background();
+            if (app.pending_frame()) driver.present();
+            app.background_step();
+            assert(std::chrono::steady_clock::now() < prepare_deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
         driver.tap(150, 240); driver.present(); driver.tap(500, 1120); driver.present();
         assert(!app.prepare_sleep() && app.sleep_pending());
         assert(sleep_frame(app)); driver.present();
         assert(app.canvas().pixel(50, 100) == 0 && app.canvas().pixel(50, 900) == 5);
+    }
+    for (const bool usb : {true, false}) {
+        ReaderApp app(root.string(), "lock-transfer", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        app.background_step();
+        assert(std::string(app.background_state()) == "sleep-cover");
+        driver.tap(600, 50); driver.present(); driver.tap(300, 180); driver.present();
+        assert(app.view() == View::Import);
+        driver.tap(342, usb ? 330 : 660);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        for (;;) {
+            const bool ready = usb ? app.take_usb_transfer_action() == UsbTransferAction::Start :
+                                     app.take_portal_action() == PortalAction::Upload;
+            if (ready) break;
+            app.poll_background();
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(usb ? app.prepare_usb_transfer() : app.prepare_portal());
+        if (app.pending_frame()) driver.present();
     }
     for (int i = 0; i < 257; ++i) write(root / "LockScreens" / ("overflow-" + std::to_string(i) + ".png"), png);
     assert(store.lock_screen_files(names) == StoreStatus::Invalid && names.empty());
@@ -2967,35 +2994,39 @@ int main(int argc, char** argv) {
         ReaderApp app(card.string(), "image-prefetch", true, true); Driver driver{app};
         assert(app.initialize()); driver.present(); opened(app, "Books/prefetch-image.epub"); driver.present();
         driver.complete_content();
+        // Idle time plans the next page without preparing its image; the turn shows the placeholder first.
+        const auto decodes = graphics::image_decode_count();
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-        while (!app.cache_usage().next_bitmap) {
+        while (app.background_due()) {
             app.background_step(); app.poll_background();
             assert(!app.pending_frame() && std::chrono::steady_clock::now() < deadline);
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        const auto decodes = graphics::image_decode_count();
+        assert(app.cache_usage().next_layout && !app.cache_usage().next_bitmap && graphics::image_decode_count() == decodes);
         driver.key(Input::K3);
-        assert(app.pending_frame()->purpose == FramePurpose::Body && !app.content_busy());
+        assert(app.pending_frame()->purpose == FramePurpose::Body && app.content_busy());
         driver.present();
-        assert(app.cache_usage().bitmap_hits == 1 && graphics::image_decode_count() == decodes);
+        assert(app.cache_usage().bitmap_hits == 0 && graphics::image_decode_count() == decodes);
+        driver.complete_content();
         assert(app.canvas().pixel(36, 76) == 1);
     }
     {
         fs::copy_file(fixtures / "next-chapter-image.epub", card / "Books/next-chapter-image.epub");
         ReaderApp app(card.string(), "next-chapter-image", true, true); Driver driver{app};
         assert(app.initialize()); driver.present(); opened(app, "Books/next-chapter-image.epub"); driver.present();
+        // Idle time prepares nothing beyond the chapter end; the turn loads the next chapter in the foreground.
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-        while (!app.cache_usage().next_content || !app.cache_usage().next_bitmap) {
+        while (app.background_due()) {
             app.background_step(); app.poll_background();
             assert(!app.pending_frame() && std::chrono::steady_clock::now() < deadline);
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        const auto decodes = graphics::image_decode_count();
+        assert(!app.cache_usage().next_layout && !app.cache_usage().next_bitmap);
         driver.key(Input::K3);
-        assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Body && !app.content_busy());
-        driver.present();
-        assert(app.saved_record()->anchor.resource.find("chapter2") != std::string::npos);
-        assert(app.cache_usage().bitmap_hits == 1 && graphics::image_decode_count() == decodes);
+        assert(app.content_busy());
+        driver.present(); driver.complete_content();
+        assert(app.view() == View::Reading && app.saved_record()->anchor.resource.find("chapter2") != std::string::npos);
+        assert(app.cache_usage().bitmap_hits == 0);
     }
     {
         ReaderApp app(card.string(), "preview-worker", true, true); Driver driver{app};
@@ -3103,17 +3134,11 @@ int main(int argc, char** argv) {
         driver.key(Input::K1); driver.present();
         assert(async.view() == View::Loading && async.saved_record() == previous);
         driver.refresh(); driver.complete_content(); same_body();
-        while (!async.cache_usage().next_bitmap) {
-            async.background_step(); async.poll_background();
-            assert(!async.pending_frame() && std::chrono::steady_clock::now() < prepare_deadline);
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-        const auto adjacent_hits = async.cache_usage().bitmap_hits;
+        // The adjacent part is loaded by the turn that reaches it.
         ref_driver.key(Input::K3); ref_driver.present();
-        driver.key(Input::K3);
-        assert(async.pending_frame() && async.pending_frame()->purpose == FramePurpose::Body && !async.content_busy());
-        driver.present(); same_body();
-        assert(async.cache_usage().bitmap_hits == adjacent_hits + 1);
+        driver.key(Input::K3); driver.present();
+        assert(async.view() == View::Loading);
+        driver.refresh(); driver.complete_content(); same_body();
         assert(async.saved_record()->anchor == first);
         for (auto* d : {&ref_driver, &driver}) {
             d->tap(342, 500); d->present(); d->tap(68, 1140); d->present();

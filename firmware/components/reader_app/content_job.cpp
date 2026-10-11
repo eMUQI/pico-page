@@ -20,10 +20,6 @@
 
 namespace pico_page {
 namespace {
-#ifdef CONFIG_PICO_PAGE_PERF_METRICS
-// Added to a Content event's detail when the job is an optional prefetch, whose refusal or failure only lowers the cache hit rate.
-constexpr std::uint32_t kDiagnosticPrefetch = 256;
-#endif
 #ifdef ESP_PLATFORM
 constexpr unsigned content_stack_bytes = 32768;
 QueueHandle_t content_requests = nullptr;
@@ -158,7 +154,7 @@ bool ContentJob::start() {
     PP_DIAGNOSTIC(
         measurement_ = diagnostics::begin(diagnostics::Kind::Content,
             {request.diagnostic_session, request.diagnostic_layout, 0, request.generation,
-             static_cast<std::uint32_t>(request.kind) | (request.prefetch ? kDiagnosticPrefetch : 0U)});
+             static_cast<std::uint32_t>(request.kind)});
         struct StartGuard {
             ContentJob& job;
             ~StartGuard() {
@@ -171,7 +167,7 @@ bool ContentJob::start() {
     // Optional work retains the same headroom after accounting for the already reserved stack.
     const auto required_internal = 32U * 1024 + (content_requests ? 0 : content_stack_bytes);
     if ((request.kind == Kind::Pagination || request.kind == Kind::FontIdentity || request.kind == Kind::LibraryCovers ||
-         request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite || request.kind == Kind::SleepCover || request.kind == Kind::LockScreen || request.prefetch) &&
+         request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite || request.kind == Kind::SleepCover || request.kind == Kind::LockScreen) &&
         heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < required_internal) {
         start_failure_ = StartFailure::InternalMemory;
         return false;
@@ -331,8 +327,8 @@ void ContentJob::render_image() {
     FileStore store(request.root);
     const bool cacheable = request.page.images.size() == 1 && request.page.glyphs.empty() &&
                            request.page.images.front().height == request.layout.height && !request.cache_name.empty();
+    constexpr std::size_t size = 684U * 1216U / 2;
     if (cacheable) {
-        constexpr std::size_t size = 684U * 1216U / 2;
 #ifdef ESP_PLATFORM
         // Cache bytes and the result canvas coexist; decoding has a separate, larger budget.
         if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2 * (size + 32) + 256U * 1024 ||
@@ -359,8 +355,8 @@ void ContentJob::render_image() {
     }
     if (stop()) return;
 #ifdef ESP_PLATFORM
-    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < (request.prefetch ? 5U : 3U) * 1024 * 1024 ||
-        heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 2U * 1024 * 1024) {
+    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < image_room ||
+        heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < size) {
         result.error = "Image preparation memory unavailable"; return;
     }
 #endif
@@ -622,10 +618,7 @@ void ContentJob::load_chapter() {
         return;
     }
     if (!load_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading, request.part, stop)) return;
-    if (request.target == Target::Start) {
-        if (request.prefetch && !stop()) prepare_chapter_page(document);
-        return;
-    }
+    if (request.target == Target::Start) return;
     if (request.known_start && *request.known_start < result.chapter.text.size()) { result.offset = *request.known_start; return; }
     graphics::Font font;
     if (!(request.font.empty() ? font.open_fallback() : font.open(request.font))) { result.error = font.error(); return; }
@@ -643,44 +636,6 @@ void ContentJob::load_chapter() {
         start = readable_offset(result.chapter, page.end);
         if (result.history.size() == 64) result.history.erase(result.history.begin());
         result.history.emplace_back(static_cast<std::uint32_t>(page.start), static_cast<std::uint32_t>(start));
-    }
-}
-void ContentJob::prepare_chapter_page(EpubDocument& document) {
-    const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
-    graphics::Font font;
-    if (!(request.font.empty() ? font.open_fallback() : font.open(request.font))) {
-        result.error = font.error(); return;
-    }
-    result.page = plan_content(font, result.chapter, result.offset, request.layout, true, stop);
-    const auto layout_bytes = result.page.glyphs.capacity() * sizeof(graphics::PositionedGlyph) +
-        result.page.lines.capacity() * sizeof(graphics::TextLine);
-    if (!result.page.error.empty() || result.page.end <= result.page.start || layout_bytes > 256U * 1024 ||
-        chapter_cache_bytes(result.chapter) > 2U * 1024 * 1024) {
-        result.error = "Prefetched page layout failed"; return;
-    }
-    if (result.page.images.empty()) {
-        result.image = std::make_unique<graphics::Canvas>();
-        if (!graphics::render_page(*result.image, font, result.page, 1, stop)) {
-            result.error = "Prefetched page rasterization failed"; result.image.reset();
-        }
-        return;
-    }
-#ifdef ESP_PLATFORM
-    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 3U * 1024 * 1024 ||
-        heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 2U * 1024 * 1024) {
-        result.error = "Image preparation memory unavailable"; return;
-    }
-#endif
-    result.image = std::make_unique<graphics::Canvas>();
-    std::vector<std::uint8_t> encoded;
-    for (const auto& box : result.page.images) {
-        std::string detail;
-        encoded.clear();
-        if (box.resource.empty() || !document.read_image(box.resource, encoded, detail, stop) ||
-            !graphics::render_image(*result.image, encoded, box.x, box.y, box.width, box.height, detail, false, stop)) {
-            if (stop()) { result.error = graphics::kImageCancelled; result.image.reset(); return; }
-            result.failed_images.push_back(box.begin);
-        }
     }
 }
 void ContentJob::library_covers() {

@@ -187,7 +187,7 @@ void status(std::uint32_t id, const ReaderApp &app, bool card_available) {
           "largest_internal=%u "
           "psram=%u stack_bytes=%u input_stack_bytes=%u input_overflows=%u battery_valid=%d battery_pct=%d importing=%d received=%llu "
           "tx_failures=%lu uptime_ms=%llu copy_ms=%u power_ms=%u draw_ms=%u "
-          "cache_total=%u cache_target=%u cache_evictions=%llu cache_body=%u cache_next=%u cache_bitmap=%u bitmap_hits=%llu cache_content=%u cache_pages=%u cache_covers=%u "
+          "cache_total=%u cache_target=%u cache_evictions=%llu cache_body=%u cache_next=%u cache_bitmap=%u bitmap_hits=%llu cache_pages=%u cache_covers=%u "
           "glyph_ui_bytes=%u glyph_body_bytes=%u glyph_ui=%u glyph_body=%u advances_ui=%u advances_body=%u\n",
           static_cast<unsigned long>(id), view_name(app.view()), !!app.pending_frame(),
           card_available, !!app.saved_record(), static_cast<unsigned long long>(revision),
@@ -218,7 +218,7 @@ void status(std::uint32_t id, const ReaderApp &app, bool card_available) {
           static_cast<unsigned>(caches.retained), static_cast<unsigned>(caches.target),
           static_cast<unsigned long long>(caches.evictions), static_cast<unsigned>(caches.body_bitmap), static_cast<unsigned>(caches.next_layout),
           static_cast<unsigned>(caches.next_bitmap), static_cast<unsigned long long>(caches.bitmap_hits),
-          static_cast<unsigned>(caches.next_content), static_cast<unsigned>(caches.page_index), static_cast<unsigned>(caches.cover_pixels),
+          static_cast<unsigned>(caches.page_index), static_cast<unsigned>(caches.cover_pixels),
           static_cast<unsigned>(caches.ui_glyph_bytes), static_cast<unsigned>(caches.body_glyph_bytes),
           static_cast<unsigned>(caches.ui_glyphs), static_cast<unsigned>(caches.body_glyphs),
           static_cast<unsigned>(caches.ui_advances), static_cast<unsigned>(caches.body_advances));
