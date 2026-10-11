@@ -655,6 +655,54 @@ static void layout_review_test(const fs::path& root, const fs::path& fixtures, c
     }
 }
 
+static void release_review_test(const fs::path& root, const fs::path& fixtures, bool async) {
+    fs::create_directories(root / "Books");
+    ReaderApp app(root.string(), "release-review", true, async); Driver driver{app};
+    assert(app.initialize()); driver.present();
+    // An empty root library lists the ways to add books; the third row only describes one.
+    driver.tap(300, 620); assert(!app.pending_frame() && app.view() == View::Library);
+    driver.tap(300, 350); assert(app.take_usb_transfer_action() == UsbTransferAction::Start);
+    driver.tap(300, 840); driver.present(); assert(app.view() == View::Help);
+    driver.tap(60, 50); driver.present(); assert(app.view() == View::Library);
+    driver.tap(600, 50); driver.present(); assert(app.view() == View::Settings);
+    driver.tap(300, 1030); driver.present(); assert(app.view() == View::About);
+    driver.refresh();
+    driver.tap(60, 50); driver.present(); assert(app.view() == View::Settings);
+    driver.tap(60, 50); driver.present(); assert(app.view() == View::Library);
+    // A hotspot that never started reports its reason on the network page, which leads back here.
+    driver.tap(300, 480); assert(app.take_portal_action() == PortalAction::Upload);
+    driver.portal({PortalPhase::Closed, "", "", "", "设备热点没有启动，请重试。", "", 0, ""}); driver.present();
+    assert(app.view() == View::Import && app.status() == "设备热点没有启动，请重试。");
+    driver.tap(60, 50); driver.present(); assert(app.view() == View::Library);
+
+    fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
+    opened(app, "Books/book.epub"); driver.present();
+    driver.tap(342, 500); driver.present(); assert(app.view() == View::Tools);
+    // The strip between the body and the toolbar closes the tools; the last cell ends at the edge.
+    driver.tap(342, 1046); driver.present(); driver.complete_content(); assert(app.view() == View::Reading);
+    driver.tap(342, 500); driver.present(); assert(app.view() == View::Tools);
+    driver.tap(683, 1150);
+    assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::ManualRefresh);
+    driver.present(); driver.close(); driver.present(); driver.complete_content();
+
+    // Unsaved progress turns the settings footer into the retry control.
+    const auto save = [&] {
+        app.save_progress();
+        while (app.save_busy()) { app.poll_background(); std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
+        if (app.pending_frame()) driver.present();
+    };
+    const auto saved = app.saved_record();
+    const auto sidecar = root / "Books/book.epub.picopage";
+    fs::remove_all(sidecar); write(sidecar, "not a directory");
+    driver.key(Input::K3); driver.present(); driver.complete_content(); save();
+    assert(app.view() == View::Error && app.saved_record() == saved);
+    driver.tap(100, 1100); driver.present(); assert(app.view() == View::Settings);
+    driver.tap(342, 1160); driver.present(); assert(app.view() == View::Error && app.saved_record() == saved);
+    driver.tap(100, 1100); driver.present(); assert(app.view() == View::Settings);
+    fs::remove(sidecar);
+    driver.tap(342, 1160); driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && !(app.saved_record() == saved));
+}
 static void swipe_test(const fs::path& root, const fs::path& fixtures, bool grid) {
     fs::create_directories(root / "Books");
     for (int i = 0; i < 15; ++i)
@@ -1062,6 +1110,8 @@ int main(int argc, char** argv) {
     help_test(card / "HelpNoCard", fixtures, false, false);
     help_test(card / "HelpSync", fixtures, false, true);
     help_test(card / "HelpAsync", fixtures, true, true);
+    release_review_test(card / "ReleaseReviewSync", fixtures, false);
+    release_review_test(card / "ReleaseReviewAsync", fixtures, true);
     network_setup_test(card / "NetworkSetupSync", fixtures, false);
     network_setup_test(card / "NetworkSetupAsync", fixtures, true);
     for (bool async : {false, true}) {

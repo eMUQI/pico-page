@@ -30,6 +30,7 @@ namespace pico_page {
 namespace {
 using graphics::decode_utf8;
 constexpr int footer_top = 1128, toolbar_top = 1080;
+constexpr char kProjectHome[] = "picopage.wulu.zone";
 constexpr int viewer_left = 24, viewer_top = 104, viewer_width = 636, viewer_height = 1088;
 constexpr int viewer_toolbar_height = 96, viewer_action_left = 456;
 constexpr int viewer_contrast_levels = 3;
@@ -121,7 +122,7 @@ enum Control {
     PortalStop,
     WifiSettings,
     WifiToggle,
-    Help,
+    Help, About,
     HelpPrevious, HelpTools, HelpNext, HelpPosition, HelpDevice,
     HelpKey1, HelpKey2, HelpKey3, ResumeDetails,
     SyncCancel,
@@ -786,7 +787,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     reading_footer::Position footer_position = reading_footer::Position::Pages;
     reading_footer::Device footer_device = reading_footer::Device::Battery;
     PageEffect page_effect = PageEffect::Off;
-    bool refresh_from_settings = false, import_from_settings = false;
+    bool refresh_from_settings = false, import_from_settings = false, help_from_settings = false;
     std::string detail_path, detail_position, detail_error;
     BookSnapshot management_snapshot;
     bool delete_original = false, drawing_error = false;
@@ -2271,6 +2272,26 @@ struct ReaderApp::Impl final : DisplayBackend {
      * Draws the library. Covers that still need decoding first appear as titles with a status
      * line. Native asynchronous mode prepares a visible batch and merges its display update.
      */
+    /** The scanned directory as it reads after a verb, with the spacing of mixed Chinese and Latin text. */
+    std::string library_location() const {
+        return library_home_root.empty() ? "已设置的书库目录" : " " + library_home_root + "/";
+    }
+    /**
+     * Body of the root library without any book or resume card: the ways to add books, the
+     * guide and the limit of the built-in font. The row without an id is a description.
+     */
+    void draw_first_use() {
+        text("书库里还没有书", 36, 160, 40, 612, 1, true);
+        text("选一种方式放入 EPUB 或 TXT", 36, 222, 26, 612, 3);
+        canvas.line(24, 288, 660, 288, 1, 2);
+        settings_row(UsbStart, "USB 连接电脑", "电脑直接管理 TF 卡，退出时重启", 288, 1);
+        settings_row(WifiUpload, "Wi-Fi 传书", "经设备热点，手机扫码上传，不需要路由器", 420, 1);
+        settings_row(0, "直接放入 TF 卡", "拷到卡上" + library_location() + "，插回后重启设备", 552, 1);
+        text("第一次使用", 36, 760, 22, 612, 3);
+        button(Help, "查看使用说明", 24, 796, 636, 96, false, 30);
+        wrapped(std::string("内置字体只含 3,500 个常用字，生僻字会显示为方框。官网 ") + kProjectHome +
+                " 可下载完整的文楷字体，放入 TF 卡 Fonts/，重启后在「排版」中选择。", 36, 924, 612, 22, true, 3);
+    }
     void draw_library(bool decode = false) {
         if (async_content) cancel_covers();
         decode = decode || display.busy();
@@ -2317,14 +2338,18 @@ struct ReaderApp::Impl final : DisplayBackend {
             top = 354;
         }
         if (entries.empty() && !library_resume_omitted) {
+            if (card_available && !library_directory_unavailable && folder.empty() && top == 104) {
+                draw_first_use();
+                footer_bar(notice());
+                return;
+            }
             const int y = top + 120;
             text(!card_available ? "存储卡不可用" : library_directory_unavailable ? "无法读取书库目录" :
                  folder.empty() ? "书库里还没有书" : "这个文件夹是空的", 36, y, 40, 612, 1, true);
             if (!card_available || library_directory_unavailable)
                 wrapped(!card_available ? "这不代表书籍已被删除。" : "请检查书库目录和 TF 卡。", 36, y + 76, 612, 28);
             else {
-                const auto library_location = library_home_root.empty() ? "已设置的书库目录" : library_home_root + "/";
-                const int height = wrapped(folder.empty() ? "把 EPUB 或 TXT 放入" + library_location + "，或使用“导入”。"
+                const int height = wrapped(folder.empty() ? "把 EPUB 或 TXT 放入" + library_location() + "，或使用“导入”。"
                                                           : "用“导入”把 EPUB 或 TXT 复制到存储卡，或返回上一级。", 36, y + 76, 612, 28);
                 button(Import, "导入", 24, y + 104 + height, 636, 96);
             }
@@ -3298,20 +3323,22 @@ struct ReaderApp::Impl final : DisplayBackend {
         reading_header();
         canvas.fill_rect(0, toolbar_top, 684, 136, 15);
         canvas.line(0, toolbar_top, 683, toolbar_top, 1, 3);
-        const char *labels[] = {"目录", "排版", "同步", "刷新", "全刷"};
+        const char *labels[] = {"目录", "排版", "同步", "刷新模式", "全刷"};
         const int ids[] = {Contents, Typography, Sync, Refresh, FullRefresh};
         for (int i = 0; i < 5; ++i) {
-            const int x = i * 137;
+            // Four cells of 137 pixels leave 136 for the last one.
+            const int x = i * 137, width = std::min(137, 684 - x);
             if (i) canvas.line(x, toolbar_top, x, 1215, 1, 2);
             tool_icon(ids[i], x + 68, 1126);
-            center(labels[i], x, 1160, 137, 28);
-            hits.push_back({x, toolbar_top, 137, 136, ids[i]});
+            const int size = ids[i] == Refresh ? 26 : 28;
+            center(labels[i], x, 1160 + (28 - size) / 2, width, size);
+            hits.push_back({x, toolbar_top, width, 136, ids[i]});
         }
         if (!notice().empty()) {
             canvas.fill_rect(24, 1012, 636, 56, 15);
             note(message, 1024);
         }
-        hits.push_back({0, 104, 684, 908, Dismiss});
+        hits.push_back({0, 104, 684, toolbar_top - 104, Dismiss});
     }
     std::size_t current_toc() const {
         const auto &toc = document.toc();
@@ -3707,11 +3734,13 @@ struct ReaderApp::Impl final : DisplayBackend {
         button(Back, "取消", 24, 1080, 306, 96);
         button(IntervalSave, "保存间隔", 354, 1080, 306, 96, true);
     }
-    void settings_row(int id, const std::string &title, const std::string &value, int y) {
+    /** A 132-pixel row with a title and a summary. A zero id draws a description without a hit. */
+    void settings_row(int id, const std::string &title, const std::string &value, int y, std::uint8_t rule = 12) {
         text(title, 36, y + 20, 28, 554, 1, true);
         text(value, 36, y + 70, 22, 554, 3);
+        canvas.line(24, y + 131, 660, y + 131, rule, 2);
+        if (!id) return;
         text("›", 620, y + 42, 28, 40);
-        canvas.line(24, y + 131, 660, y + 131, 12, 2);
         hits.push_back({24, y, 636, 132, id});
     }
     bool wifi_enabled() const {
@@ -4231,8 +4260,32 @@ struct ReaderApp::Impl final : DisplayBackend {
                      (values.auto_sleep_minutes ? std::to_string(values.auto_sleep_minutes) + " 分钟" : "不自动休眠"), 648);
         settings_row(StorageSettings, "存储与设备", (measured ? "可用 " + file_size(card_free) : "可用空间未知") + " · 固件 " + firmware_version(), 780);
         entry_row(Help, "使用说明", "", "离线查看", 912, 80);
-        if (session.needs_save()) button(SaveRetry, "重试保存进度", 24, 992, 636, 96);
-        footer_bar(cfg.diagnostics.empty() ? notice() : "设置文件无效，请检查后重新打开。");
+        entry_row(About, "关于", "", "", 992, 80);
+        if (session.needs_save()) {
+            // Unsaved progress outranks other notices; the whole footer retries the save.
+            footer_bar("进度尚未保存 · 点此重试");
+            hits.push_back({0, footer_zone, 684, 96, SaveRetry});
+        } else footer_bar(cfg.diagnostics.empty() ? notice() : "设置文件无效，请检查后重新打开。");
+    }
+    void draw_about() {
+        view = View::About;
+        hits.clear(); canvas.clear(); header("关于", Back, "设置");
+        text("Pico Page", 36, 144, 44, 612, 1, true);
+        text("Read Pico 墨水屏阅读固件", 36, 206, 22, 612, 3);
+        canvas.line(24, 256, 660, 256, 1, 2);
+        value_row(0, "版本", "", firmware_version(), 256, 70);
+        value_row(0, "硬件", "", hardware_name(), 326, 70);
+        value_row(0, "作者", "", "wulu", 396, 70);
+        value_row(0, "项目主页", "", kProjectHome, 466, 70);
+        graphics::draw_qr(canvas, std::string("https://") + kProjectHome, 36, 572, 224);
+        text("扫码打开项目主页", 284, 594, 28, 364, 1, true);
+        wrapped("查看介绍和字体下载。", 284, 642, 364, 22, true, 3);
+        text("第三方组件", 36, 840, 22, 612, 3);
+        canvas.line(24, 876, 660, 876, 1, 2);
+        value_row(0, "epdiy 显示驱动", "", "LGPL-3.0-or-later", 876, 64);
+        value_row(0, "内置正文字体", "", "OFL 1.1", 940, 64);
+        text("源码整理中，敬请期待。", 36, 1036, 22, 612, 3);
+        footer_bar(notice());
     }
     void help_regions(int x, int y, int width, int height) {
         const int left = width * 205 / 684, right = width * 479 / 684, foot = height * footer_top / 1216;
@@ -4292,7 +4345,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void draw_help() {
         view = View::Help;
-        hits.clear(); canvas.clear(); header("使用说明", Back, "设置");
+        hits.clear(); canvas.clear(); header("使用说明", Back, help_from_settings ? "设置" : "书库");
         const auto& page = kHelpPages[help_page];
         if (help_page == 3) { draw_help_demo(); return; }
         text(page.title, 36, 144, 34, 612, 1, true);
@@ -4401,6 +4454,13 @@ struct ReaderApp::Impl final : DisplayBackend {
     static std::string typography_summary(const ReaderSettings &values) {
         return font_name(values.font) + " · " + std::to_string(values.font_size_px) + " px · " + decimal(values.line_height);
     }
+    static const char *hardware_name() {
+#ifdef ESP_PLATFORM
+        return "Read Pico";
+#else
+        return "桌面预览";
+#endif
+    }
     static std::string firmware_version() {
 #ifdef ESP_PLATFORM
         return esp_app_get_description()->version;
@@ -4466,11 +4526,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         value_row(0, "可用空间", "", measured ? file_size(card_free) : "未知", 304, 70, true);
         text("设备", 36, 402, 22, 612, 3);
         value_row(0, "固件版本", "", firmware_version(), 438, 70);
-#ifdef ESP_PLATFORM
-        value_row(0, "硬件", "", "Read Pico", 508, 70);
-#else
-        value_row(0, "硬件", "", "桌面预览", 508, 70);
-#endif
+        value_row(0, "硬件", "", hardware_name(), 508, 70);
         text("文件位置", 36, 606, 22, 612, 3);
         value_row(0, "书籍与文章", "", roots.size() == 1 ? roots.front() + "/" : "多个目录（见设置文件）", 642, 70);
         value_row(0, "自行添加的字体", "", "Fonts/", 712, 70);
@@ -5584,7 +5640,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (view == View::RefreshConfirm || view == View::RefreshInterval || view == View::PageEffects) {
             draw_refresh(); overlay(); return;
         }
-        if (view == View::Help || view == View::WifiSettings || view == View::PowerSettings || view == View::StorageSettings || view == View::InputSettings ||
+        if (view == View::Help && !help_from_settings) { draw_library(); overlay(); return; }
+        if (view == View::Help || view == View::About || view == View::WifiSettings || view == View::PowerSettings || view == View::StorageSettings || view == View::InputSettings ||
             view == View::SyncSettings || (view == View::Import && import_from_settings) ||
             (view == View::Refresh && refresh_from_settings)) {
             draw_settings(); overlay(); return;
@@ -5802,6 +5859,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
             return;
         }
+        if ((id == WifiUpload || id == UsbStart) && view == View::Library) import_from_settings = false;
         if (id == WifiUpload || id == WifiUploadStation) {
             if (!wifi_enabled()) { wifi_page = wifi_root = WifiPage::Home; draw_wifi(); overlay(); return; }
             ++portal_generation;
@@ -5923,7 +5981,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         switch (id) {
         case Help:
+            help_from_settings = view == View::Settings;
             message.clear(); help_page = 0; draw_help();
+            break;
+        case About:
+            message.clear(); draw_about();
             break;
         case LinkReturn: {
             if (!link_return)
