@@ -2,7 +2,7 @@
 
 ## 当前摘要（2026-10-11）
 
-RTC 接入已有本地候选（2026-10-11，基于 `14b84e9`，分支 `feat/rtc-clock`，独立 worktree）：实现前核对官方 PMU 协议、演示与自检；启动恢复有效 RTC，真实 NTP 校时后空闲写回并读回确认。PMU 仍由应用任务独占，不增加联网入口或定时刷屏。host Debug 与 AppleClang ASan/UBSan 各 21/21，标准固件构建与来源校验通过；未刷写。保时、漂移和故障输入响应待 CK01 真机验收，详见本日 RTC 记录。
+RTC 接入已有本地候选（2026-10-11，基于 `14b84e9`，分支 `feat/rtc-clock`，独立 worktree）：实现前核对官方 PMU 协议、演示与自检；启动恢复有效 RTC，真实 NTP 校时后空闲写回并读回确认。PMU 仍由应用任务独占，不增加联网入口或定时刷屏。整合版本管理主线后，host Debug 与 AppleClang ASan/UBSan 各 22/22，标准固件构建、来源校验和 456 项交接检查通过；PR #64 等待最终 CI/review，未刷写。保时、漂移和故障输入响应待 CK01 真机验收，详见本日 RTC 记录。
 
 版本管理已统一为 `firmware/version.txt`，计划测试版本为 `0.2.0-beta.1`，尚未发布。固件应用描述、设置页、使用说明、host 预览和构建来源记录共用版本规则；开发构建附带提交号和 dirty 状态。发布标签检查、镜像版本一致性检查及编号规则见[版本管理](versioning.md)。本批 host Debug CTest 21/21、Python 49/49、Release 固件构建通过；未创建标签、未提交、未推送、未刷写。
 
@@ -4917,3 +4917,5 @@ PR #64 的 Linux GCC 在 RTC 回归中遇到 `<ctime>` 撤销 `time` 替身宏�
 ### 2026-10-11 · RTC 与版本管理整合
 
 等待 PR #64 CI/review 期间，主线通过 PR #62 增加统一版本入口。已整合 `0161b8c`，两处冲突均为开发记录，保留双方摘要和历史；版本 CMake、应用版本显示和 RTC 逻辑自动合并。整合后重新执行 host Debug、ASan/UBSan、标准固件与交接检查，并以最终提交的 CI/review 作为合并依据。未刷写。
+
+整合提交 `cb90493` 的本地结果：Debug CTest 22/22（39.91 秒）、AppleClang ASan/UBSan CTest 22/22（73.61 秒）、标准固件构建与应用版本/来源校验通过，版本为 `0.2.0-beta.1+gcb90493`；456 项交接检查与 diff 检查通过。日志为 `.local/rtc-integrated-{host,sanitized,firmware,handoff}.log`。此处的最终记录提交只修改文档，后续 CI/review 必须覆盖该提交；本批未刷写，不增加真机验收结论。
