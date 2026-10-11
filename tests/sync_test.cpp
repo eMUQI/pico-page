@@ -91,6 +91,24 @@ int main(int argc, char** argv) {
             assert(!sync::from_xpointer(images, "/body[1]/DocFragment[1]/body[1]/p[1]/img[1].0", version, recovered, error));
             assert(recovered == Anchor{});
         }
+
+        // An image that opens a chapter part lies inside that part: its run, its image entry and
+        // the place reported for its position all use offsets of the part that holds it.
+        EpubDocument split;
+        Chapter second;
+        assert(split.open((fixtures / "part-boundary-image.epub").string(), error));
+        assert(split.load_chapter(0, second, error, ChapterLoad::Mapping, 1));
+        assert(second.part == 1 && second.last_part && second.images.size() == 1 && second.plain_dom);
+        const auto& opening = second.images[0];
+        assert(opening.begin == 0 && opening.begin < opening.end && opening.end <= second.text.size());
+        assert(!second.runs.empty() && second.runs[0].element_reference && second.runs[0].begin == 0 &&
+               second.runs[0].end == opening.end);
+        Anchor first_anchor;
+        assert(second.anchor_at(0, first_anchor) && first_anchor == opening.source);
+        Anchor recovered;
+        sync::PartPosition place;
+        assert(sync::from_xpointer(split, "/body[1]/DocFragment[1]/body[1]/img[1].0", 20260812, recovered, error, {}, &place));
+        assert(recovered == opening.source && place.part == 1 && place.offset == 0 && place.offset < place.part_scalars);
     }
     chapter.plain_dom = true;
     chapter.css_sources.push_back("p { white-space: pre-wrap; }");

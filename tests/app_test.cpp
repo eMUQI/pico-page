@@ -1908,6 +1908,22 @@ int main(int argc, char** argv) {
         // The refused upload sends nothing, keeps the saved position and changes the status text.
         assert(upload() && !app.take_network_request() && *app.saved_record() == saved);
         driver.close(); driver.present(); driver.complete_content();
+        {
+            // The same refusal while the remote holds another position: the comparison panel
+            // stays, nothing is sent, and the panel says why instead of reappearing unchanged.
+            driver.sync_view();
+            const auto request = driver.check_remote();
+            app.complete_network(request.id, 200, R"({"progress":"/body[1]/DocFragment[2]/body[1]/h1[1]/text()[1].0","percentage":0.5})", "");
+            driver.present(); driver.complete_content();
+            assert(app.view() == View::Sync && std::string(app.sync_state()) == "different" && app.sync_order() == 1);
+            const auto choice = app.canvas().pixels();
+            driver.tap(342, 1090); driver.present(); driver.tap(500, 1120); driver.present();
+            driver.complete_content();
+            assert(app.view() == View::Sync && std::string(app.sync_state()) == "different");
+            assert(!app.take_network_request() && *app.saved_record() == saved && app.canvas().pixels() != choice);
+            driver.close(); driver.present(); driver.complete_content();
+            assert(app.view() == View::Reading);
+        }
         const auto unsupported = remote("/body[1]/DocFragment[1]/body[1]/p[1]/text()[1].0");
         const auto missing = remote("/body[1]/DocFragment[2]/body[1]/p[77]/text()[1].0");
         assert(unsupported != missing && *app.saved_record() == saved);
@@ -2440,7 +2456,7 @@ int main(int argc, char** argv) {
         assert(doc.open((fixtures / "multi-part.epub").string(), error));
         Chapter original, cached;
         assert(load_content(store, doc, 0, original, error, ChapterLoad::Reading, 2));
-        const auto cache = card / "PicoPage/cache/content/content-reading-v2" / doc.metadata().book_id / "0/2";
+        const auto cache = card / "PicoPage/cache/content/content-reading-v3" / doc.metadata().book_id / "0/2";
         assert(fs::exists(cache));
         const auto data = read(cache);
         for (std::uint32_t part = 0; part < 2; ++part) {

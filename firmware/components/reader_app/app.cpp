@@ -2615,7 +2615,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                       spec.left, spec.top, spec.width, spec.height, spec.font_px, spec.line_height,
                       spec.indent_chars, spec.paragraph_gap, spine.size());
         pages_name = name;
-        pages_header = std::string("PPPAGES3\n") + revision_for(book_path, document.metadata()) + ":pagination-v2\n" + book_path + "\n" + font_file + "\n" + geometry +
+        pages_header = std::string("PPPAGES3\n") + revision_for(book_path, document.metadata()) + ":pagination-v3\n" + book_path + "\n" + font_file + "\n" + geometry +
             document.metadata().book_id + "\n" + font_identity + "\n";
         if (async_content) { pages_cache_pending = true; return; }
         if (auto cached = read_page_cache(store, pages_name, pages_header, spine)) adopt_pages(std::move(*cached));
@@ -4885,7 +4885,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             canvas.line(351, 872, 647, 872, 12, 2);
             center("跳到这里", 351, 882, 297, 24);
             hits.push_back({351, 674, 297, 250, SyncJump});
-            note("留在这里不会上传，下次检查仍会提示。", 948);
+            // A refused or failed upload returns to this panel, which then shows its reason.
+            if (sync_status.empty()) note("留在这里不会上传，下次检查仍会提示。", 948);
+            else title_lines(sync_status, 36, 948, 612, 24, false, 2);
             button(SyncUpload, "上传本机位置…", 36, sync_lower, 612, 88);
             return;
         }

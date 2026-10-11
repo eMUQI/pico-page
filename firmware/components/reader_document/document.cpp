@@ -512,7 +512,11 @@ struct ChapterParser {
     }
     /** Appends a media placeholder as a block of its own, mapped to the node at path. Returns false after stopping the parser. */
     bool place_media(const std::string& label, const std::string& path, std::uint32_t& begin) {
-        finish_block(); block_kind = BlockKind::Image;
+        finish_block();
+        // A split left pending by the block before takes effect here, so that the placeholder,
+        // its run and the image entry all use offsets of the part that holds them.
+        if (split_pending && !next_part()) return false;
+        block_kind = BlockKind::Image;
         std::u32string scalar; decode(label.data(), label.size(), scalar);
         begin = static_cast<std::uint32_t>(chapter.text.size());
         if (scalar.size() > 256) { scalar.resize(255); scalar.push_back(U'…'); }
