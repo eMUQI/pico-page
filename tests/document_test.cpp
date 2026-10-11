@@ -29,6 +29,33 @@ int main(int argc, char** argv) {
     }
     assert(book.metadata().partial_md5 == "acc8613b9b4639011c4ff6dbdef6b6f7");
     assert(book.spine().size() == 2 && book.toc().size() == 2);
+    {
+        const std::string fixture = argv[1];
+        const auto directory = fixture.substr(0, fixture.rfind('/') + 1);
+        for (const auto kind : {"crlf", "padding", "limit"}) {
+            const auto path = directory + "mimetype-" + kind + ".epub";
+            FileDigest before(path);
+            while (!before.step(8192)) {}
+            EpubDocument padded;
+            assert(padded.open(path, error));
+            assert(padded.metadata().book_id == before.digest());
+            assert(padded.spine().size() == book.spine().size());
+            Chapter chapter;
+            assert(padded.load_chapter(0, chapter, error) && !chapter.text.empty());
+            FileDigest after(path);
+            while (!after.step(8192)) {}
+            assert(after.digest() == before.digest());
+        }
+        for (const auto kind : {"invalid", "internal-space", "nul", "empty", "oversized", "missing", "read-failure",
+                                "directory"}) {
+            EpubDocument invalid;
+            assert(!invalid.open(directory + "mimetype-" + kind + ".epub", error));
+            const std::string name = kind;
+            assert(error == (name == "oversized" ? "EPUB mimetype exceeds limit" :
+                             name == "read-failure" ? "Cannot read EPUB mimetype" :
+                             name == "missing" ? "Missing EPUB mimetype" : "Invalid EPUB mimetype"));
+        }
+    }
     Chapter first;
     assert(book.load_chapter(0, first, error));
     const auto mixed = first.text.find(U"中文 内联𠮷😀 与 English & 空白。\u00a0保留不换行空格。");
