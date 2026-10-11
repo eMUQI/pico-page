@@ -723,6 +723,13 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
     assert(!run(true, "01.png").image);
     assert(run(false, "01.png").cache_finished);
     assert(run(true, "01.png").image && store.last_lock_screen() == "02.PNG");
+    const auto original_time = fs::last_write_time(root / "LockScreens/01.png");
+    write(root / "LockScreens/01.png", std::string(png.size(), 'x'));
+    fs::last_write_time(root / "LockScreens/01.png", original_time);
+    assert(!run(true, "01.png").image);
+    write(root / "LockScreens/01.png", png);
+    fs::last_write_time(root / "LockScreens/01.png", original_time);
+    assert(run(true, "01.png").image);
     write(root / "LockScreens/01.png", "broken PNG");
     assert(!run(true, "01.png").image && !run(false, "01.png").cache_finished);
     fs::remove(root / "LockScreens/01.png");

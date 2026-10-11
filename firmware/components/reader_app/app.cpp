@@ -1315,6 +1315,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         // The lock screen reads the cover cache itself; a failed or cancelled attempt falls back to the title.
         if (request.kind == ContentJob::Kind::SleepCover) return;
         if (request.kind == ContentJob::Kind::LockScreen) {
+            if (settings.sleep_screen != "custom" || request.sleep_image != settings.sleep_image) return;
             if (request.preview && custom_sleep_attempted && sleep_cover_deadline) {
                 custom_sleep_image = std::move(job->result.image);
                 custom_notice = result.error;

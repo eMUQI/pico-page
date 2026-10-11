@@ -362,7 +362,7 @@ int main(int argc, char **argv) {
         if (sleep_requested && (event.type == SDL_KEYDOWN || event.type == SDL_MOUSEBUTTONDOWN)) {
             host.app.cancel_sleep();
             sleep_requested = false;
-            continue;
+            if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_SPACE) continue;
         }
         if (event.type == SDL_QUIT) {
             host.app.save_progress();

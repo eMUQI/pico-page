@@ -439,11 +439,15 @@ void ContentJob::prepare_lock_screen() {
     result.lock_screen = result.lock_screens[index];
     const auto path = request.root + "/LockScreens/" + result.lock_screen;
     struct stat before{}, after{};
-    if (stat(path.c_str(), &before) || !S_ISREG(before.st_mode)) { result.error = "图片不可读"; return; }
+    if (stat(path.c_str(), &before) || !S_ISREG(before.st_mode) || before.st_size <= 0 || before.st_size > 2 * 1024 * 1024) {
+        result.error = "图片不可读或超过 2 MiB"; return;
+    }
+    const auto identity = sha256_file(path, stop);
+    if (identity.empty() || stop()) { result.error = "图片身份校验失败或已取消"; return; }
     std::uint64_t hash = 1469598103934665603ULL;
     for (unsigned char ch : result.lock_screen) hash = (hash ^ ch) * 1099511628211ULL;
     const auto cache = "lockscreens/" + std::to_string(hash);
-    const auto header = "PPLOCK1\n" + result.lock_screen + "\n" + std::to_string(before.st_size) + "\n" +
+    const auto header = "PPLOCK2\n" + identity + "\n" + result.lock_screen + "\n" + std::to_string(before.st_size) + "\n" +
                         std::to_string(before.st_mtime) + "\n684x1216-fit\n";
     constexpr std::size_t count = 342 * 1216;
 #ifdef ESP_PLATFORM
@@ -463,7 +467,7 @@ void ContentJob::prepare_lock_screen() {
             result.cache_finished = true;
         }
     }
-    // Sleep requests only consume an existing cache. Decoding is confined to awake preparation.
+    // Sleep requests validate the source identity but never decode an uncached image.
     if (!result.cache_finished && request.preview) { result.error = "图片缓存尚未就绪"; return; }
     if (!result.cache_finished) {
         std::vector<std::uint8_t> encoded;
@@ -476,7 +480,8 @@ void ContentJob::prepare_lock_screen() {
             result.error = "图片损坏、不支持或准备超时"; return;
         }
         std::vector<std::uint8_t>().swap(encoded);
-        if (stat(path.c_str(), &after) || before.st_size != after.st_size || before.st_mtime != after.st_mtime) {
+        if (stat(path.c_str(), &after) || before.st_size != after.st_size || before.st_mtime != after.st_mtime ||
+            sha256_file(path, stop) != identity || stop()) {
             result.error = "图片已改变，请重试"; return;
         }
         auto bytes = header;
