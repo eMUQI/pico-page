@@ -2350,7 +2350,11 @@ int main(int argc, char** argv) {
         assert(!app.prepare_usb_transfer());
         const auto detached = card.string() + "-detached";
         fs::rename(card, detached);
-        app.show_usb_transfer(true, ""); driver.present();
+        app.show_usb_transfer(true, "");
+        assert(app.pending_frame()->refresh == RefreshIntent::Content && !app.pending_frame()->region);
+        app.complete_frame(false);
+        assert(app.view() == View::UsbTransfer && app.pending_frame()->refresh == RefreshIntent::FullClean);
+        driver.present();
         assert(!app.open_book("Books/book.epub"));
         assert(!app.prepare_sleep());
         app.complete_network(123, 200, "{}", "");
@@ -3385,10 +3389,13 @@ int main(int argc, char** argv) {
         assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
         const auto before = app.saved_record();
         const auto pixels = app.canvas().pixels();
-        assert(app.show_power_menu()); driver.present(); driver.refresh();
+        assert(app.show_power_menu() && app.pending_frame()->refresh == RefreshIntent::Content);
+        driver.present(); driver.refresh();
         driver.key(Input::K1); driver.key(Input::K3);
         assert(!app.pending_frame() && app.take_power_request().action == PowerAction::None);
-        driver.tap(100, 1100); driver.present();
+        driver.tap(100, 1100);
+        assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::Content);
+        driver.present();
         assert(app.view() == View::Reading && app.canvas().pixels() == pixels && app.saved_record() == before);
         driver.typography();
         const auto draft_view = app.view(); const auto draft_pixels = app.canvas().pixels();
@@ -3441,7 +3448,9 @@ int main(int argc, char** argv) {
         const auto sidecar = home / "Books/book.epub.picopage";
         fs::rename(sidecar, sidecar.string() + ".held"); write(sidecar, "not a directory");
         assert(app.show_power_menu()); driver.present(); driver.tap(300, 520);
-        assert(!app.prepare_power(app.take_power_request())); driver.present();
+        assert(!app.prepare_power(app.take_power_request()));
+        assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::Content);
+        driver.present();
         assert(app.view() == View::PowerMenu && app.saved_record() == previous);
         assert(app.status().find("TF 卡") != std::string::npos);
         driver.refresh();
@@ -3505,8 +3514,13 @@ int main(int argc, char** argv) {
     {
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present();
-        assert(app.show_power_menu()); app.complete_frame(false); driver.present();
+        assert(app.show_power_menu()); app.complete_frame(false);
+        assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean);
+        driver.present();
         assert(app.view() == View::Library && app.take_power_request().action == PowerAction::None);
+        app.power_unavailable("请先结束当前任务，再关机或重启。");
+        assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::Content);
+        driver.present();
         assert(app.prepare_portal()); driver.present();
         assert(!app.show_power_menu() && app.view() == View::Portal);
         driver.portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); driver.present();
