@@ -7,14 +7,14 @@ inline constexpr char upload_page[] = R"HTML(<!doctype html><html lang="zh-CN"><
 <style>*{box-sizing:border-box}body{margin:0 auto;max-width:560px;background:#fff;color:#111;font:16px/1.5 system-ui,-apple-system,'PingFang SC','Noto Sans SC',sans-serif}
 header{padding:18px 20px;border-bottom:3px solid #111}h1{font-size:22px;margin:0}.sub{font-size:13px;color:#333}.mono{font-family:ui-monospace,Menlo,Consolas,monospace}
 .pick{padding:16px 20px;display:flex;flex-direction:column;gap:12px;border-bottom:2px solid #111}
-.drop{height:64px;border:2px dashed #111;display:flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer;text-align:center;padding:0 12px}
+.drop{height:64px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer;text-align:center;padding:0 12px}
 .drop.over{border-style:solid;border-width:3px}.drop.off{color:#555;border-color:#999;cursor:default}
 .hint{margin:0;font-size:13px;color:#333;line-height:1.6}.counts{padding:12px 20px 0;display:flex;justify-content:space-between;font-size:14px}
 .result{padding:20px;display:flex;flex-direction:column;gap:6px;border-bottom:2px solid #111}.result b{font-size:20px}.result span{font-size:14px;line-height:1.6}
 .list{padding:4px 20px 0;display:flex;flex-direction:column}
 .row{min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #cfcfcf;padding:6px 0}
 .row>div{display:flex;flex-direction:column;min-width:0;overflow-wrap:anywhere}.row small{font-size:13px;color:#333}.row small.why{color:#111}
-.row.wait{color:#333}.tag{font-size:14px;border:2px solid #111;padding:0 6px;white-space:nowrap}.tag.dash{border-style:dashed}
+.row.wait{color:#333}.tag{font-size:14px;border:2px solid #111;padding:0 6px;white-space:nowrap}
 .now{min-height:72px;flex-direction:column;align-items:stretch;justify-content:center;gap:6px;border:2px solid #111;margin:0 -10px;padding:8px 10px}
 .now .line{display:flex;flex-direction:row;justify-content:space-between;gap:12px}.now .line span{font-size:14px;white-space:nowrap}
 .bar{height:8px;border:1px solid #111}.bar i{display:block;height:100%;background:#111}
@@ -49,7 +49,7 @@ const row=(item,i)=>{
   const width=item.state==='check'?0:item.state==='verify'?100:item.percent;
   return '<div class="row now"><div class="line"><b>'+name+'</b><span>'+label+'</span></div><div class="bar"><i style="width:'+width+'%"></i></div></div>';}
  case 'saved':return '<div class="row"><div>'+name+'<small>'+size(item.file.size)+'</small></div><span class="tag">已保存</span></div>';
- case 'rejected':return '<div class="row"><div>'+name+'<small class="why">'+esc(item.why)+'</small></div><span class="tag dash">未上传</span></div>';
+ case 'rejected':return '<div class="row"><div>'+name+'<small class="why">'+esc(item.why)+'</small></div><span class="tag">未上传</span></div>';
  default:return '<div class="row"><div>'+name+'<small class="why">'+esc(item.why)+'</small></div><button class="retry" data-retry="'+i+'">重试</button></div>';}
 };
 const render=()=>{

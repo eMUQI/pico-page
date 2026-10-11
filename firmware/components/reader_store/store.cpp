@@ -1090,7 +1090,45 @@ StoreStatus FileStore::save_cache(const std::string& name, const std::string& by
            publish(root_, path + ".tmp", path) ? StoreStatus::Ok : StoreStatus::IoError;
 }
 
-StoreStatus FileStore::save_last_book(const std::string& book_path, std::string& error) const {
+namespace {
+constexpr std::size_t recent_limit = 144 * 1024, recent_count = 128;
+constexpr const char* recent_path = "PicoPage/data/recent-books.txt";
+bool parse_recent(const std::string& bytes, std::vector<RecentBook>& records) {
+    if (bytes.compare(0, 10, "PPRECENT1\n") != 0) return false;
+    std::size_t start = 10;
+    while (start < bytes.size()) {
+        const auto end = bytes.find('\n', start), tab = bytes.find('\t', start);
+        if (end == std::string::npos || tab == std::string::npos || tab >= end || records.size() >= recent_count) return false;
+        std::int64_t utc = 0;
+        const auto parsed = std::from_chars(bytes.data() + start, bytes.data() + tab, utc);
+        const auto path = bytes.substr(tab + 1, end - tab - 1);
+        if (parsed.ec != std::errc() || parsed.ptr != bytes.data() + tab || utc < 0 || utc > 253402300799LL ||
+            !store_internal::relative_path(path) || std::any_of(records.begin(), records.end(),
+                [&](const auto& item) { return item.path == path; })) return false;
+        records.push_back({path, utc});
+        start = end + 1;
+    }
+    return true;
+}
+}
+
+std::vector<RecentBook> FileStore::load_recent_books(std::string& error) const {
+    error.clear();
+    for (const auto& path : {std::string(recent_path), std::string(recent_path) + ".bak"}) {
+        std::string bytes;
+        const auto status = store_internal::read_file(root_, path, recent_limit, bytes);
+        if (status == StoreStatus::Missing) continue;
+        std::vector<RecentBook> records;
+        if (status == StoreStatus::Ok && parse_recent(bytes, records)) {
+            error.clear(); return records;
+        }
+        error = "Recent book record cannot be read";
+        if (status != StoreStatus::Ok && status != StoreStatus::Invalid) break;
+    }
+    return {};
+}
+
+StoreStatus FileStore::save_last_book(const std::string& book_path, std::string& error, std::int64_t utc) const {
     error.clear();
     const auto safe = store_internal::safe_path(root_, book_path);
     if (safe != StoreStatus::Ok) { error = "Last book path is unavailable or unsafe"; return safe; }
@@ -1110,9 +1148,26 @@ StoreStatus FileStore::save_last_book(const std::string& book_path, std::string&
     if (!previous_path.empty() && previous_path.back() == '\n') previous_path.pop_back();
     if (!previous_path.empty() && previous_path.back() == '\r') previous_path.pop_back();
     const bool preserve_backup = status == StoreStatus::Ok && !store_internal::relative_path(previous_path);
-    return store_internal::commit_file(root_, path,
+    const auto committed = store_internal::commit_file(root_, path,
         status == StoreStatus::Ok ? std::optional<std::string>(existing) : std::nullopt,
         book_path + "\n", 1026, error, preserve_backup);
+    if (committed != StoreStatus::Ok) return committed;
+    auto records = load_recent_books(error);
+    if (!error.empty()) return StoreStatus::Invalid;
+    records.erase(std::remove_if(records.begin(), records.end(), [&](const auto& item) {
+        return item.path == book_path;
+    }), records.end());
+    if (records.size() == recent_count) records.pop_back();
+    records.insert(records.begin(), {book_path, utc >= 1704067200 && utc <= 253402300799LL ? utc : 0});
+    std::string bytes = "PPRECENT1\n";
+    for (const auto& item : records) bytes += std::to_string(item.opened_at) + "\t" + item.path + "\n";
+    std::string previous;
+    const auto read = store_internal::read_file(root_, recent_path, recent_limit, previous);
+    if (read != StoreStatus::Ok && read != StoreStatus::Missing) { error = "Recent book record cannot be read"; return read; }
+    std::vector<RecentBook> checked;
+    return store_internal::commit_file(root_, recent_path,
+        read == StoreStatus::Ok ? std::optional<std::string>(previous) : std::nullopt,
+        bytes, recent_limit, error, read == StoreStatus::Ok && !parse_recent(previous, checked));
 }
 
 std::optional<std::string> FileStore::load_last_book(std::string& error) const {

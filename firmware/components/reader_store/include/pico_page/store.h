@@ -2,6 +2,7 @@
 
 #include "pico_page/record.h"
 
+#include <ctime>
 #include <optional>
 #include <memory>
 #include <string>
@@ -74,8 +75,14 @@ struct BookSnapshot {
     std::optional<std::string> progress, backup;
 };
 
+struct RecentBook {
+    std::string path;
+    std::int64_t opened_at = 0;  // Unix seconds; 0 means that the clock was unset.
+};
+
 struct ReaderSettings {
     std::string font = "Fonts/LXGWWenKai-Regular.ttf";
+    std::string font_weight = "regular";  // light, regular, medium or bold; unsupported heavier weights are synthesized.
     int font_size_px = 38;
     double line_height = 1.5;
     int margin_x_px = 36;
@@ -86,6 +93,8 @@ struct ReaderSettings {
     int fast_full_refresh_pages = 5;
     std::vector<std::string> library_roots = {"Books"};
     std::string library_view = "list";
+    std::string library_folders = "first";  // Global only: first or recent.
+    std::string library_sort = "recent";  // Global only: recent, name or name_desc.
     bool wifi_enabled = true;  // Global only; applies to station and access-point sessions.
     int auto_sleep_minutes = 10;  // Global only; 0 disables idle sleep.
     std::string sleep_screen = "cover";  // Global only: cover, reading or simple.
@@ -200,7 +209,7 @@ public:
      * source snapshots. Invalid source layers or unsafe TOML edits are rejected.
      * Existing comments and untouched fields are preserved. Book changes equal
      * to global values remove the corresponding override. library.roots is
-     * read-only through this API; library.view is saved with the global layer only.
+     * read-only through this API; library.view, sort and folders are global only.
      * Refresh the snapshot after every successful save.
      */
     StoreStatus apply_settings(const SettingsSnapshot& snapshot, const ReaderSettings& values,
@@ -209,8 +218,14 @@ public:
     /** Removes reader/display book overrides, retaining their comments and schema. */
     StoreStatus clear_book_settings(const SettingsSnapshot& snapshot, std::string& error) const;
 
-    /** Saves an existing card-relative book path after successful page presentation. */
-    StoreStatus save_last_book(const std::string& book_path, std::string& error) const;
+    /** Saves the last path, then updates bounded recent history after successful page presentation.
+     * Each file commits independently; an error can leave the last path newer than the history.
+     * utc is Unix seconds; an unset or out-of-range clock is stored as 0. */
+    StoreStatus save_last_book(const std::string& book_path, std::string& error,
+                               std::int64_t utc = std::time(nullptr)) const;
+
+    /** At most 128 paths in last-opened order; malformed records return an empty list and an error. */
+    std::vector<RecentBook> load_recent_books(std::string& error) const;
 
     /** Loads the last existing book, recovering a valid committed backup when needed. */
     std::optional<std::string> load_last_book(std::string& error) const;

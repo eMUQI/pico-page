@@ -24,9 +24,11 @@ ESP-IDF FatFs 的 `rename` 不覆盖已有目标。host 和固件都执行「保
 
 读取顺序：内置默认 → `PicoPage/settings.toml` → `<完整书名>.picopage/settings.toml`。本书只叠加出现的字段，因此只有字号覆盖时，重新加载仍继承全局字体变化。缺失文件采用上层值；语法、UTF-8、类型、范围、未知字段或新 schema 错误时整层回退，返回文件路径、字段或解析器行号及原因，保留原文件。
 
-当前支持：`reader.font`、`font_size_px`、`line_height`、`margin_x_px`、`paragraph_gap_lines`、`indent_chars`，以及 `display.refresh_preset`、`display.balanced_full_refresh_pages`、`display.fast_full_refresh_pages`，后两项的取值范围均为 1–30 页。全局另支持 `library.roots`、`library.view`、`network.wifi_enabled`、`power.auto_sleep_minutes` 与 `power.sleep_screen`。`network.wifi_enabled` 为布尔值，默认 `true`；单书不可覆盖。关闭后禁止同步、账号验证和两种 Wi-Fi 传书，保留网络及同步账户文件。配置无效时网络入口拒绝启动，修正原文件后可重试。`power.auto_sleep_minutes` 是无输入后自动休眠的分钟数，范围 0–240，默认 10，0 表示关闭；单书配置中出现 `power` 表按未知字段处理。设备设置页可保存自动休眠时长和休眠画面；也可在 TF 卡上编辑，启动或开书时读取。`power.sleep_screen` 接受 `cover`、`reading`、`simple`。字号当前界限为 12–96 px，行高 1–3，水平边距 0–160 px；这些是输入校验界限，不是已经完成的视觉范围验收。文件最多 32 KiB，扫描根最多 16 项。段距为 0–1 行，默认 0；首行缩进为 0–2 字，默认 2。旧配置缺少这两个字段时采用默认值。用户 TOML 中 `/Books` 表示卡根目录，输出内部规范化为 `Books`，不会访问 host `/Books`。字体偏好原样保留；字体可用性和运行时回退由字体/渲染模块处理。
+当前支持：`reader.font`、`font_weight`、`font_size_px`、`line_height`、`margin_x_px`、`paragraph_gap_lines`、`indent_chars`，以及 `display.refresh_preset`、`display.balanced_full_refresh_pages`、`display.fast_full_refresh_pages`，后两项的取值范围均为 1–30 页。全局另支持 `library.roots`、`library.view`、`library.sort`、`library.folders`、`network.wifi_enabled`、`power.auto_sleep_minutes` 与 `power.sleep_screen`。`network.wifi_enabled` 为布尔值，默认 `true`；单书不可覆盖。关闭后禁止同步、账号验证和两种 Wi-Fi 传书，保留网络及同步账户文件。配置无效时网络入口拒绝启动，修正原文件后可重试。`power.auto_sleep_minutes` 是无输入后自动休眠的分钟数，范围 0–240，默认 10，0 表示关闭；单书配置中出现 `power` 表按未知字段处理。设备设置页可保存自动休眠时长和休眠画面；也可在 TF 卡上编辑，启动或开书时读取。`power.sleep_screen` 接受 `cover`、`reading`、`simple`。字号当前界限为 12–96 px，行高 1–3，水平边距 0–160 px；这些是输入校验界限，不是已经完成的视觉范围验收。文件最多 32 KiB，扫描根最多 16 项。段距为 0–1 行，默认 0；首行缩进为 0–2 字，默认 2。旧配置缺少这两个字段时采用默认值。用户 TOML 中 `/Books` 表示卡根目录，输出内部规范化为 `Books`，不会访问 host `/Books`。字体偏好原样保留；字体可用性和运行时回退由字体/渲染模块处理。
 
-`settings_snapshot()` 捕获全局和本书的原始字节及其有效值。`apply_settings()` 在写入前比较两层原文，外部修改、创建或删除文件均返回 `ExternalChange`。语法、版本或字段无效时拒绝保存，不把读取阶段的回退值覆盖到原文件。写回接受上述阅读和显示字段；全局配置还可写 `library.view`、`network.wifi_enabled` 和 `power` 字段。`library.roots` 通过此接口只读。
+`reader.font_weight` 接受 `light`、`regular`、`medium`、`bold`，默认 `regular`；字体文件选择和单字重字体的合成加粗见 [图形运行说明](graphics-runtime.md)。`library.sort` 接受 `recent`、`name`、`name_desc`，默认 `recent`；`library.folders` 接受 `first`、`recent`，默认 `first`，仅在最近阅读排序下决定文件夹置顶或跟随其最近子书。后两项只允许全局保存。
+
+`settings_snapshot()` 捕获全局和本书的原始字节及其有效值。`apply_settings()` 在写入前比较两层原文，外部修改、创建或删除文件均返回 `ExternalChange`。语法、版本或字段无效时拒绝保存，不把读取阶段的回退值覆盖到原文件。写回接受上述阅读和显示字段；全局配置还可写 `library.view`、`library.sort`、`library.folders`、`network.wifi_enabled` 和 `power` 字段。`library.roots` 通过此接口只读。
 
 写回根据 TOML 解析器的源行列定位值，仅替换发生变化的单行值，保留字段顺序、空白及注释。删除覆盖时保留该行注释；新增字段插入对应表，缺少表时新增表。行内表、多行字符串及无法确认范围的表示法返回明确失败，保留原文件。变更后的完整文本再次经过相同语法和字段校验，然后执行临时文件同步、逐字节读回、备份及发布。普通读取不自动恢复设置备份，避免有意删除的配置或覆盖项被旧备份重新启用；`.bak` 可供手工恢复。
 
@@ -35,6 +37,10 @@ ESP-IDF FatFs 的 `rename` 不覆盖已有目标。host 和固件都执行「保
 ## 最近书籍
 
 `save_last_book()` 将现存原书的安全卡根相对路径写入 `PicoPage/data/last-book.txt`，使用同一临时写入、同步、备份和读回确认流程；调用方只能在正文成功显示后调用。`load_last_book()` 拒绝路径穿越、控制字符、无效 UTF-8、符号链接和不存在的书籍。记录损坏或缺失时可恢复有效已提交 `.bak`，不采用 `.tmp`。修复坏主文件时保留已有备份，不让损坏内容覆盖唯一有效恢复副本。该文件只记录最近书籍；正文位置仍由各书 `progress.json` 管理，清理缓存不会删除它。
+
+同一次 `save_last_book()` 另维护 `PicoPage/data/recent-books.txt`：`PPRECENT1` 版本行之后，每行是 Unix 秒数、制表符和卡根相对路径。最多保留 128 本、文件上限 144 KiB；新打开的书移到首位，不依赖系统时间排序。未校时记作 0，日期显示另检查当前时钟和未来时间。两份文件各自采用现有提交协议，不组成跨文件事务；最近列表提交失败会报告「最近阅读记录未保存」，不能据此宣称列表已更新，正文进度仍由原有提交结果决定。列表读取可恢复有效 `.bak`，主副本均无效时保留文件并返回错误。打开同一本书的新会话也更新记录，普通翻页不重复写入最近列表。
+
+最近列表不是位置权威，也不用于上传同步。移动书后旧路径不会自动改名；实际书库扫描只匹配当前存在的条目。删除文件不会让历史路径变成书库条目。超出 128 本或缺少历史记录的旧书按书名排序；存在进度主文件或备份的书不标成未读，其日期保持未知。清缓存保留最近列表。
 
 ## 缓存边界
 

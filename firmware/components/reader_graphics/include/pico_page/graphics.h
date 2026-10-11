@@ -53,6 +53,8 @@ public:
     /** SHA-256 of the compiled fallback font bytes. */
     static const char* fallback_identity();
     bool size(int pixels);
+    /** Synthetic stroke strength: 0 regular, 1 medium, 2 bold; advances are unchanged. */
+    void weight(unsigned strength) { weight_ = strength > 2 ? 2 : strength; }
     bool valid() const { return face_ != nullptr; }
     const std::string& error() const { return error_; }
     int pixel_size() const { return pixel_size_; }
@@ -73,6 +75,7 @@ private:
     void* library_ = nullptr;
     void* face_ = nullptr;
     int pixel_size_ = 0;
+    unsigned weight_ = 0;
     std::string error_;
     std::unordered_map<std::uint64_t, int> advances_;
     std::deque<std::uint64_t> advance_order_;

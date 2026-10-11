@@ -31,6 +31,17 @@ int main(int argc, char** argv) {
         assert(warmed.draw(cached, fallback_text[0], 40, 60));
         assert(rasterized.pixels() == cached.pixels() && rasterized.pixels() != Canvas().pixels());
     }
+    {
+        Canvas regular, medium, bold, restored;
+        assert(font.size(38));
+        const auto width = font.advance(U'读');
+        assert(font.draw(regular, U'读', 40, 70));
+        font.weight(1); assert(font.warm(U'读') && font.draw(medium, U'读', 40, 70));
+        font.weight(2); assert(font.draw(bold, U'读', 40, 70));
+        font.weight(0); assert(font.draw(restored, U'读', 40, 70));
+        assert(regular.pixels() != medium.pixels() && medium.pixels() != bold.pixels());
+        assert(restored.pixels() == regular.pixels() && font.advance(U'读') == width);
+    }
     if (argc > 1) assert(font.open(argv[1]));
 
     Canvas canvas;
