@@ -808,6 +808,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool turned = false;
     // Reading status notices about the body font; the status line shows the position otherwise.
     static constexpr const char *kFallbackFontNotice = "所选字体不可用，已使用替代字体";
+    static constexpr const char *kWeightUnavailableNotice = "所选字重不可用，保留字体原有字重";
     static constexpr const char *kBuiltinFontNotice = "未找到正文字体，已使用内置字体";
     static constexpr const char *kMissingNotice = "部分字符无法显示，可在排版中更换字体";
     static constexpr const char *kSaveFailed = "进度未保存，请检查 TF 卡后重试";
@@ -1899,9 +1900,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto &selected = preview ? *preview : settings;
         const auto resolved = weight_font(selected);
         weight_unavailable = selected.font_weight == "light" && !light_available(selected);
-        const auto tag = selected.font_weight == "bold" ? "-Bold." : selected.font_weight == "medium" ? "-Medium." : "-Regular.";
-        const bool native_weight = resolved != selected.font || resolved.find(tag) != std::string::npos;
-        body.weight(native_weight ? 0 : selected.font_weight == "bold" ? 2 : selected.font_weight == "medium" ? 1 : 0);
+        const auto tag = selected.font_weight == "bold" ? "-Bold." : selected.font_weight == "medium" ? "-Medium." : selected.font_weight == "light" ? "-Light." : "-Regular.";
+        const bool native_weight = resolved.find(tag) != std::string::npos;
+        const bool weighted_base = resolved.find("-Bold.") != std::string::npos || resolved.find("-Medium.") != std::string::npos || resolved.find("-Light.") != std::string::npos;
+        weight_unavailable = weight_unavailable || (selected.font_weight != "regular" && !native_weight && weighted_base);
+        body.weight(native_weight || weight_unavailable ? 0 : selected.font_weight == "bold" ? 2 : selected.font_weight == "medium" ? 1 : 0);
         if (effective_font == resolved && body.valid() && controlled_storage) {
             if (effective_weight != selected.font_weight) { clear_body_cache(); clear_prefetch(); }
             effective_weight = selected.font_weight;
@@ -2008,13 +2011,12 @@ struct ReaderApp::Impl final : DisplayBackend {
             closedir(dir);
         }
         std::string history_error;
-        const auto recent = store.load_recent_books(history_error);
+        const auto recent = library_sort == "recent" ? store.load_recent_books(history_error) : std::vector<RecentBook>{};
         library_recent = library_sort == "recent" && history_error.empty();
         if (library_sort == "recent" && !history_error.empty()) message = "最近阅读记录无法读取，暂按书名排序";
         for (auto& entry : entries) {
             for (std::size_t i = 0; i < recent.size(); ++i) {
                 if (recent[i].path == entry.path || (entry.directory && recent[i].path.compare(0, entry.path.size() + 1, entry.path + "/") == 0)) {
-                    if (entry.directory && !safe_existing(root, recent[i].path)) continue;
                     entry.recent_rank = i; entry.opened_at = recent[i].opened_at; break;
                 }
             }
@@ -2339,7 +2341,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (library_resume_omitted) count = "另有 " + std::to_string(entries.size() - folders) + " 本书";
             text(count, 36, top + 24, 22, 254, 3);
         }
-        button(LibrarySort, library_sort == "recent" ? "最近阅读 ⇅" : library_sort == "name_desc" ? "书名 ↓" : "书名 ↑", 300, top + 4, 164, 60, false, 22);
+        button(LibrarySort, library_sort == "recent" ? (library_recent ? "最近阅读 ⇅" : "书名（回退）") : library_sort == "name_desc" ? "书名 ↓" : "书名 ↑", 300, top + 4, 164, 60, false, 22);
         button(LibraryList, "列表", 476, top + 4, 92, 60, !library_grid, 22);
         button(LibraryGrid, "卡片", 568, top + 4, 92, 60, library_grid, 22);
         canvas.line(0, top + 76, 683, top + 76, 1, 2);
@@ -2472,8 +2474,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         else if (!bookmarks_usable())
             message = bookmarks.status == StoreStatus::IdentityMismatch ? "书签与当前原书不符，未使用；原文件已保留"
                                                                         : "书签文件无法读取，已保留原文件；阅读进度不受影响";
-        else if (font_fallback || weight_unavailable)
+        else if (font_fallback)
             message = builtin_body ? kBuiltinFontNotice : kFallbackFontNotice;
+        else if (weight_unavailable)
+            message = kWeightUnavailableNotice;
         if (restored.status != StoreStatus::Ok && restored.status != StoreStatus::Missing && restored.status != StoreStatus::Cleared)
             message = "原进度无法读取，未覆盖原记录";
         if (loaded) {
@@ -3227,7 +3231,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             return;
         turned = true;
         // The font notice is shown on the page where the book opened; later pages show the position.
-        if (message == kBuiltinFontNotice || message == kFallbackFontNotice) message.clear();
+        if (message == kBuiltinFontNotice || message == kFallbackFontNotice || message == kWeightUnavailableNotice) message.clear();
         if (forward) {
             const auto next_offset = readable_offset(page.end);
             if (next_offset < chapter.text.size())
@@ -3554,7 +3558,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         else disabled_button(font_fallback || weight_unavailable ? "无法应用" : "已应用", 348, 1088, 312, 96);
         if (font_fallback || weight_unavailable) {
             canvas.fill_rect(24, preview_bottom - 70, 636, 58, 15);
-            note("字体或字重不可用，预览使用替代字体。", preview_bottom - 60);
+            note(weight_unavailable && !font_fallback ? kWeightUnavailableNotice : "所选字体不可用，预览使用替代字体。", preview_bottom - 60);
         }
     }
     static std::string weight_name(const std::string &weight) {
@@ -3571,7 +3575,12 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto weight = values.font_weight == "light" && values.font_size_px >= 34 ? "Light" : values.font_weight == "medium" ? "Medium" :
                             values.font_weight == "bold" ? "Bold" : "Regular";
         const auto path = values.font.substr(0, dash + 1) + weight + values.font.substr(dot);
-        return std::find(fonts.begin(), fonts.end(), path) != fonts.end() ? path : values.font;
+        if (std::find(fonts.begin(), fonts.end(), path) != fonts.end()) return path;
+        if (values.font_weight == "medium" || values.font_weight == "bold") {
+            const auto regular = values.font.substr(0, dash + 1) + "Regular" + values.font.substr(dot);
+            if (std::find(fonts.begin(), fonts.end(), regular) != fonts.end()) return regular;
+        }
+        return values.font;
     }
     bool light_available(const ReaderSettings &values) const {
         auto light = values; light.font_weight = "light";
@@ -6046,8 +6055,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             std::string detail;
             if (store.apply_settings(snapshot, values, false, detail) == StoreStatus::Ok) {
                 library_page = 0;
-                scan_library();
                 message = "文件夹排序已保存";
+                scan_library();
             } else message = "文件夹排序未保存，请检查 TF 卡或设置文件";
             draw_input_settings(); break;
         }

@@ -581,6 +581,10 @@ static void layout_review_test(const fs::path& root, const fs::path& fixtures, c
         ReaderApp library(library_root.string(), "library-review", true, async); Driver d{library};
         assert(library.initialize()); d.present();
         assert(!library.can_long_press_at(300, 480));
+        d.tap(600, 50); d.present(); d.tap(300, 560); d.present();
+        d.tap(300, 840); d.present();
+        assert(library.status() == "最近阅读记录无法读取，暂按书名排序");
+        d.tap(60, 50); d.present(); d.tap(60, 50); d.present();
         d.tap(300, 610); d.present(); d.complete_content();
         assert(library_store.load_last_book(detail) == std::optional<std::string>("Books/a.epub"));
         const auto last = library_root / "PicoPage/data/last-book.txt";
@@ -608,6 +612,8 @@ static void layout_review_test(const fs::path& root, const fs::path& fixtures, c
     assert(canvas() != with_primary);
     if (async) {
         fs::create_directories(library_root / "Fonts");
+        write(library_root / "PicoPage/data/recent-books.txt", "PPRECENT1\n");
+        write(library_root / "PicoPage/data/recent-books.txt.bak", "PPRECENT1\n");
         fs::copy_file(font, library_root / "Fonts/Legacy-Regular.ttf");
         fs::copy_file(font, library_root / "Fonts/Legacy-Bold.ttf");
         write(library_root / "PicoPage/settings.toml", "schema_version=1\n[reader]\nfont='Fonts/Legacy-Bold.ttf'\n");
@@ -624,6 +630,28 @@ static void layout_review_test(const fs::path& root, const fs::path& fixtures, c
         for (const auto& item : fs::directory_iterator(library_root / "PicoPage/cache/pages"))
             bold_cache = bold_cache || read(item.path()).find("Fonts/Legacy-Bold.ttf") != std::string::npos;
         assert(bold_cache);
+        d.typography(); d.tap(230, 820); d.present(); d.tap(580, 1020); d.present();
+        d.tap(500, 1130); d.present(); d.complete_content();
+        const auto medium_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (legacy.background_due()) {
+            legacy.poll_background(); legacy.background_step();
+            if (legacy.pending_frame()) d.present();
+            assert(std::chrono::steady_clock::now() < medium_deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        bool regular_cache = false;
+        for (const auto& item : fs::directory_iterator(library_root / "PicoPage/cache/pages"))
+            regular_cache = regular_cache || read(item.path()).find("Fonts/Legacy-Regular.ttf") != std::string::npos;
+        assert(regular_cache);
+        fs::remove(library_root / "Books/b.epub.picopage/settings.toml");
+        fs::remove(library_root / "Fonts/Legacy-Regular.ttf");
+        write(library_root / "Books/weight.txt", "A plain text page for the unavailable weight notice.\n");
+        for (const auto weight : {"medium", "light"}) {
+            write(library_root / "PicoPage/settings.toml", std::string("schema_version=1\n[reader]\nfont='Fonts/Legacy-Bold.ttf'\nfont_weight='") + weight + "'\n");
+            ReaderApp unavailable(library_root.string(), "weight-unavailable", true, false); Driver check{unavailable};
+            assert(unavailable.initialize()); check.present(); opened(unavailable, "Books/weight.txt"); check.present();
+            assert(unavailable.status() == "所选字重不可用，保留字体原有字重");
+        }
     }
 }
 
