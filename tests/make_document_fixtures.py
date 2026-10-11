@@ -138,6 +138,7 @@ def generate(directory: Path) -> None:
 <img src="cover.png" alt="正文层图片"/>
 <p>正文层图片之后。</p>
 <hr/>
+<p>段内分隔线之前。<hr/>段内分隔线之后。</p>
 <p>分隔线之后。<a href="chapter2.xhtml"><img src="cover.png" alt="链接图片"/></a>结尾。</p>
 <ul><li><img src="cover.png" alt="列表图片"/>列表文字。</li></ul>
 <p><img src="cover.png" alt="连续一"/> <img src="cover.png" alt="连续二"/>

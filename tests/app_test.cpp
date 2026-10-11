@@ -1808,6 +1808,7 @@ int main(int argc, char** argv) {
         fs::create_directories(root / "Books");
         fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
         fs::copy_file(fixtures / "multi-part-link.epub", root / "Books/parts.epub");
+        fs::copy_file(fixtures / "nonlinear-footer.epub", root / "Books/nonlinear.epub");
         write(root / "PicoPage/sync.toml", sync_config);
         write(root / "PicoPage/network.toml", "schema_version=2\n[[wifi]]\nssid=\"home\"\npassword=\"password\"\n");
         ReaderApp app(root.string(), "sync-order", true, async); Driver driver{app};
@@ -1853,6 +1854,10 @@ int main(int argc, char** argv) {
         assert(app.book_pages());
         const auto counted = compare(second + "h1[1]/text()[1].0", "0.99");
         assert(counted.first == -1 && compare(second + "h1[1]/text()[1].0", "0.01") == counted);
+
+        // A position in a non-linear item is outside the reading order: no side is further.
+        opened(app, "Books/nonlinear.epub"); driver.present();
+        assert(compare(second + "h1[1]/text()[1].0", "0.99").first == 0);
 
         // Within one long chapter the order follows the chapter parts, which hold unequal shares
         // of the book: the first chapter here has three parts and the second a single page.

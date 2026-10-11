@@ -4786,9 +4786,15 @@ struct ReaderApp::Impl final : DisplayBackend {
         return std::to_string(static_cast<int>(std::lround(std::clamp(fraction, 0., 1.) * 100))) + "%";
     }
     std::string local_position() const { return chapter_label() + " · " + book_percent(); }
-    /** Spine index of the mapped remote position; false until a mapping supplied its place. */
+    /**
+     * Spine index of the mapped remote position; false until a mapping supplied its place. Also
+     * false when the remote or the loaded item is non-linear: such an item is outside the
+     * reading order, so it has neither a book percentage nor an order against another position.
+     */
     bool remote_chapter(std::size_t& index) const {
-        return remote_anchor && remote_place && document.chapter_index_for(remote_anchor->resource, index);
+        const auto& spine = document.spine();
+        return remote_anchor && remote_place && document.chapter_index_for(remote_anchor->resource, index) &&
+               spine[index].linear && chapter_index < spine.size() && spine[chapter_index].linear;
     }
     /** Percentage of the mapped remote position, computed as book_percent() is; empty when unmapped. */
     std::string remote_book_percent() const {
