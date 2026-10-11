@@ -433,7 +433,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     enum class WifiPage { Home, Mode, Saved, Detail, Forget, Add, Joining, JoinFailed, Joined };
     // wifi_root is the page that was opened from outside; back on it leaves the Wi-Fi pages.
     WifiPage wifi_page = WifiPage::Home, wifi_root = WifiPage::Home;
-    bool wifi_from_sync = false, wifi_scanned = false, account_from_sync = false;
+    bool wifi_from_sync = false, wifi_from_transfer = false, wifi_scanned = false, account_from_sync = false;
     std::size_t wifi_add_page = 0;
     // Credentials of the network being added or updated. They stay in RAM until the join succeeds.
     provision::WifiCredentials join_draft;
@@ -2273,6 +2273,20 @@ struct ReaderApp::Impl final : DisplayBackend {
         return library_home_root.empty() ? "已设置的书库目录" : " " + library_home_root + "/";
     }
     /**
+     * One line for the row that describes copying to the card. A directory too long for the row
+     * keeps its last components, so the instruction after it is never the part that is cut.
+     */
+    std::string direct_copy_hint() {
+        auto path = library_home_root;
+        bool cut = false;
+        const auto line = [&] { return "拷到卡上 " + std::string(cut ? "…/" : "") + path + "/，插回后重启设备"; };
+        for (auto slash = path.find('/'); text_width(line(), 22) > 554 && slash != std::string::npos; slash = path.find('/')) {
+            path.erase(0, slash + 1);
+            cut = true;
+        }
+        return path.empty() || text_width(line(), 22) > 554 ? "拷到卡上已设置的书库目录，插回后重启设备" : line();
+    }
+    /**
      * Body of the root library without any book or resume card: the ways to add books, the
      * guide and the limit of the built-in font. The row without an id is a description.
      */
@@ -2282,7 +2296,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         canvas.line(24, 288, 660, 288, 1, 2);
         settings_row(UsbStart, "USB 连接电脑", "电脑直接管理 TF 卡，退出时重启", 288, 1);
         settings_row(WifiUpload, "Wi-Fi 传书", "经设备热点，手机扫码上传，不需要路由器", 420, 1);
-        settings_row(0, "直接放入 TF 卡", "拷到卡上" + library_location() + "，插回后重启设备", 552, 1);
+        settings_row(0, "直接放入 TF 卡", direct_copy_hint(), 552, 1);
         text("第一次使用", 36, 760, 22, 612, 3);
         button(Help, "查看使用说明", 24, 796, 636, 96, false, 30);
         wrapped(std::string("内置字体只含 3,500 个常用字，生僻字会显示为方框。官网 ") + kProjectHome +
@@ -3828,7 +3842,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto saved_count = std::to_string(wifi_saved.size());
         switch (wifi_page) {
         case WifiPage::Home: {
-            header("Wi-Fi", Back, wifi_from_sync ? "同步" : "设置");
+            header("Wi-Fi", Back, wifi_from_sync ? "同步" : wifi_from_transfer ? "传输" : "设置");
             const bool enabled = wifi_enabled(), online = wifi_online();
             text(wifi_summary(), 36, 132, 34, 612, 1, true);
             text(!enabled ? "同步和经已保存网络传书不会联网"
@@ -5619,6 +5633,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
             wifi_page = wifi_root = WifiPage::Home;
             if (std::exchange(wifi_from_sync, false)) { draw_sync(); overlay(); return; }
+            if (std::exchange(wifi_from_transfer, false)) { draw_import(); overlay(); return; }
         }
         if (view == View::SyncSettings) {
             if (account_page == AccountPage::Remove) { account_page = AccountPage::Form; draw_sync_settings(); overlay(); return; }
@@ -5844,6 +5859,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             return;
         if (id == WifiSettings || (id == WifiModeOpen && view == View::Sync)) {
             wifi_from_sync = view == View::Sync;
+            // The network page reached from the library stays on the way back to the library.
+            wifi_from_transfer = view == View::Import && !import_from_settings;
             if (!portal_live) cancel_sync();
             // The sync panel's network row opens the connection mode directly.
             wifi_page = wifi_root = id == WifiModeOpen ? WifiPage::Mode : WifiPage::Home;

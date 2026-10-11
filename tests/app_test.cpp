@@ -711,7 +711,25 @@ static void release_review_test(const fs::path& root, const fs::path& fixtures, 
     assert(disabled.initialize()); offline_driver.present();
     offline_driver.tap(300, 480); offline_driver.present();
     assert(disabled.view() == View::Import && disabled.take_portal_action() == PortalAction::None);
+    // Wi-Fi settings opened from that page return to it, also after Wi-Fi is turned on.
+    offline_driver.tap(342, 700); offline_driver.present(); assert(disabled.view() == View::WifiSettings);
+    offline_driver.tap(300, 288); offline_driver.present(); assert(disabled.wifi_enabled());
+    offline_driver.tap(60, 50); offline_driver.present(); assert(disabled.view() == View::Import);
     offline_driver.tap(60, 50); offline_driver.present(); assert(disabled.view() == View::Library);
+
+    // A long library directory keeps its last components; the leading ones give way to the instruction.
+    const auto first_use = [&](const char* name, const std::string& library) {
+        const fs::path card = root.string() + name;
+        fs::create_directories(card / library);
+        write(card / "PicoPage/settings.toml", "schema_version=1\n[library]\nroots=['" + library + "']\n");
+        ReaderApp app(card.string(), "release-review-roots", true, async); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        assert(app.view() == View::Library);
+        return app.canvas().pixels();
+    };
+    const auto trimmed = first_use("RootA", std::string(40, 'a') + "/Shelf/Books");
+    assert(trimmed == first_use("RootB", std::string(40, 'b') + "/Shelf/Books"));
+    assert(trimmed != first_use("RootC", std::string(40, 'a') + "/Shelf/Texts"));
 }
 static void swipe_test(const fs::path& root, const fs::path& fixtures, bool grid) {
     fs::create_directories(root / "Books");
