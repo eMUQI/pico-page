@@ -911,6 +911,13 @@ extern "C" void app_main() {
             app->save_progress();
             present(*app);
         }
+        if (!usb_mode && !sleep_requested && !network_busy && idle >= idle_save_us &&
+            !physical_source && !resume_input.active() && !app->pending_frame() &&
+            !app->content_busy() && !app->save_busy() && !app->save_due() &&
+            app->view() != pico_page::View::PowerMenu && app->view() != pico_page::View::PowerOff &&
+            !pico_page::console::transfer_active() &&
+            !platform::input_waiting_before(std::numeric_limits<std::int64_t>::max()))
+            platform::persist_clock();
         const bool background = !usb_mode && idle >= idle_background_us && !physical_source && !resume_input.active() &&
                                 !network_busy && !sleep_requested && !app->pending_frame() &&
                                 !pico_page::console::transfer_active() && app->background_due();

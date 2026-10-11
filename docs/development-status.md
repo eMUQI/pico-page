@@ -6,6 +6,8 @@
 
 本地分支 `claude/read-pico-layout-review-04690c` 基于 `95d9468` 接续 10 月 11 日《排版与翻屏 · 审阅》：排版面板改为四列两行并接入字重，翻屏页脚两侧对称，最近阅读顺序和文件夹策略写入全局配置，使用说明加入两页可点按示例。实现预览位于 `artifacts/layout-review-20261011/`；新增的最近阅读文件只记录顺序和可选日期，不取代进度文件。当前是待真机验收、未烧录的候选；验证结果见本日对应记录。原实现阶段未改主目录；PR 准备阶段已整合主线的自定义锁屏功能。
 
+RTC 接入已有本地候选（2026-10-11，基于 `14b84e9`，分支 `feat/rtc-clock`，独立 worktree）：实现前核对官方 PMU 协议、演示与自检；启动恢复有效 RTC，真实 NTP 校时后空闲写回并读回确认。PMU 仍由应用任务独占，不增加联网入口或定时刷屏。整合版本管理主线后，host Debug 与 AppleClang ASan/UBSan 各 22/22，标准固件构建、来源校验和 456 项交接检查通过；PR #64 等待最终 CI/review，未刷写。保时、漂移和故障输入响应待 CK01 真机验收，详见本日 RTC 记录。
+
 EPUB `mimetype` 最小容错已实现为本地候选：最多 64 字节，仅忽略首尾 ASCII 空格、Tab、CR、LF，不修改原书和摘要算法；内部空白、NUL、错误类型、缺失、超长及 CRC 错误仍拒绝。错误页区分格式标识的具体原因，未分类解析错误改为「无法解析文件内容」。Debug 与 ASan/UBSan CTest 各 20/20、标准固件构建通过，未烧录；详见本日「EPUB 格式标识最小容错」记录。
 
 版本管理已统一为 `firmware/version.txt`，计划测试版本为 `0.2.0-beta.1`，尚未发布。固件应用描述、设置页、使用说明、host 预览和构建来源记录共用版本规则；开发构建附带提交号和 dirty 状态。发布标签检查、镜像版本一致性检查及编号规则见[版本管理](versioning.md)。本批 host Debug CTest 21/21、Python 49/49、Release 固件构建通过；未创建标签、未提交、未推送、未刷写。
@@ -4917,6 +4919,38 @@ UI 规范区分普通输入取消在途统计并保留当前分段、既有资�
 
 整合后 Debug CTest 20/20（58.75 秒）、AppleClang ASan/UBSan 20/20（96.13 秒，不含 LSan），标准固件构建、452 项交接检查及 diff 检查通过；覆盖本批代码与主线锁屏路径。此后只补验证记录。远端 CI 和 review 随 PR 跟进。
 
+## 2026-10-11 · PMU RTC 启动恢复与 NTP 写回
+
+范围：按用户明确要求创建 `rtc-clock/pico-page` 独立 worktree，基于 `14b84e9ceca0d9f147ccff8d6df818852c84382e`，分支 `feat/rtc-clock`。原 checkout 保持干净，未提交、未推送、未刷写。
+
+官方依据：先阅读锁定 BSP `5f3406deec33304de8801046db583dec7c49e55b` 的 `main/apps/app_pmu.c`、`main/factory/pmu_selftest.c`、PMU 驱动、头文件及协议说明。沿用 TIME_SYNC 的 UTC 小端秒和 TIME_GET 有效标志，并参考官方写后读回检查；不复制演示/工厂自检的时间来源，不改 VCOM 或工厂标定。官方注明 PMU 复位后未校准、LSI 约 ±1–2% 漂移。经乐鑫文档 MCP 核对 ESP32-S3 RTC 与系统时间，再核对本机 IDF 6.1 的 SNTP 回调、等待信号与 `settimeofday()` 顺序。
+
+实现：启动时仅在系统时间未设置的情况下恢复 PMU 时间，检查本次命令、8 字节响应、有效标志和 2024–2099 范围；保留已有系统时钟。真实 SNTP 回调只置原子标志，应用任务在必要保存后、网络工作结束、无输入/显示/内容工作且空闲 2 秒时写入执行时 UTC 秒，读回确认相差 0–4 秒。失败只记日志，每个待写标志只尝试一次；新的 NTP 回包可再次触发。首次校时即使已有 RTC 时间也最多等待 10 秒真实 SNTP，同一连接成功后不再重复等待；超时但已有有效时间时沿用 TLS 日期校验。同步取消、网络断开或远端请求失败不撤销已经发生的真实校时，但网络任务不访问 PMU。立即关机或没有空闲边界时，RTC 写回可能尚未执行。
+
+BSP 构建副本通过补丁清除 TIME_GET 旧有效标记并拒绝非 8 字节成功响应，官方原件不变。配套更新决定、运行时、页脚说明、CK01 验收和第三方来源记录。新增一个 RTC host 目标，编译实际适配代码，以替身覆盖边界、无效时间、读写失败、设置系统时间失败、保留已有时间、回调合并、延迟写入、读回差异及失败后不循环重试；没有新增测试框架。
+
+环境：macOS、AppleClang 21、EIM 0.19.0、ESP-IDF 6.1 commit `fff9895c82d744c7237be8847347bdd1b07c6643`、Xtensa GCC 15.2.0。本机 SDK 原有 linker 脚本修改与未跟踪 requirements 文件保留，不能称为干净 SDK。复用本机公开字体及 FreeType 包，由 `python3 tools/setup_fonts.py` 校验锁定摘要并解压；未复制个人图书或凭据。
+
+验证：
+
+- `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host -N` 和完整 CTest：21/21，57.43 秒，含 Node 配网页面、固件内容 worker 模式和新增 RTC。日志 `.local/rtc-host-*.log`。
+- 按环境文档配置 `build/sanitized` 的 ASan/UBSan，完整构建与 CTest：21/21，172.52 秒。日志 `.local/rtc-sanitized-*.log`；这是 AppleClang ASan/UBSan，不声称 LSan 覆盖。
+- 从已打补丁的构建副本提取真实 `read_pico_pmu_cmd()`，以官方协议头及可控响应编译一次性 ASan/UBSan 自检：长度 0–44、超时、ACCEPTED、设备未就绪和旧有效标记均通过，高位 UTC 秒按无符号值解析。材料 `.local/rtc-pmu-check/`；不替代物理 I²C 验证。
+- `sh tools/build_firmware.sh`：标准固件编译、链接、defaults 核对和来源校验通过。初次构建期间文档变化导致 provenance 拒绝，已在稳定源码上重跑成功。应用 `0x33bf30` 字节，4 MiB 槽剩余 19%；BIN SHA-256 `4e70441e83bc043f87088f6cafca12e2441507b8e04c30ffa6700fcd8e35f589`。该记录写入后再次运行同一入口更新来源凭据，见 `.local/rtc-firmware-final.log` 与 `firmware/build/provenance.json`。
+- `python3 tools/check_handoff.py` 与 `git diff --check` 通过；原 checkout 无改动，官方 BSP `components` 无差异。生效配置为 `CONFIG_LIBC_TIME_SYSCALL_USE_RTC_HRT=y`、`CONFIG_RTC_CLK_SRC_INT_RC=y`，未改 defaults 或全局工具链。
+
+执行上下文与资源：RTC 初始化读取和空闲写回均在应用任务；网络/LwIP 回调只置位。Xtensa 对象中新增待写标志 1 B、连接内已校时标志 1 B，另有固定标量和 4 B 提交载荷；无新增任务、队列或堆缓冲。每次写回最多两个串行 PMU 命令，各含 BSP 30 ms 等待、最多三轮尝试与每次 I²C 100 ms 超时。已经开始的 BSP 命令不可抢断；正常至少包含两次命令等待，故障时可能明显延长。没有测量真机最大阻塞、栈/堆峰值、输入队列压力或性能分布，不以 host 耗时替代。
+
+未测与下一步：按 CK01 在另获设备操作授权后验证已校时后的 ESP32 重启、协作关机、完全断电、PMU 复位、SNTP 不可达/取消、PMU 错误、快速输入和长期漂移；记录正常/故障写回耗时及队列溢出计数。此批为待真机验证候选，不承诺完全断电保时或离线高精度，不改变只保存成功呈现位置的规则。
+
+### 2026-10-11 · RTC PR 主线整合
+
+按本次授权提交 RTC 实现 `99ef7d1` 并整合主线 `c178a07`。主线仅新增官网资源及记录，固件实现和回归逻辑未变化；唯一冲突为开发记录末尾，已保留双方内容。补丁减少空白上下文以通过暂存区 diff 检查，应用后的 PMU 源码不变。继续通过 PR 等待 CI 和最终提交的 review，未刷写设备。
+
+### 2026-10-11 · RTC Linux CI 兼容修正
+
+PR #64 的 Linux GCC 在 RTC 回归中遇到 `<ctime>` 撤销 `time` 替身宏，导致全局声明与使用不匹配。RTC 实现与该回归改为使用 C 时间头及全局时间 API，继续通过编译参数替换测试时钟；固件调用仍为同一个 C 库函数，不修改断言或测试范围。本地重跑 RTC Debug、ASan/UBSan 与固件构建，并由新的 Linux CI 覆盖完整回归；未刷写。
+
 ### 2026-10-11 · EPUB 格式标识最小容错
 
 基于 `cde2318`，按本次授权实现 `mimetype` 首尾空白兼容。沿用 `EpubDocument::open_impl` 和现有 `trim`，覆盖普通打开、已验证身份重开和封面读取；只允许空格、Tab、CR、LF，输入总长限制为 64 字节。保留 ZIP CRC、路径和资源限制，不改写文件，不改变 SHA-256、部分 MD5 或源锚点。错误页分别显示标识缺失、过长、读取失败和不正确；未分类解析错误不再推断文件损坏。同步更新 UI 规则及 EP07 验收项。未复制 KOReader 代码，其控制字符截断方式未采用。
@@ -4977,3 +5011,22 @@ PR #61 合并前整合版本管理主线 `0161b8c`：仅开发记录的当前摘
 第三轮 review 指出最近历史失败随正文帧反复重试、进度 I/O 错误被备份掩盖、旧字体文件选择被 Regular 同族覆盖。最近记录失败现在在本次开书会话内锁存，后续进度保存继续但不重试最近记录；重新开书或显式电源保存可重试。条目状态优先报告读取错误。常规字重保留指定字体文件，选择新字体时恢复常规，不再覆盖旧配置明确选择的 Bold 文件；图形说明已同步。新增回归检查连续翻页不改最后书目文件时间而进度继续保存、主文件为目录时不被备份掩盖、存在 Regular 同族时分页缓存实际使用 Legacy-Bold 文件。
 
 验证：Debug CTest 21/21（36.56 秒），AppleClang ASan/UBSan 21/21（73.85 秒，不含 LSan），标准固件构建、457 项交接及 diff 检查通过。新增用例首次编译使用了记录类型未提供的不等比较，改用既有相等比较取反后完成验证，未降低断言。补写记录后提交并重建来源清单；未刷写。
+
+### 2026-10-11 · RTC 与版本管理整合
+
+等待 PR #64 CI/review 期间，主线通过 PR #62 增加统一版本入口。已整合 `0161b8c`，两处冲突均为开发记录，保留双方摘要和历史；版本 CMake、应用版本显示和 RTC 逻辑自动合并。整合后重新执行 host Debug、ASan/UBSan、标准固件与交接检查，并以最终提交的 CI/review 作为合并依据。未刷写。
+
+整合提交 `cb90493` 的本地结果：Debug CTest 22/22（39.91 秒）、AppleClang ASan/UBSan CTest 22/22（73.61 秒）、标准固件构建与应用版本/来源校验通过，版本为 `0.2.0-beta.1+gcb90493`；456 项交接检查与 diff 检查通过。日志为 `.local/rtc-integrated-{host,sanitized,firmware,handoff}.log`。此处的最终记录提交只修改文档，后续 CI/review 必须覆盖该提交；本批未刷写，不增加真机验收结论。
+
+PR #61 合并前整合版本管理主线 `0161b8c`：仅开发记录的当前摘要及追加位置发生冲突，双方内容完整保留。主线版本构建入口和应用默认版本随之保留，EPUB 校验、文案修复及回归测试未改变；整合提交的构建与 CI 结果以本轮日志和 PR 检查为准。
+
+### 2026-10-11 · RTC 与 EPUB 校验主线整合
+
+最终提交 `6c7523f` 的两组 Linux CI 均通过，Codex review 完成且未提出问题。随后主线合并 PR #61，现整合 `79df835`；冲突仅在开发记录，双方内容保留。应用错误原因与 EPUB 格式校验沿用主线修正，RTC 代码未变。整合后重新执行本地回归、固件、交接检查及最终提交的 CI/review；未刷写。
+
+整合后本地验证通过：Debug CTest 22/22（39.08 秒）、AppleClang ASan/UBSan CTest 22/22（76.70 秒）、标准固件及来源检查、456 项交接检查和 diff 检查。日志为 `.local/rtc-epub-{host,sanitized,firmware,handoff}.log`；合并提交后重建固件以记录最终来源，CI/review 继续核对最终 SHA。未增加真机验收结论。
+
+
+### 2026-10-11 · PR #63 跟进 RTC 主线
+
+七项评审问题修正后，main 合入 RTC PR #64（`455ea52`）。仅开发记录冲突，保留两边内容；RTC、NTP 持久化及时间显示沿用主线，本批最近日期继续读取系统时间。重新验证整合检出，CI/review 结果以 PR #63 当前提交为准。未刷写设备。

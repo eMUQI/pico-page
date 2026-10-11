@@ -12,6 +12,7 @@
 #include "pico_page/text_turn_waveform.h"
 #include "esp_attr.h"
 #include "ripple.h"
+#include "rtc_clock.h"
 
 #include <algorithm>
 #include <atomic>
@@ -430,6 +431,7 @@ bool initialize(std::string& error) {
     read_pico_pmu_config_t pmu = READ_PICO_PMU_CONFIG_DEFAULT();
     auto result = read_pico_pmu_init(read_pico_i2c_bus(), &pmu);
     if (result != ESP_OK) return failure(error, "PMU initialization; panel remains off", result);
+    rtc_clock::restore();
     int factory_vcom = 0;
     for (int attempt = 0; attempt < 3; ++attempt) {
         result = read_pico_pmu_vcom_get(&factory_vcom);
@@ -546,6 +548,10 @@ bool finish_power(std::string& error) {
     }
     return true;
 }
+void persist_clock() {
+    if (ready && owner == xTaskGetCurrentTaskHandle()) rtc_clock::persist();
+}
+
 bool power_off(std::string& error) {
     error.clear();
     if (!on_owner(error) || !ready || usb_owns_card) return false;

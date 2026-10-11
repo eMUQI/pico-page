@@ -1,4 +1,5 @@
 #include "pico_page/platform.h"
+#include "rtc_clock.h"
 
 #include <algorithm>
 #include <cctype>
@@ -39,6 +40,7 @@ bool wifi_started = false;
 bool access_point = false;
 bool connected = false;
 bool sntp_initialized = false;
+bool clock_synchronized = false;
 std::uint16_t disconnect_reason = 0;
 
 bool fail(std::string& error, const char* operation, esp_err_t result) {
@@ -94,6 +96,7 @@ bool valid_url(const std::string& url) {
 void stop_clock() {
     if (sntp_initialized) esp_netif_sntp_deinit();
     sntp_initialized = false;
+    clock_synchronized = false;
 }
 
 /** Creates the interfaces and starts the driver; access selects access point plus station. */
@@ -349,13 +352,15 @@ bool synchronize_clock(std::string& error, ConnectFailure* failure, const std::a
     }
     if (!sntp_initialized) {
         esp_sntp_config_t time_configuration = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+        time_configuration.sync_cb = rtc_clock::synchronized;
         if (esp_netif_sntp_init(&time_configuration) == ESP_OK) sntp_initialized = true;
     }
     const auto deadline = esp_timer_get_time() + 10'000'000;
-    while (sntp_initialized && std::time(nullptr) < 1704067200 && esp_timer_get_time() < deadline) {
+    while (sntp_initialized && !clock_synchronized && esp_timer_get_time() < deadline) {
         if (cancelled && cancelled->load()) { error = "操作已取消。"; return false; }
-        esp_netif_sntp_sync_wait(pdMS_TO_TICKS(100));
+        clock_synchronized = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(100)) == ESP_OK;
     }
+    if (cancelled && cancelled->load()) { error = "操作已取消。"; return false; }
     if (std::time(nullptr) < 1704067200) {
         error = "A valid clock is required for TLS; time synchronization failed";
         return false;

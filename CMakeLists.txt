@@ -139,3 +139,11 @@ target_include_directories(ripple_test PRIVATE tests/ripple_stubs firmware/compo
 target_link_libraries(ripple_test PRIVATE reader_core)
 target_compile_options(ripple_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME ripple COMMAND ripple_test)
+
+add_executable(rtc_clock_test tests/rtc_clock_test.cpp firmware/components/platform_read_pico/rtc_clock.cpp)
+target_include_directories(rtc_clock_test PRIVATE tests/rtc_stubs firmware/components/platform_read_pico
+    firmware/components/reader_sync/include firmware/components/reader_document/include firmware/components/reader_core/include)
+target_compile_features(rtc_clock_test PRIVATE cxx_std_17)
+target_compile_definitions(rtc_clock_test PRIVATE time=rtc_test_time settimeofday=rtc_test_settimeofday)
+target_compile_options(rtc_clock_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME rtc_clock COMMAND rtc_clock_test)

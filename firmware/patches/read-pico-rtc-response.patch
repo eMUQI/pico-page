@@ -1,0 +1,13 @@
+--- a/read_pico_pmu.c
++++ b/read_pico_pmu.c
+@@ -264,2 +264,3 @@
+ esp_err_t read_pico_pmu_cmd(uint16_t code, const uint8_t* payload, uint8_t plen) {
++    if (code == PMU_CMD_TIME_GET) s_snap.time_ok = false;
+     if (s_dev == NULL) return ESP_ERR_INVALID_STATE;
+@@ -309,2 +310,6 @@
+     } else if (code == PMU_CMD_TIME_GET && resp.status == PMU_STATUS_OK) {
++        if (resp.payload_length != 8) {
++            s_snap.last_err = ESP_ERR_INVALID_RESPONSE;
++            return ESP_ERR_INVALID_RESPONSE;
++        }
+         s_snap.unix_sec = rd32(&resp.payload[0]);
