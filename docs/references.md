@@ -61,3 +61,7 @@
 ## 4. Codex 项目指导
 
 OpenAI 官方：`https://developers.openai.com/codex/guides/agents-md/` 本次核查时重定向至 `https://learn.chatgpt.com/docs/agent-configuration/agents-md`。官方说明 Codex 在工作前读取 AGENTS.md，并按项目目录组合指导。因此根文件只放稳定约束和必读路径；详细规格按任务读取，不把全部历史聊天塞进指导。本包不修改全局 Codex 配置，也不声称已写入用户客户端的项目设置。
+
+## 自定义休眠图片实现参考（2026-10-11）
+
+参考 [KOReader screensaver.lua](https://github.com/koreader/koreader/blob/master/frontend/ui/screensaver.lua) 的有界图片列表、按文件名轮播与不可用回退思路；未复制代码。本项目限定根目录 PNG/JPEG，复用现有内容 worker 和图形解码器，清醒时预转换、休眠只读缓存，不引入 KOReader 的 Lua UI 或渲染依赖。内存门槛同时检查总余量与最大连续块，依据 [ESP-IDF ESP32-S3 堆分配说明](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/api-reference/system/mem_alloc.html)，沿用已安装 IDF 6.1 的能力堆接口；不新增任务、栈或 DMA 路径。

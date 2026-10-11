@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <thread>
 #include <unistd.h>
@@ -135,6 +136,34 @@ int main(int argc, char** argv) {
         cover.cache_name = "covers/sleep"; cover.cache_header = "PPCOVER2\nprobe\n";
         cover.layout.width = 684; cover.layout.height = 1040; cover.cover_crop = true;
         fs::copy_file(argv[1], cover.path);
+        fs::create_directories(root / "LockScreens");
+        std::ofstream(root / "LockScreens/test.png", std::ios::binary) << "invalid image";
+        ContentJob::Request custom;
+        custom.kind = ContentJob::Kind::LockScreen; custom.root = root.string(); custom.lock_screen_prepare = true;
+        const auto custom_decodes = pico_page::graphics::image_decode_count();
+        for (bool fragmented : {false, true}) {
+            psram_free = fragmented ? 4 * 1024 * 1024 : 1024 * 1024;
+            psram_largest = fragmented ? 342 * 1216 - 1 : 3 * 1024 * 1024;
+            ContentJob refused(custom); assert(refused.start()); finish(refused);
+            assert(!refused.result.cache_finished && !refused.result.image && !refused.result.error.empty() &&
+                   refused.result.retryable_failure);
+            assert(pico_page::graphics::image_decode_count() == custom_decodes);
+        }
+        psram_free = 2 * 1024 * 1024; psram_largest = 512 * 1024;
+        ContentJob admitted(custom); assert(admitted.start()); finish(admitted);
+        assert(!admitted.result.cache_finished && !admitted.result.retryable_failure);
+        assert(admitted.result.error.find("损坏") != std::string::npos);
+        std::ofstream(root / "LockScreens/test.png", std::ios::binary) << std::string(1800 * 1024, 'x');
+        const auto before_large = pico_page::graphics::image_decode_count();
+        ContentJob too_large(custom); assert(too_large.start()); finish(too_large);
+        assert(too_large.result.retryable_failure && !too_large.result.cache_finished);
+        assert(pico_page::graphics::image_decode_count() == before_large);
+        psram_free = 4 * 1024 * 1024; psram_largest = 3 * 1024 * 1024;
+        ContentJob cancelled_custom(custom); cancelled_custom.cancel();
+        assert(cancelled_custom.start()); finish(cancelled_custom);
+        assert(!cancelled_custom.result.cache_finished && !cancelled_custom.result.image && cancelled_custom.result.retryable_failure);
+        assert(!fs::exists(root / "PicoPage/data/last-lock-screen.txt"));
+
         for (const bool fragmented : {false, true}) {
             psram_free = fragmented ? 4 * 1024 * 1024 : 3 * 1024 * 1024 - 1;
             psram_largest = fragmented ? 2 * 1024 * 1024 - 1 : 3 * 1024 * 1024;

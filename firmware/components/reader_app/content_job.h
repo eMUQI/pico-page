@@ -45,7 +45,7 @@ struct PaginationSession {
 /** A single job owns its parser and font, or borrows them from a PaginationSession. Only done() permits access to its result. */
 class ContentJob {
 public:
-    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks };
+    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks, LockScreenList, LockScreen };
     enum class Target { Start, End, Before, Anchor, Fragment };
     enum class StartFailure { None, InternalMemory, TaskCreate };
     /**
@@ -61,6 +61,7 @@ public:
     };
     struct Request {
         std::string path, font;
+        std::string sleep_image;
         Kind kind = Kind::Pagination;
         Target target = Target::Start;
         Anchor anchor;
@@ -84,6 +85,8 @@ public:
         /** Pagination only. Without a session the job prepares and discards its own. */
         std::shared_ptr<PaginationSession> session;
         bool save_last_book = false, cover_crop = false, preview = false;
+        /** LockScreen: prepare the disk cache without retaining a result canvas. */
+        bool lock_screen_prepare = false;
         bool progressive = false;
         std::uint64_t generation = 0;
         PP_DIAGNOSTIC(std::uint64_t diagnostic_session = 0, diagnostic_layout = 0;)
@@ -95,6 +98,8 @@ public:
         std::size_t offset = 0;
         bool part_done = false, last_part = false;
         std::string error, font_identity, xpointer;
+        std::vector<std::string> lock_screens;
+        std::string lock_screen;
         Anchor mapped_anchor;
         sync::PartPosition mapped_place;  // Valid with mapped_anchor after a successful MapDownload.
         double percentage = 0;
@@ -115,6 +120,8 @@ public:
         bool last_book_saved = false;
         /** SleepCover: a valid pixel or negative cache entry was read or successfully committed. */
         bool cache_finished = false;
+        /** LockScreen: cancellation, timeout or resource failure permits an idle retry. */
+        bool retryable_failure = false;
         std::optional<PageCache> page_cache;
         off_t file_size = 0;
         time_t file_modified = 0;
@@ -152,6 +159,7 @@ private:
     diagnostics::Token measurement_{};
 #endif
     void render_image();
+    void prepare_lock_screen();
     void open_book();
     void prepare_cover();
     void map_position();
