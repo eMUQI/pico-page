@@ -4858,6 +4858,13 @@ UI 规范区分普通输入取消在途统计并保留当前分段、既有资�
 
 - 2026-10-11 CI 编译修正：GCC 在新增模式切换回归中以 `-Werror=range-loop-construct` 拒绝循环变量复制，改为常量引用；不改变产品逻辑或测试断言。重跑 app 回归与交接检查，并以最新提交的 Linux CI 为准。
 
+### 2026-10-11 · 官网字体与锁屏资源下载
+
+- 在已合并的自定义锁屏主线后新增独立网站资源区，统一字体下载与五张已选锁屏的预览、单张 PNG 和 ZIP 下载；手机导航保留下载入口，旧字体锚点有效。整包包含 `LockScreens/` 与说明、来源及摘要清单，未包含被取消的折纸款。
+- 五张 PNG 与本地已选素材逐字节相同，均为 684×1216、L 模式、0–255 间隔 17 的 16 个灰阶；单张约 105–128 KiB。下载 ZIP CRC、清单 SHA-256 和包内五图与网页文件一致性通过。原字体包与 OFL 文件未改。
+- Astro 静态构建、449 项交接检查、diff 检查通过。已安装 Chrome 的 Playwright 检查覆盖 1440 px 明暗主题、390 px 和 320 px 手机宽度，无水平溢出和脚本异常；本地资源链接、整包下载、原图预览通过。已查看桌面与手机截图，证据位于忽略目录 `artifacts/website-resources-20261011/`。Playwright 默认浏览器版本未安装，改用已安装 Chrome 完成检查。
+- 本批仅修改网站与资源，没有部署官网、刷写设备或完成锁屏真机显示验收。
+
 ### 2026-10-11 · EPUB 格式标识最小容错
 
 基于 `cde2318`，按本次授权实现 `mimetype` 首尾空白兼容。沿用 `EpubDocument::open_impl` 和现有 `trim`，覆盖普通打开、已验证身份重开和封面读取；只允许空格、Tab、CR、LF，输入总长限制为 64 字节。保留 ZIP CRC、路径和资源限制，不改写文件，不改变 SHA-256、部分 MD5 或源锚点。错误页分别显示标识缺失、过长、读取失败和不正确；未分类解析错误不再推断文件损坏。同步更新 UI 规则及 EP07 验收项。未复制 KOReader 代码，其控制字符截断方式未采用。
@@ -4867,3 +4874,5 @@ UI 规范区分普通输入取消在途统计并保留当前分段、既有资�
 复用合成 EPUB 生成器及 document/app 测试，覆盖 CRLF、四种首尾空白、64/65 字节边界、错误类型、内部空白、NUL、空值、缺失和 CRC 错误，并核对原文件摘要与打开后身份。首轮边界样本误写为 65 字节，修正为 64 字节后 document 在 Debug 与 ASan/UBSan 均通过；首轮固件编译链接成功，但期间修正测试样本导致来源检查拒绝，须以重跑结果为准。用户提供的未修正原书已用更新后的 host 解析器打开，25 个 spine 项全部解析成功；私人书名、内容和文件不纳入仓库。
 
 验证：`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host -N` 及 `ctest --test-dir build/host --output-on-failure` 通过，注册并通过 20/20；`cmake --build build/sanitized --parallel 4` 与对应 CTest 通过 20/20，现有配置为 Debug、AppleClang ASan/UBSan，未宣称 LSan 覆盖。`sh tools/build_firmware.sh` 在 ESP-IDF 6.1（`fff9895c`）、锁定 BSP `5f3406de` 上通过，应用 `0x341e70` 字节，4 MiB 槽剩余 19%，来源检查通过。`python3 tools/check_handoff.py` 449 项及 `git diff --check` 通过。日志位于本机 `/tmp/mimetype-*-final.log`；原书大小及 CRC 与排查前一致。未提交、推送或烧录；本轮新固件在真机直接打开原书、错误页显示及 KOReader 往返未验证，下一步为完成本地检查后按单独授权进行设备验收。
+
+PR #61 已创建；整合主线 `c178a07` 时仅解决开发记录追加位置的冲突，双方记录完整保留，固件与测试源码未变。整合前 Linux CI 的 Debug、ASan/UBSan/LSan 及交接检查通过；最新提交的远端结果以 PR 检查为准。

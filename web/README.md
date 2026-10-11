@@ -21,11 +21,25 @@ npm run preview --prefix web
 
 网站地址为 https://picopage.wulu.zone，使用 Cloudflare Pages 的 `picopage` 项目，默认域名为 `picopage-91c.pages.dev`。当前采用手动直接上传，未连接 Git 仓库或设置自动部署；GitHub 仓库保持私有。
 
-更新时执行上述构建命令，在 Pages 项目中创建生产部署，仅上传 `web/dist/` 的内容。不要上传仓库根目录。部署后核对自定义域的 HTTPS 首页、界面图、样式和字体下载包与本地构建产物一致。
+更新时执行上述构建命令，在 Pages 项目中创建生产部署，仅上传 `web/dist/` 的内容。不要上传仓库根目录。部署后核对自定义域的 HTTPS 首页、界面图、样式、字体与锁屏下载包与本地构建产物一致。
 
-## 字体下载
+## 资源下载
 
-安装区提供霞鹜文楷 Regular v1.520 的下载，静态文件位于 `public/downloads/`。ZIP 包含未经修改的官方 `LXGWWenKai-Regular.ttf`、该版本的 `OFL.txt` 和注明作者、来源及安装方法的 `README.txt`；网页另提供许可证文本和官方版本链接。字体按 SIL OFL 1.1 单独授权。
+首页 `#resources` 集中展示锁屏与字体，手机导航保留「下载」入口；原有 `#fonts` 锚点继续有效。所有文件由静态站直接提供，不依赖私有仓库、第三方图床或运行时 API。
+
+### 锁屏图片
+
+`public/downloads/lockscreens/` 收录用户选定的五张 GPT Image 生成图：读自己的书、接着读下去、把时间留给一页书、暂时离线进入书中、下一页自有天地。来源为 Pico Page 项目制作的图集（https://picopage.wulu.zone/），本次按项目所有者要求提供下载；不标注为 CC0 或公共领域。原图与生成提示词仍保存在本地设计归档中。
+
+- 页面预览、单张下载、ZIP 中的 PNG 字节完全一致，均为 684 × 1216、16 级灰度、无抖动；不另作视觉增强。点击缩略图在浏览器查看原图，返回即可继续选择。
+- `PicoPage-LockScreens-01.zip` 包含 `LockScreens/` 下的五张 PNG，以及顶层 `README.txt` 和 `manifest.json`；清单文件名相对于 ZIP 的 `LockScreens/` 目录，记录来源、规格与 SHA-256。
+- 使用说明要求支持自定义图片的固件，并说明目录、固定图片或轮播、保存设置及准备未完成时的回退。素材未嵌入固件。
+- 更新图集时同步更新 PNG、清单摘要、ZIP 与页面。ZIP 仅打包上述七个文件，禁止带入本机路径、原始会话或其他未选素材；逐张核对尺寸、灰阶、摘要与包内文件。
+- 图片来自已选定的设计素材；浏览器预览与下载验证不等于真机显示验收。
+
+### 字体
+
+资源区提供霞鹜文楷 Regular v1.520 的下载，静态文件位于 `public/downloads/`。ZIP 包含未经修改的官方 `LXGWWenKai-Regular.ttf`、该版本的 `OFL.txt` 和注明作者、来源及安装方法的 `README.txt`；网页另提供许可证文本和官方版本链接。字体按 SIL OFL 1.1 单独授权。
 
 - 作者与项目：[LXGW / LxgwWenKai](https://github.com/lxgw/LxgwWenKai)。
 - 字体来源：[v1.520 官方文件](https://github.com/lxgw/LxgwWenKai/releases/download/v1.520/LXGWWenKai-Regular.ttf)。
