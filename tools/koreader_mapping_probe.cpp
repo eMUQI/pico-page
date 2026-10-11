@@ -16,28 +16,14 @@ void require(bool okay, const std::string& detail) {
 }
 // An image anchor names the element; every other anchor names a text node.
 bool image_anchor(const pico_page::Anchor& anchor) { return anchor.node.find("text()") == std::string::npos; }
-// Resolves a relative reference against the directory of base, without percent-decoding.
-std::string resolved(const std::string& base, const std::string& reference) {
-    std::vector<std::string> parts;
-    const auto path = base.substr(0, base.find_last_of('/') + 1) + reference;
-    for (std::size_t begin = 0; begin <= path.size();) {
-        const auto end = std::min(path.find('/', begin), path.size());
-        const auto part = path.substr(begin, end - begin);
-        if (part == "..") { if (!parts.empty()) parts.pop_back(); }
-        else if (!part.empty() && part != ".") parts.push_back(part);
-        begin = end + 1;
-    }
-    std::string joined;
-    for (const auto& part : parts) joined += (joined.empty() ? "" : "/") + part;
-    return joined;
-}
-// The engine node must be the img element whose src resolves to the resource of the native image.
+// The engine node must be the img element for the same resource. CREngine rewrites src to the
+// path of the image inside the EPUB container, which is what the native image records.
 void require_image(ldomNode* node, const pico_page::Chapter& chapter, const pico_page::Anchor& source, const std::string& pointer) {
     require(node && node->isElement() && node->getNodeName() == "img", "Reference element is not an image at " + pointer);
     const std::string src = UnicodeToUtf8(node->getAttributeValue("src")).c_str();
     for (const auto& image : chapter.images) {
         if (!(image.source == source) || image.resource.empty()) continue;
-        require(image.resource == resolved(chapter.resource, src), "Reference image differs at " + pointer);
+        require(image.resource == src, "Reference image differs at " + pointer + ": engine " + src + ", native " + image.resource);
     }
 }
 }
