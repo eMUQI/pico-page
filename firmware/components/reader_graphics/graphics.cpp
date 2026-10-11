@@ -8,6 +8,7 @@
 #include FT_FREETYPE_H
 #include FT_ADVANCES_H
 #include FT_SYNTHESIS_H
+#include FT_OUTLINE_H
 #ifdef ESP_PLATFORM
 #include FT_MODULE_H
 #include "esp_heap_caps.h"
@@ -220,7 +221,7 @@ FontMetrics Font::metrics() const {
 
 bool Font::warm(char32_t scalar, bool bold) {
     if (scalar == U'\n' || scalar == U'\r' || scalar == U'\t') return true;
-    const auto key = (std::uint64_t(bold) << 63) | (std::uint64_t(pixel_size_) << 32) | std::uint32_t(scalar);
+    const auto key = (std::uint64_t(bold) << 63) | (std::uint64_t(weight_) << 60) | (std::uint64_t(pixel_size_) << 32) | std::uint32_t(scalar);
     auto cached = glyphs_.find(key);
     if (cached == glyphs_.end()) {
         if (!face_ || FT_Load_Char(static_cast<FT_Face>(face_), scalar,
@@ -228,6 +229,10 @@ bool Font::warm(char32_t scalar, bool bold) {
             error_ = "Font glyph rasterization failed"; return false;
         }
         const auto slot = static_cast<FT_Face>(face_)->glyph;
+        if (weight_ && slot->format == FT_GLYPH_FORMAT_OUTLINE &&
+            FT_Outline_Embolden(&slot->outline, static_cast<FT_Pos>(pixel_size_ * weight_))) {
+            error_ = "Font stroke adjustment failed"; return false;
+        }
         if (bold) FT_GlyphSlot_Embolden(slot);
         if (FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL)) {
             error_ = "Font glyph rasterization failed"; return false;
@@ -264,7 +269,7 @@ bool Font::warm(char32_t scalar, bool bold) {
 bool Font::draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8_t gray, bool bold) {
     if (!warm(scalar, bold)) return false;
     if (scalar == U'\n' || scalar == U'\r' || scalar == U'\t') return true;
-    const auto key = (std::uint64_t(bold) << 63) | (std::uint64_t(pixel_size_) << 32) | std::uint32_t(scalar);
+    const auto key = (std::uint64_t(bold) << 63) | (std::uint64_t(weight_) << 60) | (std::uint64_t(pixel_size_) << 32) | std::uint32_t(scalar);
     const auto& glyph = glyphs_.at(key);
     for (unsigned row = 0; row < glyph.rows; ++row) {
         const auto* bytes = glyph.coverage.data() + static_cast<std::size_t>(row) * glyph.width;

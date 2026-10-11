@@ -5,11 +5,16 @@ schema_version = 1
 [library]
 roots = ["/Books"]
 view = "list"
+# Sort: recent / name / name_desc. Folders: first / recent.
+sort = "recent"
+folders = "first"
 
 [reader]
 # Obtain the complete body font with tools/setup_fonts.py.
 # The font path is relative to the card root.
 font = "Fonts/LXGWWenKai-Regular.ttf"
+# Weight: light / regular / medium / bold. Light requires a sibling Light font and at least 34 px.
+font_weight = "regular"
 font_size_px = 38
 line_height = 1.5
 margin_x_px = 36

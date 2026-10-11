@@ -378,6 +378,37 @@ int main() {
     assert(store.load_settings(book).settings.indent_chars == 0);
     put(book_settings, book_settings_text);
 
+    {
+        auto state = store.settings_snapshot();
+        auto values = state.config.settings; values.library_sort = "name_desc"; values.font_weight = "medium";
+        assert(store.apply_settings(state, values, false, error) == StoreStatus::Ok);
+        assert(store.load_settings().settings.library_sort == "name_desc");
+        assert(store.load_settings().settings.font_weight == "medium");
+        state = store.settings_snapshot(book); values = state.config.settings; values.library_sort = "recent";
+        assert(store.apply_settings(state, values, true, error) == StoreStatus::Invalid);
+        put(global, "schema_version=1\n[reader]\nfont_weight='unsupported'\n");
+        assert(!store.load_settings().diagnostics.empty());
+        put(global, "schema_version=1\n[library]\nsort='unsupported'\n");
+        assert(!store.load_settings().diagnostics.empty());
+        put(global, "schema_version=1\n");
+        put(root / "Books/recent.epub", "test");
+        assert(store.save_last_book(book, error, 1704067200) == StoreStatus::Ok);
+        assert(store.save_last_book("Books/recent.epub", error, 0) == StoreStatus::Ok);
+        auto recent = store.load_recent_books(error);
+        assert(error.empty() && recent.size() == 2 && recent[0].path == "Books/recent.epub" && recent[0].opened_at == 0);
+        assert(store.save_last_book(book, error, 1704153600) == StoreStatus::Ok);
+        recent = store.load_recent_books(error);
+        assert(recent.size() == 2 && recent[0].path == book && recent[0].opened_at == 1704153600);
+        const auto record = root / "PicoPage/data/recent-books.txt";
+        put(record, "PPRECENT1\n0\t../escape.epub\n");
+        assert(store.load_recent_books(error).size() == 2 && error.empty());
+        assert(store.save_last_book(book, error, 0) == StoreStatus::Ok);
+        fs::create_directory(record.string() + ".tmp");
+        const auto before = get(record);
+        assert(store.save_last_book(book, error, 1704153600) == StoreStatus::IoError && get(record) == before);
+        fs::remove(record.string() + ".tmp");
+        fs::remove(root / "Books/recent.epub");
+    }
     assert(store.save_last_book(book, error) == StoreStatus::Ok);
     assert(store.load_last_book(error) == std::optional<std::string>(book));
     assert(store.save_last_book("../outside.epub", error) == StoreStatus::UnsafePath);

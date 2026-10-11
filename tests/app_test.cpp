@@ -464,12 +464,21 @@ static void help_test(const fs::path& root, const fs::path& fixtures, bool async
                               page.sections[1].title, page.sections[1].body, page.sections[2].title, page.sections[2].body})
             for (const auto scalar : graphics::decode_utf8(text)) assert(fallback.contains(scalar));
         // Text must end before the pager, leaving a visible gap above its border.
-        for (int y = 1100; y < 1119; ++y)
+        for (int y = 1100; index != 3 && y < 1119; ++y)
             for (int x = 24; x < 660; ++x)
                 if (app.canvas().pixel(x, y) != 15) {
                     std::cerr << "Help page " << index + 1 << " overlaps the pager at " << x << ',' << y << '\n';
                     std::abort();
                 }
+        if (index == 2 || index == 3) {
+            const auto original = app.canvas().pixels();
+            driver.tap(index == 2 ? 60 : 600, index == 2 ? 350 : 400); driver.present();
+            assert(app.canvas().pixels() != original && app.view() == View::Help);
+            if (index == 3) {
+                driver.tap(100, 1160); driver.present();
+                driver.tap(600, 1160); driver.present();
+            }
+        }
         driver.refresh();
         const auto pixels = app.canvas().pixels();
         driver.queued(Input::K3); driver.queued(Input::TouchCenter, true, 600, 1160);
@@ -477,14 +486,16 @@ static void help_test(const fs::path& root, const fs::path& fixtures, bool async
         assert(app.saved_record() == saved && !app.take_network_request());
         assert(app.take_portal_action() == PortalAction::None && app.take_usb_transfer_action() == UsbTransferAction::None);
         if (index + 1 < kHelpPages.size()) {
-            if (index % 2) driver.tap(600, 1160); else driver.swipe(true);
+            if (index == 3) driver.key(Input::K3);
+            else if (index % 2) driver.tap(600, 1160); else driver.swipe(true);
             assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Overlay);
             driver.present(); assert(app.canvas().pixels() != pixels);
         }
     }
     driver.key(Input::K3); driver.tap(600, 1160); assert(!app.pending_frame());
     for (std::size_t index = 1; index < kHelpPages.size(); ++index) {
-        if (index % 2) driver.tap(60, 1160); else driver.swipe(false);
+        if (kHelpPages.size() - index == 3) driver.key(Input::K1);
+        else if (index % 2) driver.tap(60, 1160); else driver.swipe(false);
         driver.present(); assert(app.view() == View::Help);
     }
     assert(app.canvas().pixels() == first && app.saved_record() == saved);
@@ -498,9 +509,155 @@ static void help_test(const fs::path& root, const fs::path& fixtures, bool async
     if (!with_book) assert(!fs::exists(root));
 }
 
+static void layout_review_test(const fs::path& root, const fs::path& fixtures, const fs::path& font, bool async) {
+    fs::create_directories(root / "Books"); fs::create_directories(root / "Fonts");
+    fs::copy_file(font, root / "Fonts/LXGWWenKai-Regular.ttf");
+    if (async) fs::copy_file(font, root / "Fonts/LXGWWenKai-Medium.ttf");
+    for (const auto name : {"a", "b", "c"}) fs::copy_file(fixtures / "valid.epub", root / (std::string("Books/") + name + ".epub"));
+    FileStore store(root.string()); std::string detail;
+    assert(store.save_last_book("Books/b.epub", detail, 0) == StoreStatus::Ok);
+    assert(store.save_last_book("Books/a.epub", detail, 1704067200) == StoreStatus::Ok);
+    ReaderApp app(root.string(), "layout-review", true, async); Driver driver{app};
+    assert(app.initialize()); driver.present();
+    assert(app.can_long_press_at(300, 220));
+    // The resume card owns a; the first row must open b, even though c is unread.
+    driver.tap(300, 480); driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && store.load_last_book(detail) == std::optional<std::string>("Books/b.epub"));
+    const auto saved = app.saved_record();
+    const auto progress = read(root / "Books/b.epub.picopage/progress.json");
+    driver.typography(); driver.tap(230, 820); driver.present();
+    const auto regular = app.canvas().pixels();
+    driver.tap(80, 1020); assert(!app.pending_frame());
+    driver.tap(580, 1020); driver.present(); assert(app.canvas().pixels() != regular);
+    driver.refresh(); driver.close(); driver.present();
+    assert(app.saved_record() == saved && read(root / "Books/b.epub.picopage/progress.json") == progress);
+    assert(store.load_settings("Books/b.epub").settings.font_weight == "regular");
+    driver.typography(); driver.tap(230, 820); driver.present(); driver.tap(580, 1020); driver.present();
+    driver.tap(500, 1130); driver.present(); driver.complete_content();
+    assert(store.load_settings("Books/b.epub").settings.font_weight == "medium" && app.saved_record()->anchor == saved->anchor);
+    if (async) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (app.background_due()) {
+            app.poll_background(); app.background_step();
+            if (app.pending_frame()) driver.present();
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        bool native_cache = false;
+        for (const auto& item : fs::directory_iterator(root / "PicoPage/cache/pages"))
+            native_cache = native_cache || read(item.path()).find("Fonts/LXGWWenKai-Medium.ttf") != std::string::npos;
+        assert(native_cache);
+    }
+    driver.tap(342, 500); driver.present(); driver.tap(60, 50); driver.present();
+    driver.tap(380, 384); driver.present();
+    assert(store.load_settings().settings.library_sort == "name");
+    driver.tap(380, 384); driver.present(); assert(store.load_settings().settings.library_sort == "name_desc");
+    write(root / "PicoPage/settings.toml", "schema_version=9\n");
+    driver.tap(380, 384); driver.present();
+    assert(app.status() == "排序未保存，请检查 TF 卡或设置文件" && read(root / "PicoPage/settings.toml") == "schema_version=9\n");
+    write(root / "PicoPage/settings.toml", "schema_version=1\n[library]\nsort='recent'\n");
+    const auto library_root = root / "LibraryReview";
+    fs::create_directories(library_root / "Books/z-folder");
+    for (const auto name : {"a", "b", "c"})
+        fs::copy_file(fixtures / "valid.epub", library_root / (std::string("Books/") + name + ".epub"));
+    FileStore library_store(library_root.string());
+    assert(library_store.save_last_book("Books/b.epub", detail, 0) == StoreStatus::Ok);
+    assert(library_store.save_last_book("Books/a.epub", detail, 0) == StoreStatus::Ok);
+    {
+        ReaderApp library(library_root.string(), "library-review", true, async); Driver d{library};
+        assert(library.initialize()); d.present();
+        assert(!library.can_long_press_at(300, 480));
+        d.tap(600, 50); d.present(); d.tap(300, 560); d.present();
+        assert(library.view() == View::InputSettings);
+        d.tap(300, 840); d.present();
+        assert(library_store.load_settings().settings.library_folders == "recent");
+        d.tap(60, 50); d.present(); d.tap(60, 50); d.present();
+        assert(library.view() == View::Library && library.can_long_press_at(300, 480));
+    }
+    write(library_root / "PicoPage/data/recent-books.txt", "invalid");
+    write(library_root / "PicoPage/data/recent-books.txt.bak", "invalid");
+    write(library_root / "Books/c.epub.picopage/progress.json", progress);
+    {
+        ReaderApp library(library_root.string(), "library-review", true, async); Driver d{library};
+        assert(library.initialize()); d.present();
+        assert(!library.can_long_press_at(300, 480));
+        d.tap(600, 50); d.present(); d.tap(300, 560); d.present();
+        d.tap(300, 840); d.present();
+        assert(library.status() == "最近阅读记录无法读取，暂按书名排序");
+        d.tap(60, 50); d.present(); d.tap(60, 50); d.present();
+        d.tap(300, 610); d.present(); d.complete_content();
+        assert(library_store.load_last_book(detail) == std::optional<std::string>("Books/a.epub"));
+        const auto last = library_root / "PicoPage/data/last-book.txt";
+        const auto stamp = fs::file_time_type::clock::now() - std::chrono::hours(24);
+        fs::last_write_time(last, stamp);
+        const auto recorded_stamp = fs::last_write_time(last);
+        const auto saved = library.saved_record();
+        for (int i = 0; i < 2; ++i) { d.key(Input::K3); d.present(); d.complete_content(); }
+        assert(fs::last_write_time(last) == recorded_stamp);
+        assert(library.saved_record() && !(library.saved_record() == saved));
+    }
+    const auto canvas = [&] {
+        ReaderApp library(library_root.string(), "library-review", true, false); Driver d{library};
+        assert(library.initialize()); d.present();
+        return library.canvas().pixels();
+    };
+    const auto with_primary = canvas();
+    fs::rename(library_root / "Books/c.epub.picopage/progress.json", library_root / "Books/c.epub.picopage/progress.json.bak");
+    assert(canvas() == with_primary);
+    fs::create_directory(library_root / "Books/c.epub.picopage/progress.json");
+    assert(canvas() != with_primary);
+    fs::remove(library_root / "Books/c.epub.picopage/progress.json");
+    assert(canvas() == with_primary);
+    fs::remove(library_root / "Books/c.epub.picopage/progress.json.bak");
+    assert(canvas() != with_primary);
+    if (async) {
+        fs::create_directories(library_root / "Fonts");
+        write(library_root / "PicoPage/data/recent-books.txt", "PPRECENT1\n");
+        write(library_root / "PicoPage/data/recent-books.txt.bak", "PPRECENT1\n");
+        fs::copy_file(font, library_root / "Fonts/Legacy-Regular.ttf");
+        fs::copy_file(font, library_root / "Fonts/Legacy-Bold.ttf");
+        write(library_root / "PicoPage/settings.toml", "schema_version=1\n[reader]\nfont='Fonts/Legacy-Bold.ttf'\n");
+        ReaderApp legacy(library_root.string(), "legacy-weight", true, true); Driver d{legacy};
+        assert(legacy.initialize()); d.present(); opened(legacy, "Books/b.epub"); d.present();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (legacy.background_due()) {
+            legacy.poll_background(); legacy.background_step();
+            if (legacy.pending_frame()) d.present();
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        bool bold_cache = false;
+        for (const auto& item : fs::directory_iterator(library_root / "PicoPage/cache/pages"))
+            bold_cache = bold_cache || read(item.path()).find("Fonts/Legacy-Bold.ttf") != std::string::npos;
+        assert(bold_cache);
+        d.typography(); d.tap(230, 820); d.present(); d.tap(580, 1020); d.present();
+        d.tap(500, 1130); d.present(); d.complete_content();
+        const auto medium_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (legacy.background_due()) {
+            legacy.poll_background(); legacy.background_step();
+            if (legacy.pending_frame()) d.present();
+            assert(std::chrono::steady_clock::now() < medium_deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        bool regular_cache = false;
+        for (const auto& item : fs::directory_iterator(library_root / "PicoPage/cache/pages"))
+            regular_cache = regular_cache || read(item.path()).find("Fonts/Legacy-Regular.ttf") != std::string::npos;
+        assert(regular_cache);
+        fs::remove(library_root / "Books/b.epub.picopage/settings.toml");
+        fs::remove(library_root / "Fonts/Legacy-Regular.ttf");
+        write(library_root / "Books/weight.txt", "A plain text page for the unavailable weight notice.\n");
+        for (const auto weight : {"medium", "light"}) {
+            write(library_root / "PicoPage/settings.toml", std::string("schema_version=1\n[reader]\nfont='Fonts/Legacy-Bold.ttf'\nfont_weight='") + weight + "'\n");
+            ReaderApp unavailable(library_root.string(), "weight-unavailable", true, false); Driver check{unavailable};
+            assert(unavailable.initialize()); check.present(); opened(unavailable, "Books/weight.txt"); check.present();
+            assert(unavailable.status() == "所选字重不可用，保留字体原有字重");
+        }
+    }
+}
+
 static void swipe_test(const fs::path& root, const fs::path& fixtures, bool grid) {
     fs::create_directories(root / "Books");
-    for (int i = 0; i < 13; ++i)
+    for (int i = 0; i < 15; ++i)
         fs::copy_file(fixtures / "swipe.epub", root / ("Books/book" + std::to_string(i) + ".epub"));
     write(root / "PicoPage/settings.toml", std::string("schema_version = 1\n[library]\nview = '") + (grid ? "grid" : "list") + "'\n");
     ReaderApp app(root.string(), "swipe-test", true, true); Driver driver{app};
@@ -898,6 +1055,8 @@ int main(int argc, char** argv) {
     const auto bounded = reading_footer::chapter_label(wide_label, 0);
     assert(bounded.size() == 129 && graphics::decode_utf8(bounded).size() == 43);
 
+    layout_review_test(card / "LayoutSync", fixtures, argv[2], false);
+    layout_review_test(card / "LayoutAsync", fixtures, argv[2], true);
     swipe_test(card / "SwipeList", fixtures, false);
     swipe_test(card / "SwipeGrid", fixtures, true);
     help_test(card / "HelpNoCard", fixtures, false, false);
@@ -972,6 +1131,8 @@ int main(int argc, char** argv) {
         const auto defaults = screens("Books");
         assert(custom.first != defaults.first && custom.second != defaults.second);
     }
+    // Cover-coordinate checks below use a fixed alphabetical library order.
+    write(card / "PicoPage/settings.toml", "schema_version=1\n[library]\nsort='name'\n");
     const auto progress = card / "Books/book.epub.picopage/progress.json";
     const auto settings = card / "Books/book.epub.picopage/settings.toml";
     ReadingRecord confirmed;
@@ -1182,7 +1343,7 @@ int main(int argc, char** argv) {
         driver.typography();
         const auto applied_preview = app.canvas().pixels();
         driver.tap(500, 1130); assert(!app.pending_frame());
-        driver.tap(580, 948); driver.present();
+        driver.tap(580, 1020); driver.present();
         assert(app.canvas().pixels() != applied_preview);
         driver.refresh(); assert(!fs::exists(settings));
         driver.close(); assert(app.view() == View::Reading); driver.present();
@@ -1210,7 +1371,7 @@ int main(int argc, char** argv) {
         driver.close();
         assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Body && app.pending_frame()->anchor == confirmed.anchor);
         driver.present();
-        driver.typography(); driver.tap(580, 948); driver.present(); driver.tap(500, 1130);
+        driver.typography(); driver.tap(580, 1020); driver.present(); driver.tap(500, 1130);
         assert(app.view() == View::Reading && app.pending_frame() && app.pending_frame()->anchor == confirmed.anchor);
         driver.present();
         assert(FileStore(card.string()).load_settings("Books/book.epub").settings.font_size_px == 40);
@@ -1281,6 +1442,7 @@ int main(int argc, char** argv) {
         assert(graphics::image_decode_count() == before_open);
     }
     {
+        write(card / "PicoPage/settings.toml", "schema_version=1\n[library]\nsort='name'\n");
         fs::copy_file(fixtures / "long-chapter.epub", card / "Books/long.epub");
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present();
@@ -1614,7 +1776,7 @@ int main(int argc, char** argv) {
         driver.tap(580, 1170); driver.present();
         assert(app.view() == View::Reading && app.canvas().pixels() == image_pixels);
         driver.typography();
-        driver.tap(580, 948); driver.present();
+        driver.tap(580, 1020); driver.present();
         assert(*app.saved_record() == image_record);
         driver.close(); driver.present(); assert(*app.saved_record() == image_record);
         driver.key(Input::K3); driver.present(); after_image = *app.saved_record();
@@ -2253,10 +2415,10 @@ int main(int argc, char** argv) {
         const auto saved = *app.saved_record();
         const std::string external = "schema_version=1\n[reader]\nfont_size_px=48\nline_height=1.6\nmargin_x_px=44\n[display]\nrefresh_preset='clear'\n";
         write(settings, external);
-        driver.typography(); driver.tap(580, 948); driver.present();
+        driver.typography(); driver.tap(580, 1020); driver.present();
         driver.close(); driver.present();
         assert(read(settings) == external && *app.saved_record() == saved);
-        driver.typography(); driver.tap(580, 948); driver.present(); driver.tap(500, 1130); driver.present();
+        driver.typography(); driver.tap(580, 1020); driver.present(); driver.tap(500, 1130); driver.present();
         auto actual = FileStore(card.string()).load_settings("Books/book.epub").settings;
         assert(actual.font_size_px == 50 && actual.line_height == 1.6 && actual.margin_x_px == 44 && actual.refresh_preset == "clear");
         assert(*app.saved_record() == saved);
@@ -2279,8 +2441,8 @@ int main(int argc, char** argv) {
         driver.close(); driver.present();
         assert(*app.saved_record() == saved && app.canvas().pixels() == body_before_refresh);
 
-        driver.typography(); driver.tap(566, 1038); driver.present();
-        driver.tap(580, 948); driver.present(); driver.tap(500, 1130); driver.present();
+        driver.typography(); driver.tap(588, 910); driver.present();
+        driver.tap(580, 1020); driver.present(); driver.tap(500, 1130); driver.present();
         actual = FileStore(card.string()).load_settings("Books/book.epub").settings;
         const auto global = FileStore(card.string()).load_settings().settings;
         assert(actual.font_size_px == global.font_size_px + 2 && actual.line_height == global.line_height && actual.margin_x_px == global.margin_x_px);
@@ -2288,7 +2450,7 @@ int main(int argc, char** argv) {
 
         const auto applied_pixels = app.canvas().pixels();
         const auto book_overrides = read(settings);
-        driver.typography(); driver.tap(580, 948); driver.present(); driver.tap(180, 1130);
+        driver.typography(); driver.tap(580, 1020); driver.present(); driver.tap(180, 1130);
         assert(app.view() == View::Tools && app.pending_frame()->purpose == FramePurpose::Overlay);
         assert(app.status() == "阅读默认已保存，本书排版未变");
         driver.present();
@@ -2318,7 +2480,7 @@ int main(int argc, char** argv) {
         const auto before = app.canvas().pixels();
         const auto inherited = FileStore(card.string()).load_settings().settings.font_size_px;
         const auto overrides = read(settings);
-        driver.typography(); driver.tap(100, 948); driver.present(); driver.tap(180, 1130);
+        driver.typography(); driver.tap(100, 1020); driver.present(); driver.tap(180, 1130);
         assert(app.view() == View::Reading && app.pending_frame()->purpose == FramePurpose::Body);
         assert(app.status() == "阅读默认已保存，当前书已应用");
         assert(*app.saved_record() == saved);
@@ -2461,7 +2623,7 @@ int main(int argc, char** argv) {
         const auto saved = *app.saved_record();
         const auto sidecar = card / "Manage/only.epub.picopage/progress.json";
         driver.tap(342, 500); driver.present(); driver.tap(60, 50); driver.present();
-        driver.hold(300, 480); driver.present();
+        driver.hold(300, 220); driver.present();
         assert(app.view() == View::BookDetails);
         driver.tap(342, 918); driver.present();
         assert(app.view() == View::BookManagement); driver.refresh();
@@ -2477,7 +2639,7 @@ int main(int argc, char** argv) {
         assert(app.view() == View::Reading && app.saved_record() && app.saved_record()->anchor != saved.anchor);
         assert(read(sidecar.string() + ".bak") == cleared);
         const auto reset_record = read(sidecar);
-        driver.tap(342, 500); driver.present(); driver.tap(60, 50); driver.present(); driver.hold(300, 480); driver.present();
+        driver.tap(342, 500); driver.present(); driver.tap(60, 50); driver.present(); driver.hold(300, 220); driver.present();
         driver.tap(342, 1010); driver.present(); driver.refresh();
         driver.tap(500, 1120); driver.present();
         assert(app.view() == View::Library && !app.saved_record());
@@ -2526,7 +2688,7 @@ int main(int argc, char** argv) {
             driver.key(Input::K1); driver.present();
             driver.tap(342, 500); driver.present(); driver.tap(205, 1150); driver.present();
             assert(app.view() == View::Typography);
-            driver.tap(588, 948); driver.present(); driver.tap(500, 1136); driver.present();
+            driver.tap(588, 1020); driver.present(); driver.tap(500, 1136); driver.present();
             assert(app.view() == View::Reading && app.background_due() && !app.book_pages());
             while (app.background_due()) app.background_step();
             assert(app.book_pages() && app.book_pages()->total > total);
@@ -2887,19 +3049,19 @@ int main(int argc, char** argv) {
             else assert(*app.saved_record() == saved && app.canvas().pixels() == restored_pixels);
         }
         driver.tap(50, 50); driver.present();
-        assert(app.view() == View::Library && app.can_long_press_at(300, 480));
+        assert(app.view() == View::Library && app.can_long_press_at(300, 220));
         assert(!app.can_long_press_at(50, 50));
         assert(sleep_frame(app)); driver.present(); app.wake(false); driver.present();
         SleepInput input;
         input.begin();
-        input.accept({EventKind::Touch, EventPhase::Begin, 2, 300, 480, 1000});
+        input.accept({EventKind::Touch, EventPhase::Begin, 2, 300, 220, 1000});
         const auto held = input.due(1000 + kLongPressUs);
         assert(held && app.can_long_press_at(held->x, held->y));
         input.accept({EventKind::Touch, EventPhase::End, 2, held->x, held->y, 1000 + kLongPressUs});
         driver.hold(input.tap()->x, input.tap()->y); driver.present(); driver.complete_content();
         assert(app.view() == View::BookDetails);
         input.clear();
-        input.accept({EventKind::Touch, EventPhase::End, 2, 300, 480, 2000 + kLongPressUs});
+        input.accept({EventKind::Touch, EventPhase::End, 2, 300, 220, 2000 + kLongPressUs});
         assert(!input.tap());
     }
     {
@@ -3079,7 +3241,7 @@ int main(int argc, char** argv) {
         driver.tap(205, 1140); driver.present(); driver.complete_content();
         assert(app.view() == View::Typography && *app.saved_record() == saved);
         const auto prepared = graphics::image_decode_count();
-        driver.tap(580, 948); driver.present(); driver.complete_content();
+        driver.tap(580, 1020); driver.present(); driver.complete_content();
         assert(app.view() == View::Typography && graphics::image_decode_count() == prepared);
         driver.close(); driver.present();
         assert(app.view() == View::Reading && *app.saved_record() == saved);
