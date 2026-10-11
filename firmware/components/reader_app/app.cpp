@@ -5264,7 +5264,7 @@ struct ReaderApp::Impl final : DisplayBackend {
      * Chinese wording for a failure detail produced by the document, store or sync layers. Their
      * details are English diagnostic text for the log; text that is already Chinese passes through.
      * A colon-separated detail may also include a non-ASCII resource path. The layers report no
-     * error codes; an unknown diagnostic is described as invalid content.
+     * error codes; an unknown diagnostic uses the caller's fallback or a generic failure message.
      */
     static std::string reason(const std::string &detail, const char *fallback = "操作失败") {
         std::string lower = detail;
