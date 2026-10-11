@@ -704,7 +704,7 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
     auto run = [&](bool sleeping, const std::string& name = std::string()) {
         ContentJob::Request request;
         request.kind = ContentJob::Kind::LockScreen; request.root = root.string();
-        request.sleep_image = name; request.prefetch = !sleeping; request.preview = sleeping;
+        request.sleep_image = name; request.lock_screen_prepare = !sleeping; request.preview = sleeping;
         ContentJob job(std::move(request)); assert(job.start()); job.wait();
         return std::move(job.result);
     };
@@ -787,6 +787,24 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         driver.tap(300, 190); driver.present(); driver.tap(450, 1020); driver.present();
         driver.tap(500, 1120); driver.present();
         assert(store.load_settings().settings.sleep_image.empty());
+    }
+    {
+        const auto switched = root / "CoverSwitch";
+        write(switched / "LockScreens/custom.png", png);
+        write(switched / "PicoPage/settings.toml", "schema_version=1\n[power]\nsleep_screen='custom'\nsleep_image='custom.png'\n");
+        fs::create_directories(switched / "Books");
+        fs::copy_file(fixtures / "image-cover.epub", switched / "Books/cover.epub");
+        ReaderApp app(switched.string(), "cover-switch", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/cover.epub"); driver.present();
+        driver.complete_content();
+        driver.tap(342, 500); driver.present(); driver.tap(50, 50); driver.present();
+        driver.tap(600, 50); driver.present(); driver.tap(340, 710); driver.present();
+        app.background_step();
+        assert(std::string(app.background_state()) == "sleep-cover");
+        driver.tap(150, 240); driver.present(); driver.tap(500, 1120); driver.present();
+        assert(!app.prepare_sleep() && app.sleep_pending());
+        assert(sleep_frame(app)); driver.present();
+        assert(app.canvas().pixel(50, 100) == 0 && app.canvas().pixel(50, 900) == 5);
     }
     for (int i = 0; i < 257; ++i) write(root / "LockScreens" / ("overflow-" + std::to_string(i) + ".png"), png);
     assert(store.lock_screen_files(names) == StoreStatus::Invalid && names.empty());

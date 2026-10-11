@@ -454,8 +454,8 @@ void ContentJob::prepare_lock_screen() {
                         std::to_string(before.st_mtime) + "\n684x1216-fit\n";
     constexpr std::size_t count = 342 * 1216;
 #ifdef ESP_PLATFORM
-    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 3U * 1024 * 1024 ||
-        heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 2U * 1024 * 1024) {
+    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2 * (count + header.size() + 32) + 256U * 1024 ||
+        heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < count + header.size() + 32) {
         result.retryable_failure = true;
         result.error = "图片准备内存不足"; return;
     }
@@ -465,7 +465,7 @@ void ContentJob::prepare_lock_screen() {
         if (store.load_cache(cache, header.size() + count + 32, cached) == StoreStatus::Ok &&
             cached.size() == header.size() + count + 32 && cached.compare(0, header.size(), header) == 0 &&
             cached.compare(header.size() + count, 32, md5_hex(std::string_view(cached.data() + header.size(), count))) == 0) {
-            if (!request.prefetch) {
+            if (!request.lock_screen_prepare) {
                 result.image = std::make_unique<graphics::Canvas>(684, 1216);
                 std::memcpy(result.image->data(), cached.data() + header.size(), count);
             }
@@ -475,6 +475,15 @@ void ContentJob::prepare_lock_screen() {
     // Sleep requests validate the source identity but never decode an uncached image.
     if (!result.cache_finished && request.preview) { result.error = "图片缓存尚未就绪"; return; }
     if (!result.cache_finished) {
+#ifdef ESP_PLATFORM
+        // The source size is bounded above; reserve both canvases and decoder headroom before reading it.
+        const auto encoded_size = static_cast<std::size_t>(before.st_size);
+        if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < encoded_size + 2 * count + 768U * 1024 ||
+            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < std::max(encoded_size, count)) {
+            result.retryable_failure = true;
+            result.error = "图片准备内存不足"; return;
+        }
+#endif
         std::vector<std::uint8_t> encoded;
         if (stop() || store.read_lock_screen(result.lock_screen, encoded, stop) != StoreStatus::Ok) {
             result.error = "图片不可读或超过 2 MiB"; return;
@@ -494,7 +503,7 @@ void ContentJob::prepare_lock_screen() {
         bytes += md5_hex(std::string_view(bytes.data() + header.size(), count));
         result.cache_finished = store.save_cache(cache, bytes) == StoreStatus::Ok;
         if (!result.cache_finished) { result.retryable_failure = true; result.error = "图片缓存未保存"; return; }
-        if (!request.prefetch) result.image = std::move(image);
+        if (!request.lock_screen_prepare) result.image = std::move(image);
     }
     if (stop()) { result.image.reset(); result.error = "图片准备已取消"; return; }
     if (request.preview && request.sleep_image.empty() && result.image &&

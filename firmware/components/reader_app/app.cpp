@@ -475,6 +475,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool resume_to_library = false;
     bool usb_prepared = false, usb_active = false, usb_confirm = false;
     UsbTransferAction usb_action = UsbTransferAction::None;
+    std::optional<View> usb_request_view;
     WifiStatus wifi_status;
     // manual_hold keeps the station up after "connect now"; wifi_hold cancels one scan or join.
     network::Hold manual_hold, sync_hold, wifi_hold, account_hold;
@@ -1321,7 +1322,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 custom_notice = result.error;
                 if (!custom_sleep_image && custom_notice.empty()) custom_notice = "休眠图片尚未就绪";
             }
-            if (request.prefetch) {
+            if (request.lock_screen_prepare) {
                 custom_prepare_finished = result.cache_finished || !result.retryable_failure;
                 custom_retry_at = result.cache_finished ? std::chrono::steady_clock::time_point{} :
                     std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -1374,6 +1375,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool counting_loaded = false;
     /** Set while a sleep request waits for its cover worker; holds the time to request cancellation. */
     std::optional<std::chrono::steady_clock::time_point> sleep_cover_deadline;
+    bool sleep_waiting_for_cover = false;
     /** Starts the cover worker for a sleep request. The caller has stopped pagination and released prefetch memory. */
     void prepare_sleep_cover() {
         if (counting_job) return;
@@ -4237,10 +4239,17 @@ struct ReaderApp::Impl final : DisplayBackend {
         button(Back, "完成", 340, 980, 308, 88, true);
         footer_bar("返回后保存设置", lock_screen_page, pages);
     }
+    /** Requests cancellation and reports whether a custom image worker still owns storage. */
+    bool cancel_custom_preparation() {
+        if (!counting_job || counting_job->request.kind != ContentJob::Kind::LockScreen || counting_job->done()) return false;
+        counting_job->cancel();
+        return true;
+    }
     bool custom_prepare_due() const {
         return settings.sleep_screen == "custom" && !custom_prepare_finished &&
                std::chrono::steady_clock::now() >= custom_retry_at && card_available && !usb_prepared &&
-               !portal_live && !sleep_cover_deadline && !power_menu_wait && !active_network && !network_worker_id &&
+               !portal_live && !portal_requested && usb_action != UsbTransferAction::Start &&
+               !sleep_cover_deadline && !power_menu_wait && !active_network && !network_worker_id &&
                !display.busy() && !content_loading && !foreground_job && !pending_content && !counting_job &&
                !body_images_pending && !inline_image_pending && !session.needs_save() && !save_job && !bookmark_job && !cover_job && !raster_job &&
                (view == View::Library || view == View::Reading || view == View::Settings || view == View::PowerSettings);
@@ -4249,7 +4258,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         ContentJob::Request request;
         request.kind = ContentJob::Kind::LockScreen; request.root = root;
         request.sleep_image = settings.sleep_image; request.generation = counting_generation;
-        request.prefetch = !sleeping; request.preview = sleeping;
+        request.lock_screen_prepare = !sleeping; request.preview = sleeping;
         if (!sleeping) custom_retry_at = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         if (sleeping) { custom_sleep_attempted = true; custom_sleep_image.reset(); custom_notice.clear(); }
         counting_job = std::make_unique<ContentJob>(std::move(request));
@@ -5693,6 +5702,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             return;
         }
         if (id == UsbStart) {
+            usb_request_view = view;
             usb_action = UsbTransferAction::Start;
             return;
         }
@@ -6019,8 +6029,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             break;
         case ClearCache:
             if (!bookmark_io_ready()) return;
-            if (counting_job && counting_job->request.kind == ContentJob::Kind::LockScreen && !counting_job->done()) {
-                counting_job->cancel();
+            if (cancel_custom_preparation()) {
                 clear_cache_pending = true;
                 message = "正在停止图片准备，完成后清理缓存";
                 draw_storage();
@@ -6563,9 +6572,15 @@ int ReaderApp::auto_sleep_minutes() const {
     return impl_->settings.auto_sleep_minutes;
 }
 UsbTransferAction ReaderApp::take_usb_transfer_action() {
+    if (impl_->usb_action == UsbTransferAction::Start) {
+        if (impl_->usb_request_view && impl_->view != *impl_->usb_request_view) impl_->usb_action = UsbTransferAction::None;
+        else if (impl_->cancel_custom_preparation()) return UsbTransferAction::None;
+    }
+    impl_->usb_request_view.reset();
     return std::exchange(impl_->usb_action, UsbTransferAction::None);
 }
 bool ReaderApp::prepare_usb_transfer() {
+    if (impl_->cancel_custom_preparation()) return false;
     invalidate_identity_cache();
     if (impl_->network_worker_id || impl_->portal_live || impl_->usb_prepared || impl_->display.busy() || impl_->active_network ||
         !impl_->card_available || !impl_->persist()) return false;
@@ -6596,6 +6611,12 @@ void ReaderApp::show_usb_transfer(bool active, const std::string& error) {
     impl_->overlay(true);
 }
 PortalAction ReaderApp::take_portal_action() {
+    if (impl_->portal_action == PortalAction::Upload || impl_->portal_action == PortalAction::UploadStation) {
+        if (impl_->view != impl_->portal_request_view) {
+            impl_->portal_action = PortalAction::None;
+            impl_->portal_requested = false;
+        } else if (impl_->cancel_custom_preparation()) return PortalAction::None;
+    }
     return std::exchange(impl_->portal_action, PortalAction::None);
 }
 std::uint64_t ReaderApp::portal_generation() const { return impl_->portal_generation; }
@@ -6676,6 +6697,7 @@ WifiTargets ReaderApp::upload_targets() const {
 }
 bool ReaderApp::keyboard_visible() const { return impl_->view == View::TextEntry; }
 bool ReaderApp::prepare_portal(bool station) {
+    if (impl_->cancel_custom_preparation()) return false;
     if (impl_->portal_live || impl_->network_worker_id) return false;
     if (impl_->content_loading || impl_->usb_prepared || impl_->display.busy() || impl_->active_network ||
         !impl_->card_available || !impl_->persist() || !wifi_enabled()) return false;
@@ -6837,12 +6859,13 @@ bool ReaderApp::prepare_sleep() {
             return false;
         }
         impl_->sleep_cover_deadline.reset();
-        cover_attempted = true;
+        cover_attempted = impl_->sleep_waiting_for_cover;
     }
     if (impl_->network_worker_id || impl_->portal_live || impl_->usb_prepared || impl_->view == View::Portal || impl_->view == View::PowerMenu || impl_->view == View::PowerOff) return false;
     if (impl_->display.busy() || impl_->active_network) return false;
     if (impl_->counting_job && (impl_->counting_job->request.kind == ContentJob::Kind::SleepCover || impl_->counting_job->request.kind == ContentJob::Kind::LockScreen)) {
-        // Adopt the in-flight cover before cleanup can join its worker on the application task.
+        // Wait for image work before cleanup can join its worker on the application task.
+        impl_->sleep_waiting_for_cover = impl_->counting_job->request.kind == ContentJob::Kind::SleepCover;
         impl_->sleep_cover_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         return false;
     }
@@ -6858,6 +6881,7 @@ bool ReaderApp::prepare_sleep() {
     if (impl_->settings.sleep_screen == "custom" && !impl_->custom_sleep_attempted) {
         impl_->prepare_custom_sleep(true);
         if (impl_->counting_job) {
+            impl_->sleep_waiting_for_cover = false;
             impl_->sleep_cover_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
             return false;
         }
@@ -6866,6 +6890,7 @@ bool ReaderApp::prepare_sleep() {
         impl_->settings.sleep_screen == "cover") {
         impl_->prepare_sleep_cover();
         if (impl_->counting_job) {
+            impl_->sleep_waiting_for_cover = true;
             impl_->sleep_cover_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
             return false;
         }

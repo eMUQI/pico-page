@@ -79,6 +79,8 @@ public:
         /** Pagination only. Without a session the job prepares and discards its own. */
         std::shared_ptr<PaginationSession> session;
         bool save_last_book = false, prefetch = false, cover_crop = false, preview = false;
+        /** LockScreen: prepare the disk cache without retaining a result canvas. */
+        bool lock_screen_prepare = false;
         bool progressive = false;
         std::uint64_t generation = 0;
         PP_DIAGNOSTIC(std::uint64_t diagnostic_session = 0, diagnostic_layout = 0;)

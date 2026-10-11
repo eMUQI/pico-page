@@ -218,12 +218,12 @@ struct Host {
     }
     bool scripted_gesture(Input key, bool touch = false, int x = 0, int y = 0, bool hold = false) {
         if (!gesture(key, touch, x, y, hold)) return false;
-        while (app.content_busy()) {
+        while (app.content_busy() || std::string(app.background_state()) == "sleep-cover") {
             app.poll_background();
             if (!flush()) return false;
             SDL_Delay(1);
         }
-        return true;
+        return flush() && poll_portal();
     }
     bool capture(const std::string &path) {
         pixels();
@@ -351,6 +351,7 @@ int main(int argc, char **argv) {
     while (running) {
         host.poll_network();
         host.app.poll_background();
+        host.poll_portal();
         if (sleep_requested && (host.app.prepare_sleep() || !host.app.sleep_pending()))
             sleep_requested = false;
         host.flush();
