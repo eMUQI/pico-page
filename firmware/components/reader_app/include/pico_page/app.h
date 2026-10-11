@@ -40,7 +40,8 @@ enum class View {
     NetworkClosing,
     Help,
     TextEntry,
-    PageEffects
+    PageEffects,
+    LockScreens
 };
 enum class PageEffect { Off, TextTurnA, TextTurnB, TextTurnC, Ripple };
 enum class PowerAction { None, Shutdown, Restart };

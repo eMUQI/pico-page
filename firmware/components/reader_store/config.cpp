@@ -69,7 +69,7 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
         !allowed_fields(toml_get(table, "display"), {"refresh_preset", "balanced_full_refresh_pages", "fast_full_refresh_pages"}, "display", diagnostic) ||
         !allowed_fields(toml_get(table, "library"), {"roots", "view", "sort", "folders"}, "library", diagnostic) ||
         !allowed_fields(toml_get(table, "network"), {"wifi_enabled"}, "network", diagnostic) ||
-        !allowed_fields(toml_get(table, "power"), {"auto_sleep_minutes", "sleep_screen"}, "power", diagnostic)) return false;
+        !allowed_fields(toml_get(table, "power"), {"auto_sleep_minutes", "sleep_screen", "sleep_image"}, "power", diagnostic)) return false;
 
     auto value = toml_seek(table, "reader.font");
     diagnostic.field = "reader.font";
@@ -136,9 +136,16 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
     value = toml_seek(table, "power.sleep_screen");
     if (value.type != TOML_UNKNOWN) {
         diagnostic.field = "power.sleep_screen";
-        diagnostic.detail = "expected cover, reading or simple";
+        diagnostic.detail = "expected cover, reading, simple or custom";
         if (!string_value(value, settings.sleep_screen) ||
-            (settings.sleep_screen != "cover" && settings.sleep_screen != "reading" && settings.sleep_screen != "simple")) return false;
+            (settings.sleep_screen != "cover" && settings.sleep_screen != "reading" && settings.sleep_screen != "simple" && settings.sleep_screen != "custom")) return false;
+    }
+    value = toml_seek(table, "power.sleep_image");
+    if (value.type != TOML_UNKNOWN) {
+        diagnostic.field = "power.sleep_image";
+        diagnostic.detail = "expected an empty string for rotation or a PNG/JPEG basename";
+        if (value.type == TOML_STRING && value.u.str.len == 0) settings.sleep_image.clear();
+        else if (!string_value(value, settings.sleep_image) || !valid_lock_screen_name(settings.sleep_image)) return false;
     }
     value = toml_seek(table, "power.auto_sleep_minutes");
     if (value.type != TOML_UNKNOWN) {
@@ -251,6 +258,7 @@ SettingValues setting_values(const ReaderSettings& values, bool global = false) 
         fields.emplace_back("library.folders", quoted(values.library_folders));
         fields.emplace_back("power.auto_sleep_minutes", std::to_string(values.auto_sleep_minutes));
         fields.emplace_back("power.sleep_screen", quoted(values.sleep_screen));
+        fields.emplace_back("power.sleep_image", quoted(values.sleep_image));
     }
     return fields;
 }
@@ -404,7 +412,7 @@ StoreStatus save_settings(const std::string& root, const SettingsSnapshot& snaps
                        values.library_sort != effective.library_sort ||
                        values.library_folders != effective.library_folders ||
                        values.wifi_enabled != effective.wifi_enabled ||
-                       values.auto_sleep_minutes != effective.auto_sleep_minutes || values.sleep_screen != effective.sleep_screen))) {
+                       values.auto_sleep_minutes != effective.auto_sleep_minutes || values.sleep_screen != effective.sleep_screen || values.sleep_image != effective.sleep_image))) {
         error = "library.roots is read-only; library.view, library.sort, library.folders, power and network fields are global only";
         return StoreStatus::Invalid;
     }

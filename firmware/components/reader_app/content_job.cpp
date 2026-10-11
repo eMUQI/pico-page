@@ -3,6 +3,7 @@
 #include "pico_page/sync.h"
 #include "pico_page/stage_timer.h"
 #include <sys/stat.h>
+#include <chrono>
 #include "pico_page/store.h"
 #include <cstring>
 #include <algorithm>
@@ -166,7 +167,7 @@ bool ContentJob::start() {
     // Optional work retains the same headroom after accounting for the already reserved stack.
     const auto required_internal = 32U * 1024 + (content_requests ? 0 : content_stack_bytes);
     if ((request.kind == Kind::Pagination || request.kind == Kind::FontIdentity || request.kind == Kind::LibraryCovers ||
-         request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite || request.kind == Kind::SleepCover) &&
+         request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite || request.kind == Kind::SleepCover || request.kind == Kind::LockScreen) &&
         heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < required_internal) {
         start_failure_ = StartFailure::InternalMemory;
         return false;
@@ -235,7 +236,10 @@ void ContentJob::run() {
             result.bookmarks = store.load_bookmarks(request.relative_path, request.identity.book_id, request.content_revision);
         return;
     }
-    if (stop()) return;
+    if (stop()) {
+        result.retryable_failure = request.kind == Kind::LockScreen;
+        return;
+    }
     if (request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite) {
         FileStore store(request.root);
         if (request.kind == Kind::PageCacheRead)
@@ -254,6 +258,7 @@ void ContentJob::run() {
     }
     if (request.kind == Kind::MapUpload || request.kind == Kind::MapDownload) { map_position(); return; }
     if (request.kind == Kind::SleepCover) { prepare_cover(); return; }
+    if (request.kind == Kind::LockScreenList || request.kind == Kind::LockScreen) { prepare_lock_screen(); return; }
     if (request.kind == Kind::LibraryCovers) { library_covers(); return; }
     if (request.kind == Kind::Chapter) {
         load_chapter();
@@ -408,6 +413,98 @@ void ContentJob::map_position() {
     if (stop()) { result.error = kChapterCancelled; return; }
     result.percentage = (static_cast<double>(index) +
         (source.text.empty() ? 0. : static_cast<double>(offset) / source.text.size())) / document.spine().size();
+}
+void ContentJob::prepare_lock_screen() {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    const auto stop = [this, deadline] {
+        const bool stopped = cancelled_.load(std::memory_order_relaxed) || std::chrono::steady_clock::now() >= deadline;
+        if (stopped) result.retryable_failure = true;
+        return stopped;
+    };
+    FileStore store(request.root);
+    const auto status = store.lock_screen_files(result.lock_screens, stop);
+    if (status != StoreStatus::Ok && status != StoreStatus::Missing) {
+        result.error = "图片目录不可读或超过数量限制"; return;
+    }
+    if (request.kind == Kind::LockScreenList) return;
+    if (result.lock_screens.empty()) { result.error = "LockScreens 中没有可用图片"; return; }
+    std::size_t index = 0;
+    if (!request.sleep_image.empty()) {
+        const auto it = std::find(result.lock_screens.begin(), result.lock_screens.end(), request.sleep_image);
+        if (it == result.lock_screens.end()) { result.error = "指定图片已不存在"; return; }
+        index = static_cast<std::size_t>(it - result.lock_screens.begin());
+    } else {
+        const auto it = std::upper_bound(result.lock_screens.begin(), result.lock_screens.end(), store.last_lock_screen());
+        if (it != result.lock_screens.end()) index = static_cast<std::size_t>(it - result.lock_screens.begin());
+    }
+    result.lock_screen = result.lock_screens[index];
+    const auto path = request.root + "/LockScreens/" + result.lock_screen;
+    struct stat before{}, after{};
+    if (stat(path.c_str(), &before) || !S_ISREG(before.st_mode) || before.st_size <= 0 || before.st_size > 2 * 1024 * 1024) {
+        result.error = "图片不可读或超过 2 MiB"; return;
+    }
+    const auto identity = sha256_file(path, stop);
+    if (identity.empty() || stop()) { result.error = "图片身份校验失败或已取消"; return; }
+    const std::string cache = "lockscreens/current";
+    const auto header = "PPLOCK3\n" + identity + "\n" + result.lock_screen + "\n" + std::to_string(before.st_size) + "\n" +
+                        std::to_string(before.st_mtime) + "\n684x1216-fit\n";
+    constexpr std::size_t count = 342 * 1216;
+#ifdef ESP_PLATFORM
+    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2 * (count + header.size() + 32) + 256U * 1024 ||
+        heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < count + header.size() + 32) {
+        result.retryable_failure = true;
+        result.error = "图片准备内存不足"; return;
+    }
+#endif
+    {
+        std::string cached;
+        if (store.load_cache(cache, header.size() + count + 32, cached) == StoreStatus::Ok &&
+            cached.size() == header.size() + count + 32 && cached.compare(0, header.size(), header) == 0 &&
+            cached.compare(header.size() + count, 32, md5_hex(std::string_view(cached.data() + header.size(), count))) == 0) {
+            if (!request.lock_screen_prepare) {
+                result.image = std::make_unique<graphics::Canvas>(684, 1216);
+                std::memcpy(result.image->data(), cached.data() + header.size(), count);
+            }
+            result.cache_finished = true;
+        }
+    }
+    // Sleep requests validate the source identity but never decode an uncached image.
+    if (!result.cache_finished && request.preview) { result.error = "图片缓存尚未就绪"; return; }
+    if (!result.cache_finished) {
+#ifdef ESP_PLATFORM
+        // The source size is bounded above; reserve both canvases and decoder headroom before reading it.
+        const auto encoded_size = static_cast<std::size_t>(before.st_size);
+        if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < encoded_size + 2 * count + 768U * 1024 ||
+            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < std::max(encoded_size, count)) {
+            result.retryable_failure = true;
+            result.error = "图片准备内存不足"; return;
+        }
+#endif
+        std::vector<std::uint8_t> encoded;
+        if (stop() || store.read_lock_screen(result.lock_screen, encoded, stop) != StoreStatus::Ok) {
+            result.error = "图片不可读或超过 2 MiB"; return;
+        }
+        auto image = std::make_unique<graphics::Canvas>(684, 1216);
+        image->clear();
+        if (!graphics::render_image(*image, encoded, 0, 0, 684, 1216, result.error, false, stop) || stop()) {
+            result.error = "图片损坏、不支持或准备超时"; return;
+        }
+        std::vector<std::uint8_t>().swap(encoded);
+        if (stat(path.c_str(), &after) || before.st_size != after.st_size || before.st_mtime != after.st_mtime ||
+            sha256_file(path, stop) != identity || stop()) {
+            result.error = "图片已改变，请重试"; return;
+        }
+        auto bytes = header;
+        bytes.append(reinterpret_cast<const char*>(image->data()), count);
+        bytes += md5_hex(std::string_view(bytes.data() + header.size(), count));
+        result.cache_finished = store.save_cache(cache, bytes) == StoreStatus::Ok;
+        if (!result.cache_finished) { result.retryable_failure = true; result.error = "图片缓存未保存"; return; }
+        if (!request.lock_screen_prepare) result.image = std::move(image);
+    }
+    if (stop()) { result.image.reset(); result.error = "图片准备已取消"; return; }
+    if (request.preview && request.sleep_image.empty() && result.image &&
+        store.save_lock_screen(result.lock_screen) != StoreStatus::Ok)
+        result.error = "轮播位置未保存";
 }
 void ContentJob::prepare_cover() {
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };

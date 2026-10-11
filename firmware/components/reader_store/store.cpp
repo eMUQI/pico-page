@@ -1198,4 +1198,83 @@ std::optional<std::string> FileStore::load_last_book(std::string& error) const {
     }
     return {};
 }
+
+bool valid_lock_screen_name(const std::string& name) {
+    if (name.empty() || name.size() > 255 || name.front() == '.' ||
+        name.find_first_of("/\\\r\n") != std::string::npos) return false;
+    for (unsigned char ch : name) if (ch < 32 || ch == 127) return false;
+    const auto dot = name.rfind('.');
+    if (dot == std::string::npos) return false;
+    auto ext = name.substr(dot);
+    for (auto& ch : ext) if (ch >= 'A' && ch <= 'Z') ch += 'a' - 'A';
+    return ext == ".png" || ext == ".jpg" || ext == ".jpeg";
+}
+StoreStatus FileStore::lock_screen_files(std::vector<std::string>& names, const std::function<bool()>& stop) const {
+    names.clear();
+    const auto safe = store_internal::safe_path(root_, "LockScreens");
+    if (safe != StoreStatus::Ok) return safe;
+    DIR* dir = opendir((root_ + "/LockScreens").c_str());
+    if (!dir) return errno == ENOENT ? StoreStatus::Missing : StoreStatus::IoError;
+    StoreStatus status = StoreStatus::Ok;
+    std::size_t visited = 0;
+    for (;;) {
+        if (stop && stop()) { status = StoreStatus::IoError; break; }
+        errno = 0;
+        const auto* entry = readdir(dir);
+        if (!entry) { if (errno) status = StoreStatus::IoError; break; }
+        if (++visited > 2048) { status = StoreStatus::Invalid; break; }
+        const std::string name = entry->d_name;
+        if (!valid_lock_screen_name(name)) continue;
+        struct stat info{};
+        if (inspect((root_ + "/LockScreens/" + name).c_str(), &info) || !S_ISREG(info.st_mode)) continue;
+        if (names.size() == 256) { status = StoreStatus::Invalid; break; }
+        names.push_back(name);
+    }
+    closedir(dir);
+    if (status != StoreStatus::Ok) names.clear();
+    else std::sort(names.begin(), names.end());
+    return status;
+}
+StoreStatus FileStore::read_lock_screen(const std::string& name, std::vector<std::uint8_t>& bytes,
+                                       const std::function<bool()>& stop) const {
+    bytes.clear();
+    if (!valid_lock_screen_name(name)) return StoreStatus::Invalid;
+    const auto path = "LockScreens/" + name;
+    const auto safe = store_internal::safe_path(root_, path);
+    if (safe != StoreStatus::Ok) return safe;
+    struct stat info{};
+    if (inspect((root_ + "/" + path).c_str(), &info)) return StoreStatus::Missing;
+    if (!S_ISREG(info.st_mode) || info.st_size <= 0 || info.st_size > 2 * 1024 * 1024) return StoreStatus::Invalid;
+    const auto close_file = [](FILE* file) { fclose(file); };
+    std::unique_ptr<FILE, decltype(close_file)> file(fopen((root_ + "/" + path).c_str(), "rb"), close_file);
+    if (!file) return StoreStatus::IoError;
+    bytes.resize(static_cast<std::size_t>(info.st_size));
+    for (std::size_t at = 0; at < bytes.size();) {
+        if (stop && stop()) { bytes.clear(); return StoreStatus::IoError; }
+        const auto count = std::min<std::size_t>(16384, bytes.size() - at);
+        if (fread(bytes.data() + at, 1, count, file.get()) != count) { bytes.clear(); return StoreStatus::IoError; }
+        at += count;
+    }
+    if (fgetc(file.get()) != EOF || ferror(file.get())) { bytes.clear(); return StoreStatus::ExternalChange; }
+    return StoreStatus::Ok;
+}
+std::string FileStore::last_lock_screen() const {
+    for (const auto* path : {"PicoPage/data/last-lock-screen.txt", "PicoPage/data/last-lock-screen.txt.bak"}) {
+        std::string value;
+        if (store_internal::read_file(root_, path, 256, value) != StoreStatus::Ok) continue;
+        if (!value.empty() && value.back() == '\n') value.pop_back();
+        if (valid_lock_screen_name(value)) return value;
+    }
+    return {};
+}
+StoreStatus FileStore::save_lock_screen(const std::string& name) const {
+    if (!valid_lock_screen_name(name)) return StoreStatus::Invalid;
+    const std::string path = "PicoPage/data/last-lock-screen.txt";
+    std::string previous, error;
+    const auto status = store_internal::read_file(root_, path, 256, previous);
+    if (status != StoreStatus::Ok && status != StoreStatus::Missing) return status;
+    return store_internal::commit_file(root_, path,
+        status == StoreStatus::Ok ? std::optional<std::string>(previous) : std::nullopt,
+        name + "\n", 256, error);
+}
 }  // namespace pico_page

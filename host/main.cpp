@@ -216,6 +216,15 @@ struct Host {
         if (const auto wifi = app.take_wifi_request()) answer_wifi(*wifi);
         return flush() && poll_portal();
     }
+    bool scripted_gesture(Input key, bool touch = false, int x = 0, int y = 0, bool hold = false) {
+        if (!gesture(key, touch, x, y, hold)) return false;
+        while (app.content_busy() || std::string(app.background_state()) == "sleep-cover") {
+            app.poll_background();
+            if (!flush()) return false;
+            SDL_Delay(1);
+        }
+        return flush() && poll_portal();
+    }
     bool capture(const std::string &path) {
         pixels();
         auto *surface = SDL_CreateRGBSurfaceWithFormatFrom(rgba.data(), 684, 1216, 32, 684 * 4,
@@ -226,6 +235,14 @@ struct Host {
         SDL_FreeSurface(surface);
         return okay;
     }
+    bool sleep() {
+        while (!app.prepare_sleep()) {
+            if (!app.sleep_pending()) return false;
+            app.poll_background();
+            SDL_Delay(1);
+        }
+        return flush();
+    }
     bool command(const std::string &line) {
         std::istringstream input(line);
         std::string command;
@@ -233,16 +250,16 @@ struct Host {
         if (command.empty() || command[0] == '#')
             return true;
         if (command == "k1")
-            return gesture(Input::K1);
+            return scripted_gesture(Input::K1);
         if (command == "k2")
-            return gesture(Input::K2);
+            return scripted_gesture(Input::K2);
         if (command == "k3")
-            return gesture(Input::K3);
+            return scripted_gesture(Input::K3);
         if (command == "tap" || command == "hold") {
             int x, y;
             if (!(input >> x >> y))
                 return false;
-            return gesture(Input::TouchCenter, true, x, y, command == "hold");
+            return scripted_gesture(Input::TouchCenter, true, x, y, command == "hold");
         }
         if (command == "capture") {
             std::string path;
@@ -261,7 +278,7 @@ struct Host {
             return true;
         }
         if (command == "sleep")
-            return app.prepare_sleep() && flush();
+            return sleep();
         if (command == "wake") {
             app.wake();
             return flush();
@@ -330,13 +347,23 @@ int main(int argc, char **argv) {
     }
     if (headless)
         return 0;
-    bool running = true;
+    bool running = true, sleep_requested = false;
     while (running) {
         host.poll_network();
+        host.app.poll_background();
+        host.poll_portal();
+        if (sleep_requested && (host.app.prepare_sleep() || !host.app.sleep_pending()))
+            sleep_requested = false;
+        host.flush();
         SDL_Event event;
         if (!SDL_WaitEventTimeout(&event, host.app.background_due() ? 1 : 50)) {
             host.app.background_step();
             continue;
+        }
+        if (sleep_requested && (event.type == SDL_KEYDOWN || event.type == SDL_MOUSEBUTTONDOWN)) {
+            host.app.cancel_sleep();
+            sleep_requested = false;
+            if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_SPACE) continue;
         }
         if (event.type == SDL_QUIT) {
             host.app.save_progress();
@@ -369,7 +396,7 @@ int main(int argc, char **argv) {
                 if (host.app.view() == View::Sleeping)
                     host.app.wake();
                 else
-                    host.app.prepare_sleep();
+                    sleep_requested = true;
                 host.flush();
                 break;
             default:

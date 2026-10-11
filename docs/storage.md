@@ -6,7 +6,7 @@
 
 卡根目录分成用户自行放置的文件与固件管理的数据。`PicoPage/` 用于设备数据，`<原书完整文件名>.picopage/` 用于该书的设置和进度。固件内部统一使用「卡根目录相对路径」，不得把 host 的 `/mnt/...` 编入数据。
 
-默认配置下，用户把 EPUB、TXT 放入 `Books/` 或其子目录；若已自定义书库扫描根目录，则放入配置的目录。TTF、OTF 及对应许可文本放入 `Fonts/`。`PicoPage/` 由设备管理，手工编辑配置时只修改需要的 TOML 文件；清理缓存使用设备上的「清理全部缓存」。移动书籍时一并移动同名的 `.picopage/` 目录，才能保留该书的进度和单书设置。`LockScreens/` 是以后自定义锁屏图片的预留位置，原图由用户管理，未来生成的转换结果放入 `PicoPage/cache/`；目前放入图片不会改变休眠画面。
+默认配置下，用户把 EPUB、TXT 放入 `Books/` 或其子目录；若已自定义书库扫描根目录，则放入配置的目录。TTF、OTF 及对应许可文本放入 `Fonts/`。`PicoPage/` 由设备管理，手工编辑配置时只修改需要的 TOML 文件；清理缓存使用设备上的「清理全部缓存」。移动书籍时一并移动同名的 `.picopage/` 目录，才能保留该书的进度和单书设置。`LockScreens/` 保存用户管理的 PNG/JPEG 休眠图片；在电源与休眠设置中启用「自定义图片」后使用。转换缓存放入 `PicoPage/cache/lockscreens/`，轮播记录放入 `PicoPage/data/last-lock-screen.txt`；清缓存不删除原图和轮播记录。格式与大小限制见 [自定义锁屏](roadmap.md#r4--自定义锁屏)。
 
 ```text
 TF 根目录/
@@ -18,7 +18,7 @@ TF 根目录/
 │           ├── progress.json         # 正式本地阅读位置
 │           └── settings.toml         # 本书覆盖项
 ├── Fonts/                            # 用户自行添加的 TTF、OTF 和许可证文本
-├── LockScreens/                      # 未来自定义锁屏图片；当前固件尚不读取
+├── LockScreens/                      # 用户自定义休眠图片：PNG/JPEG
 └── PicoPage/
     ├── settings.toml                 # 全局阅读/UI/刷新配置
     ├── network.toml                  # 可选：最多 5 个 Wi-Fi 凭据，明文保存
