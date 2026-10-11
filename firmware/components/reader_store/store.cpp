@@ -1190,7 +1190,8 @@ StoreStatus FileStore::read_lock_screen(const std::string& name, std::vector<std
     struct stat info{};
     if (inspect((root_ + "/" + path).c_str(), &info)) return StoreStatus::Missing;
     if (!S_ISREG(info.st_mode) || info.st_size <= 0 || info.st_size > 2 * 1024 * 1024) return StoreStatus::Invalid;
-    std::unique_ptr<FILE, decltype(&fclose)> file(fopen((root_ + "/" + path).c_str(), "rb"), fclose);
+    const auto close_file = [](FILE* file) { fclose(file); };
+    std::unique_ptr<FILE, decltype(close_file)> file(fopen((root_ + "/" + path).c_str(), "rb"), close_file);
     if (!file) return StoreStatus::IoError;
     bytes.resize(static_cast<std::size_t>(info.st_size));
     for (std::size_t at = 0; at < bytes.size();) {
