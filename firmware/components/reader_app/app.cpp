@@ -2268,10 +2268,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         else blit_reduced(found->pixels, kLibraryCoverWidth, kLibraryCoverHeight, x, y, width, height);
         return Cover::Drawn;
     }
-    /**
-     * Draws the library. Covers that still need decoding first appear as titles with a status
-     * line. Native asynchronous mode prepares a visible batch and merges its display update.
-     */
     /** The scanned directory as it reads after a verb, with the spacing of mixed Chinese and Latin text. */
     std::string library_location() const {
         return library_home_root.empty() ? "已设置的书库目录" : " " + library_home_root + "/";
@@ -2292,6 +2288,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         wrapped(std::string("内置字体只含 3,500 个常用字，生僻字会显示为方框。官网 ") + kProjectHome +
                 " 可下载完整的文楷字体，放入 TF 卡 Fonts/，重启后在「排版」中选择。", 36, 924, 612, 22, true, 3);
     }
+    /**
+     * Draws the library. Covers that still need decoding first appear as titles with a status
+     * line. Native asynchronous mode prepares a visible batch and merges its display update.
+     */
     void draw_library(bool decode = false) {
         if (async_content) cancel_covers();
         decode = decode || display.busy();
@@ -5861,7 +5861,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         if ((id == WifiUpload || id == UsbStart) && view == View::Library) import_from_settings = false;
         if (id == WifiUpload || id == WifiUploadStation) {
-            if (!wifi_enabled()) { wifi_page = wifi_root = WifiPage::Home; draw_wifi(); overlay(); return; }
+            if (!wifi_enabled()) {
+                // The network page states that Wi-Fi is off and leads back to the library.
+                if (view == View::Library) { draw_import(); overlay(); return; }
+                wifi_page = wifi_root = WifiPage::Home; draw_wifi(); overlay(); return;
+            }
             ++portal_generation;
             portal_requested = true;
             portal_request_view = view;

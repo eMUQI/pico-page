@@ -702,6 +702,16 @@ static void release_review_test(const fs::path& root, const fs::path& fixtures, 
     fs::remove(sidecar);
     driver.tap(342, 1160); driver.present(); driver.complete_content();
     assert(app.view() == View::Reading && !(app.saved_record() == saved));
+
+    // With Wi-Fi off, the upload row opens the network page, which returns to the library.
+    const fs::path offline = root.string() + "Offline";
+    fs::create_directories(offline / "Books");
+    write(offline / "PicoPage/settings.toml", "schema_version=1\n[network]\nwifi_enabled=false\n");
+    ReaderApp disabled(offline.string(), "release-review-offline", true, async); Driver offline_driver{disabled};
+    assert(disabled.initialize()); offline_driver.present();
+    offline_driver.tap(300, 480); offline_driver.present();
+    assert(disabled.view() == View::Import && disabled.take_portal_action() == PortalAction::None);
+    offline_driver.tap(60, 50); offline_driver.present(); assert(disabled.view() == View::Library);
 }
 static void swipe_test(const fs::path& root, const fs::path& fixtures, bool grid) {
     fs::create_directories(root / "Books");
