@@ -4,6 +4,8 @@
 
 浅睡自行唤醒已定位并修正，候选已提交 PR、未合并（2026-10-11，分支 `claude/sleep-wake-issue-08fcba`，基于 `feee89a`）。原因是第一次 PMU 周期事件唤醒后，重新入睡前的触摸中断检查总是成立：真机上每次浅睡唤醒都会在触摸中断线记录一次下降沿，旧代码据此结束休眠。现在触摸中断只在第一次入睡前取消休眠；唤醒后 PMU 读取失败改为限时重试，入睡被拒按立即唤醒处理。按本次授权刷写后，设备不操作休眠约 183 秒，经历 6 次周期唤醒后由电源键唤醒。只有这一轮长休眠，PW02 的三次唤醒及 PW06 仍待验收，详见本日「浅睡自行唤醒」记录。
 
+USB 传输页与电源菜单取消强制全刷位于 PR #65（2026-10-11，分支 `claude/usb-refresh-optimization-5a88c9`，已整合 main `feee89a`）：开启传输的三帧，以及电源菜单的打开、取消、保存失败页和不可用提示，改为不清屏的整屏更新；交卡前等待呈现的顺序、失败后的全刷恢复和关机结果画面的全刷不变。整合后 host Debug CTest 22/22、标准固件构建和 459 项交接检查通过；未烧录，残影与耗时待真机核对。详见本日三条「取消强制全刷」记录。
+
 按用户本次明确要求，设备界面和传书网页已统一移除虚线；不可用项改为淡色实线框与文字且无热区，危险操作和待保存选项保留明确文案及实线状态区分。D39 与 UI 文档已同步，本地候选待真机验收，未烧录。
 
 本地分支 `claude/read-pico-layout-review-04690c` 基于 `95d9468` 接续 10 月 11 日《排版与翻屏 · 审阅》：排版面板改为四列两行并接入字重，翻屏页脚两侧对称，最近阅读顺序和文件夹策略写入全局配置，使用说明加入两页可点按示例。实现预览位于 `artifacts/layout-review-20261011/`；新增的最近阅读文件只记录顺序和可选日期，不取代进度文件。当前是待真机验收、未烧录的候选；验证结果见本日对应记录。原实现阶段未改主目录；PR 准备阶段已整合主线的自定义锁屏功能。
@@ -65,7 +67,32 @@ PR #52（分支 `feat/sync-map-images`，已整合 main `fd17171`）包含三项
 - 执行上下文与资源：全部在应用任务内，持有触摸锁；新增一个静态汇总结构（两个 `std::string`，仅在出错时有内容）和事件错误的 96 字节栈缓冲。唤醒后最长等待仍是原有的 2 秒窗口，被拒入睡每次增加 20 ms。
 - 命令与环境：`eim --do-not-track true run "sh tools/build_firmware.sh" v6.1`（标准构建，构建时改动尚未提交，版本 `0.2.0-beta.1+gfeee89a.dirty`；提交后未重新构建，代码与所测镜像一致）；写入前用 esptool 读回芯片 MAC、分区表和 otadata，确认 `ota_0` 位于 `0x10000`、大小 4 MiB 且为当前启动槽；`write-flash 0x10000` 只写应用，两次均 `Hash of data verified`，`--after watchdog-reset`。日志和镜像副本在忽略目录 `.local/sleep-wake/`。`python3 tools/check_handoff.py` 与 `git diff --check` 通过。
 - 未测：host Debug 与 ASan/UBSan CTest 未运行，改动只在 `ESP_PLATFORM` 的 `platform.cpp`，host 不编译该文件；电池供电（未连接 USB）下的休眠、更长时间休眠、连续三次唤醒（PW02）、USB 重新枚举专项（PW06）、休眠电流。设备现装第二版镜像，它比原来的 `455ea52` 多包含 PR #63 的排版与书库布局改动。
-- 下一步：完成 PR 的远端 CI 与 review；按 PW02 补足三次唤醒和一次电池供电的长休眠。
+- 整合主线：PR #67 的 `f6f7dcd` 通过两项 host CI，Codex 评审无意见。随后整合 main `2adce3a`（PR #65，取消强制全刷），仅本文件的当前摘要和本日记录位置冲突，保留双方内容；`platform.cpp` 与 PR #65 改动的 `app.cpp`、测试没有重叠。整合后重新执行标准固件构建、交接检查和 diff 检查，结果见 PR。设备上仍是整合前的第二版镜像，不含 PR #65 的改动。
+- 下一步：合并 PR；按 PW02 补足三次唤醒和一次电池供电的长休眠。
+
+### 2026-10-11 · 取消强制全刷 PR #65 整合主线
+
+- 代码提交 `67a0a2c` 后整合 main `feee89a`（PR #63）。仅 `docs/development-status.md` 的当前摘要冲突，保留双方内容；`app.cpp` 与测试自动合并，五处刷新改动及其余强制全刷位置与整合前一致。
+- 整合后重新执行：`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、构建与 `ctest --test-dir build/host --output-on-failure`，注册 22 项，22/22 通过；`sh tools/build_firmware.sh` 通过并完成来源记录，`pico_page.bin` 为 0x3430f0 字节；`python3 tools/check_handoff.py` 通过 459 项；`git diff --check origin/main...HEAD` 通过。
+- 已推送分支并创建 PR #65。未运行 ASan/UBSan，未烧录，未进行真机验证；待核对项同前两条。下一步等待 CI 与评审，真机确认后再评估区域更新。
+
+### 2026-10-11 · 电源菜单取消强制全刷
+
+- 变更：电源菜单的打开、取消（`close_power_menu()`）、本地保存失败页和 `power_unavailable()` 的「先结束任务」提示，由强制全刷改为不清屏的整屏更新（`firmware/components/reader_app/app.cpp` 四处）。关机、重启和手动关机的结果画面仍全刷；帧失败后的恢复、K2、按钮判定和保存流程不变。打开或关闭菜单不再把正文的全刷间隔计数清零，与其他面板一致。接续同日「USB 传输页取消强制全刷」，同一分支，未提交。
+- 依据：同上一条的波形统计。这四帧原先各执行一次黑白清屏加 GC16 重画；改后「快速」档只驱动变化的像素，「均衡」「清晰」档重驱全屏非白像素但不清屏。
+- 测试：`tests/app_test.cpp` 断言菜单打开、取消、保存失败页和不可用提示为 `Content`，并断言菜单帧失败后以 `FullClean` 恢复原页面。
+- 命令与结果：`cmake --build build/host --parallel 4` 通过；`ctest --test-dir build/host --output-on-failure` 22/22 通过；文件稳定后 `sh tools/build_firmware.sh` 通过并完成来源记录，`pico_page.bin` 为 0x33c330 字节；`python3 tools/check_handoff.py`、`git diff --check` 通过。日志同上一条。
+- 未测项：未运行 ASan/UBSan（不涉及内存或生命周期）；未烧录，未进行真机验证。待真机核对：三个刷新档位下菜单打开的出现时间与残影、取消后原页面（正文、图片查看、书库、排版草稿）的残影、保存失败页、不可用提示，以及 PW04 的其余项目。
+- 下一步：真机确认 USB 与电源菜单两批后，再评估区域更新。
+
+### 2026-10-11 · USB 传输页取消强制全刷
+
+- 变更：`ReaderApp::show_usb_transfer()` 由强制全刷改为不清屏的整屏更新（`firmware/components/reader_app/app.cpp`）。开启传输的三帧（准备提示、传输页、启动结果）及经该函数显示的「设备正忙」「准备失败」「设备仍忙」「TF 卡已移除」提示不再执行黑白清屏。主循环等待帧呈现后才准备和交出 TF 卡的顺序不变；帧失败后的恢复、K2、退出确认与取消的刷新方式不变。基于 main `455ea52`，分支 `claude/usb-refresh-optimization-5a88c9`，未提交。
+- 依据：在 host 编译 BSP `5f3406d` 的波形装配代码并统计像素不变时的驱动相数。默认 GL16（37 相）对不变的 0–14 级像素推黑 12–14 相、推白 11–18 相，对不变的白像素推白 1 相；Gray8 GL16（30 相）对不变像素不驱动。整屏更新把全部行列标为脏，区域更新只驱动有变化的行和按 32 像素对齐的列范围，两者每相都扫描整屏。因此「均衡」「清晰」档下整屏更新仍会重驱全屏非白像素，「快速」档下只驱动变化的像素。
+- 测试：`tests/app_test.cpp` 的 USB 用例断言传输页帧为不带区域的 `Content`，并补充该帧失败后以 `FullClean` 重画传输页。
+- 命令与结果：依赖按 `python3 tools/setup_fonts.py` 校验后准备；`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4` 通过；`ctest --test-dir build/host --output-on-failure` 注册 22 项，22/22 通过；`sh tools/build_firmware.sh` 通过并完成来源记录，`pico_page.bin` 为 0x33c330 字节；`python3 tools/check_handoff.py`、`git diff --check` 通过。首次固件构建期间修改了文档，来源校验拒绝记录，文件稳定后重新构建通过。日志为 worktree 内 `.local/usb-refresh-host.log`、`.local/usb-refresh-ctest.log`、`.local/usb-refresh-firmware.log`。
+- 未测项：未运行 ASan/UBSan（本次不涉及内存或生命周期）；未烧录，未进行真机验证。待真机核对：三个刷新档位下开启传输的三帧残影与耗时、传输页长时间停留后的残影、K2 全刷、帧失败后的恢复、实际 USB 挂载与退出重启。
+- 下一步：真机确认后，再评估把准备提示和启动结果改为区域更新，以及电源菜单的打开、取消、保存失败和操作不可用提示改为不清屏更新。
 
 ### 2026-10-11 · PR #56 许可证原文的差异检查
 
