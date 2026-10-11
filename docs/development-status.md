@@ -4,6 +4,8 @@
 
 按用户提供的《发布前审阅》已有本地候选（分支 `claude/read-pico-review-3cd5cd`，基于 `feee89a`）：书库根目录为空时列出三种放书方式、使用说明入口和内置字体说明；阅读工具栏修正收起热区和列宽，「刷新」改为「刷新模式」；设置新增「关于」页，保存重试移到设置页脚。审阅稿第 04 节中「已定稿，源码中尚未实现」的三项在当前主线已经实现，本批未改动。关于页的项目主页为官网 picopage.wulu.zone。host Debug 与 ASan/UBSan 各 22/22、标准固件构建通过；已按用户要求提交并开 PR 等待 CI/review，未烧录，真机待验项见本日「发布前审阅」记录。
 
+USB 传输页与电源菜单取消强制全刷位于 PR #65（2026-10-11，分支 `claude/usb-refresh-optimization-5a88c9`，已整合 main `feee89a`）：开启传输的三帧，以及电源菜单的打开、取消、保存失败页和不可用提示，改为不清屏的整屏更新；交卡前等待呈现的顺序、失败后的全刷恢复和关机结果画面的全刷不变。整合后 host Debug CTest 22/22、标准固件构建和 459 项交接检查通过；未烧录，残影与耗时待真机核对。详见本日三条「取消强制全刷」记录。
+
 按用户本次明确要求，设备界面和传书网页已统一移除虚线；不可用项改为淡色实线框与文字且无热区，危险操作和待保存选项保留明确文案及实线状态区分。D39 与 UI 文档已同步，本地候选待真机验收，未烧录。
 
 本地分支 `claude/read-pico-layout-review-04690c` 基于 `95d9468` 接续 10 月 11 日《排版与翻屏 · 审阅》：排版面板改为四列两行并接入字重，翻屏页脚两侧对称，最近阅读顺序和文件夹策略写入全局配置，使用说明加入两页可点按示例。实现预览位于 `artifacts/layout-review-20261011/`；新增的最近阅读文件只记录顺序和可选日期，不取代进度文件。当前是待真机验收、未烧录的候选；验证结果见本日对应记录。原实现阶段未改主目录；PR 准备阶段已整合主线的自定义锁屏功能。
@@ -53,6 +55,30 @@ PR #52（分支 `feat/sync-map-images`，已整合 main `fd17171`）包含三项
 个人主目录、设备标识及私有样本名称已脱敏；占位路径不保证可直接执行。历史日期、验证数值和结果保留，历史授权不适用于新的设备操作。
 
 ## 历史摘要与开发记录
+
+### 2026-10-11 · 取消强制全刷 PR #65 整合主线
+
+- 代码提交 `67a0a2c` 后整合 main `feee89a`（PR #63）。仅 `docs/development-status.md` 的当前摘要冲突，保留双方内容；`app.cpp` 与测试自动合并，五处刷新改动及其余强制全刷位置与整合前一致。
+- 整合后重新执行：`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、构建与 `ctest --test-dir build/host --output-on-failure`，注册 22 项，22/22 通过；`sh tools/build_firmware.sh` 通过并完成来源记录，`pico_page.bin` 为 0x3430f0 字节；`python3 tools/check_handoff.py` 通过 459 项；`git diff --check origin/main...HEAD` 通过。
+- 已推送分支并创建 PR #65。未运行 ASan/UBSan，未烧录，未进行真机验证；待核对项同前两条。下一步等待 CI 与评审，真机确认后再评估区域更新。
+
+### 2026-10-11 · 电源菜单取消强制全刷
+
+- 变更：电源菜单的打开、取消（`close_power_menu()`）、本地保存失败页和 `power_unavailable()` 的「先结束任务」提示，由强制全刷改为不清屏的整屏更新（`firmware/components/reader_app/app.cpp` 四处）。关机、重启和手动关机的结果画面仍全刷；帧失败后的恢复、K2、按钮判定和保存流程不变。打开或关闭菜单不再把正文的全刷间隔计数清零，与其他面板一致。接续同日「USB 传输页取消强制全刷」，同一分支，未提交。
+- 依据：同上一条的波形统计。这四帧原先各执行一次黑白清屏加 GC16 重画；改后「快速」档只驱动变化的像素，「均衡」「清晰」档重驱全屏非白像素但不清屏。
+- 测试：`tests/app_test.cpp` 断言菜单打开、取消、保存失败页和不可用提示为 `Content`，并断言菜单帧失败后以 `FullClean` 恢复原页面。
+- 命令与结果：`cmake --build build/host --parallel 4` 通过；`ctest --test-dir build/host --output-on-failure` 22/22 通过；文件稳定后 `sh tools/build_firmware.sh` 通过并完成来源记录，`pico_page.bin` 为 0x33c330 字节；`python3 tools/check_handoff.py`、`git diff --check` 通过。日志同上一条。
+- 未测项：未运行 ASan/UBSan（不涉及内存或生命周期）；未烧录，未进行真机验证。待真机核对：三个刷新档位下菜单打开的出现时间与残影、取消后原页面（正文、图片查看、书库、排版草稿）的残影、保存失败页、不可用提示，以及 PW04 的其余项目。
+- 下一步：真机确认 USB 与电源菜单两批后，再评估区域更新。
+
+### 2026-10-11 · USB 传输页取消强制全刷
+
+- 变更：`ReaderApp::show_usb_transfer()` 由强制全刷改为不清屏的整屏更新（`firmware/components/reader_app/app.cpp`）。开启传输的三帧（准备提示、传输页、启动结果）及经该函数显示的「设备正忙」「准备失败」「设备仍忙」「TF 卡已移除」提示不再执行黑白清屏。主循环等待帧呈现后才准备和交出 TF 卡的顺序不变；帧失败后的恢复、K2、退出确认与取消的刷新方式不变。基于 main `455ea52`，分支 `claude/usb-refresh-optimization-5a88c9`，未提交。
+- 依据：在 host 编译 BSP `5f3406d` 的波形装配代码并统计像素不变时的驱动相数。默认 GL16（37 相）对不变的 0–14 级像素推黑 12–14 相、推白 11–18 相，对不变的白像素推白 1 相；Gray8 GL16（30 相）对不变像素不驱动。整屏更新把全部行列标为脏，区域更新只驱动有变化的行和按 32 像素对齐的列范围，两者每相都扫描整屏。因此「均衡」「清晰」档下整屏更新仍会重驱全屏非白像素，「快速」档下只驱动变化的像素。
+- 测试：`tests/app_test.cpp` 的 USB 用例断言传输页帧为不带区域的 `Content`，并补充该帧失败后以 `FullClean` 重画传输页。
+- 命令与结果：依赖按 `python3 tools/setup_fonts.py` 校验后准备；`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4` 通过；`ctest --test-dir build/host --output-on-failure` 注册 22 项，22/22 通过；`sh tools/build_firmware.sh` 通过并完成来源记录，`pico_page.bin` 为 0x33c330 字节；`python3 tools/check_handoff.py`、`git diff --check` 通过。首次固件构建期间修改了文档，来源校验拒绝记录，文件稳定后重新构建通过。日志为 worktree 内 `.local/usb-refresh-host.log`、`.local/usb-refresh-ctest.log`、`.local/usb-refresh-firmware.log`。
+- 未测项：未运行 ASan/UBSan（本次不涉及内存或生命周期）；未烧录，未进行真机验证。待真机核对：三个刷新档位下开启传输的三帧残影与耗时、传输页长时间停留后的残影、K2 全刷、帧失败后的恢复、实际 USB 挂载与退出重启。
+- 下一步：真机确认后，再评估把准备提示和启动结果改为区域更新，以及电源菜单的打开、取消、保存失败和操作不可用提示改为不清屏更新。
 
 ### 2026-10-11 · PR #56 许可证原文的差异检查
 
@@ -5084,3 +5110,8 @@ Codex review 对 `fdc427f` 提出三条意见，逐条对照源码后均成立�
 - `draw_library()` 的说明注释被新增函数隔开，已移回该函数之前。
 
 验证：`release_review_test` 增加 Wi-Fi 关闭的场景（同步、异步各一次）。host Debug CTest 22/22（32.77 秒），AppleClang ASan/UBSan 22/22（65.27 秒），标准固件构建、交接检查和 `git diff --check` 通过。未烧录，真机待验项不变。
+
+
+### 2026-10-11 · PR #66 整合主线
+
+首轮修正提交 `0d61625` 的两项 Linux CI 通过，Codex 复审完成且未提出意见。随后主线合入 PR #65（`2adce3a`，USB 传输页与电源菜单取消强制全刷）。冲突仅在开发记录的当前摘要，双方内容完整保留；`app.cpp` 与 `app_test.cpp` 自动合并，两边改动互不重叠。整合后重新执行 host Debug、ASan/UBSan、标准固件构建、交接检查和 diff 检查，结果以本次合并提交的 PR 说明及 CI/review 为准。未烧录。
