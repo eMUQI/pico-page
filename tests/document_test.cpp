@@ -211,7 +211,8 @@ int main(int argc, char** argv) {
         assert(styled.load_chapter(0, first, error));
         assert(first.text.find(U"正文保留 内联") != std::u32string::npos);
         assert(first.text.find(U"[图片：示例图片]") != std::u32string::npos);
-        assert(!first.warnings.empty() && !first.plain_dom);
+        // An image is reported as a placeholder warning and stays inside the mapping profile.
+        assert(!first.warnings.empty() && first.plain_dom);
         const auto image = static_cast<std::uint32_t>(first.text.find(U"[图片：示例图片]"));
         Anchor element;
         assert(first.anchor_at(image, element) && element.node == "/html[1]/body[1]/p[2]/img[1]" && element.offset == 0);

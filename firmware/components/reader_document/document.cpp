@@ -512,7 +512,11 @@ struct ChapterParser {
     }
     /** Appends a media placeholder as a block of its own, mapped to the node at path. Returns false after stopping the parser. */
     bool place_media(const std::string& label, const std::string& path, std::uint32_t& begin) {
-        finish_block(); block_kind = BlockKind::Image;
+        finish_block();
+        // A split left pending by the block before takes effect here, so that the placeholder,
+        // its run and the image entry all use offsets of the part that holds them.
+        if (split_pending && !next_part()) return false;
+        block_kind = BlockKind::Image;
         std::u32string scalar; decode(label.data(), label.size(), scalar);
         begin = static_cast<std::uint32_t>(chapter.text.size());
         if (scalar.size() > 256) { scalar.resize(255); scalar.push_back(U'…'); }
@@ -533,7 +537,7 @@ struct ChapterParser {
             return aspect.empty() || aspect == "xMidYMid meet" || aspect == "none";
         };
         if (!room(0)) return;
-        static const std::set<std::string> plain_elements = {"html", "head", "title", "meta", "link", "style", "body", "h1", "h2", "h3", "h4", "h5", "h6", "p", "div", "section", "article", "aside", "header", "footer", "nav", "blockquote", "span", "em", "strong", "b", "i", "u", "s", "a", "ul", "ol", "li", "br", "code", "small", "sub", "sup", "mark", "abbr", "cite", "q", "del", "ins"};
+        static const std::set<std::string> plain_elements = {"html", "head", "title", "meta", "link", "style", "body", "h1", "h2", "h3", "h4", "h5", "h6", "p", "div", "section", "article", "aside", "header", "footer", "nav", "blockquote", "span", "em", "strong", "b", "i", "u", "s", "a", "ul", "ol", "li", "br", "code", "small", "sub", "sup", "mark", "abbr", "cite", "q", "del", "ins", "img", "hr"};
         if (!plain_elements.count(name) || xml.foreign_namespace || !attr(attrs, "space").empty()) chapter.plain_dom = false;
         Frame frame; frame.name = name;
         if (!frames.empty()) {

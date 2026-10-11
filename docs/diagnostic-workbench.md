@@ -53,7 +53,7 @@ sh tools/build_firmware.sh diagnostic
 - `PP <id> trace`：取出最多 8 个事件作为 ENTRY，OK 返回上述队列/丢失状态。耗时与输出发生在显式命令处理时，不在事件写入路径中。
 - `PP <id> trace_start`：在记录器临界区中开始新窗口，清空旧计数和事件；此前的任务 token 不计入新窗口。`trace_stop` 在同一临界区冻结事件与计数并返回含 `stopped=1` 的 metrics。仍在执行的业务任务正常继续，但在截止点计为 unfinished；后续操作不进入该窗口。主机收到截止序号后排空到该序号，才结束采集。
 - metrics 与 trace 的整次响应共用 20 ms 传输等待预算；计入 IDF 驱动对 TX 互斥锁和环形缓冲的两次等待。超出后非阻塞发送，失败计入 tx_failures；该预算不包含任务被抢占和格式化的墙钟时间。
-- status 新增 content_busy、save_busy、save_due、已保存位置的身份 anchor（资源、节点与偏移的 CRC32，不输出路径或正文）、生效正文字号 font_px，以及同步面板最近一次结果 sync（unchecked、no-record、same、different、unmapped、uploaded、uncertain、unauthorized、failed、link-failed、config-changed；开始检查时回到 unchecked）。pending=0 只说明无待呈现帧。
+- status 新增 content_busy、save_busy、save_due、已保存位置的身份 anchor（资源、节点与偏移的 CRC32，不输出路径或正文）、生效正文字号 font_px，以及同步面板最近一次结果 sync（unchecked、no-record、same、different、unmapped、uploaded、uncertain、unauthorized、failed、link-failed、config-changed；开始检查时回到 unchecked）。sync 为 different 时，sync_order 为 1 表示远端位置在当前页之后，-1 表示在当前页之前，0 表示在当前页内；其他结果下为 0。pending=0 只说明无待呈现帧。
 
 `status/metrics/trace/trace_start/trace_stop/screen/ls/file` 是观察命令，不重置主循环空闲计时；否则连续采集会阻止延迟保存、分页和休眠。它们仍可能占用串口和 CRC 计算时间，Diagnostic 性能不等同于 Performance。保留原 `PP 0 FRAME` 主动通知和所有已有导入安全限制。trace 导出失败仍通过 tx_failures 和序号缺口暴露，不能悄悄丢失后显示通过。
 

@@ -1801,6 +1801,165 @@ int main(int argc, char** argv) {
         app.complete_network(upload->id, 200, "{}", ""); driver.present();
         assert(*app.saved_record() == saved);
     }
+    // Which of two different positions is further comes from where the remote position was mapped,
+    // never from the percentage the server stores: each client computes that value its own way.
+    for (const bool async : {false, true}) {
+        const auto root = card / (async ? "SyncOrderAsync" : "SyncOrderSync");
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
+        fs::copy_file(fixtures / "multi-part-link.epub", root / "Books/parts.epub");
+        fs::copy_file(fixtures / "nonlinear-footer.epub", root / "Books/nonlinear.epub");
+        write(root / "PicoPage/sync.toml", sync_config);
+        write(root / "PicoPage/network.toml", "schema_version=2\n[[wifi]]\nssid=\"home\"\npassword=\"password\"\n");
+        ReaderApp app(root.string(), "sync-order", true, async); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        // Checks the remote position, returns the order and the panel, then stays on the local page.
+        const auto compare = [&](const std::string& pointer, const char* percentage) {
+            const auto saved = *app.saved_record();
+            driver.sync_view();
+            const auto request = driver.check_remote();
+            app.complete_network(request.id, 200, R"({"progress":")" + pointer + R"(","percentage":)" + percentage + "}", "");
+            driver.present(); driver.complete_content();
+            assert(app.view() == View::Sync && std::string(app.sync_state()) == "different");
+            const std::pair result{app.sync_order(), app.canvas().pixels()};
+            driver.close(); driver.present(); driver.complete_content();
+            assert(app.view() == View::Reading && !app.take_network_request() && *app.saved_record() == saved);
+            return result;
+        };
+        const std::string second = "/body[1]/DocFragment[2]/body[1]/";
+        opened(app, "Books/book.epub"); driver.present();
+        assert(app.saved_record()->anchor.resource.find("chapter1") != std::string::npos);
+        // A later chapter is further, whatever percentage the other client stored.
+        const auto later = compare(second + "h1[1]/text()[1].0", "0.01");
+        assert(later.first == 1);
+        assert(compare(second + "h1[1]/text()[1].0", "0.99") == later);
+        while (app.saved_record()->anchor.resource.find("chapter2") == std::string::npos) {
+            driver.key(Input::K3); driver.present(); driver.complete_content();
+        }
+        // On the visible page, at another anchor than the saved one: neither side is further.
+        assert(compare(second + "p[1]/text()[1].0", "0.99").first == 0);
+        driver.key(Input::K3); driver.present(); driver.complete_content();
+        // The start of this chapter lies before its second page; the stored 99% does not count.
+        const auto earlier = compare(second + "h1[1]/text()[1].0", "0.99");
+        assert(earlier.first == -1 && earlier.second != later.second);
+        assert(compare(second + "h1[1]/text()[1].0", "0.01") == earlier);
+        // Counted pages change how both percentages are computed, not which position is further.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (app.background_due()) {
+            app.background_step(); app.poll_background();
+            if (app.pending_frame()) driver.present();
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(app.book_pages());
+        const auto counted = compare(second + "h1[1]/text()[1].0", "0.99");
+        assert(counted.first == -1 && compare(second + "h1[1]/text()[1].0", "0.01") == counted);
+
+        // A position in a non-linear item is outside the reading order: no side is further.
+        opened(app, "Books/nonlinear.epub"); driver.present();
+        assert(compare(second + "h1[1]/text()[1].0", "0.99").first == 0);
+
+        // Within one long chapter the order follows the chapter parts, which hold unequal shares
+        // of the book: the first chapter here has three parts and the second a single page.
+        const std::string first = "/body[1]/DocFragment[1]/body[1]/";
+        opened(app, "Books/parts.epub"); driver.present();
+        assert(compare(first + "p[4501]/text()[1].0", "0").first == 1);
+        const auto config = FileStore(root.string()).load_settings("Books/parts.epub").settings;
+        driver.tap(config.margin_x_px + config.indent_chars * config.font_size_px + config.font_size_px / 2, 80);
+        driver.present(); driver.complete_content();
+        assert(app.saved_record()->anchor.node.find("/p[4501]/") != std::string::npos);
+        driver.key(Input::K3); driver.present(); driver.complete_content();
+        assert(compare(first + "p[2]/text()[1].0", "0.99").first == -1);
+        assert(compare(first + "p[4501]/text()[1].0", "0.99").first == -1);
+        assert(compare(second + "h1[1]/text()[1].0", "0").first == 1);
+    }
+    // A chapter with a table lies outside the exact mapping profile. Its positions are neither
+    // uploaded nor offered as a jump target, and the panel names that cause rather than the
+    // fallback for a remote position that the book does not contain.
+    for (const bool async : {false, true}) {
+        const auto root = card / (async ? "SyncUnsupportedAsync" : "SyncUnsupportedSync");
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "table-chapter.epub", root / "Books/table.epub");
+        fs::copy_file(fixtures / "image-cover.epub", root / "Books/cover.epub");
+        write(root / "PicoPage/sync.toml", sync_config);
+        write(root / "PicoPage/network.toml", "schema_version=2\n[[wifi]]\nssid=\"home\"\npassword=\"password\"\n");
+        ReaderApp app(root.string(), "sync-unsupported", true, async); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/table.epub"); driver.present();
+        driver.complete_content();
+        const auto saved = *app.saved_record();
+        assert(saved.anchor.resource.find("chapter1") != std::string::npos);
+        const auto upload = [&] {
+            driver.sync_view();
+            const auto request = driver.check_remote();
+            app.complete_network(request.id, 200, "{}", ""); driver.present();
+            assert(std::string(app.sync_state()) == "no-record");
+            const auto empty = app.canvas().pixels();
+            driver.tap(342, 1090); driver.present(); driver.tap(500, 1120); driver.present();
+            driver.complete_content();
+            assert(app.view() == View::Sync);
+            return app.canvas().pixels() != empty;
+        };
+        const auto remote = [&](const std::string& pointer) {
+            driver.sync_view();
+            const auto request = driver.check_remote();
+            app.complete_network(request.id, 200, R"({"progress":")" + pointer + R"(","percentage":0.5})", "");
+            driver.present(); driver.complete_content();
+            assert(app.view() == View::Sync && std::string(app.sync_state()) == "unmapped");
+            const auto pixels = app.canvas().pixels();
+            driver.tap(342, 990); driver.present(); driver.complete_content();
+            assert(app.view() == View::Reading && !app.take_network_request());
+            return pixels;
+        };
+        // The refused upload sends nothing, keeps the saved position and changes the status text.
+        assert(upload() && !app.take_network_request() && *app.saved_record() == saved);
+        driver.close(); driver.present(); driver.complete_content();
+        {
+            // The same refusal while the remote holds another position: the comparison panel
+            // stays, nothing is sent, and the panel says why instead of reappearing unchanged.
+            driver.sync_view();
+            const auto request = driver.check_remote();
+            app.complete_network(request.id, 200, R"({"progress":"/body[1]/DocFragment[2]/body[1]/h1[1]/text()[1].0","percentage":0.5})", "");
+            driver.present(); driver.complete_content();
+            assert(app.view() == View::Sync && std::string(app.sync_state()) == "different" && app.sync_order() == 1);
+            const auto choice = app.canvas().pixels();
+            driver.tap(342, 1090); driver.present(); driver.tap(500, 1120); driver.present();
+            driver.complete_content();
+            assert(app.view() == View::Sync && std::string(app.sync_state()) == "different");
+            assert(!app.take_network_request() && *app.saved_record() == saved && app.canvas().pixels() != choice);
+            driver.close(); driver.present(); driver.complete_content();
+            assert(app.view() == View::Reading);
+        }
+        const auto unsupported = remote("/body[1]/DocFragment[1]/body[1]/p[1]/text()[1].0");
+        const auto missing = remote("/body[1]/DocFragment[2]/body[1]/p[77]/text()[1].0");
+        assert(unsupported != missing && *app.saved_record() == saved);
+        // A position inside the table itself shows the same explanation as one beside it.
+        assert(remote("/body[1]/DocFragment[1]/body[1]/table[1]/tr[1]/td[1]/text()[1].0") == unsupported);
+        // The next chapter has no table; the same steps there produce the upload.
+        while (app.saved_record()->anchor.resource.find("chapter2") == std::string::npos) {
+            driver.key(Input::K3); driver.present(); driver.complete_content();
+        }
+        upload();
+        auto sent = app.take_network_request();
+        assert(sent && sent->request.method == "PUT");
+        app.complete_network(sent->id, 200, "{}", ""); driver.present();
+
+        // A page that begins with an image is uploaded as that image element, and the same
+        // element position coming back from the server is recognised as the saved position.
+        const std::string image_position = "/body[1]/DocFragment[1]/body[1]/img[1].0";
+        opened(app, "Books/cover.epub"); driver.present(); driver.complete_content();
+        const auto cover = *app.saved_record();
+        assert(cover.anchor.node == "/html[1]/body[1]/img[1]" && cover.anchor.offset == 0);
+        upload();
+        sent = app.take_network_request();
+        assert(sent && sent->request.method == "PUT" && sent->request.body.find(image_position) != std::string::npos);
+        app.complete_network(sent->id, 200, "{}", ""); driver.present();
+        driver.close(); driver.present(); driver.complete_content();
+        driver.sync_view();
+        const auto again = driver.check_remote();
+        app.complete_network(again.id, 200, R"({"progress":")" + image_position + R"(","percentage":0})", "");
+        driver.present(); driver.complete_content();
+        assert(app.view() == View::Sync && std::string(app.sync_state()) == "same" && *app.saved_record() == cover);
+    }
     {
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
@@ -2304,7 +2463,7 @@ int main(int argc, char** argv) {
         assert(doc.open((fixtures / "multi-part.epub").string(), error));
         Chapter original, cached;
         assert(load_content(store, doc, 0, original, error, ChapterLoad::Reading, 2));
-        const auto cache = card / "PicoPage/cache/content/content-reading-v2" / doc.metadata().book_id / "0/2";
+        const auto cache = card / "PicoPage/cache/content/content-reading-v3" / doc.metadata().book_id / "0/2";
         assert(fs::exists(cache));
         const auto data = read(cache);
         for (std::uint32_t part = 0; part < 2; ++part) {

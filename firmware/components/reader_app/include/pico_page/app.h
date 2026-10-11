@@ -258,6 +258,12 @@ class ReaderApp {
      * Defined for host builds and for firmware with the diagnostic console.
      */
     const char *sync_state() const;
+    /**
+     * Diagnostic order of the "different" result: 1 when the mapped remote position lies after the
+     * visible page, -1 when it lies before it, 0 on the page or in any other state. Defined where
+     * sync_state() is.
+     */
+    int sync_order() const;
     /** Effective body font size in pixels for the open book. Defined where sync_state() is. */
     int font_size_px() const;
     CacheUsage cache_usage() const;

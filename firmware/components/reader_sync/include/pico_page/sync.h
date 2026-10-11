@@ -59,12 +59,39 @@ RemoteResult parse_remote(int http_status, const std::string& body);
 bool upload_confirmed(int http_status, std::string& error);
 
 /**
+ * Error of to_xpointer and from_xpointer for a chapter part outside the verified plain XHTML
+ * profile, for example one that holds a table. No position in that part is mapped.
+ */
+inline constexpr char kUnsupportedStructure[] = "This chapter contains an unsupported KOReader DOM structure";
+/**
+ * Error of to_xpointer and from_xpointer for an image position in a chapter whose CSS holds a
+ * "display: none" declaration. Selectors are not resolved, so the image may have no position in
+ * the engine's layout. Text positions of the chapter are not affected.
+ */
+inline constexpr char kUnresolvedVisibility[] = "Image visibility requires a resolved CSS display value";
+
+/**
  * Exact mapping for the verified plain XHTML profile and configured CREngine
  * DOM version. Unsupported content returns false; percentage is never a locator.
+ * A text anchor maps to a text node and offset; the anchor of an img element maps to that
+ * element at offset zero. Other media anchors are refused.
  */
 bool to_xpointer(const EpubDocument& document, const Chapter& chapter, const Anchor& anchor,
                  int dom_version, std::string& xpointer, std::string& error);
+/**
+ * A reading-text position inside one spine item. Unlike an Anchor it can be ordered against
+ * another position of the same item without loading the chapter.
+ */
+struct PartPosition {
+    std::uint32_t part = 0;          // Chapter part that holds the position.
+    std::uint32_t offset = 0;        // Unicode scalar index within that part.
+    std::uint32_t part_scalars = 0;  // Length of that part in Unicode scalars.
+    bool last_part = true;           // False when a later part of the item holds more text.
+};
+
+/** As to_xpointer in reverse. place, when given, receives where the anchor lies in its chapter. */
 bool from_xpointer(EpubDocument& document, const std::string& xpointer, int dom_version,
-                   Anchor& anchor, std::string& error, const std::function<bool()>& stop = {});
+                   Anchor& anchor, std::string& error, const std::function<bool()>& stop = {},
+                   PartPosition* place = nullptr);
 
 }  // namespace pico_page::sync
