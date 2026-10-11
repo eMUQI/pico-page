@@ -152,9 +152,11 @@ std::uint64_t image_decode_count();
 inline constexpr char kImageCancelled[] = "Image decode cancelled";
 
 /** Decode PNG/baseline JPEG centered in the box. Crop fills the box; otherwise fit the whole image.
- * Failure leaves the canvas unchanged. Temporary pixels are bounded by the box dimensions;
- * the scaling tables hold one 16-bit entry per source column and row. Cancellation is checked
- * between PNG input chunks and JPEG blocks and returns kImageCancelled without changing pixels.
+ * Validation and decode failures leave the canvas unchanged. Temporary pixels are bounded by
+ * the box dimensions; scaling tables hold one 16-bit entry per source column and row.
+ * Cancellation is checked between PNG input chunks, JPEG blocks and output rows; it returns
+ * false with kImageCancelled and may leave partial pixels after output begins. When stop is
+ * provided, use an unpublished destination and discard its contents on cancellation.
  */
 bool render_image(Canvas& canvas, const std::vector<std::uint8_t>& encoded,
                   int x, int y, int width, int height, std::string& error, bool crop = false,
