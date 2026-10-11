@@ -556,6 +556,44 @@ static void layout_review_test(const fs::path& root, const fs::path& fixtures, c
     driver.tap(380, 384); driver.present();
     assert(app.status() == "排序未保存，请检查 TF 卡或设置文件" && read(root / "PicoPage/settings.toml") == "schema_version=9\n");
     write(root / "PicoPage/settings.toml", "schema_version=1\n[library]\nsort='recent'\n");
+    const auto library_root = root / "LibraryReview";
+    fs::create_directories(library_root / "Books/z-folder");
+    for (const auto name : {"a", "b", "c"})
+        fs::copy_file(fixtures / "valid.epub", library_root / (std::string("Books/") + name + ".epub"));
+    FileStore library_store(library_root.string());
+    assert(library_store.save_last_book("Books/b.epub", detail, 0) == StoreStatus::Ok);
+    assert(library_store.save_last_book("Books/a.epub", detail, 0) == StoreStatus::Ok);
+    {
+        ReaderApp library(library_root.string(), "library-review", true, async); Driver d{library};
+        assert(library.initialize()); d.present();
+        assert(!library.can_long_press_at(300, 480));
+        d.tap(600, 50); d.present(); d.tap(300, 560); d.present();
+        assert(library.view() == View::InputSettings);
+        d.tap(300, 840); d.present();
+        assert(library_store.load_settings().settings.library_folders == "recent");
+        d.tap(60, 50); d.present(); d.tap(60, 50); d.present();
+        assert(library.view() == View::Library && library.can_long_press_at(300, 480));
+    }
+    write(library_root / "PicoPage/data/recent-books.txt", "invalid");
+    write(library_root / "PicoPage/data/recent-books.txt.bak", "invalid");
+    write(library_root / "Books/c.epub.picopage/progress.json", progress);
+    {
+        ReaderApp library(library_root.string(), "library-review", true, async); Driver d{library};
+        assert(library.initialize()); d.present();
+        assert(!library.can_long_press_at(300, 480));
+        d.tap(300, 610); d.present(); d.complete_content();
+        assert(library_store.load_last_book(detail) == std::optional<std::string>("Books/a.epub"));
+    }
+    const auto canvas = [&] {
+        ReaderApp library(library_root.string(), "library-review", true, false); Driver d{library};
+        assert(library.initialize()); d.present();
+        return library.canvas().pixels();
+    };
+    const auto with_primary = canvas();
+    fs::rename(library_root / "Books/c.epub.picopage/progress.json", library_root / "Books/c.epub.picopage/progress.json.bak");
+    assert(canvas() == with_primary);
+    fs::remove(library_root / "Books/c.epub.picopage/progress.json.bak");
+    assert(canvas() != with_primary);
 }
 
 static void swipe_test(const fs::path& root, const fs::path& fixtures, bool grid) {

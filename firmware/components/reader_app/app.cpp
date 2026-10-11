@@ -44,7 +44,6 @@ struct Entry {
     bool described = false;
     std::size_t recent_rank = 128;
     std::int64_t opened_at = 0;
-    bool read_before = false;
 };
 struct Hit {
     int x, y, w, h, id;
@@ -574,7 +573,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::set<std::size_t> toc_collapsed;
     bool toc_locate_current = false, library_grid = false;
     std::string library_sort = "recent";
-    bool library_resume_omitted = false, folders_first = true;
+    bool library_resume_omitted = false, folders_first = true, library_recent = true;
     std::int64_t resume_opened_at = 0;
     // Bookmarks of the open book, loaded with it. Only Ok and Missing lists are shown.
     BookmarkList bookmarks;
@@ -2010,7 +2009,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         std::string history_error;
         const auto recent = store.load_recent_books(history_error);
-        if (!history_error.empty()) message = "最近阅读记录无法读取，暂按书名排序";
+        library_recent = library_sort == "recent" && history_error.empty();
+        if (library_sort == "recent" && !history_error.empty()) message = "最近阅读记录无法读取，暂按书名排序";
         for (auto& entry : entries) {
             for (std::size_t i = 0; i < recent.size(); ++i) {
                 if (recent[i].path == entry.path || (entry.directory && recent[i].path.compare(0, entry.path.size() + 1, entry.path + "/") == 0)) {
@@ -2018,29 +2018,22 @@ struct ReaderApp::Impl final : DisplayBackend {
                     entry.recent_rank = i; entry.opened_at = recent[i].opened_at; break;
                 }
             }
-            entry.read_before = entry.directory || entry.recent_rank < 128;
-            if (!entry.read_before && library_sort == "recent") {
-                // Existing records without history have unknown dates, rather than being labelled unread.
-                struct stat progress{};
-                const auto path = root + "/" + entry.path + ".picopage/progress.json";
-                entry.read_before = stat(path.c_str(), &progress) == 0 || errno != ENOENT;
-                if (!entry.read_before) entry.read_before = stat((path + ".bak").c_str(), &progress) == 0 || errno != ENOENT;
-            }
+
         }
         library_resume_omitted = false;
         const auto resume = has_book() ? book_path : last_book;
         resume_opened_at = 0;
         for (const auto& item : recent) if (item.path == resume) { resume_opened_at = item.opened_at; break; }
-        if (library_sort == "recent" && (folder.empty() || folder_root) && !resume.empty()) {
+        if (library_recent && (folder.empty() || folder_root) && !resume.empty()) {
             const auto end = std::remove_if(entries.begin(), entries.end(), [&](const auto& entry) {
                 return !entry.directory && entry.path == resume;
             });
             library_resume_omitted = end != entries.end(); entries.erase(end, entries.end());
         }
         std::sort(entries.begin(), entries.end(), [this](const Entry &a, const Entry &b) {
-            if ((folders_first || library_sort != "recent") && a.directory != b.directory) return a.directory > b.directory;
-            if (library_sort == "recent" && a.recent_rank != b.recent_rank) return a.recent_rank < b.recent_rank;
-            if (library_sort == "recent" && a.read_before != b.read_before) return a.read_before > b.read_before;
+            if ((folders_first || !library_recent) && a.directory != b.directory) return a.directory > b.directory;
+            if (library_recent && a.recent_rank != b.recent_rank) return a.recent_rank < b.recent_rank;
+            if (library_recent && a.directory != b.directory) return a.directory > b.directory;
             return library_sort == "name_desc" ? a.name > b.name : a.name < b.name;
         });
         library_page = std::min(library_page, library_pages() - 1);
@@ -2142,12 +2135,17 @@ struct ReaderApp::Impl final : DisplayBackend {
         // a small file that names its state.
         char record[512] = {};
         std::size_t length = 0;
-        if (std::FILE *file = std::fopen((root + "/" + entry.path + ".picopage/progress.json").c_str(), "rb")) {
-            length = std::fread(record, 1, sizeof(record) - 1, file);
-            std::fclose(file);
+        bool unreadable = false;
+        for (const auto* suffix : {"/progress.json", "/progress.json.bak"}) {
+            if (std::FILE *file = std::fopen((root + "/" + entry.path + ".picopage" + suffix).c_str(), "rb")) {
+                length = std::fread(record, 1, sizeof(record) - 1, file);
+                unreadable = unreadable || std::ferror(file);
+                std::fclose(file);
+                if (length) break;
+            } else if (errno != ENOENT) unreadable = true;
         }
         entry.status = length && !std::strstr(record, "\"cleared\"") ? "在读" :
-                       entry.recent_rank < 128 ? "已打开" : "未读";
+                       unreadable ? "位置未知" : entry.recent_rank < 128 ? "已打开" : "未读";
     }
     struct CoverEntry {
         std::string name, header;
@@ -2309,7 +2307,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             const int left = cover == Cover::Drawn ? 168 : 48;
             const int width = cover == Cover::Drawn ? 420 : 540;
             title_lines(has_book() ? document.metadata().title : basename(last_book), left, 182, width, 30, true);
-            const auto date = library_sort == "recent" ? recent_date(resume_opened_at) : "";
+            const auto date = library_recent ? recent_date(resume_opened_at) : "";
             if (!date.empty()) position += (position.empty() ? "" : " · ") + date;
             text(position.empty() ? "打开后恢复已保存的位置" : position, left, 288, 22, width, 3);
             text("›", 620, 214, 28, 30);
@@ -2373,9 +2371,10 @@ struct ReaderApp::Impl final : DisplayBackend {
                 text(entry.status, x, y + 264, 22, kLibraryCoverWidth, 3);
                 hits.push_back({x, y, kLibraryCoverWidth, 296, EntryBase + static_cast<int>(i)});
             } else {
-                if (library_sort == "recent" && !entry.read_before && (i == begin || entries[i - 1].read_before)) {
+                if (library_recent && !entry.directory && entry.recent_rank == 128 &&
+                    (i == begin || entries[i - 1].directory || entries[i - 1].recent_rank < 128)) {
                     const int divider = top + 78 + static_cast<int>(i - begin) * 126;
-                    text("以下未读", 36, divider + 4, 20, 150, 5);
+                    text("其他书籍", 36, divider + 4, 20, 150, 5);
                     canvas.line(156, divider + 18, 648, divider + 18, 12);
                     group_gap = 32;
                 }
@@ -2386,7 +2385,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 undecoded = undecoded || cover == Cover::Undecoded;
                 if (cover == Cover::Drawn) outline(36, y + 21, kRowCoverWidth + 2, kRowCoverHeight + 2);
                 const int left = cover == Cover::Drawn ? 118 : 36;
-                const auto date = library_sort == "recent" ? recent_date(entry.opened_at) : "";
+                const auto date = library_recent ? recent_date(entry.opened_at) : "";
                 const auto status = entry.directory ? entry.status + " ›" : entry.status;
                 const int status_width = std::min(std::max(text_width(status, 22), text_width(date, 22)), 200);
                 const int title_width = 628 - left - status_width;
@@ -6039,7 +6038,11 @@ struct ReaderApp::Impl final : DisplayBackend {
             auto values = snapshot.config.settings;
             values.library_folders = values.library_folders == "first" ? "recent" : "first";
             std::string detail;
-            message = store.apply_settings(snapshot, values, false, detail) == StoreStatus::Ok ? "文件夹排序已保存" : "文件夹排序未保存，请检查 TF 卡或设置文件";
+            if (store.apply_settings(snapshot, values, false, detail) == StoreStatus::Ok) {
+                library_page = 0;
+                scan_library();
+                message = "文件夹排序已保存";
+            } else message = "文件夹排序未保存，请检查 TF 卡或设置文件";
             draw_input_settings(); break;
         }
         case LibrarySort: {
