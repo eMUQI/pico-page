@@ -98,10 +98,12 @@ def generate(directory: Path) -> None:
     write_fixture(directory / "complex-svg-cover.epub", entries)
     entries["EPUB/chapter1.xhtml"] = '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>图片前的正文。</p><img src="cover.png" alt="真实图片"/><p>图片后的正文。</p><img src="missing.png" alt="缺失图片"/><p>末尾正文。</p></body></html>'
     write_fixture(directory / "image-flow.epub", entries)
-    # One block fills the first part, so the image after it is the first content of the second part.
+    # 2000 blocks of 30 scalars each, separator included, end the first part exactly at its
+    # limit, so the image after them is the first content of the second part.
     boundary = dict(entries)
-    boundary["EPUB/chapter1.xhtml"] = ('<html xmlns="http://www.w3.org/1999/xhtml"><body><p>' + "分" * 60010 +
-                                       '</p><img src="cover.png" alt="分段首图"/><p>图片之后的正文。</p></body></html>')
+    boundary["EPUB/chapter1.xhtml"] = ('<html xmlns="http://www.w3.org/1999/xhtml"><body>' + "".join(
+        f"<p>{number:04d}这一段文字用于把第一个分段正好填满到分段上限为止。</p>" for number in range(2000)) +
+        '<img src="cover.png" alt="分段首图"/><p>图片之后的正文。</p></body></html>')
     write_fixture(directory / "part-boundary-image.epub", boundary)
     # A table keeps its whole chapter outside the exact KOReader position mapping.
     table = fixture_entries()
