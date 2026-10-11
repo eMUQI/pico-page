@@ -8,6 +8,8 @@ Pico Page 是运行在 Read Pico 墨水屏阅读器上的个人阅读固件，�
 
 > **项目状态**：开发中，尚未发布第一版。固件已能在 Read Pico 上运行，但第一版验收（EPUB 离线阅读与 KOReader 双向位置接续）尚未完成。host 测试通过或固件构建成功不代表真机行为已验收。各项功能的实际验证结果见[开发状态](docs/development-status.md)。
 
+当前计划测试版本为 `0.2.0-beta.1`，尚未发布。版本来源与发版规则见[版本管理](docs/versioning.md)。
+
 ## 功能
 
 ### 阅读
