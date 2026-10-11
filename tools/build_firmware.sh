@@ -26,12 +26,12 @@ if command -v idf.py >/dev/null 2>&1; then
     if [ -n "$mode" ]; then
         idf.py -C firmware -B "$repo_root/build/firmware-$mode" \
             -D "SDKCONFIG=$repo_root/build/firmware-$mode/sdkconfig" \
-            -D "SDKCONFIG_DEFAULTS=$repo_root/firmware/sdkconfig.defaults;$repo_root/firmware/configs/$mode.defaults" build
+            -D "SDKCONFIG_DEFAULTS=$repo_root/firmware/sdkconfig.defaults;$repo_root/firmware/configs/$mode.defaults" reconfigure build
     else
-        idf.py -C firmware build
+        idf.py -C firmware reconfigure build
     fi
 elif [ -z "$mode" ] && command -v eim >/dev/null 2>&1; then
-    eim --log-file .local/eim.log --do-not-track true run "idf.py -C firmware build" v6.1
+    eim --log-file .local/eim.log --do-not-track true run "idf.py -C firmware reconfigure build" v6.1
 else
     printf '%s\n' "Activate an existing ESP-IDF 6.1 installation or provide EIM in PATH." >&2
     exit 1

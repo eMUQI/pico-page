@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+from project_version import project_version
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -79,7 +80,14 @@ def main():
         if len(hashes) != 3:
             raise RuntimeError('Firmware build artifacts are incomplete')
         require_defaults(build)
-        manifest.write_text(json.dumps(dict(schema=1, **before, artifacts_sha256=hashes), indent=2) + '\n')
+        version = project_version()
+        image = (build / 'pico_page.bin').read_bytes()
+        # The app descriptor follows the 24-byte image header and 8-byte first segment header.
+        if image[32:36] != bytes.fromhex('3254cdab') or image[48:80].split(b'\0', 1)[0] != version.encode():
+            raise RuntimeError('Application descriptor version differs from current source; reconfigure and rebuild')
+        mode = build.name.removeprefix('firmware-') if build.parent.resolve() == ROOT / 'build' else 'default'
+        manifest.write_text(json.dumps(dict(schema=1, **before, version=version, build_mode=mode,
+                                           artifacts_sha256=hashes), indent=2) + '\n')
     else:
         raise ValueError(action)
 

@@ -4395,7 +4395,7 @@ struct ReaderApp::Impl final : DisplayBackend {
 #ifdef ESP_PLATFORM
         return esp_app_get_description()->version;
 #else
-        return "桌面预览";
+        return PICO_PAGE_VERSION;
 #endif
     }
     /**

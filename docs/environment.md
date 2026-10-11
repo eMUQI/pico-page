@@ -42,13 +42,15 @@ sh -n tools/build_firmware.sh tools/setup_bsp.sh
 
 ## 固件构建入口与证据
 
+产品版本唯一来源为 `firmware/version.txt`，规则见[版本管理](versioning.md)。标准入口每次先重新配置，确保提交号、标签和 dirty 状态进入应用版本；构建完成后核对镜像中的版本，并把版本、构建模式、来源和摘要写入 `provenance.json`。手动调用 IDF 时使用 `idf.py -C firmware reconfigure build`；host 重新构建前先执行下文的 CMake 配置命令。
+
 仓库根目录执行：
 
 ```sh
 sh tools/build_firmware.sh
 ```
 
-首次下载 BSP 需要访问 GitHub。脚本与 CMake 核对 BSP 的完整 commit，发现已有不同版本或已跟踪组件修改时停止，不自动重置开发者的文件。已激活 IDF 的等价命令是 `idf.py -C firmware build`；本机使用 `eim --log-file .local/eim.log --do-not-track true run "idf.py -C firmware build" v6.1`。构建脚本没有刷写、擦除或监视串口动作。
+首次下载 BSP 需要访问 GitHub。脚本与 CMake 核对 BSP 的完整 commit，发现已有不同版本或已跟踪组件修改时停止，不自动重置开发者的文件。已激活 IDF 的等价命令是 `idf.py -C firmware reconfigure build`；本机使用 `eim --log-file .local/eim.log --do-not-track true run "idf.py -C firmware reconfigure build" v6.1`。构建脚本没有刷写、擦除或监视串口动作。
 
 初次受限运行被 macOS `psutil` 的 `sysctl()` 进程枚举权限阻止，发生在组件管理器配置阶段。随后在授权的非沙箱构建环境继续。首次完整编译发现 TOML 库把 `uint32_t` 用 `%x` 格式化，与 Xtensa 的类型定义不匹配；改为 `PRIx32` 后，完整构建退出码为 0。第三方修改见依赖记录。早期 G0 产物为 162,064 字节，SHA-256 为 `8317108ae066cad40acc87a5c259c13d5bf7cc2381efb5210670d2df1ce57cb0`；当时入口未初始化板级外设、未运行固件。该记录不代表下面的最新应用。
 
