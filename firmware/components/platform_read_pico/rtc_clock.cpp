@@ -4,7 +4,7 @@
 #include "read_pico_pmu.h"
 
 #include <atomic>
-#include <ctime>
+#include <time.h>
 
 namespace pico_page::platform::rtc_clock {
 namespace {
@@ -27,7 +27,7 @@ bool read() {
 
 void restore() {
     // Preserve an already running system clock; PMU time is only a boot fallback.
-    if (std::time(nullptr) >= provision::clock_floor) return;
+    if (::time(nullptr) >= provision::clock_floor) return;
     if (!read()) {
         ESP_LOGW(tag, "RTC unavailable or unset; waiting for network time");
         return;
@@ -46,7 +46,7 @@ void synchronized(timeval* time) {
 
 void persist() {
     if (!pending.exchange(false)) return;
-    const auto now = std::time(nullptr);
+    const auto now = ::time(nullptr);
     if (!valid(now)) {
         ESP_LOGW(tag, "System clock outside RTC range; RTC write skipped");
         return;

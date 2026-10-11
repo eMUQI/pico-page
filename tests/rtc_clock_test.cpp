@@ -1,14 +1,14 @@
 #include "rtc_clock.h"
 #include "read_pico_pmu.h"
 #include <cassert>
-#include <ctime>
+#include <time.h>
 #include <string>
 #include <vector>
 
 namespace rtc = pico_page::platform::rtc_clock;
 namespace {
-constexpr std::time_t epoch = 1791676800;
-std::time_t system_time = 0;
+constexpr time_t epoch = 1791676800;
+time_t system_time = 0;
 pmu_snapshot_t snapshot;
 int get_error = 0, sync_error = 0, set_error = 0, set_calls = 0;
 std::uint16_t status = PMU_STATUS_OK;
@@ -27,14 +27,14 @@ void reset() {
     commands.clear();
     message.clear();
 }
-void synchronized(std::time_t seconds = epoch) {
+void synchronized(time_t seconds = epoch) {
     timeval value{seconds, 0};
     system_time = seconds;
     rtc::synchronized(&value);
 }
 }
 
-extern "C" std::time_t time(std::time_t* output) noexcept(noexcept(::time(nullptr))) {
+extern "C" time_t time(time_t* output) noexcept(noexcept(::time(nullptr))) {
     if (output) *output = system_time;
     return system_time;
 }
