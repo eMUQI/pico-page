@@ -32,6 +32,7 @@ constexpr int footer_top = 1128, toolbar_top = 1080;
 constexpr int viewer_left = 24, viewer_top = 104, viewer_width = 636, viewer_height = 1088;
 constexpr int viewer_toolbar_height = 96, viewer_action_left = 456;
 constexpr int viewer_contrast_levels = 3;
+constexpr auto inline_image_delay = std::chrono::milliseconds(250);
 constexpr const char *content_revision = "epub-native-v1";
 constexpr const char *txt_revision = "txt-utf8-v1";
 struct Entry {
@@ -326,7 +327,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     bool prefetch_due() const {
         return !sleep_cover_deadline && !power_menu_wait && !session.needs_save() && view == View::Reading && !image_viewing && has_book() && card_available && !usb_prepared &&
-               !display.busy() && !deferred && !save_job && !bookmark_job && !foreground_job && !pending_content && !prefetch_done;
+               !display.busy() && !deferred && !save_job && !bookmark_job && !foreground_job && !pending_content && !body_images_pending && !prefetch_done;
     }
     void prepare_next(const std::function<bool()>& stop) {
         if ((stop && stop()) || raster_job) return;
@@ -343,14 +344,14 @@ struct ReaderApp::Impl final : DisplayBackend {
                     while (index < document.spine().size() && !document.spine()[index].linear) ++index;
                 }
                 if (index >= document.spine().size()) { prefetch_done = true; return; }
-                // The chapter job opens the book and font itself; the idle session yields its files and memory.
-                counting_session.reset();
 #ifdef ESP_PLATFORM
                 if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 5U * 1024 * 1024 ||
                     heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 2U * 1024 * 1024) {
                     prefetch_done = true; return;
                 }
 #endif
+                // An admitted chapter job owns its book and font independently.
+                counting_session.reset();
                 ContentJob::Request request;
                 request.kind = ContentJob::Kind::Chapter; request.target = ContentJob::Target::Start;
                 request.root = root; request.path = root + "/" + book_path; request.identity = document.metadata();
@@ -363,8 +364,6 @@ struct ReaderApp::Impl final : DisplayBackend {
 #ifdef ESP_PLATFORM
             if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2048U * 1024 ||
                 heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 256U * 1024) {
-                // The next page has priority over counting; retry once the session memory is free.
-                if (yield_counting_session()) return;
                 prefetch_done = true;
                 return;
             }
@@ -384,12 +383,10 @@ struct ReaderApp::Impl final : DisplayBackend {
 #ifdef ESP_PLATFORM
         if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2048U * 1024 ||
             heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 64U * 1024) {
-            if (yield_counting_session()) return;
             next_page.reset(); prefetch_done = true; return;
         }
 #endif
         if (!next_page->images.empty() && async_content && !raster_disabled && !counting_job) {
-            counting_session.reset();
             ContentJob::Request request;
             request.kind = ContentJob::Kind::Image; request.root = root; request.path = root + "/" + book_path;
             request.identity = document.metadata(); request.layout = next_spec;
@@ -913,6 +910,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     PP_DIAGNOSTIC(std::uint64_t diagnostic_session = 0, diagnostic_layout = 0;)
     bool content_loading = false, image_prepared = false;
     bool inline_image_pending = false, body_images_pending = false;
+    std::chrono::steady_clock::time_point inline_image_after = std::chrono::steady_clock::time_point::max();
     std::string prepared_image_error;
     void abandon_content() {
         cancel_covers();
@@ -2752,7 +2750,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     bool background_content_ready() const {
         return !sleep_cover_deadline && !power_menu_wait && !session.needs_save() && view == View::Reading && !image_viewing && has_book() && card_available && !usb_prepared &&
-               !display.busy() && !deferred && !save_job && !bookmark_job && !foreground_job && !pending_content &&
+               !display.busy() && !deferred && !save_job && !bookmark_job && !foreground_job && !pending_content && !body_images_pending &&
                !raster_job && !cover_job && !pending_covers;
     }
     bool counting_due() const {
@@ -3108,10 +3106,9 @@ struct ReaderApp::Impl final : DisplayBackend {
                      body_updates >= static_cast<unsigned>(refresh_interval(settings)))
                         ? RefreshIntent::FullClean
                         : RefreshIntent::Content);
+        inline_image_after = std::chrono::steady_clock::time_point::max();
         if (!session.layout_ready(token))
             return false;
-        if (async_content && body_images_pending && !inline_image_pending)
-            begin_image(page.start, page, false, true);
         return true;
     }
     /** Records only successfully presented body pages; at most 64 recent spans are retained. */
@@ -6155,7 +6152,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (accepted && view == View::TextEntry && key_input(input)) return;
         if (!accepted || display.busy() || view == View::Sleeping || view == View::PowerOff)
             return;
-        release_counting();
+        if (async_content) {
+            if (counting_job) counting_job->cancel();
+        } else release_counting();
         if (content_loading) {
             if (!input.touch && input.event.input == Input::K2) force_refresh();
             else if (!input.queued && input.touch && loading_cancel.contains(input.x, input.y)) {
@@ -6380,6 +6379,8 @@ void ReaderApp::complete_frame(bool success) {
     const auto result = impl_->display.finish(frame.token, success);
     impl_->pending.reset();
     if (success) {
+        if (impl_->view == View::Reading && !impl_->image_viewing && impl_->body_images_pending && !impl_->inline_image_pending)
+            impl_->inline_image_after = std::chrono::steady_clock::now() + inline_image_delay;
         if (frame.refresh == RefreshIntent::FullClean)
             impl_->body_updates = 0;
         else if (frame.purpose == FramePurpose::Body)
@@ -6800,7 +6801,10 @@ std::optional<BookPages> ReaderApp::book_pages() const {
 }
 CacheUsage ReaderApp::cache_usage() const { return impl_->cache_usage(); }
 
-bool ReaderApp::content_busy() const { return !!impl_->foreground_job || impl_->pending_content.has_value(); }
+bool ReaderApp::content_busy() const {
+    return !!impl_->foreground_job || impl_->pending_content.has_value() ||
+           (impl_->async_content && impl_->view == View::Reading && !impl_->image_viewing && impl_->body_images_pending);
+}
 bool ReaderApp::background_due() const {
     return !!impl_->cover_job || impl_->pending_covers.has_value() || !!impl_->raster_job || !!impl_->counting_job ||
            impl_->prefetch_due() || impl_->counting_due();
@@ -6816,7 +6820,7 @@ int ReaderApp::sync_order() const { return impl_->sync_state == Impl::SyncState:
 int ReaderApp::font_size_px() const { return impl_->settings.font_size_px; }
 #endif
 const char *ReaderApp::background_state() const {
-    if (impl_->inline_image_pending) return "image";
+    if (impl_->inline_image_pending || (impl_->view == View::Reading && !impl_->image_viewing && impl_->body_images_pending)) return "image";
     if (impl_->content_loading) {
         const auto kind = impl_->pending_content ? impl_->pending_content->kind : impl_->foreground_job->request.kind;
         return kind == ContentJob::Kind::Open ? "opening" : kind == ContentJob::Kind::Inspect ? "details" :
@@ -6838,6 +6842,8 @@ const char *ReaderApp::background_state() const {
 }
 void ReaderApp::poll_background(bool cancel) {
     if (impl_->view == View::PowerOff) return;
+    if (cancel && impl_->body_images_pending && !impl_->inline_image_pending && !impl_->display.busy())
+        impl_->inline_image_after = std::chrono::steady_clock::now() + inline_image_delay;
     if (cancel && impl_->counting_job) impl_->counting_job->cancel();
     impl_->poll_raster();
     impl_->poll_counting_job();
@@ -6873,8 +6879,9 @@ void ReaderApp::poll_background(bool cancel) {
             show_power_menu();
         }
     }
-    // Returning from a panel or viewer may restore a page whose image request was cancelled.
+    // Only prepare images after the displayed page has remained idle; panels may restore an unfinished page.
     if (!cancel && !impl_->sleep_cover_deadline && !impl_->power_menu_wait && impl_->async_content && impl_->body_images_pending && !impl_->inline_image_pending &&
+        std::chrono::steady_clock::now() >= impl_->inline_image_after &&
         !impl_->content_loading && !impl_->foreground_job && !impl_->pending_content &&
         impl_->view == View::Reading && !impl_->image_viewing && !impl_->display.busy() &&
         impl_->has_book() && impl_->card_available && !impl_->usb_prepared && !impl_->page.images.empty())

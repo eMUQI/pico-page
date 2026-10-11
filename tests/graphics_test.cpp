@@ -79,6 +79,12 @@ int main(int argc, char** argv) {
     assert(!render_image(canvas, jpeg, 0, 0, 32, 24, image_error, false,
                          [&] { return ++cancellation_checks >= 3; }));
     assert(image_error == kImageCancelled && canvas.pixels() == jpeg_unchanged);
+    // Cancel after output starts; the remaining rows must retain their previous pixels.
+    Canvas partial;
+    partial.clear(7);
+    assert(!render_image(partial, rgba, 10, 20, 4, 4, image_error, false,
+                         [&] { return partial.pixel(10, 20) != 7; }));
+    assert(image_error == kImageCancelled && partial.pixel(10, 20) == 0 && partial.pixel(10, 21) == 7);
     cancellation_checks = 0;
     assert(!render_image(canvas, rgba, 0, 0, 4, 4, image_error, false,
                          [&] { return ++cancellation_checks >= 3; }));

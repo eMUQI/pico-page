@@ -242,7 +242,7 @@ class ReaderApp {
     std::optional<BookPages> book_pages() const;
     /** True while the reading page is shown and next-page preparation or counting has work left. */
     bool background_due() const;
-    /** True until a foreground content job has completed or acknowledged cancellation. */
+    /** True while foreground content is pending, including the inline-image dwell interval and cancellation. */
     bool content_busy() const;
     /**
      * Diagnostic state: "opening" during book preparation, "image" while an image is prepared, "prefetch" while the next page is being prepared, "idle" without

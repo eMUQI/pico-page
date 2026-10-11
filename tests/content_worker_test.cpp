@@ -170,6 +170,37 @@ int main(int argc, char** argv) {
         ContentJob cached(cover); assert(cached.start()); finish(cached);
         assert(cached.result.cache_finished && !cached.result.image);
         assert(pico_page::graphics::image_decode_count() == decodes);
+        {
+            const pico_page::graphics::Canvas pixels;
+            std::string bytes(reinterpret_cast<const char*>(pixels.data()), pixels.pixels().size());
+            const auto valid = bytes + pico_page::md5_hex(bytes);
+            pico_page::FileStore store(root.string());
+            ContentJob::Request image;
+            image.kind = ContentJob::Kind::Image; image.root = root.string();
+            image.path = (root / "missing.epub").string(); image.cache_name = "images/admission";
+            image.page.images.push_back({0, 24, 64, 636, image.layout.height, "cover.png"});
+            assert(store.save_cache(image.cache_name, valid) == pico_page::StoreStatus::Ok);
+            for (const bool prefetch : {false, true}) {
+                image.prefetch = prefetch;
+                psram_free = 2560 * 1024; psram_largest = 1024 * 1024;
+                ContentJob warm(image); assert(warm.start()); finish(warm);
+                assert(warm.result.error.empty() && warm.result.image);
+                assert(warm.result.image->pixels() == pixels.pixels());
+            }
+            psram_free = psram_largest = 512 * 1024;
+            ContentJob too_small(image); assert(too_small.start()); finish(too_small);
+            assert(!too_small.result.image && !too_small.result.error.empty());
+            psram_free = 2560 * 1024; psram_largest = 1024 * 1024;
+            for (const auto& invalid : {valid.substr(1), std::string(valid.size(), 'x')}) {
+                assert(store.save_cache(image.cache_name, invalid) == pico_page::StoreStatus::Ok);
+                ContentJob corrupt(image); assert(corrupt.start()); finish(corrupt);
+                assert(!corrupt.result.image && corrupt.result.error == "Image preparation memory unavailable");
+            }
+            fs::remove(root / "PicoPage/cache" / image.cache_name);
+            ContentJob cold(image); assert(cold.start()); finish(cold);
+            assert(!cold.result.image && cold.result.error == "Image preparation memory unavailable");
+            assert(pico_page::graphics::image_decode_count() == decodes);
+        }
         psram_free = 4 * 1024 * 1024; psram_largest = 3 * 1024 * 1024;
         cover.path = (fs::path(argv[1]).parent_path() / "valid.epub").string();
         cover.cache_name = "covers/no-cover";
