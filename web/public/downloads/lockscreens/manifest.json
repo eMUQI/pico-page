@@ -22,10 +22,10 @@
       1216
     ],
     "gray_levels": 16,
-    "dithering": false,
+    "dithering": true,
     "source": "GPT Image",
     "hardware_verified": false,
-    "sha256": "795d56e602b73f4600251ee291f741dc9daa2879fc0cab4e013976ffa7955b42"
+    "sha256": "8699eb97977b2ab5e359a56a12d0efbe0dacd56835dd859fd9aba5b951748019"
   },
   {
     "file": "03-one-page.png",
@@ -36,10 +36,10 @@
       1216
     ],
     "gray_levels": 16,
-    "dithering": false,
+    "dithering": true,
     "source": "GPT Image",
     "hardware_verified": false,
-    "sha256": "56eb9abd94feb8b60f8d776b589decc7381e090611ab4d98dcd7103c9da1c2a2"
+    "sha256": "c854556c4bed0a8894abe537efd6b37454b6a3703982a748d71a8a9cdd294283"
   },
   {
     "file": "04-offline.png",
@@ -50,10 +50,10 @@
       1216
     ],
     "gray_levels": 16,
-    "dithering": false,
+    "dithering": true,
     "source": "GPT Image",
     "hardware_verified": false,
-    "sha256": "d186a906ce65748d2a7440f3835a3bd3bbe1eb12d756741281aca55bf9a6fe57"
+    "sha256": "c6a573145b5326d78f301362ccdb6bff8fbce4f44c9dbf46ae167fa73feb07e8"
   },
   {
     "file": "05-next-page.png",
