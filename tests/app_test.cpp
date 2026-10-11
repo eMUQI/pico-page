@@ -716,9 +716,16 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
     auto ready = run(true);
     assert(ready.image && ready.image->width() == 684 && ready.image->height() == 1216);
     assert(store.last_lock_screen() == "01.png");
+    const auto cache_path = root / "PicoPage/cache/lockscreens/current";
+    auto damaged_cache = read(cache_path);
+    damaged_cache[damaged_cache.size() - 33] ^= 1;
+    write(cache_path, damaged_cache);
+    assert(!run(true, "01.png").image);
+    assert(run(false, "01.png").cache_finished && run(true, "01.png").image);
     assert(run(false).lock_screen == "02.PNG");
     assert(run(true).image && FileStore(root.string()).last_lock_screen() == "02.PNG");
     assert(run(false).lock_screen == "01.png");
+    assert(std::distance(fs::directory_iterator(cache_path.parent_path()), fs::directory_iterator{}) == 1);
     assert(store.clear_cache() == StoreStatus::Ok && store.last_lock_screen() == "02.PNG");
     assert(!run(true, "01.png").image);
     assert(run(false, "01.png").cache_finished);
@@ -784,7 +791,8 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
     for (int i = 0; i < 257; ++i) write(root / "LockScreens" / ("overflow-" + std::to_string(i) + ".png"), png);
     assert(store.lock_screen_files(names) == StoreStatus::Invalid && names.empty());
     fs::remove_all(root / "LockScreens");
-    assert(!run(true).image && !run(false).cache_finished);
+    const auto missing = run(false);
+    assert(!run(true).image && !missing.cache_finished && !missing.retryable_failure);
     {
         ReaderApp app(root.string(), "empty-locks", true, true); Driver driver{app};
         assert(app.initialize()); driver.present();

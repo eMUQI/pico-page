@@ -240,7 +240,10 @@ void ContentJob::run() {
             result.bookmarks = store.load_bookmarks(request.relative_path, request.identity.book_id, request.content_revision);
         return;
     }
-    if (stop()) return;
+    if (stop()) {
+        result.retryable_failure = request.kind == Kind::LockScreen;
+        return;
+    }
     if (request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite) {
         FileStore store(request.root);
         if (request.kind == Kind::PageCacheRead)
@@ -418,7 +421,9 @@ void ContentJob::map_position() {
 void ContentJob::prepare_lock_screen() {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     const auto stop = [this, deadline] {
-        return cancelled_.load(std::memory_order_relaxed) || std::chrono::steady_clock::now() >= deadline;
+        const bool stopped = cancelled_.load(std::memory_order_relaxed) || std::chrono::steady_clock::now() >= deadline;
+        if (stopped) result.retryable_failure = true;
+        return stopped;
     };
     FileStore store(request.root);
     const auto status = store.lock_screen_files(result.lock_screens, stop);
@@ -444,22 +449,22 @@ void ContentJob::prepare_lock_screen() {
     }
     const auto identity = sha256_file(path, stop);
     if (identity.empty() || stop()) { result.error = "图片身份校验失败或已取消"; return; }
-    std::uint64_t hash = 1469598103934665603ULL;
-    for (unsigned char ch : result.lock_screen) hash = (hash ^ ch) * 1099511628211ULL;
-    const auto cache = "lockscreens/" + std::to_string(hash);
-    const auto header = "PPLOCK2\n" + identity + "\n" + result.lock_screen + "\n" + std::to_string(before.st_size) + "\n" +
+    const std::string cache = "lockscreens/current";
+    const auto header = "PPLOCK3\n" + identity + "\n" + result.lock_screen + "\n" + std::to_string(before.st_size) + "\n" +
                         std::to_string(before.st_mtime) + "\n684x1216-fit\n";
     constexpr std::size_t count = 342 * 1216;
 #ifdef ESP_PLATFORM
     if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 3U * 1024 * 1024 ||
         heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 2U * 1024 * 1024) {
+        result.retryable_failure = true;
         result.error = "图片准备内存不足"; return;
     }
 #endif
     {
         std::string cached;
-        if (store.load_cache(cache, header.size() + count, cached) == StoreStatus::Ok &&
-            cached.size() == header.size() + count && cached.compare(0, header.size(), header) == 0) {
+        if (store.load_cache(cache, header.size() + count + 32, cached) == StoreStatus::Ok &&
+            cached.size() == header.size() + count + 32 && cached.compare(0, header.size(), header) == 0 &&
+            cached.compare(header.size() + count, 32, md5_hex(std::string_view(cached.data() + header.size(), count))) == 0) {
             if (!request.prefetch) {
                 result.image = std::make_unique<graphics::Canvas>(684, 1216);
                 std::memcpy(result.image->data(), cached.data() + header.size(), count);
@@ -486,8 +491,9 @@ void ContentJob::prepare_lock_screen() {
         }
         auto bytes = header;
         bytes.append(reinterpret_cast<const char*>(image->data()), count);
+        bytes += md5_hex(std::string_view(bytes.data() + header.size(), count));
         result.cache_finished = store.save_cache(cache, bytes) == StoreStatus::Ok;
-        if (!result.cache_finished) { result.error = "图片缓存未保存"; return; }
+        if (!result.cache_finished) { result.retryable_failure = true; result.error = "图片缓存未保存"; return; }
         if (!request.prefetch) result.image = std::move(image);
     }
     if (stop()) { result.image.reset(); result.error = "图片准备已取消"; return; }

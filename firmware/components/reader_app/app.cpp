@@ -1322,7 +1322,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 if (!custom_sleep_image && custom_notice.empty()) custom_notice = "休眠图片尚未就绪";
             }
             if (request.prefetch) {
-                custom_prepared = result.cache_finished;
+                custom_prepare_finished = result.cache_finished || !result.retryable_failure;
                 custom_retry_at = result.cache_finished ? std::chrono::steady_clock::time_point{} :
                     std::chrono::steady_clock::now() + std::chrono::seconds(5);
             }
@@ -4205,7 +4205,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::size_t lock_screen_page = 0;
     std::string lock_screen_error, custom_notice;
     std::chrono::steady_clock::time_point custom_retry_at{};
-    bool custom_prepared = false, custom_sleep_attempted = false, custom_notice_pending = false;
+    bool clear_cache_pending = false;
+    bool custom_prepare_finished = false, custom_sleep_attempted = false, custom_notice_pending = false;
     std::unique_ptr<graphics::Canvas> custom_sleep_image;
     void list_lock_screens() {
         abandon_content();
@@ -4237,7 +4238,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         footer_bar("返回后保存设置", lock_screen_page, pages);
     }
     bool custom_prepare_due() const {
-        return settings.sleep_screen == "custom" && !custom_prepared &&
+        return settings.sleep_screen == "custom" && !custom_prepare_finished &&
                std::chrono::steady_clock::now() >= custom_retry_at && card_available && !usb_prepared &&
                !portal_live && !sleep_cover_deadline && !power_menu_wait && !active_network && !network_worker_id &&
                !display.busy() && !content_loading && !foreground_job && !pending_content && !counting_job &&
@@ -6007,7 +6008,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             settings.auto_sleep_minutes = draft.auto_sleep_minutes;
             settings.sleep_screen = draft.sleep_screen;
             settings.sleep_image = draft.sleep_image;
-            custom_prepared = custom_sleep_attempted = false;
+            custom_prepare_finished = custom_sleep_attempted = false;
             custom_sleep_image.reset();
             message = "休眠设置已保存";
             draw_settings();
@@ -6018,8 +6019,16 @@ struct ReaderApp::Impl final : DisplayBackend {
             break;
         case ClearCache:
             if (!bookmark_io_ready()) return;
+            if (counting_job && counting_job->request.kind == ContentJob::Kind::LockScreen && !counting_job->done()) {
+                counting_job->cancel();
+                clear_cache_pending = true;
+                message = "正在停止图片准备，完成后清理缓存";
+                draw_storage();
+                break;
+            }
+            clear_cache_pending = false;
             abandon_content(); foreground_job.reset(); stop_covers(); stop_raster(); stop_counting_job();
-            covers.clear(); custom_prepared = false; custom_sleep_image.reset();
+            covers.clear(); custom_prepare_finished = false; custom_sleep_image.reset();
             message = store.clear_cache() == StoreStatus::Ok ? "缓存已清理，原书与阅读记录保留" : "缓存未完全清理，请检查 TF 卡";
             draw_storage();
             break;
@@ -6802,7 +6811,7 @@ void ReaderApp::show_power_off_help() {
 bool ReaderApp::sleep_pending() const { return impl_->sleep_cover_deadline.has_value(); }
 void ReaderApp::cancel_sleep() {
     impl_->custom_sleep_attempted = false;
-    impl_->custom_prepared = false;
+    impl_->custom_prepare_finished = false;
     impl_->custom_sleep_image.reset();
     if (impl_->sleep_cover_deadline) {
         impl_->sleep_cover_deadline.reset();
@@ -6882,7 +6891,7 @@ void ReaderApp::wake(bool slept) {
     impl_->wifi_status.ssid.clear(); impl_->wifi_status.detail.clear();
     impl_->wifi_notice.clear();
     impl_->custom_sleep_attempted = false;
-    impl_->custom_prepared = false;
+    impl_->custom_prepare_finished = false;
     impl_->custom_notice_pending = slept && !impl_->custom_notice.empty();
     if (slept) impl_->sleep_wifi_target.reset();
     else cancel_sleep();
@@ -6973,6 +6982,11 @@ void ReaderApp::poll_background(bool cancel) {
     if (cancel && impl_->counting_job) impl_->counting_job->cancel();
     impl_->poll_raster();
     impl_->poll_counting_job();
+    if (impl_->clear_cache_pending) {
+        if (impl_->view != View::StorageSettings || !impl_->card_available) impl_->clear_cache_pending = false;
+        else if (!cancel && !impl_->counting_job && !impl_->display.busy() && !impl_->save_job && !impl_->bookmark_job)
+            impl_->control(ClearCache);
+    }
     // The counting session lives only while the reading page is shown.
     if (impl_->view != View::Reading && !impl_->counting_job) impl_->counting_session.reset();
     impl_->poll_covers();

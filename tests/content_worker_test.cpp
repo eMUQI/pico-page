@@ -145,13 +145,14 @@ int main(int argc, char** argv) {
             psram_free = fragmented ? 4 * 1024 * 1024 : 3 * 1024 * 1024 - 1;
             psram_largest = fragmented ? 2 * 1024 * 1024 - 1 : 3 * 1024 * 1024;
             ContentJob refused(custom); assert(refused.start()); finish(refused);
-            assert(!refused.result.cache_finished && !refused.result.image && !refused.result.error.empty());
+            assert(!refused.result.cache_finished && !refused.result.image && !refused.result.error.empty() &&
+                   refused.result.retryable_failure);
             assert(pico_page::graphics::image_decode_count() == custom_decodes);
         }
         psram_free = 4 * 1024 * 1024; psram_largest = 3 * 1024 * 1024;
         ContentJob cancelled_custom(custom); cancelled_custom.cancel();
         assert(cancelled_custom.start()); finish(cancelled_custom);
-        assert(!cancelled_custom.result.cache_finished && !cancelled_custom.result.image);
+        assert(!cancelled_custom.result.cache_finished && !cancelled_custom.result.image && cancelled_custom.result.retryable_failure);
         assert(!fs::exists(root / "PicoPage/data/last-lock-screen.txt"));
 
         for (const bool fragmented : {false, true}) {

@@ -113,6 +113,8 @@ public:
         bool last_book_saved = false;
         /** SleepCover: a valid pixel or negative cache entry was read or successfully committed. */
         bool cache_finished = false;
+        /** LockScreen: cancellation, timeout or resource failure permits an idle retry. */
+        bool retryable_failure = false;
         std::optional<PageCache> page_cache;
         off_t file_size = 0;
         time_t file_modified = 0;
