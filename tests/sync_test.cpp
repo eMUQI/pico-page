@@ -60,6 +60,9 @@ int main(int argc, char** argv) {
         Anchor refused;
         assert(!sync::from_xpointer(tables, "/body[1]/DocFragment[1]/body[1]/p[1]/text()[1].0", 20260812, refused, error));
         assert(error == sync::kUnsupportedStructure);
+        // A position inside the table itself names the same cause, not a missing node.
+        assert(!sync::from_xpointer(tables, "/body[1]/DocFragment[1]/body[1]/table[1]/tr[1]/td[1]/text()[1].0", 20260812, refused, error));
+        assert(error == sync::kUnsupportedStructure);
 
         // An image stays inside the profile. Text beside it maps as before and the image maps as
         // its element at offset zero. The pinned CREngine resolves these paths to the same

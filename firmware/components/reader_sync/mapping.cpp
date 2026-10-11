@@ -210,20 +210,22 @@ bool from_xpointer(EpubDocument& document, const std::string& xpointer, int dom_
     const auto index = static_cast<std::size_t>(parts[1].index - 1);
     Chapter chapter;
     const std::string source = "/html[1]" + canonical(parts, 2);
+    // A path through an element outside the profile, such as a table cell, is refused for that
+    // cause before any chapter is read; no node of this document could match it.
+    std::vector<Segment> shape;
+    if (!parse_path(source, shape) || !supported_structure(shape)) { error = kUnsupportedStructure; return false; }
     const auto report = [&](std::uint32_t visible) {
         if (place) *place = {chapter.part, visible, static_cast<std::uint32_t>(chapter.text.size()), chapter.last_part};
     };
     if (parts.back().name == "img") {
         // An element position: the image itself, which is how CREngine reports a page that begins with one.
-        std::vector<Segment> element;
         const auto holds = [&](const Chapter& candidate) {
             return std::any_of(candidate.images.begin(), candidate.images.end(),
                                [&](const DocumentImage& image) { return image.source.node == source; });
         };
         CssProfile css;
         std::uint32_t visible = 0;
-        if (offset || !parse_path(source, element) || !supported_structure(element) ||
-            !document.find_chapter_part(index, chapter, error, ChapterLoad::Mapping, holds, stop) ||
+        if (offset || !document.find_chapter_part(index, chapter, error, ChapterLoad::Mapping, holds, stop) ||
             !mapping_profile(chapter, css, error) || !chapter.offset_for({chapter.resource, source, 0}, visible)) {
             if (error.empty() || error.rfind("Chapter part is not available", 0) == 0)
                 error = "KOReader image position cannot be mapped exactly";

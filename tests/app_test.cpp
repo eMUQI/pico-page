@@ -1927,6 +1927,8 @@ int main(int argc, char** argv) {
         const auto unsupported = remote("/body[1]/DocFragment[1]/body[1]/p[1]/text()[1].0");
         const auto missing = remote("/body[1]/DocFragment[2]/body[1]/p[77]/text()[1].0");
         assert(unsupported != missing && *app.saved_record() == saved);
+        // A position inside the table itself shows the same explanation as one beside it.
+        assert(remote("/body[1]/DocFragment[1]/body[1]/table[1]/tr[1]/td[1]/text()[1].0") == unsupported);
         // The next chapter has no table; the same steps there produce the upload.
         while (app.saved_record()->anchor.resource.find("chapter2") == std::string::npos) {
             driver.key(Input::K3); driver.present(); driver.complete_content();
