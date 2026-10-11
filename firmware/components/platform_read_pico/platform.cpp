@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 
@@ -62,6 +63,20 @@ std::int64_t rails_deadline = 0;
 std::int64_t last_pmu_poll = 0;
 std::int64_t last_card_poll = 0;
 std::int64_t power_ignore_until = 0;
+// Output written before the host re-enumerates the USB console after light sleep is lost,
+// so poll() reports the last sleep once this time has passed.
+constexpr std::int64_t sleep_report_delay_us = 1'000'000;
+struct SleepReport {
+    std::int64_t due = 0;
+    int wakes = 0;
+    int rejected = 0;
+    int pmu_retries = 0;
+    int touch_edges = 0;
+    int touch_low = 0;
+    std::string first_pmu_error;
+    std::string result;
+};
+SleepReport sleep_report;
 std::atomic<std::uint64_t> sequence{0};
 EpdiyHighlevelState display{};
 cst836u_handle_t touch = nullptr;
@@ -193,7 +208,16 @@ bool pmu_events(bool& short_press, bool& wake_press, std::string& error, bool* l
         battery_state.charging = snapshot->charge_state == PMU_CHARGE_CHARGING;
         if (!snapshot->pending_events) return true;
         if (!snapshot->event_ok || snapshot->event.event_id == 0) {
-            return failure(error, "PMU event", ESP_ERR_INVALID_RESPONSE);
+            // id and type read as zero when the count or the event register could not be
+            // read; a non-zero id with ok=0 is a CRC mismatch.
+            char detail[96];
+            std::snprintf(detail, sizeof(detail),
+                          "PMU event unreadable (pending=%u ok=%d id=%u type=0x%02x flags=0x%04lx)",
+                          static_cast<unsigned>(snapshot->pending_events), snapshot->event_ok ? 1 : 0,
+                          static_cast<unsigned>(snapshot->event.event_id),
+                          static_cast<unsigned>(snapshot->event.type),
+                          static_cast<unsigned long>(snapshot->flags));
+            return failure(error, detail, ESP_ERR_INVALID_RESPONSE);
         }
         if (i == PMU_EVENT_FIFO_DEPTH) {
             return failure(error, "PMU event queue did not drain", ESP_ERR_TIMEOUT);
@@ -246,23 +270,34 @@ bool wake_lines_idle(gpio_num_t irq, bool& idle, std::string& error) {
  * Besides key events, the PMU reports a battery sample about every 30 s while the host is
  * powered. Acknowledging events releases CW_INT, and the expander reports that release as
  * a further input change, so its interrupt is cleared only after the events are consumed.
+ * A failed PMU read is retried, since a periodic event must not end the sleep.
  *
  * @param irq Expander interrupt line, active low.
  * @param wake_press Set when the events include a power-key press.
- * @return false if the PMU fails, or if the line or the PMU queue does not become idle
- *         within 2 s without a key press; @p error then describes the failure.
+ * @return false if the PMU still fails, or if the line or the PMU queue is still not idle,
+ *         2 s after the wake without a key press; @p error then describes the failure.
  */
 bool settle_wake_interrupt(gpio_num_t irq, bool& wake_press, std::string& error) {
+    wake_press = false;
     const auto deadline = esp_timer_get_time() + 2'000'000;
     for (;;) {
         bool short_press = false;
-        if (!pmu_events(short_press, wake_press, error)) return false;
-        if (wake_press) return true;
+        bool press = false;
         bool idle = false;
-        if (!wake_lines_idle(irq, idle, error)) return false;
-        if (idle) return true;
+        // A key event acknowledged before a later read failed is not reported again.
+        bool read = pmu_events(short_press, press, error);
+        wake_press = wake_press || press;
+        if (!wake_press) read = read && wake_lines_idle(irq, idle, error);
+        if (wake_press || (read && idle)) {
+            error.clear();
+            return true;
+        }
+        if (!read) {
+            if (sleep_report.first_pmu_error.empty()) sleep_report.first_pmu_error = error;
+            ++sleep_report.pmu_retries;
+        }
         if (esp_timer_get_time() >= deadline) {
-            error = "Wake interrupt or PMU events did not settle without a power-key event";
+            if (read) error = "Wake interrupt or PMU events did not settle without a power-key event";
             return false;
         }
         vTaskDelay(pdMS_TO_TICKS(20));
@@ -695,6 +730,15 @@ bool poll(Event& event, std::string& error) {
     error.clear();
     if (!on_owner(error) || !ready) return false;
     const auto now = esp_timer_get_time();
+    if (sleep_report.due && now >= sleep_report.due) {
+        sleep_report.due = 0;
+        ESP_LOGI(tag, "Light sleep: wakes=%d rejected=%d pmu_retries=%d touch_edges=%d touch_low=%d "
+                 "first_pmu_error=%s result=%s",
+                 sleep_report.wakes, sleep_report.rejected, sleep_report.pmu_retries,
+                 sleep_report.touch_edges, sleep_report.touch_low,
+                 sleep_report.first_pmu_error.empty() ? "none" : sleep_report.first_pmu_error.c_str(),
+                 sleep_report.result.empty() ? "power key" : sleep_report.result.c_str());
+    }
     if (rails_deadline && now >= rails_deadline) {
         epd_poweroff();
         rails_deadline = 0;
@@ -768,6 +812,7 @@ bool sleep(std::string& error, bool& entered_sleep) {
     }
     epd_poweroff();
     rails_deadline = 0;
+    sleep_report = {};
     // The sampler must not address the controller between standby and its reset on wake.
     xSemaphoreTake(touch_lock, portMAX_DELAY);
     if (input_waiting_before(std::numeric_limits<std::int64_t>::max()) ||
@@ -813,12 +858,29 @@ bool sleep(std::string& error, bool& entered_sleep) {
             if (result == ESP_OK) result = esp_sleep_enable_gpio_wakeup();
             if (result != ESP_OK) break;
             while (result == ESP_OK) {
-                // Wake-source setup and non-power wake handling may deliver a pending IRQ.
-                if (has_pending_touch() || cst836u_int_asserted(touch)) {
+                // Wake-source setup may deliver a pending IRQ before the first entry. After
+                // it the controller ignores contacts until its reset on wake, so activity
+                // on its line is counted but does not end the sleep.
+                if (entered_sleep) {
+                    if (has_pending_touch()) {
+                        set_touch_pending(false);
+                        ++sleep_report.touch_edges;
+                    }
+                    if (cst836u_int_asserted(touch)) ++sleep_report.touch_low;
+                } else if (has_pending_touch() || cst836u_int_asserted(touch)) {
                     error = "Sleep cancelled by touch interrupt";
                     break;
                 }
                 result = esp_light_sleep_start();
+                // The request is rejected when the wake line is already low. The pending
+                // event is then handled as a wake; the delay bounds the rate of repeats.
+                if (result == ESP_ERR_SLEEP_REJECT) {
+                    result = ESP_OK;
+                    ++sleep_report.rejected;
+                    vTaskDelay(pdMS_TO_TICKS(20));
+                } else if (result == ESP_OK) {
+                    ++sleep_report.wakes;
+                }
                 if (result != ESP_OK) break;
                 entered_sleep = true;
                 if (!settle_wake_interrupt(irq, wake_press, error)) break;
@@ -843,10 +905,14 @@ bool sleep(std::string& error, bool& entered_sleep) {
     if (entered_sleep) power_ignore_until = esp_timer_get_time() + 300'000;
     // Reconnect outside touch_lock, including when wake cleanup failed.
     if (entered_sleep) reconnect_usb_console();
-    if (touch_result != ESP_OK) return failure(error, "Touch resume", touch_result);
-    if (result != ESP_OK) return failure(error, "Light sleep", result);
-    if (!slept && error.empty()) error = "Power key or wake interrupt did not become idle";
-    return slept;
+    if (touch_result != ESP_OK) failure(error, "Touch resume", touch_result);
+    else if (result != ESP_OK) failure(error, "Light sleep", result);
+    else if (!slept && error.empty()) error = "Power key or wake interrupt did not become idle";
+    if (entered_sleep) {
+        sleep_report.result = error;
+        sleep_report.due = esp_timer_get_time() + sleep_report_delay_us;
+    }
+    return slept && touch_result == ESP_OK;
 }
 
 } // namespace pico_page::platform
