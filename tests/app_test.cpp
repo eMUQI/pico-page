@@ -1231,8 +1231,19 @@ int main(int argc, char** argv) {
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present();
         assert(!app.open_book("Books/missing-resource.epub") && app.view() == View::Error);
-        assert(app.status().find("文件内容无效或已损坏") != std::string::npos);
+        assert(app.status().find("无法解析文件内容") != std::string::npos);
         assert(app.status().find("Missing EPUB resource") == std::string::npos);
+    }
+    for (const auto& item : {std::pair{"invalid", "EPUB 格式标识不正确"},
+                             std::pair{"read-failure", "EPUB 格式标识读取失败"},
+                             std::pair{"missing", "EPUB 缺少格式标识"},
+                             std::pair{"oversized", "EPUB 格式标识过长"}}) {
+        const auto name = std::string("mimetype-") + item.first + ".epub";
+        fs::copy_file(fixtures / name, card / "Books" / name);
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        assert(!app.open_book("Books/" + name) && app.view() == View::Error);
+        assert(app.status().find(item.second) != std::string::npos);
     }
     {
         ReaderApp app(card.string()); Driver driver{app};

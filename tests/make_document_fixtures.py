@@ -12,6 +12,26 @@ def generate(directory: Path) -> None:
     (directory / "invalid.txt").write_bytes(b"valid\xffinvalid")
     (directory / "gb18030.txt").write_bytes(("甲" * 24575 + "😀\ue587" + "乙" * 500 + "\r\n末尾").encode("gb18030"))
     write_fixture(directory / "valid.epub")
+    for kind, mime in (
+        ("crlf", "application/epub+zip\r\n"),
+        ("padding", " \t\r\napplication/epub+zip\n\r\t "),
+        ("limit", " " * 22 + "application/epub+zip" + " " * 22),
+        ("oversized", " " * 45 + "application/epub+zip"),
+        ("invalid", "application/zip"),
+        ("internal-space", "application/epub +zip"),
+        ("nul", "application/epub+zip\x00"),
+        ("empty", ""),
+        ("missing", None),
+    ):
+        entries = fixture_entries()
+        if mime is None:
+            del entries["mimetype"]
+        else:
+            entries["mimetype"] = mime
+        write_fixture(directory / ("mimetype-" + kind + ".epub"), entries)
+    damaged = directory / "mimetype-read-failure.epub"
+    write_fixture(damaged)
+    damaged.write_bytes(damaged.read_bytes().replace(b"application/epub+zip", b"application/epub+ziX", 1))
     for kind, label in (("empty-label", ""), ("whitespace-label", " \t\n "),
                         ("long-label", "甲" * 10922)):
         labeled = fixture_entries()

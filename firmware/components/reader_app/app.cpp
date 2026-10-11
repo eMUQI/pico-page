@@ -5270,6 +5270,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         std::string lower = detail;
         for (auto &c : lower) if (c >= 'A' && c <= 'Z') c += 32;
         const auto has = [&](const char *word) { return lower.find(word) != std::string::npos; };
+        if (lower == "missing epub mimetype") return "EPUB 缺少格式标识";
+        if (lower == "epub mimetype exceeds limit") return "EPUB 格式标识过长";
+        if (lower == "cannot read epub mimetype") return "EPUB 格式标识读取失败";
+        if (lower == "invalid epub mimetype") return "EPUB 格式标识不正确";
         if (has("memory") || has("alloc")) return "设备内存不足";
         if (has("changed")) return "文件在读取过程中发生了变化";
         if (has("unsupported") || has("requires") || has("exactly") || has("not retained")) return "内容结构暂不支持";
@@ -5282,7 +5286,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             const bool ended = detail.size() >= stop.size() && detail.compare(detail.size() - stop.size(), stop.size(), stop) == 0;
             return ended ? detail.substr(0, detail.size() - stop.size()) : detail;
         }
-        return "文件内容无效或已损坏";
+        return "无法解析文件内容";
     }
     std::string retry_path;
     /**
