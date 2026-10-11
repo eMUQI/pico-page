@@ -1315,10 +1315,15 @@ struct ReaderApp::Impl final : DisplayBackend {
         // The lock screen reads the cover cache itself; a failed or cancelled attempt falls back to the title.
         if (request.kind == ContentJob::Kind::SleepCover) return;
         if (request.kind == ContentJob::Kind::LockScreen) {
-            if (request.preview) {
+            if (request.preview && custom_sleep_attempted && sleep_cover_deadline) {
                 custom_sleep_image = std::move(job->result.image);
                 custom_notice = result.error;
                 if (!custom_sleep_image && custom_notice.empty()) custom_notice = "休眠图片尚未就绪";
+            }
+            if (request.prefetch) {
+                custom_prepared = result.cache_finished;
+                custom_retry_at = result.cache_finished ? std::chrono::steady_clock::time_point{} :
+                    std::chrono::steady_clock::now() + std::chrono::seconds(5);
             }
             return;
         }
@@ -2712,6 +2717,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         usage.page_index = page_index_bytes();
         for (const auto& cover : covers) usage.cover_pixels += cover.pixels.capacity();
         if (detail_cover) usage.cover_pixels += detail_cover->pixels().capacity();
+        if (custom_sleep_image) usage.cover_pixels += custom_sleep_image->pixels().capacity();
         usage.ui_glyph_bytes = ui.cached_glyph_bytes(); usage.body_glyph_bytes = body.cached_glyph_bytes();
         usage.ui_glyphs = ui.cached_glyphs(); usage.body_glyphs = body.cached_glyphs();
         usage.ui_advances = ui.cached_advances(); usage.body_advances = body.cached_advances();
@@ -4197,6 +4203,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::vector<std::string> lock_screens;
     std::size_t lock_screen_page = 0;
     std::string lock_screen_error, custom_notice;
+    std::chrono::steady_clock::time_point custom_retry_at{};
     bool custom_prepared = false, custom_sleep_attempted = false, custom_notice_pending = false;
     std::unique_ptr<graphics::Canvas> custom_sleep_image;
     void list_lock_screens() {
@@ -4229,7 +4236,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         footer_bar("返回后保存设置", lock_screen_page, pages);
     }
     bool custom_prepare_due() const {
-        return settings.sleep_screen == "custom" && !custom_prepared && card_available && !usb_prepared &&
+        return settings.sleep_screen == "custom" && !custom_prepared &&
+               std::chrono::steady_clock::now() >= custom_retry_at && card_available && !usb_prepared &&
                !portal_live && !sleep_cover_deadline && !power_menu_wait && !active_network && !network_worker_id &&
                !display.busy() && !content_loading && !foreground_job && !pending_content && !counting_job &&
                !body_images_pending && !inline_image_pending && !session.needs_save() && !save_job && !bookmark_job && !cover_job && !raster_job &&
@@ -4240,7 +4248,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         request.kind = ContentJob::Kind::LockScreen; request.root = root;
         request.sleep_image = settings.sleep_image; request.generation = counting_generation;
         request.prefetch = !sleeping; request.preview = sleeping;
-        custom_prepared = true;
+        if (!sleeping) custom_retry_at = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         if (sleeping) { custom_sleep_attempted = true; custom_sleep_image.reset(); custom_notice.clear(); }
         counting_job = std::make_unique<ContentJob>(std::move(request));
         if (!counting_job->start()) {
@@ -4259,7 +4267,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (draft.sleep_screen == "custom") {
             button(SleepChoose, "选择图片 / 轮播", 36, 432, 612, 88);
             text(draft.sleep_image.empty() ? "按文件名轮播" : draft.sleep_image, 36, 548, 24, 612, 3);
-        } else note("无可用封面时显示书名与作者。", 464);
+        } else if (draft.sleep_screen == "cover") note("无可用封面时显示书名与作者。", 464);
+        else if (draft.sleep_screen == "reading") note("保留当前正文，并显示休眠提示。", 464);
+        else note("显示书名、阅读位置与唤醒提示。", 464);
         text("自动休眠", 36, 636, 28, 612, 1, true);
         button(SleepLess, "−", 36, 706, 120, 96);
         center(draft.auto_sleep_minutes ? std::to_string(draft.auto_sleep_minutes) + " 分钟" : "关闭", 168, 728, 348, 34);

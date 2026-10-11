@@ -740,6 +740,28 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
     {
         ReaderApp app(root.string(), "locks", true, true); Driver driver{app};
         assert(app.initialize()); driver.present();
+        ContentJob::fail_starts_for_test(ContentJob::Kind::LockScreen, 1, ContentJob::StartFailure::TaskCreate);
+        assert(app.background_due()); app.background_step();
+        assert(!app.background_due());
+        const auto retry_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (!app.background_due()) {
+            assert(std::chrono::steady_clock::now() < retry_deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        app.background_step();
+        while (app.background_due()) {
+            app.poll_background();
+            assert(std::chrono::steady_clock::now() < retry_deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(!app.prepare_sleep() && app.sleep_pending());
+        app.cancel_sleep();
+        while (std::string(app.background_state()) == "sleep-cover") {
+            app.poll_background();
+            assert(std::chrono::steady_clock::now() < retry_deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(!app.sleep_pending() && app.view() == View::Library && app.cache_usage().cover_pixels == 0);
         assert(sleep_frame(app) && app.view() == View::Sleeping); driver.present();
         auto expected = run(true, "02.PNG"); assert(expected.image);
         assert(app.canvas().pixels() == expected.image->pixels());
