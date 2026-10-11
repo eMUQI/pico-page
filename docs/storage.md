@@ -24,6 +24,7 @@ TF 根目录/
     ├── network.toml                  # 可选：最多 5 个 Wi-Fi 凭据，明文保存
     ├── sync.toml                     # 可选：KOReader 同步账户，明文保存
     ├── data/last-book.txt            # 上次打开的书
+    ├── data/recent-books.txt         # 最多 128 本的最近打开顺序与可选日期
     └── cache/                       # 可重建内容
         ├── covers/                  # 书籍及休眠封面缩略图
         ├── positions/               # 书库显示的章节和百分比

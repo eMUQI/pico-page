@@ -65,9 +65,9 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
     }
     if (!(book ? allowed_fields(table, {"schema_version", "reader", "display"}, "", diagnostic)
                : allowed_fields(table, {"schema_version", "reader", "display", "library", "power", "network"}, "", diagnostic)) ||
-        !allowed_fields(toml_get(table, "reader"), {"font", "font_size_px", "line_height", "margin_x_px", "paragraph_gap_lines", "indent_chars"}, "reader", diagnostic) ||
+        !allowed_fields(toml_get(table, "reader"), {"font", "font_weight", "font_size_px", "line_height", "margin_x_px", "paragraph_gap_lines", "indent_chars"}, "reader", diagnostic) ||
         !allowed_fields(toml_get(table, "display"), {"refresh_preset", "balanced_full_refresh_pages", "fast_full_refresh_pages"}, "display", diagnostic) ||
-        !allowed_fields(toml_get(table, "library"), {"roots", "view"}, "library", diagnostic) ||
+        !allowed_fields(toml_get(table, "library"), {"roots", "view", "sort", "folders"}, "library", diagnostic) ||
         !allowed_fields(toml_get(table, "network"), {"wifi_enabled"}, "network", diagnostic) ||
         !allowed_fields(toml_get(table, "power"), {"auto_sleep_minutes", "sleep_screen", "sleep_image"}, "power", diagnostic)) return false;
 
@@ -75,6 +75,14 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
     diagnostic.field = "reader.font";
     diagnostic.detail = "expected a relative font path";
     if (value.type != TOML_UNKNOWN && (!string_value(value, settings.font) || !store_internal::relative_path(settings.font))) return false;
+
+    value = toml_seek(table, "reader.font_weight");
+    if (value.type != TOML_UNKNOWN) {
+        diagnostic.field = "reader.font_weight";
+        diagnostic.detail = "expected light, regular, medium or bold";
+        if (!string_value(value, settings.font_weight) ||
+            (settings.font_weight != "light" && settings.font_weight != "regular" && settings.font_weight != "medium" && settings.font_weight != "bold")) return false;
+    }
 
     for (const char* field : {"reader.font_size_px", "reader.margin_x_px", "reader.indent_chars"}) {
         value = toml_seek(table, field);
@@ -152,6 +160,20 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
         diagnostic.detail = "expected list or grid";
         if (!string_value(value, settings.library_view) || (settings.library_view != "list" && settings.library_view != "grid")) return false;
     }
+    value = toml_seek(table, "library.folders");
+    if (value.type != TOML_UNKNOWN) {
+        diagnostic.field = "library.folders";
+        diagnostic.detail = "expected first or recent";
+        if (!string_value(value, settings.library_folders) ||
+            (settings.library_folders != "first" && settings.library_folders != "recent")) return false;
+    }
+    value = toml_seek(table, "library.sort");
+    if (value.type != TOML_UNKNOWN) {
+        diagnostic.field = "library.sort";
+        diagnostic.detail = "expected recent, name or name_desc";
+        if (!string_value(value, settings.library_sort) ||
+            (settings.library_sort != "recent" && settings.library_sort != "name" && settings.library_sort != "name_desc")) return false;
+    }
     value = toml_seek(table, "library.roots");
     if (value.type != TOML_UNKNOWN) {
         diagnostic.field = "library.roots";
@@ -220,6 +242,7 @@ using SettingValues = std::vector<std::pair<std::string, std::string>>;
 /** Fields of one layer in a fixed order; the global layer adds library, power and network values. */
 SettingValues setting_values(const ReaderSettings& values, bool global = false) {
     SettingValues fields = {{"reader.font", quoted(values.font)},
+            {"reader.font_weight", quoted(values.font_weight)},
             {"reader.font_size_px", std::to_string(values.font_size_px)},
             {"reader.line_height", number(values.line_height)},
             {"reader.margin_x_px", std::to_string(values.margin_x_px)},
@@ -231,6 +254,8 @@ SettingValues setting_values(const ReaderSettings& values, bool global = false) 
     if (global) {
         fields.emplace_back("network.wifi_enabled", values.wifi_enabled ? "true" : "false");
         fields.emplace_back("library.view", quoted(values.library_view));
+        fields.emplace_back("library.sort", quoted(values.library_sort));
+        fields.emplace_back("library.folders", quoted(values.library_folders));
         fields.emplace_back("power.auto_sleep_minutes", std::to_string(values.auto_sleep_minutes));
         fields.emplace_back("power.sleep_screen", quoted(values.sleep_screen));
         fields.emplace_back("power.sleep_image", quoted(values.sleep_image));
@@ -384,9 +409,11 @@ StoreStatus save_settings(const std::string& root, const SettingsSnapshot& snaps
     }
     if (values.library_roots != effective.library_roots ||
         (book_only && (values.library_view != effective.library_view ||
+                       values.library_sort != effective.library_sort ||
+                       values.library_folders != effective.library_folders ||
                        values.wifi_enabled != effective.wifi_enabled ||
                        values.auto_sleep_minutes != effective.auto_sleep_minutes || values.sleep_screen != effective.sleep_screen || values.sleep_image != effective.sleep_image))) {
-        error = "library.roots is read-only; library.view, power and network fields are global only";
+        error = "library.roots is read-only; library.view, library.sort, library.folders, power and network fields are global only";
         return StoreStatus::Invalid;
     }
     const auto desired = setting_values(values, !book_only);

@@ -9,6 +9,7 @@
 #include "pico_page/store.h"
 #include <algorithm>
 #include <chrono>
+#include <cerrno>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -41,6 +42,8 @@ struct Entry {
     // Status line of the library row; filled when the row is first drawn.
     std::string status = {};
     bool described = false;
+    std::size_t recent_rank = 128;
+    std::int64_t opened_at = 0;
 };
 struct Hit {
     int x, y, w, h, id;
@@ -69,7 +72,7 @@ enum Control {
     Apply,
     Scope,
     FontChoice,
-    Advanced,
+    FontWeight,
     Gap,
     Indent,
     Defaults,
@@ -87,7 +90,7 @@ enum Control {
     UsbExit,
     UsbExitConfirm,
     UsbCancel,
-    LibrarySort,
+    LibrarySort, LibraryFolders,
     LibraryList,
     LibraryGrid,
     RefreshAccept,
@@ -119,6 +122,8 @@ enum Control {
     WifiSettings,
     WifiToggle,
     Help,
+    HelpPrevious, HelpTools, HelpNext, HelpPosition, HelpDevice,
+    HelpKey1, HelpKey2, HelpKey3, ResumeDetails,
     SyncCancel,
     Retry,
     PowerMenu,
@@ -144,6 +149,7 @@ enum Control {
     WifiSavedBase = 50100, WifiModeBase = 50200, WifiNearbyBase = 50300,
     SleepCustom = 51000, SleepRotation, SleepChoose, SleepRefresh, LockScreenBase = 52000
 };
+static_assert(ContentsBookmarks < EntryBase);
 std::string basename(const std::string &path) {
     const auto i = path.find_last_of('/');
     return path.substr(i == std::string::npos ? 0 : i + 1);
@@ -361,6 +367,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     ReaderSettings settings, draft;
     std::size_t help_page = 0;
+    int help_zone = HelpTools, help_key = HelpKey2, help_position = 0, help_device = 0;
     SettingsSnapshot edit_snapshot;
     View view = View::Library;
     std::optional<graphics::Canvas> power_return_canvas;
@@ -564,7 +571,10 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::size_t chapter_index = 0, offset = 0, library_page = 0, toc_page = 0;
     std::vector<std::size_t> toc_starts, toc_visible;
     std::set<std::size_t> toc_collapsed;
-    bool toc_locate_current = false, library_grid = false, library_descending = false;
+    bool toc_locate_current = false, library_grid = false;
+    std::string library_sort = "recent";
+    bool library_resume_omitted = false, folders_first = true, library_recent = true;
+    std::int64_t resume_opened_at = 0;
     // Bookmarks of the open book, loaded with it. Only Ok and Missing lists are shown.
     BookmarkList bookmarks;
     // The contents panel lists bookmarks instead of the table of contents until another book opens.
@@ -787,10 +797,10 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::optional<int> battery_percent;
     std::uint64_t ui_sequence = 0;
     int parameter = FontSize;
-    bool book_scope = true, card_available = true, font_fallback = false, builtin_body = false,
-         advanced = false, reset_overrides = false;
+    bool book_scope = true, card_available = true, font_fallback = false, builtin_body = false, weight_unavailable = false,
+         reset_overrides = false;
     unsigned body_updates = 0;
-    std::string effective_font, last_recorded;
+    std::string effective_font, effective_weight, last_recorded;
     std::vector<std::string> fonts;
     std::function<void()> deferred;
     bool save_failed = false, notice_shown = false;
@@ -798,6 +808,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool turned = false;
     // Reading status notices about the body font; the status line shows the position otherwise.
     static constexpr const char *kFallbackFontNotice = "所选字体不可用，已使用替代字体";
+    static constexpr const char *kWeightUnavailableNotice = "所选字重不可用，保留字体原有字重";
     static constexpr const char *kBuiltinFontNotice = "未找到正文字体，已使用内置字体";
     static constexpr const char *kMissingNotice = "部分字符无法显示，可在排版中更换字体";
     static constexpr const char *kSaveFailed = "进度未保存，请检查 TF 卡后重试";
@@ -816,7 +827,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool font_scan_turn = true, pages_cache_disabled = false;
     std::string body_font_path() const {
         return builtin_body ? "" : root + "/" +
-            (font_fallback ? "Fonts/LXGWWenKai-Regular.ttf" : settings.font);
+            (font_fallback ? "Fonts/LXGWWenKai-Regular.ttf" : effective_font);
     }
     // The synchronous fallback releases its extra chapter on input. The worker owns a separate
     // chapter until it observes cancellation; both paths retain accepted pagination offsets.
@@ -1397,10 +1408,10 @@ struct ReaderApp::Impl final : DisplayBackend {
             cover_job->cancel();
         }
         saving_request = session.request_save();
-        if (!saving_request && (!session.visible_record() || last_recorded == book_path)) return;
+        if (!saving_request && (!session.visible_record() || last_recorded == book_path || recent_save_failed)) return;
         ContentJob::Request request;
         request.kind = ContentJob::Kind::SaveProgress; request.root = root; request.relative_path = book_path;
-        request.record = saving_request ? saving_request->record : *session.visible_record(); request.save_last_book = last_recorded != book_path;
+        request.record = saving_request ? saving_request->record : *session.visible_record(); request.save_last_book = !recent_save_failed && last_recorded != book_path;
         save_job = std::make_unique<ContentJob>(std::move(request));
         if (counting_job) counting_job->cancel();
         poll_save();
@@ -1520,11 +1531,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         canvas.line(36, y + height - 1, 647, y + height - 1, 12, 2);
         if (id) hits.push_back({24, y, 636, height, id});
     }
-    void outline(int x, int y, int w, int h, int weight = 2) {
-        canvas.fill_rect(x, y, w, weight, 1);
-        canvas.fill_rect(x, y + h - weight, w, weight, 1);
-        canvas.fill_rect(x, y, weight, h, 1);
-        canvas.fill_rect(x + w - weight, y, weight, h, 1);
+    void outline(int x, int y, int w, int h, int weight = 2, std::uint8_t gray = 1) {
+        canvas.fill_rect(x, y, w, weight, gray);
+        canvas.fill_rect(x, y + h - weight, w, weight, gray);
+        canvas.fill_rect(x, y, weight, h, gray);
+        canvas.fill_rect(x + w - weight, y, weight, h, gray);
     }
     void button(int id, const std::string &title, int x, int y, int w, int h = 88,
                 bool selected = false, int size = 28) {
@@ -1552,23 +1563,13 @@ struct ReaderApp::Impl final : DisplayBackend {
         text(title, left, 30, 32, right_edge - left, 1, true);
         canvas.line(0, 103, 683, 103, 1, 3);
     }
-    void dashed(int x, int y, int w, int h, std::uint8_t gray = 5) {
-        for (int i = 0; i < w; i += 12) {
-            canvas.fill_rect(x + i, y, std::min(6, w - i), 2, gray);
-            canvas.fill_rect(x + i, y + h - 2, std::min(6, w - i), 2, gray);
-        }
-        for (int i = 0; i < h; i += 12) {
-            canvas.fill_rect(x, y + i, 2, std::min(6, h - i), gray);
-            canvas.fill_rect(x + w - 2, y + i, 2, std::min(6, h - i), gray);
-        }
-    }
     void disabled_button(const std::string &label, int x, int y, int w, int h = 88) {
-        dashed(x, y, w, h);
+        outline(x, y, w, h, 2, 5);
         center(label, x, y + (h - 26) / 2 - 3, w, 26, 5);
     }
-    /** An action that cannot be undone: dashed frame, never the filled recommended style. */
+    /** An action that cannot be undone: solid frame, never the filled recommended style. */
     void danger_button(int id, const std::string &label, int x, int y, int w, int h = 96) {
-        dashed(x, y, w, h, 1);
+        outline(x, y, w, h);
         center(label, x, y + (h - 28) / 2 - 3, w, 28);
         hits.push_back({x, y, w, h, id});
     }
@@ -1581,6 +1582,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     /**
      * The 96-pixel footer shared by the screen pager and the page notice. With several screens
      * the notice takes the place of the screen number; a single screen shows the notice alone.
+     * The pager zones match the reading page: previous left of 205, next from 479. A direction
+     * that is unavailable stays blank and has no hit.
      */
     void footer_bar(const std::string &hint, std::size_t index = 0, std::size_t total = 1) {
         canvas.fill_rect(0, footer_zone, 684, 96, 15);
@@ -1590,13 +1593,17 @@ struct ReaderApp::Impl final : DisplayBackend {
             text(hint, 36, footer_zone + 34, 24, 612);
             return;
         }
-        center("‹ 上一屏", 0, footer_zone + 34, 170, 24, index ? 1 : 9);
-        if (index) hits.push_back({0, footer_zone, 170, 96, Prev});
-        canvas.line(514, footer_zone, 514, 1215, 1, 2);
-        center("下一屏 ›", 514, footer_zone + 34, 170, 24, index + 1 < total ? 1 : 9);
-        if (index + 1 < total) hits.push_back({514, footer_zone, 170, 96, Next});
-        if (hint.empty()) center(std::to_string(index + 1) + " / " + std::to_string(total), 170, footer_zone + 34, 344, 24, 3);
-        else center(hint, 178, footer_zone + 36, 328, 22);
+        for (int x : {205, 479}) canvas.line(x, footer_zone, x, 1215, 1, 2);
+        if (index) {
+            text("‹ 上一屏", 36, footer_zone + 34, 24, 160);
+            hits.push_back({0, footer_zone, 205, 96, Prev});
+        }
+        if (index + 1 < total) {
+            text("下一屏 ›", 648 - text_width("下一屏 ›", 24), footer_zone + 34, 24, 160);
+            hits.push_back({479, footer_zone, 205, 96, Next});
+        }
+        if (hint.empty()) center(std::to_string(index + 1) + " / " + std::to_string(total), 205, footer_zone + 34, 274, 24, 3);
+        else center(hint, 213, footer_zone + 36, 258, 22);
     }
     void title_lines(const std::string &value, int x, int y, int width, int size, bool bold = false, int max_rows = 2,
                      std::uint8_t gray = 1) {
@@ -1618,7 +1625,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     bool typography_changed() const {
         const auto &applied = edit_snapshot.config.settings;
-        return reset_overrides || draft.font != applied.font || draft.font_size_px != applied.font_size_px ||
+        return reset_overrides || draft.font != applied.font || draft.font_weight != applied.font_weight || draft.font_size_px != applied.font_size_px ||
             draft.line_height != applied.line_height || draft.margin_x_px != applied.margin_x_px ||
             draft.paragraph_gap_lines != applied.paragraph_gap_lines || draft.indent_chars != applied.indent_chars;
     }
@@ -1891,15 +1898,25 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void load_fonts(const ReaderSettings *preview = nullptr) {
         const auto &selected = preview ? *preview : settings;
-        if (effective_font == selected.font && body.valid() && controlled_storage)
+        const auto resolved = weight_font(selected);
+        weight_unavailable = selected.font_weight == "light" && !light_available(selected);
+        const auto tag = selected.font_weight == "bold" ? "-Bold." : selected.font_weight == "medium" ? "-Medium." : selected.font_weight == "light" ? "-Light." : "-Regular.";
+        const bool native_weight = resolved.find(tag) != std::string::npos;
+        const bool weighted_base = resolved.find("-Bold.") != std::string::npos || resolved.find("-Medium.") != std::string::npos || resolved.find("-Light.") != std::string::npos;
+        weight_unavailable = weight_unavailable || (selected.font_weight != "regular" && !native_weight && weighted_base);
+        body.weight(native_weight || weight_unavailable ? 0 : selected.font_weight == "bold" ? 2 : selected.font_weight == "medium" ? 1 : 0);
+        if (effective_font == resolved && body.valid() && controlled_storage) {
+            if (effective_weight != selected.font_weight) { clear_body_cache(); clear_prefetch(); }
+            effective_weight = selected.font_weight;
             return;
+        }
         clear_body_cache();
         clear_prefetch();
         font_identity.clear();
         font_scan.reset();
         font_fallback = false;
         builtin_body = false;
-        const std::string path = root + "/" + selected.font;
+        const std::string path = root + "/" + resolved;
         if (!body.open(path)) {
             if (!body.open(root + "/Fonts/LXGWWenKai-Regular.ttf")) {
                 body.open_fallback();
@@ -1907,7 +1924,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
             font_fallback = true;
         }
-        effective_font = selected.font;
+        effective_font = resolved;
+        effective_weight = selected.font_weight;
     }
     bool initialize() {
         refresh_badge_config();
@@ -1915,7 +1933,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             return false;
         settings = store.load_settings().settings;
         library_grid = settings.library_view == "grid";
-        load_fonts();
+        library_sort = settings.library_sort;
         std::string detail;
         const auto recent = store.load_last_book(detail);
         if (recent) {
@@ -1935,6 +1953,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         if (std::find(fonts.begin(), fonts.end(), settings.font) == fonts.end())
             fonts.push_back(settings.font);
+        load_fonts();
         scan_library();
         draw_library();
         overlay(true);
@@ -1948,6 +1967,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!card_available)
             return;
         const auto cfg = store.load_settings();
+        library_sort = cfg.settings.library_sort;
+        folders_first = cfg.settings.library_folders == "first";
         const auto &roots = cfg.settings.library_roots;
         library_home_root = roots.size() == 1 ? roots.front() : "";
         folder_root = std::find(roots.begin(), roots.end(), folder) != roots.end();
@@ -1989,14 +2010,59 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
             closedir(dir);
         }
+        std::string history_error;
+        const auto recent = library_sort == "recent" ? store.load_recent_books(history_error) : std::vector<RecentBook>{};
+        library_recent = library_sort == "recent" && history_error.empty();
+        if (library_sort == "recent" && !history_error.empty()) message = "最近阅读记录无法读取，暂按书名排序";
+        for (auto& entry : entries) {
+            for (std::size_t i = 0; i < recent.size(); ++i) {
+                if (recent[i].path == entry.path || (entry.directory && recent[i].path.compare(0, entry.path.size() + 1, entry.path + "/") == 0)) {
+                    entry.recent_rank = i; entry.opened_at = recent[i].opened_at; break;
+                }
+            }
+
+        }
+        library_resume_omitted = false;
+        const auto resume = has_book() ? book_path : last_book;
+        resume_opened_at = 0;
+        for (const auto& item : recent) if (item.path == resume) { resume_opened_at = item.opened_at; break; }
+        if (library_recent && (folder.empty() || folder_root) && !resume.empty()) {
+            const auto end = std::remove_if(entries.begin(), entries.end(), [&](const auto& entry) {
+                return !entry.directory && entry.path == resume;
+            });
+            library_resume_omitted = end != entries.end(); entries.erase(end, entries.end());
+        }
         std::sort(entries.begin(), entries.end(), [this](const Entry &a, const Entry &b) {
-            if (a.directory != b.directory)
-                return a.directory > b.directory;
-            return library_descending ? a.name > b.name : a.name < b.name;
+            if ((folders_first || !library_recent) && a.directory != b.directory) return a.directory > b.directory;
+            if (library_recent && a.recent_rank != b.recent_rank) return a.recent_rank < b.recent_rank;
+            if (library_recent && a.directory != b.directory) return a.directory > b.directory;
+            return library_sort == "name_desc" ? a.name > b.name : a.name < b.name;
         });
-        library_page = std::min(library_page, entries.empty() ? 0 : (entries.size() - 1) / library_page_size());
+        library_page = std::min(library_page, library_pages() - 1);
     }
-    std::size_t library_page_size() const { return library_grid ? 6 : 5; }
+    bool library_resume() const { return (folder.empty() || folder_root) && (has_book() || !last_book.empty()); }
+    std::size_t library_page_size() const { return library_grid ? 6 : library_page == 0 && library_resume() ? 5 : 7; }
+    std::size_t library_begin() const {
+        if (!library_page) return 0;
+        const std::size_t first = library_grid ? 6 : library_resume() ? 5 : 7;
+        return first + (library_page - 1) * (library_grid ? 6 : 7);
+    }
+    std::size_t library_pages() const {
+        const std::size_t first = library_grid ? 6 : library_resume() ? 5 : 7, rest = library_grid ? 6 : 7;
+        return entries.size() <= first ? 1 : 1 + (entries.size() - first + rest - 1) / rest;
+    }
+    std::string recent_date(std::int64_t utc) const {
+        const auto now = static_cast<std::int64_t>(std::time(nullptr));
+        if (now < provision::clock_floor || utc < provision::clock_floor || utc > now) return "";
+        const auto days = (now + 8 * 3600) / 86400 - (utc + 8 * 3600) / 86400;
+        if (days == 0) return "今天";
+        if (days == 1) return "昨天";
+        if (days < 30) return std::to_string(days) + " 天前";
+        const auto shifted = static_cast<std::time_t>(utc + 8 * 3600);
+        std::tm date{};
+        if (!gmtime_r(&shifted, &date)) return "";
+        char value[12]; std::strftime(value, sizeof(value), "%m-%d", &date); return value;
+    }
     static std::string entry_title(const Entry &entry) {
         return entry.directory ? entry.name : entry.name.substr(0, entry.name.size() - (txt_name(entry.name) ? 4 : 5));
     }
@@ -2071,11 +2137,17 @@ struct ReaderApp::Impl final : DisplayBackend {
         // a small file that names its state.
         char record[512] = {};
         std::size_t length = 0;
-        if (std::FILE *file = std::fopen((root + "/" + entry.path + ".picopage/progress.json").c_str(), "rb")) {
-            length = std::fread(record, 1, sizeof(record) - 1, file);
-            std::fclose(file);
+        bool unreadable = false;
+        for (const auto* suffix : {"/progress.json", "/progress.json.bak"}) {
+            if (std::FILE *file = std::fopen((root + "/" + entry.path + ".picopage" + suffix).c_str(), "rb")) {
+                length = std::fread(record, 1, sizeof(record) - 1, file);
+                unreadable = unreadable || std::ferror(file);
+                std::fclose(file);
+                if (length) break;
+            } else if (errno != ENOENT) unreadable = true;
         }
-        entry.status = length && !std::strstr(record, "\"cleared\"") ? "在读" : "未读";
+        entry.status = unreadable ? "位置未知" : length && !std::strstr(record, "\"cleared\"") ? "在读" :
+                       entry.recent_rank < 128 ? "已打开" : "未读";
     }
     struct CoverEntry {
         std::string name, header;
@@ -2220,7 +2292,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         hits.push_back({540, 0, 144, 104, Settings});
         // The card appears where reading normally starts and only when there is a book to resume.
         int top = 104;
-        if ((folder.empty() || folder_root) && (has_book() || !last_book.empty())) {
+        if (!library_page && library_resume()) {
             std::string position;
             if (has_book() && page.end > page.start) position = chapter_label() + " · " + book_percent();
             else if (!has_book()) {
@@ -2237,12 +2309,14 @@ struct ReaderApp::Impl final : DisplayBackend {
             const int left = cover == Cover::Drawn ? 168 : 48;
             const int width = cover == Cover::Drawn ? 420 : 540;
             title_lines(has_book() ? document.metadata().title : basename(last_book), left, 182, width, 30, true);
+            const auto date = library_recent ? recent_date(resume_opened_at) : "";
+            if (!date.empty()) position += (position.empty() ? "" : " · ") + date;
             text(position.empty() ? "打开后恢复已保存的位置" : position, left, 288, 22, width, 3);
             text("›", 620, 214, 28, 30);
             hits.push_back({24, 128, 636, 206, Tools});
             top = 354;
         }
-        if (entries.empty()) {
+        if (entries.empty() && !library_resume_omitted) {
             const int y = top + 120;
             text(!card_available ? "存储卡不可用" : library_directory_unavailable ? "无法读取书库目录" :
                  folder.empty() ? "书库里还没有书" : "这个文件夹是空的", 36, y, 40, 612, 1, true);
@@ -2260,13 +2334,19 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto folders = static_cast<std::size_t>(std::count_if(entries.begin(), entries.end(), [](const Entry &entry) { return entry.directory; }));
         std::string count = folders ? std::to_string(folders) + " 个文件夹" : "";
         if (folders < entries.size()) count += (count.empty() ? "" : " · ") + std::to_string(entries.size() - folders) + " 本书";
-        text(count, 36, top + 24, 22, 280, 3);
-        text(library_descending ? "书名 ↓" : "书名 ↑", 340, top + 24, 22, 108);
-        hits.push_back({324, top, 144, 64, LibrarySort});
+        if (folders && folders < entries.size()) {
+            text((library_resume_omitted ? "另有 " : "") + std::to_string(entries.size() - folders) + " 本书", 36, top + 8, 22, 254, 3);
+            text(std::to_string(folders) + " 个文件夹", 36, top + 38, 20, 254, 3);
+        } else {
+            if (library_resume_omitted) count = "另有 " + std::to_string(entries.size() - folders) + " 本书";
+            text(count, 36, top + 24, 22, 254, 3);
+        }
+        button(LibrarySort, library_sort == "recent" ? (library_recent ? "最近阅读 ⇅" : "书名（回退）") : library_sort == "name_desc" ? "书名 ↓" : "书名 ↑", 300, top + 4, 164, 60, false, 22);
         button(LibraryList, "列表", 476, top + 4, 92, 60, !library_grid, 22);
         button(LibraryGrid, "卡片", 568, top + 4, 92, 60, library_grid, 22);
         canvas.line(0, top + 76, 683, top + 76, 1, 2);
-        const auto size = library_page_size(), begin = library_page * size;
+        const auto size = library_page_size(), begin = library_begin();
+        int group_gap = 0;
         for (std::size_t i = begin; i < std::min(begin + size, entries.size()); ++i) {
             auto &entry = entries[i];
             describe(entry);
@@ -2293,23 +2373,34 @@ struct ReaderApp::Impl final : DisplayBackend {
                 text(entry.status, x, y + 264, 22, kLibraryCoverWidth, 3);
                 hits.push_back({x, y, kLibraryCoverWidth, 296, EntryBase + static_cast<int>(i)});
             } else {
-                const int y = top + 78 + static_cast<int>(i - begin) * 126;
+                if (library_recent && !entry.directory && entry.recent_rank == 128 &&
+                    (i == begin || entries[i - 1].directory || entries[i - 1].recent_rank < 128)) {
+                    const int divider = top + 78 + static_cast<int>(i - begin) * 126;
+                    text("其他书籍", 36, divider + 4, 20, 150, 5);
+                    canvas.line(156, divider + 18, 648, divider + 18, 12);
+                    group_gap = 32;
+                }
+                const int y = top + 78 + static_cast<int>(i - begin) * 126 + group_gap;
                 // A book without a cover leaves no empty slot; its title starts at the margin.
                 const auto cover = entry.directory ? Cover::None : draw_cover(entry, 37, y + 22, decode,
                                                                                 kRowCoverWidth, kRowCoverHeight);
                 undecoded = undecoded || cover == Cover::Undecoded;
                 if (cover == Cover::Drawn) outline(36, y + 21, kRowCoverWidth + 2, kRowCoverHeight + 2);
                 const int left = cover == Cover::Drawn ? 118 : 36;
+                const auto date = library_recent ? recent_date(entry.opened_at) : "";
                 const auto status = entry.directory ? entry.status + " ›" : entry.status;
-                const int status_width = std::min(text_width(status, 22), 200);
+                const int status_width = std::min(std::max(text_width(status, 22), text_width(date, 22)), 200);
                 const int title_width = 628 - left - status_width;
                 title_lines(label, left, y + (text_width(label, 28) <= title_width ? 44 : 26), title_width, 28);
-                text(status, 648 - status_width, y + 50, 22, status_width, 3);
+                if (!date.empty()) {
+                    text(date, 648 - text_width(date, 22), y + 30, 22, 200, 3);
+                    text(status, 648 - status_width, y + 66, 20, status_width, 3);
+                } else text(status, 648 - status_width, y + 50, 22, status_width, 3);
                 canvas.line(24, y + 125, 660, y + 125, 12, 2);
                 hits.push_back({24, y, 636, 126, EntryBase + static_cast<int>(i)});
             }
         }
-        footer_bar(undecoded ? "正在生成封面…" : notice(), library_page, (entries.size() + size - 1) / size);
+        footer_bar(undecoded ? "正在生成封面…" : notice(), library_page, library_pages());
         if (undecoded && async_content) {
             ContentJob::Request request;
             request.kind = ContentJob::Kind::LibraryCovers; request.root = root;
@@ -2359,6 +2450,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         confirmed_link_return.reset();
         book_path = path;
         last_book = path;
+        last_recorded.clear();
+        recent_save_failed = false;
         const auto configuration = loaded ? loaded->configuration : store.load_settings(path);
         settings = configuration.settings;
         load_fonts();
@@ -2383,6 +2476,8 @@ struct ReaderApp::Impl final : DisplayBackend {
                                                                         : "书签文件无法读取，已保留原文件；阅读进度不受影响";
         else if (font_fallback)
             message = builtin_body ? kBuiltinFontNotice : kFallbackFontNotice;
+        else if (weight_unavailable)
+            message = kWeightUnavailableNotice;
         if (restored.status != StoreStatus::Ok && restored.status != StoreStatus::Missing && restored.status != StoreStatus::Cleared)
             message = "原进度无法读取，未覆盖原记录";
         if (loaded) {
@@ -2564,7 +2659,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     void load_pages_cache() {
         const auto& spine = document.spine();
         struct stat book {}, font {};
-        const std::string font_file = builtin_body ? "" : font_fallback ? "Fonts/LXGWWenKai-Regular.ttf" : settings.font;
+        const std::string font_file = builtin_body ? "" : font_fallback ? "Fonts/LXGWWenKai-Regular.ttf" : effective_font;
         if (stat((root + "/" + book_path).c_str(), &book) != 0 ||
             (!font_file.empty() && stat((root + "/" + font_file).c_str(), &font) != 0)) {
             pages_cache_disabled = true;
@@ -3136,7 +3231,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             return;
         turned = true;
         // The font notice is shown on the page where the book opened; later pages show the position.
-        if (message == kBuiltinFontNotice || message == kFallbackFontNotice) message.clear();
+        if (message == kBuiltinFontNotice || message == kFallbackFontNotice || message == kWeightUnavailableNotice) message.clear();
         if (forward) {
             const auto next_offset = readable_offset(page.end);
             if (next_offset < chapter.text.size())
@@ -3397,79 +3492,99 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (!preview.error.empty() || !draw_page_content(preview, spec))
                 text("预览暂不可用", 36, 96, 28);
         }
-        canvas.fill_rect(16, 12, 270, 40, 15);
         const bool changed = typography_changed();
-        outline(16, 12, changed ? 236 : 120, 40);
-        text(changed ? "预览 · 尚未应用" : "当前排版", 28, 16, 22, 246);
-        canvas.fill_rect(0, 656, 684, 560, 15);
-        canvas.line(0, 656, 683, 656, 1, 3);
         tabs(656, Typography);
-        std::vector<int> ids = advanced
-                                   ? std::vector<int>{Gap, Indent}
-                                   : std::vector<int>{FontChoice, FontSize, LineHeight, Margin};
+        canvas.fill_rect(24, 605, 636, 44, 15);
+        text(changed ? "预览 · 尚未应用" : "当前排版 · 此书", 36, 614, 22, 432, 3);
+        text(changed ? "放弃修改" : "收起", changed ? 540 : 600, 614, 24, 120);
+        const std::array<int, 8> ids{{FontChoice, FontWeight, FontSize, LineHeight, Margin, Gap, Indent, Defaults}};
         auto name = [](int id) -> std::string {
             switch (id) {
-            case FontChoice:
-                return "字体";
-            case FontSize:
-                return "字号";
-            case LineHeight:
-                return "行距";
-            case Margin:
-                return "页边距";
-            case Gap:
-                return "段距";
-            default:
-                return "首行缩进";
+            case FontChoice: return "字体";
+            case FontWeight: return "字重";
+            case FontSize: return "字号";
+            case LineHeight: return "行距";
+            case Margin: return "页边距";
+            case Gap: return "段距";
+            case Indent: return "首行缩进";
+            default: return "恢复默认";
             }
         };
         auto value = [&](int id) -> std::string {
             switch (id) {
-            case FontChoice:
-                return font_name(draft.font);
-            case FontSize:
-                return std::to_string(draft.font_size_px) + " px";
-            case LineHeight:
-                return decimal(draft.line_height);
-            case Margin:
-                return std::to_string(draft.margin_x_px) + " px";
-            case Gap:
-                return decimal(draft.paragraph_gap_lines) + " 行";
-            default:
-                return std::to_string(draft.indent_chars) + " 字";
+            case FontChoice: return font_name(draft.font);
+            case FontWeight: return weight_name(draft.font_weight);
+            case FontSize: return std::to_string(draft.font_size_px) + " px";
+            case LineHeight: return decimal(draft.line_height);
+            case Margin: return std::to_string(draft.margin_x_px) + " px";
+            case Gap: return decimal(draft.paragraph_gap_lines) + " 行";
+            default: return std::to_string(draft.indent_chars) + " 字";
             }
         };
         for (std::size_t i = 0; i < ids.size(); ++i) {
-            const int x = 24 + static_cast<int>(i) * 162, w = 150;
-            if (parameter == ids[i])
-                outline(x, 776, w, 96, 3);
-            center(name(ids[i]), x, 788, w, 22);
-            center(value(ids[i]), x, 830, w, 26, 1, true);
-            hits.push_back({x, 776, w, 96, ids[i]});
+            const int x = 24 + static_cast<int>(i % 4) * 162, y = 780 + static_cast<int>(i / 4) * 92;
+            if (ids[i] == Defaults) {
+                outline(x, y, 150, 80, 1);
+                center("恢复默认", x, y + 21, 150, 24);
+            } else {
+                outline(x, y, 150, 80, parameter == ids[i] ? 3 : 1, parameter == ids[i] ? 1 : 9);
+                center(name(ids[i]), x, y + 5, 150, 22);
+                center(value(ids[i]), x + 6, y + 37, 138, 24, 1, true);
+            }
+            hits.push_back({x, y, 150, 80, ids[i]});
         }
-        if (advanced)
-            button(Advanced, "‹ 基本", 486, 776, 174, 96, false, 24);
-        button(Minus, "−", 36, 904, 120, 88, false, 40);
-        center(name(parameter), 168, 900, 348, 22);
-        center(value(parameter), 168, 946, 348, 34, 1, true);
-        button(Plus, "+", 528, 904, 120, 88, false, 40);
-        canvas.line(0, 1012, 683, 1012, 12);
-        text(changed ? "取消预览" : "作用域：此书", 36, 1034, 22, 190, changed ? 1 : 3);
-        if (changed) hits.push_back({24, 1014, 190, 72, Back});
-        text("段距、缩进 ›", 236, 1034, 22, 238);
-        hits.push_back({220, 1014, 258, 72, Advanced});
-        text("恢复默认", 514, 1034, 22, 146);
-        hits.push_back({494, 1014, 166, 72, Defaults});
-        button(Scope, "设为阅读默认", 36, 1088, 298, 96, false, 26);
-        if (!font_fallback && changed)
-            button(Apply, "应用排版", 350, 1088, 298, 96, true);
-        else if (!font_fallback)
-            disabled_button("已应用", 350, 1088, 298, 96);
-        else {
-            disabled_button("无法应用", 350, 1088, 298, 96);
+        auto can_step = [&](int direction) {
+            switch (parameter) {
+            case FontChoice: {
+                const auto at = std::find(fonts.begin(), fonts.end(), draft.font);
+                return direction < 0 ? at != fonts.begin() : at != fonts.end() && at + 1 != fonts.end();
+            }
+            case FontWeight: return direction < 0 ? draft.font_weight != (light_available(draft) ? "light" : "regular") : draft.font_weight != "bold";
+            case FontSize: return direction < 0 ? draft.font_size_px > 28 : draft.font_size_px < 56;
+            case LineHeight: return direction < 0 ? draft.line_height > 1.35001 : draft.line_height < 1.64999;
+            case Margin: return direction < 0 ? draft.margin_x_px > 24 : draft.margin_x_px < 52;
+            case Gap: return direction < 0 ? draft.paragraph_gap_lines > 0.00001 : draft.paragraph_gap_lines < 0.99999;
+            default: return direction < 0 ? draft.indent_chars > 0 : draft.indent_chars < 2;
+            }
+        };
+        if (can_step(-1)) button(Minus, "−", 24, 976, 150, 88, false, 40);
+        else disabled_button("−", 24, 976, 150, 88);
+        center(value(parameter), 186, 1000, 312, 30, 1, true);
+        if (can_step(1)) button(Plus, "+", 510, 976, 150, 88, false, 40);
+        else disabled_button("+", 510, 976, 150, 88);
+        if (!font_fallback && !weight_unavailable) button(Scope, "设为阅读默认", 24, 1088, 312, 96, false, 26);
+        else disabled_button("设为阅读默认", 24, 1088, 312, 96);
+        if (!font_fallback && !weight_unavailable && changed) button(Apply, "应用到此书", 348, 1088, 312, 96, true, 26);
+        else disabled_button(font_fallback || weight_unavailable ? "无法应用" : "已应用", 348, 1088, 312, 96);
+        if (font_fallback || weight_unavailable) {
             canvas.fill_rect(24, preview_bottom - 70, 636, 58, 15);
-            note("字体缺失或损坏，预览使用替代字体。", preview_bottom - 60);
+            note(weight_unavailable && !font_fallback ? kWeightUnavailableNotice : "所选字体不可用，预览使用替代字体。", preview_bottom - 60);
         }
+    }
+    static std::string weight_name(const std::string &weight) {
+        return weight == "light" ? "细" : weight == "medium" ? "中粗" : weight == "bold" ? "粗" : "常规";
+    }
+    /** Only explicit sibling weight files are selected; no directory scan occurs during preview. */
+    std::string weight_font(const ReaderSettings &values) const {
+        if (values.font_weight == "regular") return values.font;
+        const auto dot = values.font.find_last_of('.');
+        const auto dash = values.font.find_last_of('-');
+        if (dot == std::string::npos || dash == std::string::npos || dash > dot) return values.font;
+        const auto suffix = values.font.substr(dash + 1, dot - dash - 1);
+        if (suffix != "Regular" && suffix != "Light" && suffix != "Medium" && suffix != "Bold") return values.font;
+        const auto weight = values.font_weight == "light" && values.font_size_px >= 34 ? "Light" : values.font_weight == "medium" ? "Medium" :
+                            values.font_weight == "bold" ? "Bold" : "Regular";
+        const auto path = values.font.substr(0, dash + 1) + weight + values.font.substr(dot);
+        if (std::find(fonts.begin(), fonts.end(), path) != fonts.end()) return path;
+        if (values.font_weight == "medium" || values.font_weight == "bold") {
+            const auto regular = values.font.substr(0, dash + 1) + "Regular" + values.font.substr(dot);
+            if (std::find(fonts.begin(), fonts.end(), regular) != fonts.end()) return regular;
+        }
+        return values.font;
+    }
+    bool light_available(const ReaderSettings &values) const {
+        auto light = values; light.font_weight = "light";
+        return values.font_size_px >= 34 && (weight_font(light) != values.font || values.font.find("-Light.") != std::string::npos);
     }
     static std::string font_name(const std::string &font) {
         return font.find("WenKai") != std::string::npos     ? "文楷"
@@ -3494,7 +3609,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     void choice(int id, const std::string &title, const std::string &description, int y, bool selected,
                 bool pending_choice = false, bool framed = true) {
         if (!framed) {}
-        else if (selected && pending_choice) dashed(24, y, 636, 116);
+        else if (selected && pending_choice) outline(24, y, 636, 116, 2);
         else if (selected) outline(24, y, 636, 116, 3);
         for (int row = -18; row <= 18; ++row)
             for (int col = -18; col <= 18; ++col) {
@@ -4119,12 +4234,70 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (session.needs_save()) button(SaveRetry, "重试保存进度", 24, 992, 636, 96);
         footer_bar(cfg.diagnostics.empty() ? notice() : "设置文件无效，请检查后重新打开。");
     }
+    void help_regions(int x, int y, int width, int height) {
+        const int left = width * 205 / 684, right = width * 479 / 684, foot = height * footer_top / 1216;
+        const int device = width * reading_footer::device_left / 684;
+        const std::array<Hit, 5> zones{{{x, y, left, foot, HelpPrevious},
+            {x + left, y, right - left, foot, HelpTools}, {x + right, y, width - right, foot, HelpNext},
+            {x, y + foot, device, height - foot, HelpPosition}, {x + device, y + foot, width - device, height - foot, HelpDevice}}};
+        for (const auto& zone : zones) {
+            canvas.fill_rect(zone.x, zone.y, zone.w, zone.h, zone.id == help_zone ? 1 : 15);
+            hits.push_back(zone);
+        }
+        for (int split : {left, right}) canvas.line(x + split, y, x + split, y + foot, 9, 2);
+        canvas.line(x, y + foot, x + width, y + foot, 9, 2);
+        canvas.line(x + device, y + foot, x + device, y + height, 9, 2);
+        outline(x, y, width, height);
+    }
+    void draw_help_demo() {
+        const bool full = help_page == 3;
+        if (full) {
+            hits.clear();
+            hits.push_back({0, 1016, 205, 112, Prev});
+            hits.push_back({205, 1016, 274, 112, FullRefresh});
+            hits.push_back({479, 1016, 205, 112, Next});
+            help_regions(0, 0, 684, 1216);
+            const std::array<const char*, 3> names{{"上一页", "打开工具", "下一页"}};
+            for (int i = 0; i < 3; ++i) {
+                const int x = i == 0 ? 0 : i == 1 ? 205 : 479, w = i == 1 ? 274 : 205;
+                const auto ink = help_zone == HelpPrevious + i ? 15 : 1;
+                center(names[i], x, 370, w, 28, ink, true);
+                center(i == 1 ? "K2 全刷" : i == 0 ? "K1 上一屏" : "K3 下一屏", x, 1024, w, 22, ink);
+            }
+            canvas.fill_rect(24, 620, 636, 196, 15); outline(24, 620, 636, 196);
+            center("点按示例 · 不改变阅读位置", 36, 646, 612, 26, 1, true);
+            center("点任一区域，查看对应操作", 36, 700, 612, 24);
+            center("按 K1 / K3 或左右轻扫离开", 36, 754, 612, 24);
+            const char* positions[] = {"第 12 / 340 页", "3.53%", "第 2 / 10 章", "第一章 从一页开始"};
+            text(positions[help_position], 36, 1154, 24, 476, help_zone == HelpPosition ? 15 : 1);
+            center(help_device ? "12:00" : "84%", 540, 1154, 144, 24, help_zone == HelpDevice ? 15 : 1);
+            return;
+        }
+        help_regions(36, 276, 274, 486);
+        const char* labels[] = {"左侧：上一页", "中部：打开工具", "右侧：下一页", "页脚左：切换位置", "页脚右：电量 / 时钟"};
+        for (int i = 0; i < 5; ++i) {
+            const int id = HelpPrevious + i, y = 290 + i * 88;
+            if (help_zone == id) canvas.fill_rect(330, y, 330, 72, 1);
+            text(labels[i], 342, y + 22, 24, 306, help_zone == id ? 15 : 1);
+            hits.push_back({330, y, 330, 72, id});
+        }
+        text("点示意图或说明，查看对应区域", 36, 786, 24, 612, 3);
+        for (int i = 0; i < 3; ++i)
+            button(HelpKey1 + i, "K" + std::to_string(i + 1), 24 + i * 216, 842, 204, 72, help_key == HelpKey1 + i, 26);
+        const char* description = help_key == HelpKey2 ? "所有可交互页面：立即全刷。" :
+            help_key == HelpKey1 ? "正文：上一页。书库、目录、说明：上一屏。" : "正文：下一页。书库、目录、说明：下一屏。";
+        wrapped(description, 36, 942, 612, 24);
+        text(help_key == HelpKey2 ? "不关闭面板，不改变阅读位置。" : "工具、排版和键盘中不翻动正文。", 36, 1030, 24, 612, 3);
+        footer_bar("", help_page, kHelpPages.size());
+    }
     void draw_help() {
         view = View::Help;
         hits.clear(); canvas.clear(); header("使用说明", Back, "设置");
         const auto& page = kHelpPages[help_page];
+        if (help_page == 3) { draw_help_demo(); return; }
         text(page.title, 36, 144, 34, 612, 1, true);
         text("Pico Page · " + firmware_version(), 36, 204, 22, 612, 3);
+        if (help_page == 2) { draw_help_demo(); return; }
         int y = 276;
         for (const auto& section : page.sections) {
             text(section.title, 36, y, 28, 612, 1, true);
@@ -4132,6 +4305,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             y += wrapped(section.body, 36, y, 612, 26);
             y += 36;
         }
+        if (help_page == 1) text("下一屏可直接点按试一试", 36, 1058, 24, 612, 3);
         footer_bar("", help_page, kHelpPages.size());
     }
     std::vector<std::string> lock_screens;
@@ -4320,6 +4494,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         note("长按书库中的书，查看书籍详情。", 544);
         if (!has_book()) note("打开一本书后，可在排版页调整阅读默认排版。", 596);
         button(FullRefresh, "立即全刷", 24, 680, 636, 96);
+        value_row(LibraryFolders, "书库文件夹", "最近阅读排序时生效", values.library_folders == "first" ? "置顶" : "跟随最近", 800, 104, false, false);
         if (!notice().empty()) {
             canvas.line(0, 1012, 683, 1012, 1, 3);
             wrapped(message, 36, 1044, 612, 22);
@@ -5862,7 +6037,6 @@ struct ReaderApp::Impl final : DisplayBackend {
                 return;
             draft = edit_snapshot.config.settings;
             parameter = FontSize;
-            advanced = false;
             reset_overrides = false;
             book_scope = true;
             draw_typography();
@@ -5873,11 +6047,33 @@ struct ReaderApp::Impl final : DisplayBackend {
                 return;
             draw_refresh();
             break;
-        case LibrarySort:
-            library_descending = !library_descending;
-            library_page = 0;
-            scan_library(); draw_library();
-            break;
+        case LibraryFolders: {
+            if (!bookmark_io_ready()) return;
+            const auto snapshot = store.settings_snapshot();
+            auto values = snapshot.config.settings;
+            values.library_folders = values.library_folders == "first" ? "recent" : "first";
+            std::string detail;
+            if (store.apply_settings(snapshot, values, false, detail) == StoreStatus::Ok) {
+                library_page = 0;
+                message = "文件夹排序已保存";
+                scan_library();
+            } else message = "文件夹排序未保存，请检查 TF 卡或设置文件";
+            draw_input_settings(); break;
+        }
+        case LibrarySort: {
+            if (!bookmark_io_ready()) return;
+            const auto snapshot = store.settings_snapshot();
+            auto values = snapshot.config.settings;
+            values.library_sort = library_sort == "recent" ? "name" : library_sort == "name" ? "name_desc" : "recent";
+            std::string detail;
+            if (store.apply_settings(snapshot, values, false, detail) == StoreStatus::Ok) {
+                library_sort = values.library_sort; settings.library_sort = library_sort;
+                library_page = 0;
+                message = library_sort == "recent" ? "按最近阅读排序" : library_sort == "name" ? "按书名升序排列" : "按书名降序排列";
+                scan_library();
+            } else message = "排序未保存，请检查 TF 卡或设置文件";
+            draw_library(); break;
+        }
         case LibraryList:
         case LibraryGrid:
             library_grid = id == LibraryGrid;
@@ -6076,6 +6272,15 @@ struct ReaderApp::Impl final : DisplayBackend {
             show_page(start);
             return;
         }
+        case ResumeDetails:
+            inspect_book(has_book() ? book_path : last_book); if (!display.busy()) overlay(); return;
+        case HelpPrevious: case HelpTools: case HelpNext: case HelpPosition: case HelpDevice:
+            help_zone = id;
+            if (id == HelpPosition) help_position = (help_position + 1) % 4;
+            if (id == HelpDevice) help_device = 1 - help_device;
+            draw_help(); break;
+        case HelpKey1: case HelpKey2: case HelpKey3:
+            help_key = id; draw_help(); break;
         case FullRefresh:
             force_refresh();
             return;
@@ -6093,7 +6298,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             } else if (view == View::Library) {
                 if (id == Prev && library_page)
                     --library_page;
-                else if (id == Next && (library_page + 1) * library_page_size() < entries.size())
+                else if (id == Next && library_page + 1 < library_pages())
                     ++library_page;
                 else return;
                 draw_library();
@@ -6118,6 +6323,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
             break;
         case FontChoice:
+        case FontWeight:
         case FontSize:
         case LineHeight:
         case Margin:
@@ -6130,11 +6336,6 @@ struct ReaderApp::Impl final : DisplayBackend {
             book_scope = false;
             apply_typography();
             return;
-        case Advanced:
-            advanced = !advanced;
-            parameter = advanced ? Gap : FontSize;
-            draw_typography();
-            break;
         case Defaults:
             draft = edit_snapshot.global_settings;
             reset_overrides = true;
@@ -6147,9 +6348,14 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (parameter == FontChoice) {
                 auto i = std::find(fonts.begin(), fonts.end(), draft.font);
                 auto n = i == fonts.end() ? 0 : static_cast<int>(i - fonts.begin());
-                n = (n + direction + static_cast<int>(fonts.size())) %
-                    static_cast<int>(fonts.size());
+                n = std::clamp(n + direction, 0, static_cast<int>(fonts.size()) - 1);
                 draft.font = fonts[n];
+                draft.font_weight = "regular";
+            } else if (parameter == FontWeight) {
+                const std::array<std::string, 4> weights{{"light", "regular", "medium", "bold"}};
+                const auto at = std::find(weights.begin(), weights.end(), draft.font_weight);
+                const int first = light_available(draft) ? 0 : 1;
+                draft.font_weight = weights[std::clamp(static_cast<int>(at - weights.begin()) + direction, first, 3)];
             } else if (parameter == Gap)
                 draft.paragraph_gap_lines =
                     std::clamp(draft.paragraph_gap_lines + direction * .2, 0., 1.);
@@ -6161,6 +6367,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 draft.line_height = std::clamp(draft.line_height + direction * .05, 1.35, 1.65);
             else
                 draft.margin_x_px = std::clamp(draft.margin_x_px + direction * 4, 24, 52);
+            if (draft.font_weight == "light" && !light_available(draft)) draft.font_weight = "regular";
             draw_typography();
             break;
         }
@@ -6319,6 +6526,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                         }
                         int id = hit.id;
                         // A long press on a book in the library opens its details instead of the book.
+                        if (input.long_press && view == View::Library && id == Tools) id = ResumeDetails;
                         if (input.long_press && view == View::Library && id >= EntryBase && id < TocBase &&
                             !entries[static_cast<std::size_t>(id - EntryBase)].directory)
                             id += DetailBase - EntryBase;
@@ -6344,8 +6552,8 @@ struct ReaderApp::Impl final : DisplayBackend {
 void ReaderApp::Impl::apply_typography() {
     if (!bookmark_io_ready()) return;
     std::string detail;
-    if (font_fallback) {
-        error("所选字体不可用，排版未保存");
+    if (font_fallback || weight_unavailable) {
+        error("所选字体或字重不可用，排版未保存");
         return;
     }
     const auto result = reset_overrides && book_scope
@@ -6357,6 +6565,7 @@ void ReaderApp::Impl::apply_typography() {
     }
     const auto effective = store.load_settings(book_path).settings;
     const bool layout_changed = effective.font != settings.font ||
+        effective.font_weight != settings.font_weight ||
         effective.font_size_px != settings.font_size_px ||
         effective.line_height != settings.line_height ||
         effective.margin_x_px != settings.margin_x_px ||
@@ -6428,8 +6637,8 @@ void ReaderApp::input(const AppInput &event) {
 bool ReaderApp::can_long_press_at(int x, int y) const {
     if (impl_->image_at(x, y)) return true;
     return impl_->view == View::Library && std::any_of(impl_->hits.begin(), impl_->hits.end(), [&](const auto& hit) {
-        return hit.contains(x, y) && hit.id >= EntryBase && hit.id < TocBase &&
-               !impl_->entries[static_cast<std::size_t>(hit.id - EntryBase)].directory;
+        return hit.contains(x, y) && (hit.id == Tools || (hit.id >= EntryBase && hit.id < TocBase &&
+               !impl_->entries[static_cast<std::size_t>(hit.id - EntryBase)].directory));
     });
 }
 const graphics::Canvas &ReaderApp::canvas() const {
@@ -6456,12 +6665,12 @@ void ReaderApp::complete_frame(bool success) {
         if (frame.purpose == FramePurpose::Body) impl_->remember_page();
         impl_->confirmed_link_return = impl_->link_return;
         impl_->save_failed = false;
-        impl_->recent_save_failed = false;
-        if (!impl_->async_content && impl_->last_recorded != impl_->book_path) {
+        if (!impl_->async_content && !impl_->recent_save_failed && impl_->last_recorded != impl_->book_path) {
             std::string error;
-            if (impl_->store.save_last_book(impl_->book_path, error) != StoreStatus::Ok)
+            if (impl_->store.save_last_book(impl_->book_path, error) != StoreStatus::Ok) {
+                impl_->recent_save_failed = true;
                 impl_->message = "最近阅读记录未保存";
-            else
+            } else
                 impl_->last_recorded = impl_->book_path;
         }
     }
