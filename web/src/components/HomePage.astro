@@ -5,7 +5,14 @@ const screens = [
   { id: "tools", title: "阅读工具", description: "轻点正文中部，打开目录、排版、同步与刷新工具。", alt: "正文上的阅读工具，包含目录、排版、同步和刷新入口" },
   { id: "typography", title: "排版", description: "字体、字号与行距，先看预览，再应用到正文。", alt: "示例书籍的排版预览，字号尚未应用" },
   { id: "sync", title: "位置接续", description: "检查远端位置后，选择继续阅读的位置；上传前确认。", alt: "示例书籍的同步面板，分别显示本机与远端阅读位置" },
-  { id: "sleep", title: "休眠", description: "暂停阅读，让书籍封面留在屏幕上。也可保留正文或使用简洁屏保。", alt: "休眠画面，显示示例书籍封面和已保存的阅读进度" },
+  { id: "sleep", title: "休眠", description: "暂停阅读，让书籍封面留在屏幕上。也可保留正文、使用简洁屏保，或选择自己的锁屏图片。", alt: "休眠画面，显示示例书籍封面和已保存的阅读进度" },
+];
+const lockscreens = [
+  { file: "01-own-books.png", title: "读自己的书。", alt: "黑白书页交叠展开，配文：读自己的书。" },
+  { file: "02-keep-reading.png", title: "接着读下去。", alt: "书中垂下的纸带连接山川与海岸，配文：接着读下去。" },
+  { file: "03-one-page.png", title: "把时间留给一页书。", alt: "阳光在翻起的书页上投下阴影，竖排文字：把时间留给一页书。" },
+  { file: "04-offline.png", title: "暂时离线，进入书中。", alt: "打开的书中浮现门廊与阶梯，配文：暂时离线，进入书中。" },
+  { file: "05-next-page.png", title: "下一页，自有天地。", alt: "书页旋转展开，配以 Pico Page 字样和文字：下一页，自有天地。" },
 ];
 ---
 <!doctype html>
@@ -23,7 +30,7 @@ const screens = [
     <header class="site-header wrap">
       <a class="wordmark" href="./" aria-label="Pico Page 首页">Pico Page<span class="brand-period">.</span></a>
       <nav aria-label="主导航">
-        <a href="#features">功能</a><a href="#screens">界面</a><a href="#devices">设备</a><a href="#install">安装</a>
+        <a href="#features">功能</a><a href="#screens">界面</a><a href="#devices">设备</a><a href="#install">安装</a><a class="resource-nav" href="#resources">下载</a>
       </nav>
     </header>
     <main id="main">
@@ -109,7 +116,35 @@ const screens = [
           </div>
           <ol class="steps"><li><strong>连接设备</strong><span>用 USB 数据线将 Read Pico 连接到电脑。</span></li><li><strong>安装固件</strong><span>待固件发布后，按安装说明核对设备分区与恢复方案。</span></li><li><strong>放入书籍</strong><span>把 EPUB 或 TXT 放进 TF 卡的 <code>Books/</code> 文件夹，即可开始阅读。</span></li></ol>
         </div>
-        <div id="fonts" class="wrap font-download" aria-labelledby="fonts-title">
+      </section>
+      <section id="resources" class="resources wrap" aria-labelledby="resources-title">
+        <p class="eyebrow">给阅读，多一点自己的选择</p>
+        <h2 id="resources-title">字体与锁屏，随你选择。</h2>
+        <p class="section-lead">下载后放进 TF 卡，在设备上选择使用。</p>
+        <div id="lockscreens" class="resource-block" aria-labelledby="lockscreens-title">
+          <div class="resource-heading">
+            <div><h3 id="lockscreens-title">锁屏图集 01</h3><p class="section-lead">五张关于书与阅读的图文。684 × 1216 · 16 级灰度 · PNG</p></div>
+            <a class="button" href="./downloads/PicoPage-LockScreens-01.zip" download>下载全部（ZIP）</a>
+          </div>
+          <div class="lockscreen-grid">
+            {lockscreens.map((art) => (
+              <figure>
+                <a class="lockscreen-preview" href={`./downloads/lockscreens/${art.file}`} aria-label={`预览原图：${art.title}`}>
+                  <img src={`./downloads/lockscreens/${art.file}`} width="684" height="1216" alt={art.alt} loading="lazy" decoding="async">
+                </a>
+                <figcaption><strong>{art.title}</strong><a href={`./downloads/lockscreens/${art.file}`} download aria-label={`下载 PNG：${art.title}`}>下载 PNG <span aria-hidden="true">↓</span></a></figcaption>
+              </figure>
+            ))}
+          </div>
+          <p class="section-lead">点击图片查看原图。图片由 GPT Image 生成，预览为下载文件，非设备实拍。</p>
+          <details class="resource-instructions" open>
+            <summary>如何使用锁屏图片</summary>
+            <p>需要支持「自定义图片」的固件。解压后，将 <code>LockScreens/</code> 文件夹复制到 TF 卡根目录；已有同名文件夹时合并内容。单张下载的 PNG 也直接放在这个文件夹中。</p>
+            <p>在「设置 → 电源与休眠」选择「自定义图片」，进入「选择图片 / 轮播」，选好后返回并点击「保存设置」。可固定一张，也可按文件名顺序轮播。</p>
+            <p>保存后让设备空闲片刻，等待图片准备完成；未准备好时会显示简洁屏保。</p>
+          </details>
+        </div>
+        <div id="fonts" class="resource-block font-download" aria-labelledby="fonts-title">
           <h3 id="fonts-title">下载霞鹜文楷</h3>
           <p class="section-lead">官方原版 Regular · v1.520 · 作者 <a href="https://github.com/lxgw">LXGW</a>。按 SIL Open Font License 1.1 免费分发，下载包内附完整许可证与来源说明。</p>
           <div class="actions">
