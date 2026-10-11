@@ -1407,10 +1407,10 @@ struct ReaderApp::Impl final : DisplayBackend {
             cover_job->cancel();
         }
         saving_request = session.request_save();
-        if (!saving_request && (!session.visible_record() || last_recorded == book_path)) return;
+        if (!saving_request && (!session.visible_record() || last_recorded == book_path || recent_save_failed)) return;
         ContentJob::Request request;
         request.kind = ContentJob::Kind::SaveProgress; request.root = root; request.relative_path = book_path;
-        request.record = saving_request ? saving_request->record : *session.visible_record(); request.save_last_book = last_recorded != book_path;
+        request.record = saving_request ? saving_request->record : *session.visible_record(); request.save_last_book = !recent_save_failed && last_recorded != book_path;
         save_job = std::make_unique<ContentJob>(std::move(request));
         if (counting_job) counting_job->cancel();
         poll_save();
@@ -2144,8 +2144,8 @@ struct ReaderApp::Impl final : DisplayBackend {
                 if (length) break;
             } else if (errno != ENOENT) unreadable = true;
         }
-        entry.status = length && !std::strstr(record, "\"cleared\"") ? "在读" :
-                       unreadable ? "位置未知" : entry.recent_rank < 128 ? "已打开" : "未读";
+        entry.status = unreadable ? "位置未知" : length && !std::strstr(record, "\"cleared\"") ? "在读" :
+                       entry.recent_rank < 128 ? "已打开" : "未读";
     }
     struct CoverEntry {
         std::string name, header;
@@ -2449,6 +2449,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         book_path = path;
         last_book = path;
         last_recorded.clear();
+        recent_save_failed = false;
         const auto configuration = loaded ? loaded->configuration : store.load_settings(path);
         settings = configuration.settings;
         load_fonts();
@@ -3561,6 +3562,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     /** Only explicit sibling weight files are selected; no directory scan occurs during preview. */
     std::string weight_font(const ReaderSettings &values) const {
+        if (values.font_weight == "regular") return values.font;
         const auto dot = values.font.find_last_of('.');
         const auto dash = values.font.find_last_of('-');
         if (dot == std::string::npos || dash == std::string::npos || dash > dot) return values.font;
@@ -6339,6 +6341,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 auto n = i == fonts.end() ? 0 : static_cast<int>(i - fonts.begin());
                 n = std::clamp(n + direction, 0, static_cast<int>(fonts.size()) - 1);
                 draft.font = fonts[n];
+                draft.font_weight = "regular";
             } else if (parameter == FontWeight) {
                 const std::array<std::string, 4> weights{{"light", "regular", "medium", "bold"}};
                 const auto at = std::find(weights.begin(), weights.end(), draft.font_weight);
@@ -6653,12 +6656,12 @@ void ReaderApp::complete_frame(bool success) {
         if (frame.purpose == FramePurpose::Body) impl_->remember_page();
         impl_->confirmed_link_return = impl_->link_return;
         impl_->save_failed = false;
-        impl_->recent_save_failed = false;
-        if (!impl_->async_content && impl_->last_recorded != impl_->book_path) {
+        if (!impl_->async_content && !impl_->recent_save_failed && impl_->last_recorded != impl_->book_path) {
             std::string error;
-            if (impl_->store.save_last_book(impl_->book_path, error) != StoreStatus::Ok)
+            if (impl_->store.save_last_book(impl_->book_path, error) != StoreStatus::Ok) {
+                impl_->recent_save_failed = true;
                 impl_->message = "最近阅读记录未保存";
-            else
+            } else
                 impl_->last_recorded = impl_->book_path;
         }
     }

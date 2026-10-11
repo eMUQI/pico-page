@@ -583,6 +583,14 @@ static void layout_review_test(const fs::path& root, const fs::path& fixtures, c
         assert(!library.can_long_press_at(300, 480));
         d.tap(300, 610); d.present(); d.complete_content();
         assert(library_store.load_last_book(detail) == std::optional<std::string>("Books/a.epub"));
+        const auto last = library_root / "PicoPage/data/last-book.txt";
+        const auto stamp = fs::file_time_type::clock::now() - std::chrono::hours(24);
+        fs::last_write_time(last, stamp);
+        const auto recorded_stamp = fs::last_write_time(last);
+        const auto saved = library.saved_record();
+        for (int i = 0; i < 2; ++i) { d.key(Input::K3); d.present(); d.complete_content(); }
+        assert(fs::last_write_time(last) == recorded_stamp);
+        assert(library.saved_record() && !(library.saved_record() == saved));
     }
     const auto canvas = [&] {
         ReaderApp library(library_root.string(), "library-review", true, false); Driver d{library};
@@ -592,8 +600,31 @@ static void layout_review_test(const fs::path& root, const fs::path& fixtures, c
     const auto with_primary = canvas();
     fs::rename(library_root / "Books/c.epub.picopage/progress.json", library_root / "Books/c.epub.picopage/progress.json.bak");
     assert(canvas() == with_primary);
+    fs::create_directory(library_root / "Books/c.epub.picopage/progress.json");
+    assert(canvas() != with_primary);
+    fs::remove(library_root / "Books/c.epub.picopage/progress.json");
+    assert(canvas() == with_primary);
     fs::remove(library_root / "Books/c.epub.picopage/progress.json.bak");
     assert(canvas() != with_primary);
+    if (async) {
+        fs::create_directories(library_root / "Fonts");
+        fs::copy_file(font, library_root / "Fonts/Legacy-Regular.ttf");
+        fs::copy_file(font, library_root / "Fonts/Legacy-Bold.ttf");
+        write(library_root / "PicoPage/settings.toml", "schema_version=1\n[reader]\nfont='Fonts/Legacy-Bold.ttf'\n");
+        ReaderApp legacy(library_root.string(), "legacy-weight", true, true); Driver d{legacy};
+        assert(legacy.initialize()); d.present(); opened(legacy, "Books/b.epub"); d.present();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (legacy.background_due()) {
+            legacy.poll_background(); legacy.background_step();
+            if (legacy.pending_frame()) d.present();
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        bool bold_cache = false;
+        for (const auto& item : fs::directory_iterator(library_root / "PicoPage/cache/pages"))
+            bold_cache = bold_cache || read(item.path()).find("Fonts/Legacy-Bold.ttf") != std::string::npos;
+        assert(bold_cache);
+    }
 }
 
 static void swipe_test(const fs::path& root, const fs::path& fixtures, bool grid) {
