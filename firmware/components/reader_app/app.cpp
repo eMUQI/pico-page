@@ -404,7 +404,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         message = power_return_message; power_selected = PowerAction::None;
         power_save_failed = false; power_request = {};
         if (view == View::Library) draw_library();
-        overlay(true);
+        overlay();
     }
     void draw_power_off(const std::string& detail, bool manual = false) {
         view = View::PowerOff;
@@ -5948,7 +5948,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 drain_save(); stop_covers(); clear_prefetch(); stop_counting_job();
                 power_return_canvas = canvas; power_return_hits = hits; power_return_view = view;
                 power_return_message = message; power_selected = PowerAction::None; power_save_failed = false;
-                draw_power_menu(); overlay(true);
+                draw_power_menu(); overlay();
             }
             return;
         case PowerShutdown:
@@ -6752,7 +6752,7 @@ void ReaderApp::show_usb_transfer(bool active, const std::string& error) {
     impl_->usb_confirm = false;
     if (impl_->usb_prepared) impl_->draw_usb();
     else impl_->draw_import();
-    impl_->overlay(true);
+    impl_->overlay();
 }
 PortalAction ReaderApp::take_portal_action() {
     if (impl_->portal_action == PortalAction::Upload || impl_->portal_action == PortalAction::UploadStation) {
@@ -6931,7 +6931,7 @@ PowerRequest ReaderApp::take_power_request() {
 void ReaderApp::power_unavailable(const std::string& message) {
     if (impl_->display.busy()) return;
     impl_->note(message, 1012);
-    impl_->overlay(true);
+    impl_->overlay();
 }
 bool ReaderApp::prepare_power(PowerRequest request) {
     if (request.action == PowerAction::None || impl_->view != View::PowerMenu ||
@@ -6948,7 +6948,7 @@ bool ReaderApp::prepare_power(PowerRequest request) {
     if (!saved && !request.without_save) {
         impl_->message = "阅读位置、书签或最近阅读记录未能保存到 TF 卡，仍要" +
             std::string(request.action == PowerAction::Restart ? "重启吗？" : "关机吗？");
-        impl_->draw_power_menu(); impl_->overlay(true); return false;
+        impl_->draw_power_menu(); impl_->overlay(); return false;
     }
     impl_->remember_position();
     impl_->cancel_sync();
