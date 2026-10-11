@@ -322,30 +322,44 @@ std::string image_cache_key(const std::string& book_id, const std::string& resou
 }
 void ContentJob::render_image() {
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
-#ifdef ESP_PLATFORM
-    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < (request.prefetch ? 5U : 3U) * 1024 * 1024 ||
-        heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 2U * 1024 * 1024) {
-        result.error = "Image preparation memory unavailable"; return;
-    }
-#endif
     if (stop()) return;
-    result.image = std::make_unique<graphics::Canvas>();
     FileStore store(request.root);
     const bool cacheable = request.page.images.size() == 1 && request.page.glyphs.empty() &&
                            request.page.images.front().height == request.layout.height && !request.cache_name.empty();
     if (cacheable) {
+        constexpr std::size_t size = 684U * 1216U / 2;
+#ifdef ESP_PLATFORM
+        // Cache bytes and the result canvas coexist; decoding has a separate, larger budget.
+        if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2 * (size + 32) + 256U * 1024 ||
+            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < size + 33) {
+            result.error = "Image preparation memory unavailable"; return;
+        }
+#endif
         std::string cached;
-        const auto size = result.image->pixels().size();
         if (store.load_cache(request.cache_name, size + 32, cached) == StoreStatus::Ok && cached.size() == size + 32) {
             const auto checksum = cached.substr(size);
             cached.resize(size);
             if (md5_hex(cached) == checksum) {
+                if (stop()) return;
+#ifdef ESP_PLATFORM
+                if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < size) {
+                    result.error = "Image preparation memory unavailable"; return;
+                }
+#endif
+                result.image = std::make_unique<graphics::Canvas>();
                 std::memcpy(result.image->data(), cached.data(), size);
                 return;
             }
         }
     }
     if (stop()) return;
+#ifdef ESP_PLATFORM
+    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < (request.prefetch ? 5U : 3U) * 1024 * 1024 ||
+        heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 2U * 1024 * 1024) {
+        result.error = "Image preparation memory unavailable"; return;
+    }
+#endif
+    result.image = std::make_unique<graphics::Canvas>();
     EpubDocument document;
     std::vector<std::uint8_t> bytes;
     if (!document.open_verified(request.path, request.identity, result.error, stop) || stop()) return;
@@ -369,6 +383,7 @@ void ContentJob::render_image() {
     if (cacheable && result.failed_images.empty()) {
         std::string pixels(reinterpret_cast<const char*>(result.image->data()), result.image->pixels().size());
         pixels += md5_hex(pixels);
+        if (stop()) return;
         store.save_cache(request.cache_name, pixels);
     }
 }

@@ -1208,17 +1208,27 @@ int main(int argc, char** argv) {
         assert(app.view() == View::Reading && app.content_busy());
         assert(app.pending_frame()->purpose == FramePurpose::Body && !app.pending_frame()->region);
         const auto first_anchor = app.pending_frame()->anchor;
-        const auto placeholder = app.canvas().pixels();
+        auto placeholder = app.canvas().pixels();
         app.poll_background();
         assert(app.canvas().pixels() == placeholder && graphics::image_decode_count() == decodes);
         app.complete_frame(true);
+        // Pages skipped before the dwell interval must not start an image decoder.
+        driver.key(Input::K3); app.complete_frame(true); app.poll_background();
+        driver.key(Input::K1);
+        assert(app.pending_frame()->anchor == first_anchor);
+        app.complete_frame(true); app.poll_background();
+        assert(graphics::image_decode_count() == decodes);
+        placeholder = app.canvas().pixels();
         // Pending input wins over starting or applying an image job.
         app.poll_background(true);
         assert(!app.pending_frame() && graphics::image_decode_count() == decodes);
         driver.key(Input::K2);
         assert(app.pending_frame()->refresh == RefreshIntent::FullClean && !app.pending_frame()->region);
         app.complete_frame(true);
-        app.poll_background(); // Start the worker, but do not adopt its result before turning.
+        app.poll_background();
+        assert(graphics::image_decode_count() == decodes);
+        std::this_thread::sleep_for(std::chrono::milliseconds(275));
+        app.poll_background(); app.poll_background(); // Start without adopting the result.
         const auto decode_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
         while (graphics::image_decode_count() == decodes) {
             app.poll_background(true);
@@ -2530,6 +2540,34 @@ int main(int argc, char** argv) {
             assert(std::chrono::steady_clock::now() < deadline);
         }
         assert(reference.book_pages() && reference.book_pages()->total == total);
+    }
+    {
+        const auto root = card / "CountInputReuse";
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "multi-part.epub", root / "Books/book.epub");
+        ReaderApp app(root.string(), "count-input-reuse", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+        const auto initial = app.cache_usage().page_index;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (app.cache_usage().page_index < initial + 64 * sizeof(std::uint32_t)) {
+            app.background_step(); app.poll_background();
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        // A completed batch owns enough chapter text to continue without another file read.
+        fs::remove_all(root / "PicoPage/cache/content");
+        fs::resize_file(root / "Books/book.epub", 0);
+        const auto counted = app.cache_usage().page_index;
+        driver.key(Input::K2); driver.present();
+        driver.key(Input::K3); driver.present();
+        driver.key(Input::K1); driver.present();
+        while (app.cache_usage().page_index == counted) {
+            app.background_step(); app.poll_background();
+            assert(std::string(app.background_state()) != "failed");
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(app.cache_usage().page_index > counted && app.view() == View::Reading);
     }
     {
         ReaderApp app(card.string(), "exclusive-storage-test", true); Driver driver{app};

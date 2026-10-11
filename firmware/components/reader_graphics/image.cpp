@@ -267,9 +267,12 @@ bool render_image(Canvas& canvas, const std::vector<std::uint8_t>& encoded,
     if (raster.cancelled()) return fail(error, kImageCancelled);
     x += (width - static_cast<int>(raster.width)) / 2;
     y += (height - static_cast<int>(raster.height)) / 2;
-    for (unsigned row = 0; row < raster.height; ++row) for (unsigned col = 0; col < raster.width; ++col) {
-        const auto packed = raster.pixels.get()[std::size_t(row) * raster.stride + col / 2];
-        canvas.pixel(x + col, y + row, col & 1 ? packed >> 4 : packed & 15);
+    for (unsigned row = 0; row < raster.height; ++row) {
+        for (unsigned col = 0; col < raster.width; ++col) {
+            const auto packed = raster.pixels.get()[std::size_t(row) * raster.stride + col / 2];
+            canvas.pixel(x + col, y + row, col & 1 ? packed >> 4 : packed & 15);
+        }
+        if (raster.cancelled()) return fail(error, kImageCancelled);
     }
     return true;
 }
