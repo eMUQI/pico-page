@@ -1,0 +1,72 @@
+[
+  {
+    "file": "01-own-books.png",
+    "title": "读自己的书。",
+    "status": "selected",
+    "size": [
+      684,
+      1216
+    ],
+    "gray_levels": 16,
+    "dithering": false,
+    "source": "GPT Image",
+    "hardware_verified": false,
+    "sha256": "5882034d9857fe46a8ef84ec7476917d24c174ba489bef8fdeff585fe216eb2c"
+  },
+  {
+    "file": "02-keep-reading.png",
+    "title": "接着读下去。",
+    "status": "selected",
+    "size": [
+      684,
+      1216
+    ],
+    "gray_levels": 16,
+    "dithering": false,
+    "source": "GPT Image",
+    "hardware_verified": false,
+    "sha256": "795d56e602b73f4600251ee291f741dc9daa2879fc0cab4e013976ffa7955b42"
+  },
+  {
+    "file": "03-one-page.png",
+    "title": "把时间留给一页书。",
+    "status": "selected",
+    "size": [
+      684,
+      1216
+    ],
+    "gray_levels": 16,
+    "dithering": false,
+    "source": "GPT Image",
+    "hardware_verified": false,
+    "sha256": "56eb9abd94feb8b60f8d776b589decc7381e090611ab4d98dcd7103c9da1c2a2"
+  },
+  {
+    "file": "04-offline.png",
+    "title": "暂时离线，进入书中。",
+    "status": "selected",
+    "size": [
+      684,
+      1216
+    ],
+    "gray_levels": 16,
+    "dithering": false,
+    "source": "GPT Image",
+    "hardware_verified": false,
+    "sha256": "d186a906ce65748d2a7440f3835a3bd3bbe1eb12d756741281aca55bf9a6fe57"
+  },
+  {
+    "file": "05-next-page.png",
+    "title": "下一页，自有天地。",
+    "status": "selected",
+    "size": [
+      684,
+      1216
+    ],
+    "gray_levels": 16,
+    "dithering": false,
+    "source": "GPT Image",
+    "hardware_verified": false,
+    "sha256": "608ac31bcc060e35a6ed75701ae5f78e178010a90359e9bb277553c6f777aeca"
+  }
+]
