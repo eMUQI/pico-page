@@ -5949,6 +5949,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             settings.sleep_screen = draft.sleep_screen;
             settings.sleep_image = draft.sleep_image;
             custom_prepare_finished = custom_sleep_attempted = false;
+            custom_notice.clear(); custom_notice_pending = false;
             custom_sleep_image.reset();
             message = "休眠设置已保存";
             draw_settings();
@@ -6793,9 +6794,12 @@ bool ReaderApp::prepare_sleep() {
     }
     if (impl_->network_worker_id || impl_->portal_live || impl_->usb_prepared || impl_->view == View::Portal || impl_->view == View::PowerMenu || impl_->view == View::PowerOff) return false;
     if (impl_->display.busy() || impl_->active_network) return false;
-    if (impl_->counting_job && (impl_->counting_job->request.kind == ContentJob::Kind::SleepCover || impl_->counting_job->request.kind == ContentJob::Kind::LockScreen)) {
-        // Wait for image work before cleanup can join its worker on the application task.
-        impl_->sleep_waiting_for_cover = impl_->counting_job->request.kind == ContentJob::Kind::SleepCover;
+    if (impl_->counting_job) {
+        // Every background owner must return before cleanup or a sleep image can replace it.
+        const auto kind = impl_->counting_job->request.kind;
+        impl_->sleep_waiting_for_cover = kind == ContentJob::Kind::SleepCover;
+        if (kind != ContentJob::Kind::SleepCover && kind != ContentJob::Kind::LockScreen)
+            impl_->counting_job->cancel();
         impl_->sleep_cover_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         return false;
     }
@@ -6847,7 +6851,7 @@ void ReaderApp::wake(bool slept) {
     impl_->wifi_notice.clear();
     impl_->custom_sleep_attempted = false;
     impl_->custom_prepare_finished = false;
-    impl_->custom_notice_pending = slept && !impl_->custom_notice.empty();
+    impl_->custom_notice_pending = slept && impl_->settings.sleep_screen == "custom" && !impl_->custom_notice.empty();
     if (slept) impl_->sleep_wifi_target.reset();
     else cancel_sleep();
     if (!impl_->resume_to_library && impl_->has_book()) {
