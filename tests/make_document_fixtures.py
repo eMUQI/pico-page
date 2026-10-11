@@ -1,6 +1,8 @@
 """Generate original EPUB inputs for the native reader's integration check."""
 
 import argparse
+import struct
+import zipfile
 from pathlib import Path
 from make_epub_fixture import fixture_entries, write_fixture
 
@@ -32,6 +34,12 @@ def generate(directory: Path) -> None:
     damaged = directory / "mimetype-read-failure.epub"
     write_fixture(damaged)
     damaged.write_bytes(damaged.read_bytes().replace(b"application/epub+zip", b"application/epub+ziX", 1))
+    with zipfile.ZipFile(directory / "valid.epub") as archive:
+        central = archive.start_dir
+    # Mark the first entry (mimetype) as a DOS directory while retaining its nonzero size.
+    data = bytearray((directory / "valid.epub").read_bytes())
+    struct.pack_into("<I", data, central + 38, 0x10)
+    (directory / "mimetype-directory.epub").write_bytes(data)
     for kind, label in (("empty-label", ""), ("whitespace-label", " \t\n "),
                         ("long-label", "甲" * 10922)):
         labeled = fixture_entries()

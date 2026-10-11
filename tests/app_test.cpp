@@ -1234,6 +1234,20 @@ int main(int argc, char** argv) {
         assert(app.status().find("无法解析文件内容") != std::string::npos);
         assert(app.status().find("Missing EPUB resource") == std::string::npos);
     }
+    {
+        const auto root = card / "SettingsWriteFailure";
+        const auto config = root / "PicoPage/settings.toml";
+        write(config, "schema_version=1\n");
+        ReaderApp app(root.string()); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        driver.tap(600, 50); driver.present(); driver.tap(340, 710); driver.present();
+        assert(app.view() == View::PowerSettings);
+        driver.tap(600, 750); driver.present();
+        fs::create_directory(config.string() + ".tmp");
+        driver.tap(500, 1120); driver.present();
+        assert(app.view() == View::Error && app.status() == "休眠设置未保存。操作失败。");
+        assert(read(config) == "schema_version=1\n");
+    }
     for (const auto& item : {std::pair{"invalid", "EPUB 格式标识不正确"},
                              std::pair{"read-failure", "EPUB 格式标识读取失败"},
                              std::pair{"missing", "EPUB 缺少格式标识"},

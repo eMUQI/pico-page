@@ -1024,11 +1024,12 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
         if (stat.m_uncomp_size > 32 * 1024 * 1024 || total > 512ULL * 1024 * 1024 || (stat.m_uncomp_size > 4096 && stat.m_uncomp_size > std::max<mz_uint64>(1, stat.m_comp_size) * 1000)) return fail(error, "ZIP expansion limit exceeded");
     }
     if (names.count("META-INF/encryption.xml")) return fail(error, "Encrypted or obfuscated EPUB is unsupported");
-    char mime[64];
+    char mime[64]{};
     mz_zip_archive_file_stat mime_stat{};
     const int mime_index = mz_zip_reader_locate_file(&next->zip, "mimetype", nullptr, 0);
     if (mime_index < 0) return fail(error, "Missing EPUB mimetype");
     if (!mz_zip_reader_file_stat(&next->zip, mime_index, &mime_stat)) return fail(error, "Cannot read EPUB mimetype");
+    if (mime_stat.m_is_directory) return fail(error, "Invalid EPUB mimetype");
     if (mime_stat.m_uncomp_size > sizeof(mime)) return fail(error, "EPUB mimetype exceeds limit");
     if (!mz_zip_reader_extract_to_mem(&next->zip, mime_index, mime, sizeof(mime), 0)) return fail(error, "Cannot read EPUB mimetype");
     if (trim(std::string(mime, static_cast<std::size_t>(mime_stat.m_uncomp_size))) != "application/epub+zip")

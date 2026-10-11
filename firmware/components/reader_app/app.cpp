@@ -1196,7 +1196,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (!job->result.error.empty()) {
                 if (request.kind == ContentJob::Kind::Inspect) {
                     detail_error = job->result.error; draw_details(); overlay();
-                } else error(reason(job->result.error) + "。原书没有被修改。", request.relative_path);
+                } else error(reason(job->result.error, "无法解析文件内容") + "。原书没有被修改。", request.relative_path);
                 return;
             }
             const auto& loaded = *job->result.document;
@@ -2347,7 +2347,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!open_document(path, detail)) {
             book_path.clear();
             session.open("", "", writer);
-            error(reason(detail) + "。原书没有被修改。", path);
+            error(reason(detail, "无法解析文件内容") + "。原书没有被修改。", path);
             return false;
         }
         return finish_open(path);
@@ -2435,7 +2435,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         return detail.rfind(kChapterMemoryError, 0) == 0;
     }
     static std::string chapter_error(const std::string &detail) {
-        return memory_error(detail) ? "本章内容过大，设备内存不足，无法显示。" : "章节读取失败。" + reason(detail) + "。";
+        return memory_error(detail) ? "本章内容过大，设备内存不足，无法显示。" : "章节读取失败。" + reason(detail, "无法解析文件内容") + "。";
     }
     /**
      * Makes the part that load produces the chapter being read. The visible chapter stays in
@@ -4508,7 +4508,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         text("原书占用", 36, 548, 24, 150, 3);
         text(detail_size ? file_size(*detail_size) : "未知", 210, 548, 24, 438);
         if (detail_error.empty()) button(DetailOpen, detail_progress.record ? "继续阅读" : "打开书籍", 36, 630, 612, 96, true);
-        else wrapped("无法打开：" + reason(detail_error) + "。", 36, 620, 612, 24);
+        else wrapped("无法打开：" + reason(detail_error, "无法解析文件内容") + "。", 36, 620, 612, 24);
         canvas.line(0, 764, 683, 764, 1, 3);
         button(DetailCache, "清理本书缓存", 36, 788, 612, 76);
         if (detail_error.empty()) button(DetailReset, "清除本地阅读进度", 36, 880, 612, 76);
@@ -5266,7 +5266,7 @@ struct ReaderApp::Impl final : DisplayBackend {
      * A colon-separated detail may also include a non-ASCII resource path. The layers report no
      * error codes; an unknown diagnostic is described as invalid content.
      */
-    static std::string reason(const std::string &detail) {
+    static std::string reason(const std::string &detail, const char *fallback = "操作失败") {
         std::string lower = detail;
         for (auto &c : lower) if (c >= 'A' && c <= 'Z') c += 32;
         const auto has = [&](const char *word) { return lower.find(word) != std::string::npos; };
@@ -5286,7 +5286,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             const bool ended = detail.size() >= stop.size() && detail.compare(detail.size() - stop.size(), stop.size(), stop) == 0;
             return ended ? detail.substr(0, detail.size() - stop.size()) : detail;
         }
-        return "无法解析文件内容";
+        return fallback;
     }
     std::string retry_path;
     /**

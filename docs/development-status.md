@@ -4876,3 +4876,9 @@ UI 规范区分普通输入取消在途统计并保留当前分段、既有资�
 验证：`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host -N` 及 `ctest --test-dir build/host --output-on-failure` 通过，注册并通过 20/20；`cmake --build build/sanitized --parallel 4` 与对应 CTest 通过 20/20，现有配置为 Debug、AppleClang ASan/UBSan，未宣称 LSan 覆盖。`sh tools/build_firmware.sh` 在 ESP-IDF 6.1（`fff9895c`）、锁定 BSP `5f3406de` 上通过，应用 `0x341e70` 字节，4 MiB 槽剩余 19%，来源检查通过。`python3 tools/check_handoff.py` 449 项及 `git diff --check` 通过。日志位于本机 `/tmp/mimetype-*-final.log`；原书大小及 CRC 与排查前一致。未提交、推送或烧录；本轮新固件在真机直接打开原书、错误页显示及 KOReader 往返未验证，下一步为完成本地检查后按单独授权进行设备验收。
 
 PR #61 已创建；整合主线 `c178a07` 时仅解决开发记录追加位置的冲突，双方记录完整保留，固件与测试源码未变。整合前 Linux CI 的 Debug、ASan/UBSan/LSan 及交接检查通过；最新提交的远端结果以 PR 检查为准。
+
+### 2026-10-11 · PR #61 评审修正：拒绝无输出的格式标识条目
+
+评审发现 miniz 对目录条目可返回成功而不填充输出。格式标识缓冲改为零初始化，并在提取前显式拒绝目录条目，保持原错误提示及 64 字节上限。复用原合成书，在中央目录设置 DOS 目录属性并保留非零解压长度，验证以 `Invalid EPUB mimetype` 拒绝。另核对零压缩长度：非零解压长度配合零压缩长度已由 ZIP 初始化校验拒绝，不重复增加判断。只改共享开书校验，不新增任务、分配或 I/O；资源上限、原书摘要和失败回退不变。最终两条评审修复一起验证：Debug CTest 20/20（50.36 秒）、AppleClang ASan/UBSan CTest 20/20（108.24 秒），ESP-IDF 6.1 标准固件构建通过（`0x341f00` 字节，4 MiB 槽剩余 19%），449 项交接检查与 diff 检查通过。日志为本机 `/tmp/mimetype-review2-*.log`。未烧录，新固件实机及同步往返仍未验证。
+
+第二条评审指出共享错误原因函数也用于设置写入。解析失败的兜底文案现仅由四处文档读取调用显式提供；其他调用保留已分类原因，未知原因使用中性的「操作失败」，由调用方说明哪项操作未完成。增加休眠设置写入临时文件失败的应用回归，确认提示「休眠设置未保存。操作失败。」且配置不变。

@@ -46,7 +46,8 @@ int main(int argc, char** argv) {
             while (!after.step(8192)) {}
             assert(after.digest() == before.digest());
         }
-        for (const auto kind : {"invalid", "internal-space", "nul", "empty", "oversized", "missing", "read-failure"}) {
+        for (const auto kind : {"invalid", "internal-space", "nul", "empty", "oversized", "missing", "read-failure",
+                                "directory"}) {
             EpubDocument invalid;
             assert(!invalid.open(directory + "mimetype-" + kind + ".epub", error));
             const std::string name = kind;
