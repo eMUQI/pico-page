@@ -45,7 +45,7 @@ struct PaginationSession {
 /** A single job owns its parser and font, or borrows them from a PaginationSession. Only done() permits access to its result. */
 class ContentJob {
 public:
-    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks };
+    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks, LockScreenList, LockScreen };
     enum class Target { Start, End, Before, Anchor, Fragment };
     enum class StartFailure { None, InternalMemory, TaskCreate };
     struct CoverSource {
@@ -55,6 +55,7 @@ public:
     };
     struct Request {
         std::string path, font;
+        std::string sleep_image;
         Kind kind = Kind::Pagination;
         Target target = Target::Start;
         Anchor anchor;
@@ -89,6 +90,8 @@ public:
         std::size_t offset = 0;
         bool part_done = false, last_part = false;
         std::string error, font_identity, xpointer;
+        std::vector<std::string> lock_screens;
+        std::string lock_screen;
         Anchor mapped_anchor;
         sync::PartPosition mapped_place;  // Valid with mapped_anchor after a successful MapDownload.
         double percentage = 0;
@@ -147,6 +150,7 @@ private:
     diagnostics::Token measurement_{};
 #endif
     void render_image();
+    void prepare_lock_screen();
     void prepare_chapter_page(EpubDocument& document);
     void open_book();
     void prepare_cover();

@@ -684,11 +684,94 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     driver.present();
 }
 
+static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
+    std::vector<std::uint8_t> encoded;
+    std::string detail;
+    assert(EpubDocument::read_cover((fixtures / "image-cover.epub").string(), encoded, detail));
+    const std::string png(reinterpret_cast<const char*>(encoded.data()), encoded.size());
+    write(root / "LockScreens/01.png", png);
+    write(root / "LockScreens/02.PNG", png);
+    write(root / "LockScreens/._ignored.png", png);
+    write(root / "LockScreens/sub/hidden.png", png);
+    fs::create_symlink(root / "LockScreens/01.png", root / "LockScreens/link.png");
+    FileStore store(root.string());
+    std::vector<std::string> names;
+    assert(store.lock_screen_files(names) == StoreStatus::Ok &&
+           names == std::vector<std::string>({"01.png", "02.PNG"}));
+    assert(!valid_lock_screen_name("../outside.png") && !valid_lock_screen_name(".hidden.png"));
+    assert(!valid_lock_screen_name(std::string("a\0.png", 6)));
+    assert(store.read_lock_screen("link.png", encoded) == StoreStatus::UnsafePath);
+    auto run = [&](bool sleeping, const std::string& name = std::string()) {
+        ContentJob::Request request;
+        request.kind = ContentJob::Kind::LockScreen; request.root = root.string();
+        request.sleep_image = name; request.prefetch = !sleeping; request.preview = sleeping;
+        ContentJob job(std::move(request)); assert(job.start()); job.wait();
+        return std::move(job.result);
+    };
+    auto cold = run(true);
+    assert(!cold.image && !cold.error.empty() && store.last_lock_screen().empty());
+    auto first = run(false);
+    assert(first.cache_finished && first.lock_screen == "01.png" && !first.image);
+    assert(store.last_lock_screen().empty());
+    auto ready = run(true);
+    assert(ready.image && ready.image->width() == 684 && ready.image->height() == 1216);
+    assert(store.last_lock_screen() == "01.png");
+    assert(run(false).lock_screen == "02.PNG");
+    assert(run(true).image && FileStore(root.string()).last_lock_screen() == "02.PNG");
+    assert(run(false).lock_screen == "01.png");
+    assert(store.clear_cache() == StoreStatus::Ok && store.last_lock_screen() == "02.PNG");
+    assert(!run(true, "01.png").image);
+    assert(run(false, "01.png").cache_finished);
+    assert(run(true, "01.png").image && store.last_lock_screen() == "02.PNG");
+    write(root / "LockScreens/01.png", "broken PNG");
+    assert(!run(true, "01.png").image && !run(false, "01.png").cache_finished);
+    fs::remove(root / "LockScreens/01.png");
+    assert(!run(true, "01.png").image);
+    write(root / "LockScreens/01.png", png);
+    write(root / "PicoPage/settings.toml", "schema_version=1\n[power]\nsleep_screen='custom'\nsleep_image='01.png'\n");
+    auto snapshot = store.settings_snapshot();
+    assert(snapshot.config.diagnostics.empty() && snapshot.config.settings.sleep_image == "01.png");
+    auto values = snapshot.config.settings; values.sleep_image = "../outside.png";
+    assert(store.apply_settings(snapshot, values, false, detail) != StoreStatus::Ok);
+    values.sleep_image = "02.PNG";
+    assert(store.apply_settings(snapshot, values, false, detail) == StoreStatus::Ok);
+    assert(store.load_settings().settings.sleep_image == "02.PNG");
+    assert(run(false, "02.PNG").cache_finished);
+    {
+        ReaderApp app(root.string(), "locks", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        assert(sleep_frame(app) && app.view() == View::Sleeping); driver.present();
+        auto expected = run(true, "02.PNG"); assert(expected.image);
+        assert(app.canvas().pixels() == expected.image->pixels());
+        app.wake(); driver.present();
+        driver.tap(600, 50); driver.present(); driver.tap(340, 710); driver.present();
+        assert(app.view() == View::PowerSettings);
+        driver.tap(480, 350); driver.present(); driver.tap(330, 470); driver.present(); driver.complete_content();
+        assert(app.view() == View::LockScreens); driver.refresh();
+        driver.tap(300, 190); driver.present(); driver.tap(450, 1020); driver.present();
+        driver.tap(500, 1120); driver.present();
+        assert(store.load_settings().settings.sleep_image.empty());
+    }
+    for (int i = 0; i < 257; ++i) write(root / "LockScreens" / ("overflow-" + std::to_string(i) + ".png"), png);
+    assert(store.lock_screen_files(names) == StoreStatus::Invalid && names.empty());
+    fs::remove_all(root / "LockScreens");
+    assert(!run(true).image && !run(false).cache_finished);
+    {
+        ReaderApp app(root.string(), "empty-locks", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        assert(sleep_frame(app) && app.view() == View::Sleeping); driver.present();
+        app.wake(); driver.present(); app.poll_background();
+        assert(app.view() == View::Error && app.status().find("LockScreens") != std::string::npos);
+        if (app.pending_frame()) driver.present();
+    }
+}
+
 int main(int argc, char** argv) {
     assert(argc == 3);
     char temporary[] = "/tmp/pico-app-XXXXXX";
     const char* directory = mkdtemp(temporary); assert(directory);
     const fs::path card(directory), fixtures(argv[1]);
+    lock_screen_test(card / "CustomLocks", fixtures);
     assert(reading_footer::percent(0) == "0.00%");
     assert(reading_footer::percent(.2697, false) == "27%");
     assert(reading_footer::percent(.2649, false) == "26%");
@@ -2211,10 +2294,10 @@ int main(int argc, char** argv) {
         driver.tap(340, 710); driver.present();
         assert(app.view() == View::PowerSettings); driver.refresh();
         const auto global_before = read(card / "PicoPage/settings.toml");
-        driver.tap(340, 390); driver.present(); driver.tap(600, 750); driver.present();
+        driver.tap(480, 240); driver.present(); driver.tap(600, 750); driver.present();
         driver.refresh(); driver.tap(150, 1120); driver.present();
         assert(read(card / "PicoPage/settings.toml") == global_before && app.auto_sleep_minutes() == 10);
-        driver.tap(340, 710); driver.present(); driver.tap(340, 390); driver.present();
+        driver.tap(340, 710); driver.present(); driver.tap(480, 240); driver.present();
         driver.tap(600, 750); driver.present(); driver.tap(500, 1120); driver.present();
         assert(app.auto_sleep_minutes() == 15 && FileStore(card.string()).load_settings().settings.sleep_screen == "reading");
         assert(sleep_frame(app));
@@ -2232,7 +2315,7 @@ int main(int argc, char** argv) {
         assert(!fs::exists(card / "PicoPage/cache/layout") && read(progress) == progress_before);
         assert(read(card / "Books/book.epub") == book_before && *app.saved_record() == saved);
         driver.close(); driver.present(); driver.tap(340, 710); driver.present();
-        driver.tap(340, 250); driver.present();
+        driver.tap(180, 240); driver.present();
         write(card / "PicoPage/settings.toml", global_before + "# external edit\n");
         driver.tap(500, 1120); driver.present();
         assert(app.view() == View::Error && app.auto_sleep_minutes() == 15);

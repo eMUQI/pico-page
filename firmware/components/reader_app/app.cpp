@@ -141,7 +141,8 @@ enum Control {
     SyncEnable, SyncOnceAuto, SyncAccount, SyncStay, ContinueOffline,
     AccountEndpoint, AccountUser, AccountPassword, AccountVerify, AccountCancel, AccountRemove, AccountRemoveConfirm,
     EntryClear, EntryMask, EntryDefault,
-    WifiSavedBase = 50100, WifiModeBase = 50200, WifiNearbyBase = 50300
+    WifiSavedBase = 50100, WifiModeBase = 50200, WifiNearbyBase = 50300,
+    SleepCustom = 51000, SleepRotation, SleepChoose, SleepRefresh, LockScreenBase = 52000
 };
 std::string basename(const std::string &path) {
     const auto i = path.find_last_of('/');
@@ -1209,6 +1210,12 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto& request = job->request;
         if ((!content_loading && !inline_image_pending) || request.generation != foreground_generation) return;
         if (request.progressive) { complete_inline_image(*job); return; }
+        if (request.kind == ContentJob::Kind::LockScreenList) {
+            content_loading = false;
+            lock_screens = std::move(job->result.lock_screens);
+            lock_screen_error = job->result.error;
+            draw_lock_screens(); overlay(); return;
+        }
         if (request.kind == ContentJob::Kind::ImageViewer) {
             content_loading = false;
             if (request.chapter != chapter_index || request.part != chapter.part || !body_canvas) return;
@@ -1307,6 +1314,14 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (request.generation != counting_generation) return;
         // The lock screen reads the cover cache itself; a failed or cancelled attempt falls back to the title.
         if (request.kind == ContentJob::Kind::SleepCover) return;
+        if (request.kind == ContentJob::Kind::LockScreen) {
+            if (request.preview) {
+                custom_sleep_image = std::move(job->result.image);
+                custom_notice = result.error;
+                if (!custom_sleep_image && custom_notice.empty()) custom_notice = "休眠图片尚未就绪";
+            }
+            return;
+        }
         if (request.kind == ContentJob::Kind::PageCacheRead) {
             if (result.cache_finished) pages_cache_pending = false;
             if (job->result.page_cache) adopt_pages(std::move(*job->result.page_cache));
@@ -2708,7 +2723,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void reclaim_caches() {
         if (view != View::Reading || display.busy() || content_loading ||
-            (counting_job && counting_job->request.kind == ContentJob::Kind::SleepCover)) return;
+            (counting_job && (counting_job->request.kind == ContentJob::Kind::SleepCover || counting_job->request.kind == ContentJob::Kind::LockScreen))) return;
         const auto pressure = [&] {
             if (cache_usage().retained > cache_target) return true;
 #ifdef ESP_PLATFORM
@@ -3530,7 +3545,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         return values.refresh_preset == "clear" ? "清晰" : values.refresh_preset == "fast" ? "快速" : "均衡";
     }
     static std::string sleep_name(const ReaderSettings &values) {
-        return values.sleep_screen == "reading" ? "保留正文" : values.sleep_screen == "simple" ? "简洁屏保" : "书籍封面";
+        return values.sleep_screen == "custom" ? "自定义图片" : values.sleep_screen == "reading" ? "保留正文" : values.sleep_screen == "simple" ? "简洁屏保" : "书籍封面";
     }
     static int refresh_interval(const ReaderSettings &values) {
         return values.refresh_preset == "fast" ? values.fast_full_refresh_pages : values.balanced_full_refresh_pages;
@@ -4179,13 +4194,72 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         footer_bar("", help_page, kHelpPages.size());
     }
+    std::vector<std::string> lock_screens;
+    std::size_t lock_screen_page = 0;
+    std::string lock_screen_error, custom_notice;
+    bool custom_prepared = false, custom_sleep_attempted = false, custom_notice_pending = false;
+    std::unique_ptr<graphics::Canvas> custom_sleep_image;
+    void list_lock_screens() {
+        abandon_content();
+        if (counting_job) counting_job->cancel();
+        if (cover_job) cover_job->cancel();
+        if (raster_job) raster_job->cancel();
+        ContentJob::Request request;
+        request.kind = ContentJob::Kind::LockScreenList;
+        request.root = root; request.generation = foreground_generation;
+        pending_content = std::move(request);
+        loading("正在读取休眠图片");
+    }
+    void draw_lock_screens() {
+        view = View::LockScreens;
+        hits.clear(); canvas.clear(); header("自定义休眠图片", Back, "休眠");
+        choice(SleepRotation, "按文件名轮播", "每次休眠使用下一张图片", 140, draft.sleep_image.empty(),
+               draft.sleep_image != edit_snapshot.config.settings.sleep_image || draft.sleep_screen != edit_snapshot.config.settings.sleep_screen);
+        text("LockScreens/ · PNG / JPEG", 36, 280, 24, 612, 3);
+        const auto pages = std::max<std::size_t>(1, (lock_screens.size() + 5) / 6);
+        lock_screen_page = std::min(lock_screen_page, pages - 1);
+        for (std::size_t i = lock_screen_page * 6; i < lock_screens.size() && i < (lock_screen_page + 1) * 6; ++i) {
+            const int y = 334 + static_cast<int>(i % 6) * 102;
+            button(LockScreenBase + static_cast<int>(i), lock_screens[i], 36, y, 612, 88,
+                   draft.sleep_image == lock_screens[i], 24);
+        }
+        if (lock_screens.empty()) note(lock_screen_error.empty() ? "请将图片放入 TF 卡 LockScreens/ 目录。" : lock_screen_error, 380);
+        button(SleepRefresh, "重新读取", 36, 980, 280, 88);
+        button(Back, "完成", 340, 980, 308, 88, true);
+        footer_bar("返回后保存设置", lock_screen_page, pages);
+    }
+    bool custom_prepare_due() const {
+        return settings.sleep_screen == "custom" && !custom_prepared && card_available && !usb_prepared &&
+               !portal_live && !sleep_cover_deadline && !power_menu_wait && !active_network && !network_worker_id &&
+               !display.busy() && !content_loading && !foreground_job && !pending_content && !counting_job &&
+               !body_images_pending && !inline_image_pending && !session.needs_save() && !save_job && !bookmark_job && !cover_job && !raster_job &&
+               (view == View::Library || view == View::Reading || view == View::Settings || view == View::PowerSettings);
+    }
+    void prepare_custom_sleep(bool sleeping) {
+        ContentJob::Request request;
+        request.kind = ContentJob::Kind::LockScreen; request.root = root;
+        request.sleep_image = settings.sleep_image; request.generation = counting_generation;
+        request.prefetch = !sleeping; request.preview = sleeping;
+        custom_prepared = true;
+        if (sleeping) { custom_sleep_attempted = true; custom_sleep_image.reset(); custom_notice.clear(); }
+        counting_job = std::make_unique<ContentJob>(std::move(request));
+        if (!counting_job->start()) {
+            counting_job.reset();
+            if (sleeping) custom_notice = "休眠图片任务无法启动";
+        }
+    }
     void draw_power() {
         view = View::PowerSettings;
         hits.clear(); canvas.clear(); header("电源与休眠", Back, "设置");
         text("休眠画面", 36, 144, 24, 612, 3);
-        choice(SleepCover, "书籍封面", "无可用封面时显示书名与作者", 200, draft.sleep_screen == "cover", draft.sleep_screen != edit_snapshot.config.settings.sleep_screen);
-        choice(SleepReading, "保留正文", "保留当前页，底部显示休眠状态", 332, draft.sleep_screen == "reading", draft.sleep_screen != edit_snapshot.config.settings.sleep_screen);
-        choice(SleepSimple, "简洁屏保", "仅显示书名与阅读位置", 464, draft.sleep_screen == "simple", draft.sleep_screen != edit_snapshot.config.settings.sleep_screen);
+        button(SleepCover, "书籍封面", 36, 192, 296, 92, draft.sleep_screen == "cover");
+        button(SleepReading, "保留正文", 352, 192, 296, 92, draft.sleep_screen == "reading");
+        button(SleepSimple, "简洁屏保", 36, 308, 296, 92, draft.sleep_screen == "simple");
+        button(SleepCustom, "自定义图片", 352, 308, 296, 92, draft.sleep_screen == "custom");
+        if (draft.sleep_screen == "custom") {
+            button(SleepChoose, "选择图片 / 轮播", 36, 432, 612, 88);
+            text(draft.sleep_image.empty() ? "按文件名轮播" : draft.sleep_image, 36, 548, 24, 612, 3);
+        } else note("无可用封面时显示书名与作者。", 464);
         text("自动休眠", 36, 636, 28, 612, 1, true);
         button(SleepLess, "−", 36, 706, 120, 96);
         center(draft.auto_sleep_minutes ? std::to_string(draft.auto_sleep_minutes) + " 分钟" : "关闭", 168, 728, 348, 34);
@@ -4583,7 +4657,13 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (has_book() && !restore_confirmed_position()) return;
         const auto position = has_book() ? book_position(offset, offset) : std::string("位置已保存");
         const char *resume_hint = resume_to_library ? "按电源键返回书库" : "按电源键继续阅读";
-        if (settings.sleep_screen == "simple") {
+        if (settings.sleep_screen == "custom" && custom_sleep_image) {
+            canvas = *custom_sleep_image;
+            custom_sleep_image.reset();
+            view = View::Sleeping;
+            return;
+        }
+        if (settings.sleep_screen == "simple" || settings.sleep_screen == "custom") {
             canvas.clear();
             text("已休眠", 72, 440, 40, 540, 1, true);
             text(resume_hint, 72, 512, 26, 540);
@@ -5363,6 +5443,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 refresh_badge_config(); cancel_sync(); sync_status.clear(); draw_sync(); overlay(); return;
             }
         }
+        if (view == View::LockScreens) { draw_power(); overlay(); return; }
         if (view == View::PowerMenu) { close_power_menu(); return; }
         if (view == View::Portal) return;
         if (view == View::BookManagement) { draw_details(); overlay(); return; }
@@ -5549,6 +5630,19 @@ struct ReaderApp::Impl final : DisplayBackend {
         draw_wifi(); overlay();
     }
     void control(int id) {
+        if (id == SleepCustom) { draft.sleep_screen = "custom"; draw_power(); overlay(); return; }
+        if (id == SleepChoose || id == SleepRefresh) { list_lock_screens(); return; }
+        if (id == SleepRotation) {
+            draft.sleep_image.clear(); draft.sleep_screen = "custom"; draw_lock_screens(); overlay(); return;
+        }
+        if (view == View::LockScreens && id >= LockScreenBase && id < LockScreenBase + 256) {
+            const auto index = static_cast<std::size_t>(id - LockScreenBase);
+            if (index < lock_screens.size()) {
+                draft.sleep_image = lock_screens[index]; draft.sleep_screen = "custom";
+                draw_lock_screens(); overlay();
+            }
+            return;
+        }
         if (view == View::NetworkClosing) {
             if (id == ContinueOffline) {
                 network_after_cancel = 0;
@@ -5715,7 +5809,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         case PowerMenu:
             if (!display.busy() && !active_network && !content_loading && !foreground_job && !usb_prepared && view != View::Portal) {
-                if (counting_job && counting_job->request.kind == ContentJob::Kind::SleepCover) {
+                if (counting_job && (counting_job->request.kind == ContentJob::Kind::SleepCover || counting_job->request.kind == ContentJob::Kind::LockScreen)) {
                     counting_job->cancel();
                     power_menu_wait = view;
                     return;
@@ -5901,6 +5995,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
             settings.auto_sleep_minutes = draft.auto_sleep_minutes;
             settings.sleep_screen = draft.sleep_screen;
+            settings.sleep_image = draft.sleep_image;
+            custom_prepared = custom_sleep_attempted = false;
+            custom_sleep_image.reset();
             message = "休眠设置已保存";
             draw_settings();
             break;
@@ -5911,7 +6008,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         case ClearCache:
             if (!bookmark_io_ready()) return;
             abandon_content(); foreground_job.reset(); stop_covers(); stop_raster(); stop_counting_job();
-            covers.clear();
+            covers.clear(); custom_prepared = false; custom_sleep_image.reset();
             message = store.clear_cache() == StoreStatus::Ok ? "缓存已清理，原书与阅读记录保留" : "缓存未完全清理，请检查 TF 卡";
             draw_storage();
             break;
@@ -6020,7 +6117,11 @@ struct ReaderApp::Impl final : DisplayBackend {
             return;
         case Prev:
         case Next:
-            if (view == View::Help) {
+            if (view == View::LockScreens) {
+                if (id == Prev && lock_screen_page) --lock_screen_page;
+                else if (id == Next) ++lock_screen_page;
+                draw_lock_screens();
+            } else if (view == View::Help) {
                 if (id == Prev && help_page) --help_page;
                 else if (id == Next && help_page + 1 < kHelpPages.size()) ++help_page;
                 else return;
@@ -6165,7 +6266,8 @@ struct ReaderApp::Impl final : DisplayBackend {
                 abandon_content();
                 if (kind == ContentJob::Kind::ImageViewer) { close_image_viewer(); return; }
                 link_return = confirmed_link_return;
-                if (mapping) { sync_cancelled(false); draw_sync(); }
+                if (kind == ContentJob::Kind::LockScreenList) draw_power();
+                else if (mapping) { sync_cancelled(false); draw_sync(); }
                 else if (preview) draw_tools();
                 else draw_library();
                 overlay();
@@ -6688,6 +6790,9 @@ void ReaderApp::show_power_off_help() {
 }
 bool ReaderApp::sleep_pending() const { return impl_->sleep_cover_deadline.has_value(); }
 void ReaderApp::cancel_sleep() {
+    impl_->custom_sleep_attempted = false;
+    impl_->custom_prepared = false;
+    impl_->custom_sleep_image.reset();
     if (impl_->sleep_cover_deadline) {
         impl_->sleep_cover_deadline.reset();
         if (impl_->counting_job) impl_->counting_job->cancel();
@@ -6716,7 +6821,7 @@ bool ReaderApp::prepare_sleep() {
     }
     if (impl_->network_worker_id || impl_->portal_live || impl_->usb_prepared || impl_->view == View::Portal || impl_->view == View::PowerMenu || impl_->view == View::PowerOff) return false;
     if (impl_->display.busy() || impl_->active_network) return false;
-    if (impl_->counting_job && impl_->counting_job->request.kind == ContentJob::Kind::SleepCover) {
+    if (impl_->counting_job && (impl_->counting_job->request.kind == ContentJob::Kind::SleepCover || impl_->counting_job->request.kind == ContentJob::Kind::LockScreen)) {
         // Adopt the in-flight cover before cleanup can join its worker on the application task.
         impl_->sleep_cover_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         return false;
@@ -6730,6 +6835,13 @@ bool ReaderApp::prepare_sleep() {
     impl_->clear_prefetch();
     impl_->release_counting();
     impl_->resume_to_library = impl_->view == View::Library || !impl_->has_book();
+    if (impl_->settings.sleep_screen == "custom" && !impl_->custom_sleep_attempted) {
+        impl_->prepare_custom_sleep(true);
+        if (impl_->counting_job) {
+            impl_->sleep_cover_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            return false;
+        }
+    }
     if (!cover_attempted && impl_->async_content && impl_->has_book() && !txt_name(impl_->book_path) &&
         impl_->settings.sleep_screen == "cover") {
         impl_->prepare_sleep_cover();
@@ -6758,6 +6870,9 @@ void ReaderApp::wake(bool slept) {
     impl_->wifi_status.manual = false;
     impl_->wifi_status.ssid.clear(); impl_->wifi_status.detail.clear();
     impl_->wifi_notice.clear();
+    impl_->custom_sleep_attempted = false;
+    impl_->custom_prepared = false;
+    impl_->custom_notice_pending = slept && !impl_->custom_notice.empty();
     if (slept) impl_->sleep_wifi_target.reset();
     else cancel_sleep();
     if (!impl_->resume_to_library && impl_->has_book()) {
@@ -6807,7 +6922,7 @@ bool ReaderApp::content_busy() const {
 }
 bool ReaderApp::background_due() const {
     return !!impl_->cover_job || impl_->pending_covers.has_value() || !!impl_->raster_job || !!impl_->counting_job ||
-           impl_->prefetch_due() || impl_->counting_due();
+           impl_->custom_prepare_due() || impl_->prefetch_due() || impl_->counting_due();
 }
 #if !defined(ESP_PLATFORM) || defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
 // Only the diagnostic console reads this; other firmware builds do not carry the name table.
@@ -6828,7 +6943,7 @@ const char *ReaderApp::background_state() const {
             kind == ContentJob::Kind::Chapter ? "chapter" : "image";
     }
     if (impl_->cover_job || impl_->pending_covers) return "covers";
-    if (impl_->counting_job && impl_->counting_job->request.kind == ContentJob::Kind::SleepCover) return "sleep-cover";
+    if (impl_->counting_job && (impl_->counting_job->request.kind == ContentJob::Kind::SleepCover || impl_->counting_job->request.kind == ContentJob::Kind::LockScreen)) return "sleep-cover";
     if (impl_->raster_job || impl_->prefetch_due()) return "prefetch";
     if (impl_->counting_blocked == impl_->chapter_index) return "waiting";
     if ((!impl_->pages_cache_disabled && impl_->pages_complete && impl_->font_identity.empty()) ||
@@ -6863,6 +6978,11 @@ void ReaderApp::poll_background(bool cancel) {
     if (!cancel || !impl_->content_loading) impl_->poll_content(!cancel);
     // Waits for the queued taps of one burst, so they reach the panel in a single update.
     if (!cancel) impl_->flush_entry();
+    if (impl_->custom_notice_pending && !impl_->display.busy() && !impl_->content_loading && !impl_->foreground_job &&
+        (impl_->view == View::Library || impl_->view == View::Reading)) {
+        impl_->custom_notice_pending = false;
+        impl_->error(impl_->custom_notice + "。请检查 LockScreens/ 图片；不可用时使用简洁屏保。");
+    }
     if (!cancel && !impl_->pending_wifi_record.empty() && impl_->card_available &&
         !impl_->portal_live && !impl_->usb_prepared && !impl_->network_worker_id &&
         !impl_->display.busy() && !impl_->save_job && !impl_->bookmark_job && !impl_->foreground_job) {
@@ -6892,7 +7012,8 @@ void ReaderApp::background_step(const std::function<bool()>& stop) {
     impl_->poll_raster();
     impl_->poll_counting_job();
     if (stop && stop()) { if (impl_->counting_job) impl_->counting_job->cancel(); return; }
-    if (impl_->prefetch_due()) impl_->prepare_next(stop);
+    if (impl_->custom_prepare_due()) impl_->prepare_custom_sleep(false);
+    else if (impl_->prefetch_due()) impl_->prepare_next(stop);
     else if (impl_->counting_due()) impl_->count_pages(stop);
 }
 void ReaderApp::show_error(const std::string &message) {

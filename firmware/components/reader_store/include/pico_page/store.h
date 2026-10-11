@@ -3,6 +3,7 @@
 #include "pico_page/record.h"
 
 #include <optional>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -74,6 +75,9 @@ struct BookSnapshot {
     std::optional<std::string> progress, backup;
 };
 
+/** A supported basename directly below LockScreens; hidden files and path components are refused. */
+bool valid_lock_screen_name(const std::string& name);
+
 struct ReaderSettings {
     std::string font = "Fonts/LXGWWenKai-Regular.ttf";
     int font_size_px = 38;
@@ -88,7 +92,8 @@ struct ReaderSettings {
     std::string library_view = "list";
     bool wifi_enabled = true;  // Global only; applies to station and access-point sessions.
     int auto_sleep_minutes = 10;  // Global only; 0 disables idle sleep.
-    std::string sleep_screen = "cover";  // Global only: cover, reading or simple.
+    std::string sleep_screen = "cover";  // Global only: cover, reading, simple or custom.
+    std::string sleep_image;  // Global only; empty selects alphabetical rotation.
 };
 
 struct ConfigDiagnostic {
@@ -261,6 +266,13 @@ public:
 
     /** Delete only PicoPage/cache children after users of those files stop. */
     StoreStatus clear_cache() const;
+    /** Enumerates up to 256 regular PNG/JPEG files; refuses oversized or unsafe directories. */
+    StoreStatus lock_screen_files(std::vector<std::string>& names, const std::function<bool()>& stop = {}) const;
+    /** Reads at most 2 MiB, checking cancellation between bounded chunks. */
+    StoreStatus read_lock_screen(const std::string& name, std::vector<std::uint8_t>& bytes,
+                                 const std::function<bool()>& stop = {}) const;
+    std::string last_lock_screen() const;
+    StoreStatus save_lock_screen(const std::string& name) const;
 
     /** Reads a rebuildable file below PicoPage/cache. The caller validates its contents. */
     StoreStatus load_cache(const std::string& name, std::size_t limit, std::string& bytes) const;

@@ -212,6 +212,12 @@ struct Host {
         // Keyboard taps are drawn by the next idle poll, as in the device loop.
         if (app.keyboard_visible()) app.poll_background();
         if (!flush()) return false;
+        // The desktop preview completes asynchronous settings lists before the next scripted input.
+        while (app.content_busy()) {
+            app.poll_background();
+            if (!flush()) return false;
+            SDL_Delay(1);
+        }
         // Scripts have no event loop, so a Wi-Fi request is answered right after its page is shown.
         if (const auto wifi = app.take_wifi_request()) answer_wifi(*wifi);
         return flush() && poll_portal();
@@ -225,6 +231,14 @@ struct Host {
         const bool okay = SDL_SaveBMP(surface, path.c_str()) == 0;
         SDL_FreeSurface(surface);
         return okay;
+    }
+    bool sleep() {
+        while (!app.prepare_sleep()) {
+            if (!app.sleep_pending()) return false;
+            app.poll_background();
+            SDL_Delay(1);
+        }
+        return flush();
     }
     bool command(const std::string &line) {
         std::istringstream input(line);
@@ -261,7 +275,7 @@ struct Host {
             return true;
         }
         if (command == "sleep")
-            return app.prepare_sleep() && flush();
+            return sleep();
         if (command == "wake") {
             app.wake();
             return flush();
@@ -369,7 +383,7 @@ int main(int argc, char **argv) {
                 if (host.app.view() == View::Sleeping)
                     host.app.wake();
                 else
-                    host.app.prepare_sleep();
+                    host.sleep();
                 host.flush();
                 break;
             default:
