@@ -48,6 +48,12 @@ public:
     enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks };
     enum class Target { Start, End, Before, Anchor, Fragment };
     enum class StartFailure { None, InternalMemory, TaskCreate };
+    /**
+     * Free PSRAM a cold image decode requires before reading the image: the result canvas, a raster of
+     * at most the same size, and the 768 KiB kept free while a document is read. The encoded bytes are
+     * admitted separately, by their actual size, in EpubDocument::read_image.
+     */
+    static constexpr std::size_t image_room = 2 * (684U * 1216U / 2) + 768U * 1024;
     struct CoverSource {
         std::string path, cache_name, cache_header;
         off_t size = 0;
@@ -77,7 +83,7 @@ public:
         std::uint64_t bookmark_next = 1;
         /** Pagination only. Without a session the job prepares and discards its own. */
         std::shared_ptr<PaginationSession> session;
-        bool save_last_book = false, prefetch = false, cover_crop = false, preview = false;
+        bool save_last_book = false, cover_crop = false, preview = false;
         bool progressive = false;
         std::uint64_t generation = 0;
         PP_DIAGNOSTIC(std::uint64_t diagnostic_session = 0, diagnostic_layout = 0;)
@@ -98,7 +104,6 @@ public:
         std::vector<std::vector<std::uint8_t>> covers;
         std::unique_ptr<EpubDocument> document;
         Chapter chapter;
-        graphics::Page page;
         std::vector<std::pair<std::uint32_t, std::uint32_t>> history;
         std::size_t chapter_index = 0;
         ConfigResult configuration;
@@ -147,7 +152,6 @@ private:
     diagnostics::Token measurement_{};
 #endif
     void render_image();
-    void prepare_chapter_page(EpubDocument& document);
     void open_book();
     void prepare_cover();
     void map_position();

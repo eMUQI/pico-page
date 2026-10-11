@@ -16,7 +16,6 @@ from device_console import Console, open_serial
 from firmware_provenance import artifacts, source_state
 
 OUTCOMES = ("success", "failure", "cancelled", "timeout")
-PREFETCH = 256  # Content detail flag: optional work whose failure only lowers the cache hit rate
 
 # Control centres in the 684 x 1216 layout that reader_app draws at this revision. Every tap is followed
 # by a check of the resulting view, so a layout change ends the run instead of tapping something else.
@@ -575,7 +574,7 @@ def image_observation(session):
 
 def analyze(output):
     """Conservative offline analysis. Missing starts/ends or drops invalidate percentiles."""
-    active, counts, optional, samples = {}, Counter(), Counter(), defaultdict(list)
+    active, counts, samples = {}, Counter(), defaultdict(list)
     gaps, last_seq, metric_active, failures = [], None, {}, 0
     failed_operations = []
     event_count = 0
@@ -593,7 +592,6 @@ def analyze(output):
                 # this measurement window. Active operations will need a new start event.
                 active.clear()
                 counts.clear()
-                optional.clear()
                 failed_operations.clear()
                 samples.clear()
                 metric_active.clear()
@@ -658,11 +656,8 @@ def analyze(output):
                 else:
                     operations.append(dict(f, start_us=int(start["time_us"])))
                 result = int(f["result"])
-                # Optional prefetches are tallied apart, so that neither their failures nor their
-                # successes move the verdict or the failure rate of the mandatory operations.
-                prefetch = f["kind"] == "3" and int(f["detail"]) & PREFETCH
-                (optional if prefetch else counts)[OUTCOMES[result]] += 1
-                if result in (1, 3) and not prefetch:
+                counts[OUTCOMES[result]] += 1
+                if result in (1, 3):
                     failed_operations.append(f["op"])
                 composition[f'{f["kind"]}:{f["detail"]}:{result}'] += 1
                 samples[f["kind"]].append(int(f["duration_us"]))
@@ -685,7 +680,7 @@ def analyze(output):
                                    p99_us=None if gaps else percentile(values, .99))
     completed = sum(counts[k] for k in OUTCOMES)
     return dict(counts={k: counts[k] for k in (*OUTCOMES, "unfinished", "command_failure", "command_timeout", "busy")},
-                optional={k: optional[k] for k in OUTCOMES}, failed_operations=failed_operations,
+                failed_operations=failed_operations,
                 gaps=sorted(set(gaps)), distributions=distributions, events=event_count,
                 composition=dict(composition), frame_failures=failures,
                 image_chains=image_evidence(operations), stale_image_patches=stale_image_patches(operations),

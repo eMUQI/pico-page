@@ -102,7 +102,7 @@ python3 tools/device_workbench.py --port /dev/ttyACM0 \
 
 每轮生成 run.json、serial.bin、chunks.jsonl、events.jsonl、marks.jsonl、mark-windows.json、report.html；自动检查成功时另存 canvas.pgm。chunks.jsonl 的 offset/size 精确指向原始字节区间，并保存主机单调时间和 UTC 纳秒时间。报告可离线打开。输出路径必须不存在，工具不会覆盖已有证据。
 
-状态分 pass、fail、skip、inconclusive、infra_error。聚合分别列成功、失败、取消、超时和未完成；命令失败/超时与操作终态分开。设备在有待呈现帧时拒绝注入输入并回复 `ERROR busy`，这是忙态保护，单独计入 busy，不算命令失败。预取任务（detail 含 256）的所有终态单独计入 `analysis.optional`，不进入 counts 和失败率：它的失败只降低缓存命中率，不使结果变为 fail，但会显示在报告中。发现漏事件、溢出、未完成操作、设备重启或缺元数据，不显示全绿。完整事件样本才给 p50/p95/p99；有缺口时分位数为 null。当前分布按 kind 汇总所有终态（包含失败和取消），应同时查看样本数、max_us 和失败率，不能当成单一图片类型的成功耗时。旧的阈值阶段日志仅原样留存，不纳入新分布。
+状态分 pass、fail、skip、inconclusive、infra_error。聚合分别列成功、失败、取消、超时和未完成；命令失败/超时与操作终态分开。设备在有待呈现帧时拒绝注入输入并回复 `ERROR busy`，这是忙态保护，单独计入 busy，不算命令失败。发现漏事件、溢出、未完成操作、设备重启或缺元数据，不显示全绿。完整事件样本才给 p50/p95/p99；有缺口时分位数为 null。当前分布按 kind 汇总所有终态（包含失败和取消），应同时查看样本数、max_us 和失败率，不能当成单一图片类型的成功耗时。旧的阈值阶段日志仅原样留存，不纳入新分布。
 
 ```sh
 python3 tools/device_workbench.py --compare .local/runs/base/run.json .local/runs/new/run.json

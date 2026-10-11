@@ -309,19 +309,6 @@ class WorkbenchTest(unittest.TestCase):
         self.assertEqual(stale_image_patches([dict(frame, session="1"), patch_op]), [])
         self.assertEqual(stale_image_patches([dict(frame, time_us="125"), patch_op]), [])
 
-    def test_optional_prefetch_failure_does_not_fail_the_run(self):
-        session = self.start()
-        for seq, (op, begin, result, detail) in enumerate(((1, 1, 0, 258), (1, 0, 1, 258), (2, 1, 0, 2), (2, 0, 0, 2)), 1):
-            session._line(f"PP 1 ENTRY seq={seq} time_us={seq * 10} op={op} duration_us=10 task=7 kind=3 begin={begin} "
-                          f"result={result} session=0 layout=0 frame=0 request=4 detail={detail}")
-        self.cutoff(4)
-        self.finish()
-        run = finalize(self.output, {}, dict(status="pass"))
-        # Optional prefetches stay out of the mandatory counters and of the failure rate, whatever their outcome.
-        self.assertEqual((run["analysis"]["optional"]["failure"], run["analysis"]["counts"]["failure"]), (1, 0))
-        self.assertEqual((run["analysis"]["counts"]["success"], run["analysis"]["failure_rate"]), (1, 0))
-        self.assertEqual(run["result"]["status"], "pass")
-
     def image_trace(self, *, overlap=True, content_result=0, patch_result=0, frame_result=0,
                     decoded=1, generation=4, frame_request=9, network_result=0, stage=None):
         session = self.start()
