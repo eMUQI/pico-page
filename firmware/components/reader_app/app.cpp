@@ -5068,9 +5068,13 @@ struct ReaderApp::Impl final : DisplayBackend {
             remote_anchor.reset(); sync_state = SyncState::Unmapped;
             log_mapping_failure("Download", detail);
             if (memory_error(detail)) sync_status = "设备内存不足，暂时无法定位远端位置，没有跳转。";
-            else if (detail == sync::kUnsupportedStructure)
+            else if (outside_mapping(detail))
                 sync_status = "远端位置所在的章节含有表格等暂不支持的内容，无法换算成本机位置，没有跳转。";
         }
+    }
+    /** True when the content at a position, not a transient condition, keeps it from being mapped. */
+    static bool outside_mapping(const std::string& detail) {
+        return detail == sync::kUnsupportedStructure || detail == sync::kUnresolvedVisibility;
     }
     /**
      * Records why a position could not be mapped. The texts are fixed and name at most a
@@ -5085,7 +5089,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     void upload_mapping_failed(const std::string& detail) {
         log_mapping_failure("Upload", detail);
         sync_status = memory_error(detail) ? "设备内存不足，暂时无法计算上传位置。" :
-            detail == sync::kUnsupportedStructure ? "这一章含有表格等暂不支持的内容，无法换算成 KOReader 的位置，没有上传。" :
+            outside_mapping(detail) ? "这一章含有表格等暂不支持的内容，无法换算成 KOReader 的位置，没有上传。" :
             "这个位置暂时不能上传。";
     }
     void upload() {

@@ -95,6 +95,24 @@ int main(int argc, char** argv) {
             assert(recovered == Anchor{});
         }
 
+        // A stylesheet that can remove elements from the layout leaves the visibility of an image
+        // unknown, so its position is refused in both directions; text keeps its mapping. A
+        // display value other than none does not hide anything.
+        EpubDocument hiding;
+        Chapter hidden, shown;
+        assert(hiding.open((fixtures / "hidden-image.epub").string(), error));
+        assert(hiding.load_chapter(0, hidden, error) && hiding.load_chapter(1, shown, error));
+        assert(hidden.images.size() == 1 && shown.images.size() == 1);
+        Anchor unused;
+        assert(!sync::to_xpointer(hiding, hidden, hidden.images[0].source, 20260812, pointer, error));
+        assert(error == std::string(sync::kUnresolvedVisibility));
+        assert(!sync::from_xpointer(hiding, "/body[1]/DocFragment[1]/body[1]/img[1].0", 20260812, unused, error));
+        assert(error == std::string(sync::kUnresolvedVisibility));
+        assert(sync::to_xpointer(hiding, hidden, {hidden.resource, "/html[1]/body[1]/p[1]/text()[1]", 0}, 20260812, pointer, error));
+        assert(sync::to_xpointer(hiding, shown, shown.images[0].source, 20260812, pointer, error));
+        assert(pointer == "/body[1]/DocFragment[2]/body[1]/img[1].0");
+        assert(sync::from_xpointer(hiding, pointer, 20260812, unused, error) && unused == shown.images[0].source);
+
         // An image that opens a chapter part lies inside that part: its run, its image entry and
         // the place reported for its position all use offsets of the part that holds it.
         EpubDocument split;

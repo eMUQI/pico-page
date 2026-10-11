@@ -105,6 +105,14 @@ def generate(directory: Path) -> None:
         f"<p>{number:04d}这一段文字用于把第一个分段正好填满到分段上限为止。</p>" for number in range(2000)) +
         '<img src="cover.png" alt="分段首图"/><p>图片之后的正文。</p></body></html>')
     write_fixture(directory / "part-boundary-image.epub", boundary)
+    # CSS that removes elements from the layout: the first chapter hides its image, the second
+    # only changes how its image is displayed.
+    hidden = dict(entries)
+    hidden["EPUB/chapter1.xhtml"] = ('<html xmlns="http://www.w3.org/1999/xhtml"><body><p>隐藏图片之前的正文。</p>'
+                                     '<img src="cover.png" alt="隐藏图片" style="display:none"/><p>隐藏图片之后的正文。</p></body></html>')
+    hidden["EPUB/chapter2.xhtml"] = ('<html xmlns="http://www.w3.org/1999/xhtml"><body><p>块级图片之前的正文。</p>'
+                                     '<img src="cover.png" alt="块级图片" style="display: block"/><p>块级图片之后的正文。</p></body></html>')
+    write_fixture(directory / "hidden-image.epub", hidden)
     # A table keeps its whole chapter outside the exact KOReader position mapping.
     table = fixture_entries()
     table["EPUB/chapter1.xhtml"] = ('<html xmlns="http://www.w3.org/1999/xhtml"><body><p>表格之前的正文。</p>'

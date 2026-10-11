@@ -70,7 +70,11 @@ bool supported_structure(const std::vector<Segment>& parts) {
 }
 bool xml_space(char32_t value) { return value == U' ' || value == U'\t' || value == U'\n' || value == U'\r'; }
 
-struct CssProfile { bool normal_whitespace = true; bool changes_display = false; };
+struct CssProfile {
+    bool normal_whitespace = true;
+    bool changes_display = false;
+    bool hides_elements = false;  // A "display: none" declaration; which elements it selects is not resolved.
+};
 
 CssProfile css_profile(const Chapter& chapter) {
     CssProfile profile;
@@ -100,11 +104,12 @@ CssProfile css_profile(const Chapter& chapter) {
             if (i >= css.size() || css[i] != ':') continue;
             ++i;
             if (name == "display") profile.changes_display = true;
-            if (name != "white-space") continue;
+            if (name != "white-space" && name != "display") continue;
             while (i < css.size() && std::isspace(static_cast<unsigned char>(css[i]))) ++i;
             const auto value_begin = i;
             while (i < css.size() && (std::isalpha(static_cast<unsigned char>(css[i])) || css[i] == '-')) ++i;
             const auto value = css.substr(value_begin, i - value_begin);
+            if (name == "display") { profile.hides_elements = profile.hides_elements || value == "none"; continue; }
             if (value != "normal" && value != "nowrap" && value != "inherit" && value != "initial" && value != "unset")
                 profile.normal_whitespace = false;
         }
@@ -173,6 +178,8 @@ bool to_xpointer(const EpubDocument& document, const Chapter& chapter, const Anc
         // CREngine addresses an image as its element at offset zero. The boxing nodes it inserts
         // around inline content are not part of an XPointer in the supported DOM versions.
         if (!supported_structure(element)) { error = "Unsupported source node structure"; return false; }
+        // A hidden image has no position in the engine's layout.
+        if (css.hides_elements) { error = kUnresolvedVisibility; return false; }
         xpointer = "/body[1]/DocFragment[" + std::to_string(spine + 1) + ']' + canonical(element, 1) + ".0";
         return true;
     }
@@ -231,6 +238,7 @@ bool from_xpointer(EpubDocument& document, const std::string& xpointer, int dom_
                 error = "KOReader image position cannot be mapped exactly";
             return false;
         }
+        if (css.hides_elements) { error = kUnresolvedVisibility; return false; }
         anchor = {chapter.resource, source, 0};
         report(visible);
         return true;
