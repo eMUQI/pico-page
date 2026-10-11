@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(pico_page_host LANGUAGES C CXX)
+include(tools/project_version.cmake)
 
 include(CTest)
 add_executable(power_key_test tests/power_key_test.cpp)
@@ -42,6 +43,9 @@ add_subdirectory(firmware/components/reader_document)
 add_subdirectory(firmware/components/reader_graphics)
 add_subdirectory(firmware/components/reader_sync)
 add_subdirectory(firmware/components/reader_app)
+target_compile_definitions(reader_app PRIVATE PICO_PAGE_VERSION="${PROJECT_VER}")
+add_test(NAME project_version COMMAND ${Python3_EXECUTABLE} -m unittest discover
+    -s ${CMAKE_CURRENT_SOURCE_DIR}/tests -p test_project_version.py -v)
 # Compile the firmware worker path with controlled queue, allocation and scheduling failures.
 add_executable(content_worker_test tests/content_worker_test.cpp firmware/components/reader_app/content_job.cpp)
 target_compile_definitions(content_worker_test PRIVATE ESP_PLATFORM)
