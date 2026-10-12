@@ -1203,26 +1203,19 @@ static void update_test(const fs::path& root) {
         assert(!app.prepare_power(drained) && app.view() == View::Update); driver.present();
         assert(!fs::exists(root / "PicoPage/cache" / update::state_cache) || state().pending_to.empty());
         app.set_battery(std::nullopt, true);
-        // The restart is refused while the result marker cannot be written; nothing is left pending.
-        fs::remove_all(root / "PicoPage/cache");
-        write(root / "PicoPage/cache", "not a directory");
+        // The restart request leaves no record: one is written only after the boot slot was switched,
+        // so a start that never reached the new firmware is not reported as its failure.
         driver.tap(300, 1020);
-        auto power = app.take_power_request();
+        const auto power = app.take_power_request();
         assert(power.action == PowerAction::Restart && power.install && !power.without_save);
-        assert(!app.prepare_power(power) && app.view() == View::Update); driver.present();
-        fs::remove(root / "PicoPage/cache");
-        driver.tap(300, 1020);
-        power = app.take_power_request();
-        assert(power.install && app.prepare_power(power) && app.view() == View::PowerOff); driver.present();
-        assert(app.close_power_files());
+        assert(app.prepare_power(power) && app.view() == View::PowerOff); driver.present();
+        assert(app.close_power_files() && state().pending_to.empty() && state().pending_from.empty());
+        app.record_install();
         cached = state();
         // The cached notes travel with the marker, so the result page can show them offline.
         assert(cached.pending_from == "0.2.0-beta.1" && cached.pending_to == "0.2.0-beta.2" &&
                cached.manifest && cached.manifest->version == "0.2.0-beta.2");
-        // When the boot slot cannot be switched the record is withdrawn, so no failed start is reported.
-        app.discard_install_record();
-        assert(state().pending_to.empty() && state().pending_from.empty() && state().manifest);
-        write(root / "PicoPage/cache" / update::state_cache, update::encode_state(cached));
+
     }
     {
         // The installed version reports success once.
@@ -1271,10 +1264,62 @@ static void update_test(const fs::path& root) {
         ReaderApp app(root.string()); Driver driver{app};
         app.set_firmware_version("0.2.0-beta.9+g1234567.dirty"); app.set_battery(80);
         open_page(app, driver);
+        // The manifest on the card only describes the offer. Its address and digest are confirmed
+        // with the server first; an unchanged answer continues into the download.
+        const auto shown = *state().manifest;
+        const auto unchanged = update_manifest(shown.version, shown.progress_schema);
         driver.tap(300, 1040); driver.present();
-        const auto download = app.take_update_request();
-        assert(download && download->version == "0.2.0-beta.3");
+        auto confirm = app.take_update_request();
+        assert(confirm && confirm->kind == UpdateOperation::Kind::Check);
+        app.complete_update(confirm->id, UpdateFailure::None, 200, unchanged, ""); driver.present();
+        auto download = app.take_update_request();
+        assert(download && download->kind == UpdateOperation::Kind::Download && download->version == "0.2.0-beta.3" &&
+               download->url == shown.url && download->sha256 == shown.sha256);
         app.complete_update(download->id, UpdateFailure::Cancelled, 0, "", ""); driver.present();
+        assert(!app.update_busy());
+    }
+    {
+        // A card whose cached manifest names another image never directs a download: the server's
+        // answer replaces it and the user is asked again.
+        auto forged = state();
+        forged.manifest->url = "https://example.com/firmware/pico-page-0.2.0-beta.3-read_pico-release.bin";
+        forged.manifest->sha256 = std::string(64, 'f');
+        write(root / "PicoPage/cache" / update::state_cache, update::encode_state(forged));
+        ReaderApp app(root.string()); Driver driver{app};
+        app.set_firmware_version("0.2.0-beta.9+g1234567.dirty"); app.set_battery(80);
+        open_page(app, driver);
+        driver.tap(300, 1040); driver.present();
+        const auto confirm = app.take_update_request();
+        assert(confirm && confirm->kind == UpdateOperation::Kind::Check && confirm->url == update::manifest_url);
+        app.complete_update(confirm->id, UpdateFailure::None, 200, update_manifest("0.2.0-beta.3", update::progress_schema + 1), "");
+        driver.present();
+        assert(!app.update_busy() && !app.take_update_request() && state().manifest->sha256 == std::string(64, 'a'));
+        // A failed confirmation starts nothing either.
+        write(root / "PicoPage/cache" / update::state_cache, update::encode_state(forged));
+    }
+    {
+        ReaderApp app(root.string()); Driver driver{app};
+        app.set_firmware_version("0.2.0-beta.9+g1234567.dirty"); app.set_battery(80);
+        open_page(app, driver);
+        driver.tap(300, 1040); driver.present();
+        const auto confirm = app.take_update_request();
+        assert(confirm && confirm->kind == UpdateOperation::Kind::Check);
+        app.complete_update(confirm->id, UpdateFailure::Network, 0, "", ""); driver.present();
+        assert(!app.update_busy() && !app.take_update_request());
+        driver.tap(300, 1040); driver.present();
+        const auto again = app.take_update_request();
+        assert(again && again->kind == UpdateOperation::Kind::Check);
+        app.complete_update(again->id, UpdateFailure::Cancelled, 0, "", ""); driver.present();
+    }
+    {
+        // With Wi-Fi switched off the page leads to the switch instead of a check that cannot start.
+        write(root / "PicoPage/settings.toml", "schema_version=1\n[network]\nwifi_enabled=false\n");
+        ReaderApp app(root.string()); Driver driver{app};
+        app.set_firmware_version("0.2.0-beta.3"); app.set_battery(80);
+        open_page(app, driver);
+        driver.tap(300, 1130); driver.present();
+        assert(app.view() == View::WifiSettings && !app.update_busy());
+        fs::remove(root / "PicoPage/settings.toml");
     }
     {
         // The running release is not offered again, and an older data format is refused.
