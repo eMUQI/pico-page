@@ -1,6 +1,6 @@
 # 版本管理
 
-产品版本的唯一来源为 `firmware/version.txt`。第一个版本 `0.2.0-beta.1` 已于 2026-10-12 作为预发布发布，`firmware/version.txt` 现为 `0.2.0-beta.2`；历史标签 `v0.1.0-mvp` 保留，不重新编号。
+产品版本的唯一来源为 `firmware/version.txt`。`0.2.0-beta.1` 于 2026-10-12、`0.2.0-beta.2` 于 2026-10-13 作为预发布发布，`firmware/version.txt` 现为 `0.2.0-beta.2`，下一轮改动前改为 `0.2.0-beta.3`；历史标签 `v0.1.0-mvp` 保留，不重新编号。
 
 ## 编号与兼容性
 
