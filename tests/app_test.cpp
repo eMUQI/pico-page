@@ -1089,7 +1089,7 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
     }
 }
 
-static std::string update_manifest(const std::string& version, int progress_schema = 1, const std::string& notes = "## 新增\\n- **书签**：可添加。") {
+static std::string update_manifest(const std::string& version, int progress_schema = update::progress_schema, const std::string& notes = "## 新增\\n- **书签**：可添加。") {
     return "{\"manifest\":1,\"board\":\"read_pico\",\"version\":\"" + version + "\",\"published_at\":\"2026-10-18\","
            "\"url\":\"https://picopage.wulu.zone/firmware/pico-page-" + version + "-read_pico-release.bin\",\"size\":2936012,"
            "\"sha256\":\"" + std::string(64, 'a') + "\",\"data_schema\":{\"progress\":" + std::to_string(progress_schema) +
@@ -1148,7 +1148,7 @@ static void update_test(const fs::path& root) {
         app.complete_update(held->id, UpdateFailure::None, 200, update_manifest("0.2.0-beta.2"), "");
         driver.present(); assert(!app.update_busy() && !fs::exists(root / "PicoPage/cache" / update::state_cache));
 
-        check(app, driver, 1130, update_manifest("0.2.0-beta.2", 1,
+        check(app, driver, 1130, update_manifest("0.2.0-beta.2", update::progress_schema,
               "## 新增\\n" + [] { std::string items; for (int i = 0; i < 60; ++i) items += "- 第 " + std::to_string(i) + " 项改动，说明文字较长以便换行和分屏。\\n"; return items; }()));
         auto cached = state();
         assert(cached.manifest && cached.manifest->version == "0.2.0-beta.2" && cached.pending_to.empty());
@@ -1193,6 +1193,16 @@ static void update_test(const fs::path& root) {
         // "Later" keeps the verified image for this power session.
         driver.tap(300, 1130); driver.present(); assert(app.view() == View::Settings);
         driver.tap(300, 856); driver.present(); assert(app.view() == View::Update);
+        // The battery is judged again at the restart: a download can outlast the charge or the charger.
+        app.set_battery(19);
+        step(app, driver, 300, 1020); assert(app.take_power_request().action == PowerAction::None);
+        app.set_battery(40);
+        driver.tap(300, 1020);
+        auto drained = app.take_power_request(); assert(drained.install);
+        app.set_battery(std::nullopt);
+        assert(!app.prepare_power(drained) && app.view() == View::Update); driver.present();
+        assert(!fs::exists(root / "PicoPage/cache" / update::state_cache) || state().pending_to.empty());
+        app.set_battery(std::nullopt, true);
         // The restart is refused while the result marker cannot be written; nothing is left pending.
         fs::remove_all(root / "PicoPage/cache");
         write(root / "PicoPage/cache", "not a directory");
@@ -1209,6 +1219,10 @@ static void update_test(const fs::path& root) {
         // The cached notes travel with the marker, so the result page can show them offline.
         assert(cached.pending_from == "0.2.0-beta.1" && cached.pending_to == "0.2.0-beta.2" &&
                cached.manifest && cached.manifest->version == "0.2.0-beta.2");
+        // When the boot slot cannot be switched the record is withdrawn, so no failed start is reported.
+        app.discard_install_record();
+        assert(state().pending_to.empty() && state().pending_from.empty() && state().manifest);
+        write(root / "PicoPage/cache" / update::state_cache, update::encode_state(cached));
     }
     {
         // The installed version reports success once.
@@ -1242,7 +1256,7 @@ static void update_test(const fs::path& root) {
         check(app, driver, 1130, update_manifest("0.2.0-beta.2"));
         step(app, driver, 300, 1040); assert(!app.update_busy() && state().skipped == "0.2.0-beta.2");
         // A later version lifts the hold; a newer data format asks before it installs.
-        check(app, driver, 1130, update_manifest("0.2.0-beta.3", 2));
+        check(app, driver, 1130, update_manifest("0.2.0-beta.3", update::progress_schema + 1));
         assert(state().skipped.empty());
         driver.tap(300, 1040); driver.present(); assert(!app.update_busy());
         driver.tap(300, 1130); driver.present(); assert(!app.update_busy());
@@ -1268,7 +1282,8 @@ static void update_test(const fs::path& root) {
         app.set_firmware_version("0.2.0-beta.3"); app.set_battery(80);
         open_page(app, driver);
         step(app, driver, 300, 1040); assert(!app.update_busy());
-        check(app, driver, 1130, update_manifest("0.3.0", 0));
+        check(app, driver, 1130, update_manifest("0.3.0", update::progress_schema - 1));
+        assert(state().manifest->version == "0.3.0");
         step(app, driver, 300, 1040); assert(!app.update_busy());
     }
 }

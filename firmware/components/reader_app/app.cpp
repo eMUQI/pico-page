@@ -4311,11 +4311,15 @@ struct ReaderApp::Impl final : DisplayBackend {
         return offer == update::Offer::Newer || offer == update::Offer::NewerSchema || offer == update::Offer::Development;
     }
     bool update_waiting() const { return update_request || update_worker; }
+    /** Why the battery forbids an installation now; empty at 20% or above, or on external power. */
+    std::string update_battery_block() const {
+        if (battery_charging || (battery_percent && *battery_percent >= 20)) return {};
+        return battery_percent ? "电量 " + std::to_string(*battery_percent) + "%。充电或电量到 20% 以上再安装。"
+                               : "电量未知。接上电源后再安装。";
+    }
     /** Why an installation cannot start now; empty when it can. */
     std::string update_block() const {
-        if (!battery_charging && (!battery_percent || *battery_percent < 20))
-            return battery_percent ? "电量 " + std::to_string(*battery_percent) + "%。充电或电量到 20% 以上再安装。"
-                                   : "电量未知。接上电源后再安装。";
+        if (const auto battery = update_battery_block(); !battery.empty()) return battery;
         if (active_network || portal_live || wifi_worker || content_loading || foreground_job || save_job || bookmark_job)
             return "请先结束正在进行的同步、传书或书籍加载。";
         return {};
@@ -4751,10 +4755,12 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (update_page == UpdatePage::Ready) { update_notice.clear(); draw_settings(); overlay(); }
             return true;
         case UpdateRestart:
-            if (update_page == UpdatePage::Ready && update_ready) {
-                power_selected = PowerAction::Restart;
-                power_request = {PowerAction::Restart, false, true};
-            }
+            if (update_page != UpdatePage::Ready || !update_ready) return true;
+            // The download may have drained the battery or the charger may have been removed.
+            update_notice = update_battery_block();
+            if (!update_notice.empty()) break;
+            power_selected = PowerAction::Restart;
+            power_request = {PowerAction::Restart, false, true};
             return true;
         case UpdateDismiss:
             if (update_page != UpdatePage::Result) return true;
@@ -7280,6 +7286,10 @@ void ReaderApp::complete_update(std::uint64_t id, UpdateFailure failure, int sta
     impl_->update_complete(id, failure, status, body, detail);
 }
 bool ReaderApp::update_busy() const { return impl_->update_waiting(); }
+void ReaderApp::discard_install_record() {
+    impl_->update_state.pending_from.clear(); impl_->update_state.pending_to.clear();
+    impl_->save_update_state();
+}
 void ReaderApp::input(const AppInput &event) {
     impl_->input(event);
 }
@@ -7600,6 +7610,12 @@ bool ReaderApp::prepare_power(PowerRequest request) {
         if (saved) { impl_->last_recorded = impl_->book_path; impl_->recent_save_failed = false; }
     }
     if (install) {
+        if (const auto battery = impl_->update_battery_block(); !battery.empty()) {
+            impl_->power_request = {}; impl_->power_selected = PowerAction::None;
+            impl_->update_notice = battery;
+            impl_->draw_update(); impl_->overlay();
+            return false;
+        }
         // The marker lets the next start report the result; it is written only after the position.
         if (saved) {
             impl_->update_state.pending_from = impl_->running_version;

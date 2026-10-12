@@ -40,7 +40,10 @@ class ManifestTest(unittest.TestCase):
                 self.build(data)
         with self.assertRaises(ValueError):
             self.build(image(), notes='长' * 3000)
-        for url in ('http://picopage.wulu.zone/firmware/', 'https://picopage.wulu.zone/firmware'):
+        # The device refuses these addresses, so a manifest must never be written with them.
+        for url in ('http://picopage.wulu.zone/firmware/', 'https://picopage.wulu.zone/firmware', 'https:///firmware/',
+                    'https://user@picopage.wulu.zone/firmware/', 'https://picopage.wulu.zone/a b/', 'https://#/',
+                    'https://picopage.wulu.zone/firmware/#x/', 'https://picopage.wulu.zone/' + 'a' * 500 + '/'):
             with self.assertRaises(ValueError):
                 self.build(image(), url=url)
         with self.assertRaises(ValueError):
@@ -88,7 +91,7 @@ class ManifestTest(unittest.TestCase):
         self.assertIsNone(ota_manifest.newest_release([]))
 
     def test_schema_defaults_follow_the_device_constants(self):
-        self.assertEqual(ota_manifest.schema_defaults(), (1, 1))
+        self.assertEqual(ota_manifest.schema_defaults(), (2, 1))
 
 
 if __name__ == '__main__':

@@ -598,7 +598,7 @@ extern "C" void app_main() {
     portal_emit_lock = xSemaphoreCreateMutex();
     flash_lock = xSemaphoreCreateMutex();
     const bool worker_ready =
-        requests && responses && portal_events && wifi_events && update_events && portal_emit_lock && flash_lock &&
+        requests && responses && portal_events && wifi_events && portal_emit_lock &&
         xTaskCreate(network_worker, "pico_network", 16384, nullptr, 3, nullptr) == pdPASS;
     bool usb_mode = false;
     bool network_busy = false, sleep_requested = false, physical_suppressed = false;
@@ -663,14 +663,15 @@ extern "C" void app_main() {
                     ESP_LOGE(tag, "Power teardown did not close file consumers");
                     for (;;) vTaskDelay(pdMS_TO_TICKS(1000));
                 }
+                // The boot slot is switched while the card is still mounted: without the switch the
+                // restart returns to this firmware, and the installation record must not remain.
+                if (power_request.install && !pico_page::platform::activate_firmware(error)) {
+                    ESP_LOGE(tag, "Firmware activation: %s", error.c_str());
+                    app->discard_install_record();
+                }
                 if (!pico_page::platform::finish_power(error))
                     ESP_LOGW(tag, "Power teardown: %s", error.c_str());
-                if (power_request.action == pico_page::PowerAction::Restart) {
-                    // A failed activation restarts into the running firmware, which then reports it.
-                    if (power_request.install && !pico_page::platform::activate_firmware(error))
-                        ESP_LOGE(tag, "Firmware activation: %s", error.c_str());
-                    esp_restart();
-                }
+                if (power_request.action == pico_page::PowerAction::Restart) esp_restart();
                 if (!pico_page::platform::power_off(error)) {
                     ESP_LOGE(tag, "PMU power-off: %s", error.c_str());
                     app->show_power_off_help();
@@ -803,7 +804,8 @@ extern "C" void app_main() {
         if (!usb_mode && !network_busy && !sleep_requested && !resume_input.active() && !pico_page::console::transfer_active()) {
             if (auto update = app->take_update_request()) {
                 const auto id = update->id;
-                auto* job = worker_ready ? new NetworkJob{} : nullptr;
+                // Without its progress queue or flash lock only the update is refused; other network work continues.
+                auto* job = worker_ready && update_events && flash_lock ? new NetworkJob{} : nullptr;
                 if (job) job->update = std::move(*update);
                 if (job && xQueueSend(requests, &job, 0) == pdTRUE) network_busy = true;
                 else {

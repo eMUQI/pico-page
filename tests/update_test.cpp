@@ -10,7 +10,8 @@ static std::string manifest_json(const std::string& version, const std::string& 
     return "{\"manifest\":1,\"board\":\"read_pico\",\"version\":\"" + version +
            "\",\"published_at\":\"2026-10-18\",\"url\":\"https://picopage.wulu.zone/firmware/a.bin\","
            "\"size\":2936012,\"sha256\":\"" + std::string(64, 'A') + "\","
-           "\"data_schema\":{\"progress\":1,\"config\":1},\"notes\":\"" + notes + "\"" + extra + "}";
+           "\"data_schema\":{\"progress\":" + std::to_string(update::progress_schema) + ",\"config\":" +
+           std::to_string(update::config_schema) + "},\"notes\":\"" + notes + "\"" + extra + "}";
 }
 
 int main() {
@@ -33,7 +34,8 @@ int main() {
     std::string error;
     assert(update::parse_manifest(manifest_json("0.2.0-beta.2"), manifest, error) && error.empty());
     assert(manifest.version == "0.2.0-beta.2" && manifest.size == 2936012 && manifest.sha256 == std::string(64, 'a') &&
-           manifest.published_at == "2026-10-18" && manifest.progress_schema == 1 && !manifest.notes_truncated);
+           manifest.published_at == "2026-10-18" && manifest.progress_schema == update::progress_schema &&
+           manifest.config_schema == update::config_schema && !manifest.notes_truncated);
     // Anything the device cannot verify later is refused before it is cached or offered.
     for (const auto& bad : {std::string("[]"), std::string("{\"manifest\":2}"),
              std::string("{\"manifest\":1,\"board\":\"other\"}"), manifest_json("0.2.0-beta.2+g1234567"), manifest_json("0.2")})
@@ -62,8 +64,13 @@ int main() {
     auto changed = manifest;
     changed.progress_schema = update::progress_schema + 1;
     assert(update::evaluate(changed, "0.2.0-beta.1", "") == Offer::NewerSchema);
-    changed.progress_schema = 1; changed.config_schema = 0;
+    changed.progress_schema = update::progress_schema; changed.config_schema = update::config_schema - 1;
     assert(update::evaluate(changed, "0.2.0-beta.1", "") == Offer::OlderSchema);
+    // Cleared-progress markers use schema 2, so firmware that writes only schema 1 is older.
+    changed = manifest; changed.progress_schema = 1;
+    assert(update::progress_schema == 2 && update::evaluate(changed, "0.2.0-beta.1", "") == Offer::OlderSchema);
+    // The hold names one version: another version that is newer than the running one is offered.
+    assert(update::evaluate(manifest, "0.2.0-beta.1", "0.2.0-beta.3") == Offer::Newer);
     changed = manifest; changed.size = update::slot_bytes + 1;
     assert(update::evaluate(changed, "0.2.0-beta.1", "") == Offer::TooLarge);
     changed.size = update::slot_bytes;

@@ -22,6 +22,7 @@ SLOT_BYTES = 4 * 1024 * 1024
 NOTES_LIMIT = 8 * 1024
 ESP32S3_CHIP_ID = 9
 RELEASE = re.compile(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:beta|rc)\.[1-9][0-9]*)?')
+IMAGE_URL = re.compile(r'https://[!-"$-.0-?A-\[\]-~][!-"$-?A-\[\]-~]*')
 # esp_image_header_t (24 bytes), esp_image_segment_header_t (8 bytes), then esp_app_desc_t.
 DESCRIPTION = 32
 
@@ -57,10 +58,12 @@ def build_manifest(image, notes, base_url, published, schema):
         raise ValueError('Image exceeds the 4 MiB application slot')
     if len(notes.encode()) > NOTES_LIMIT:
         raise ValueError('Release notes exceed 8 KiB; the device would cut them')
-    if not base_url.startswith('https://') or not base_url.endswith('/'):
-        raise ValueError('Base URL must start with https:// and end with /')
     datetime.date.fromisoformat(published)
     name = f'pico-page-{version}-{BOARD}-release.bin'
+    # The device accepts only such addresses: a host directly after the scheme, printable ASCII
+    # without user information, fragment or backslash, at most 512 bytes.
+    if not IMAGE_URL.fullmatch(base_url) or not base_url.endswith('/') or len(base_url + name) > 512:
+        raise ValueError('Base URL must be a plain https:// address that ends with /')
     return name, dict(manifest=1, board=BOARD, version=version, published_at=published, url=base_url + name,
                       size=len(image), sha256=hashlib.sha256(image).hexdigest(),
                       data_schema=dict(progress=schema[0], config=schema[1]), notes=notes)

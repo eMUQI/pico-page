@@ -21,10 +21,11 @@ inline constexpr std::uint32_t slot_bytes = 4u * 1024 * 1024;
 /** Release notes beyond this many bytes are not kept or shown. */
 inline constexpr std::size_t notes_limit = 8 * 1024;
 /**
- * Highest schema_version this firmware reads in progress.json and in settings.toml. Raise them
- * together with the store formats; a manifest names the versions its firmware writes.
+ * Highest schema_version this firmware reads and writes in progress.json and in settings.toml.
+ * Progress records use 1 and the marker of cleared progress uses 2. Raise them together with
+ * the store formats; a manifest names the versions its firmware writes.
  */
-inline constexpr int progress_schema = 1, config_schema = 1;
+inline constexpr int progress_schema = 2, config_schema = 1;
 /** Rebuildable cache entry that holds the encoded State. */
 inline constexpr char state_cache[] = "update.json";
 inline constexpr std::size_t state_limit = 24 * 1024;
@@ -47,7 +48,7 @@ struct Manifest {
     std::string version, published_at, url, sha256, notes;
     std::uint32_t size = 0;
     /** Schema versions the firmware writes; see progress_schema and config_schema. */
-    int progress_schema = 1, config_schema = 1;
+    int progress_schema = update::progress_schema, config_schema = update::config_schema;
     /** notes was cut at notes_limit. */
     bool notes_truncated = false;
 };
