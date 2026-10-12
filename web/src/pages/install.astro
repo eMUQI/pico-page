@@ -8,7 +8,10 @@ let firmware;
 try {
   const { version } = JSON.parse(readFileSync("public/firmware/manifest.json", "utf8"));
   const file = `pico-page-${version}-read_pico-release-full.bin`;
-  const sha256 = createHash("sha256").update(readFileSync(`public/firmware/${file}`)).digest("hex");
+  const image = readFileSync(`public/firmware/${file}`);
+  // The installer erases the flash before it writes, so an image that cannot fit is never offered.
+  if (image.length > 16 * 1024 * 1024) throw new Error(`${file} is larger than the 16 MiB flash of Read Pico`);
+  const sha256 = createHash("sha256").update(image).digest("hex");
   firmware = { version, url: `/firmware/${file}`, sha256 };
 } catch (error) {
   if (error.code !== "ENOENT") throw error;
@@ -90,12 +93,13 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
                       </div>
                       <div data-panel="connected" hidden>
                         <dl>
-                          <div><dt>设备</dt><dd>Read Pico</dd></div>
+                          <div><dt>芯片</dt><dd>ESP32-S3 · 16 MiB 闪存</dd></div>
                           <div><dt>方式</dt><dd>整片覆盖写入</dd></div>
                         </dl>
                         <p class="notice">设备闪存中的所有内容都会被清除，包括现有固件和设备内保存的 Wi‑Fi 等设置。回到官方系统的方法见第 1 步中的官方说明。</p>
+                        <label class="confirm"><input type="checkbox" data-el="confirm"><span>我确认连接的是 Read Pico。本页只能核对芯片型号和闪存容量；连接的是其他设备时，它的全部内容同样会被清除。</span></label>
                         <div class="choices">
-                          <button class="primary" type="button" data-el="install">安装 Pico Page</button>
+                          <button class="primary" type="button" data-el="install" disabled>安装 Pico Page</button>
                           <button class="secondary" type="button" data-el="disconnect">断开</button>
                         </div>
                       </div>
@@ -182,7 +186,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
           <p class="wordmark">Pico Page</p>
           <p>读自己的书，接着读下去。</p>
         </div>
-        <nav aria-label="页脚导航"><a href="/">返回首页</a></nav>
+        <nav aria-label="页脚导航"><a href="/assets/third-party-licenses.txt">第三方许可</a><a href="/">返回首页</a></nav>
       </footer>
     </div>
     <script>
@@ -201,6 +205,8 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
           el("status").textContent = labels[phase];
           el("error").textContent = error;
           el("error").hidden = !error;
+          el("confirm").checked = false;
+          el("install").disabled = true;
           card.querySelectorAll("[data-panel]").forEach((panel) => (panel.hidden = panel.dataset.panel !== phase));
           const current = phase === "done" ? 2 : 1;
           steps.forEach((step, index) => {
@@ -217,11 +223,14 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
           el("bar").parentElement.setAttribute("aria-valuenow", percent);
         }
 
-        // Restarts the device out of download mode and frees the port.
+        // Restarts the device out of download mode and frees the port. Returns whether both
+        // succeeded; a page reload frees a port that did not close.
         async function release() {
-          await loader?.after("hard_reset").catch(() => {});
-          await transport?.disconnect().catch(() => {});
+          let clean = true;
+          await loader?.after("hard_reset").catch(() => (clean = false));
+          await transport?.disconnect().catch(() => (clean = false));
           transport = loader = undefined;
+          return clean;
         }
 
         async function connect() {
@@ -240,13 +249,29 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
             transport = new Transport(port, false);
             loader = new ESPLoader({ transport, baudrate: 115200 });
             await loader.main();
-            // Read Pico is an ESP32-S3 with 16 MiB of flash. Only the stub that main() loads can
-            // erase the whole chip; without it the old boot data would survive the installation.
-            if (loader.IS_STUB && loader.chip.CHIP_NAME === "ESP32-S3" && (await loader.detectFlashSize()) === "16MB") {
-              show("connected");
+            // Only the stub that main() loads can erase the whole chip; without it the old boot
+            // data would survive the installation.
+            if (!loader.IS_STUB) throw new Error("The flasher stub is not running");
+            let refusal = "";
+            // Read Pico is an ESP32-S3 with 16 MiB of flash. Other boards match this too, so the
+            // visitor confirms the device before installing.
+            if (loader.chip.CHIP_NAME !== "ESP32-S3" || (await loader.detectFlashSize()) !== "16MB") {
+              refusal = "连接的设备不是 Read Pico，没有写入任何内容。";
             } else {
+              // Read from the ROM during chip detection. The image is plaintext and unsigned: it
+              // would not start on a chip with flash encryption (an odd number of counter bits
+              // set) or secure boot.
+              const security = await loader.getSecurityInfo();
+              const encrypted = security.flashCryptCnt.toString(2).replaceAll("0", "").length % 2 === 1;
+              if (encrypted || security.parsedFlags.SECURE_BOOT_EN) {
+                refusal = "这台设备启用了闪存加密或安全启动，本页写入的固件无法在它上面启动。没有写入任何内容。";
+              }
+            }
+            if (refusal) {
               await release();
-              show("idle", "连接的设备不是 Read Pico，没有写入任何内容。");
+              show("idle", refusal);
+            } else {
+              show("connected");
             }
           } catch (error) {
             console.error(error);
@@ -283,8 +308,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
               reportProgress: (_, written, total) =>
                 progress(Math.floor((written / total) * 100), written < total ? "正在写入" : "正在校验"),
             });
-            await release();
-            show("done");
+            show("done", (await release()) ? "" : "固件已写入并通过校验，但设备可能没有自动重启。请手动重启设备。");
           } catch (error) {
             console.error(error);
             await release();
@@ -294,12 +318,14 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
 
         el("connect").addEventListener("click", connect);
         el("install").addEventListener("click", install);
+        el("confirm").addEventListener("change", () => (el("install").disabled = !el("confirm").checked));
         el("disconnect").addEventListener("click", async () => {
-          await release();
-          show("idle");
+          show("idle", (await release()) ? "" : "串口没有正常释放，设备可能仍在下载模式。请手动重启设备；无法再次连接时，刷新本页。");
         });
+        // A connected device runs the flasher stub until it is reset, and closing the page cannot
+        // reset it. The browser asks before leaving while connected or writing.
         addEventListener("beforeunload", (event) => {
-          if (card.dataset.phase === "writing") event.preventDefault();
+          if (["connected", "writing"].includes(card.dataset.phase)) event.preventDefault();
         });
         if (!("serial" in navigator)) {
           el("hint").textContent = "这个浏览器不能连接设备。请用电脑版 Chrome 或 Edge 打开本页。";
@@ -649,6 +675,18 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
   }
   .flash dt {
     color: var(--muted);
+  }
+  .confirm {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    align-items: start;
+    font-size: 14px;
+    line-height: 1.7;
+    cursor: pointer;
+  }
+  .confirm input {
+    margin: 5px 0 0;
+    accent-color: var(--ink);
   }
   .choices {
     display: flex;
