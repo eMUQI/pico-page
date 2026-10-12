@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+"""Regenerate the website's LXGW WenKai sample font with fonttools 4.60.1 in a local virtual environment.
+
+The home page shows a few words in LXGW WenKai. This writes a WOFF that holds only those characters,
+cut from the pinned v1.520 file that tools/setup_fonts.py downloads.
+"""
+import hashlib
+from pathlib import Path
+
+from fontTools import subset
+from fontTools.ttLib import TTFont
+
+ROOT = Path(__file__).resolve().parents[1]
+SOURCE = ROOT / ".local/card/Fonts/LXGWWenKai-Regular.ttf"
+SOURCE_SHA256 = "8d6ba638ac9553413354cfaab97637c1cd778444e259441ea1e5f8fb2c697fba"
+TARGET = ROOT / "web/public/assets/fonts/PicoPageWenKaiSample.woff"
+# Every character the home page sets in the sample font; keep in step with HomePage.astro.
+TEXT = "霞鹜文楷 Regular读自己的书，接着读下去。鄱阳湖畔䶮行"
+
+
+def main():
+    if hashlib.sha256(SOURCE.read_bytes()).hexdigest() != SOURCE_SHA256:
+        raise ValueError(f"{SOURCE} is not the pinned LXGW WenKai Regular v1.520")
+    font = TTFont(SOURCE, recalcTimestamp=False)
+    requested = set(map(ord, TEXT))
+    missing = requested - set(font.getBestCmap())
+    if missing:
+        raise ValueError("Font lacks requested characters: " + ", ".join(f"U+{c:04X}" for c in sorted(missing)))
+    options = subset.Options()
+    options.layout_features = []
+    # Copyright, names, version, licence text and licence URL stay in the file.
+    options.name_IDs = [0, 1, 2, 3, 4, 5, 6, 13, 14]
+    options.name_legacy = True
+    options.name_languages = ["*"]
+    sub = subset.Subsetter(options=options)
+    sub.populate(unicodes=requested)
+    sub.subset(font)
+    # A modified version carries its own name.
+    names = {1: "Pico Page WenKai Sample", 3: "PicoPageWenKaiSample-1.520", 4: "Pico Page WenKai Sample", 6: "PicoPageWenKaiSample"}
+    for record in font["name"].names:
+        if record.nameID in names:
+            record.string = names[record.nameID].encode(record.getEncoding())
+    font.flavor = "woff"
+    TARGET.parent.mkdir(parents=True, exist_ok=True)
+    font.save(TARGET)
+    print(f"Generated {TARGET}: {len(requested)} characters, {TARGET.stat().st_size} bytes")
+
+
+if __name__ == "__main__":
+    main()

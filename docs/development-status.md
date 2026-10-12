@@ -2,6 +2,8 @@
 
 ## 当前摘要（2026-10-12）
 
+网站首页已有候选（2026-10-12，分支 `web/home-v3`，基于 main `ef3bdb5`，本地提交，未推送）：首页按设计稿《Pico Page 官网 v3》重做，与安装页、404 页共用页头、页脚和样式；界面图按 main `ef3bdb5` 重新导出，六张中四张有变化。固件尚未发布，首页第 1 步显示「固件尚未发布」。只在本机无头 Chrome 检查过，未在线上、Edge 和真实手机检查。详见本日「网站首页 v3 与界面图」记录。
+
 网站安装页已有候选（2026-10-12，分支 `web/install-page`，基于 main `95934bc`，已提交 PR）：`/install/` 按设计稿《Pico Page 烧录》实现，通过 Web Serial 整片擦除并写入全量镜像。固件尚未发布且没有全量镜像，页面显示「固件尚未发布」，不开放写入。安装流程只用模拟的串口和烧录库检查过，没有连接过设备；整片覆盖与现行「只写应用」的规定冲突，待项目所有者确认。详见本日「网站安装页」记录。
 
 联网固件更新第一批已有候选（2026-10-12，分支 `claude/pico-ota-network-update-a2b4fc`，已整合 main `29be1fb`，D40）：「设置 → 固件更新」手动检查、更新日志、安装条件、边下载边写入空闲应用槽、长度与 SHA-256 校验、重启安装、首次启动确认与回滚后的结果提示。出厂 bootloader 经只读核对支持应用回滚，应用配置已启用对应选项，构建分区表改为与实测布局一致。host Debug 与 AppleClang ASan/UBSan 各 24/24，标准、release 和 Diagnostic 固件构建通过；未烧录，下载、闪存写入、启动槽切换、自检和回滚都没有真机证据。「联网时顺便检查」和「下次开机再装」未实现，网站尚未发布清单。详见本日「联网固件更新第一批」记录。
@@ -65,6 +67,18 @@ PR #52（分支 `feat/sync-map-images`，已整合 main `fd17171`）包含三项
 个人主目录、设备标识及私有样本名称已脱敏；占位路径不保证可直接执行。历史日期、验证数值和结果保留，历史授权不适用于新的设备操作。
 
 ## 历史摘要与开发记录
+
+### 2026-10-12 · 网站首页 v3 与界面图
+
+基于 main `ef3bdb5`，分支 `web/home-v3`，本地提交；未推送、未开 PR、未部署。设计稿《Pico Page 官网 v3》经 DesignSync 从 Claude Design 项目只读读取。
+
+- 变更：`web/src/components/HomePage.astro` 按 v3 重写；新增 `web/src/layouts/Site.astro`（页头、导航、页脚）、`web/src/styles/site.css`（从安装页提取的色板、字体栈、页头、页脚、按钮）和 `web/src/firmware.js`（从安装页原样移出的全量镜像查找，首页和安装页共用）；安装页和 404 页改用它们，安装脚本未改；删除 `web/public/assets/styles.css`。导航统一为开始使用、字体、功能、界面、锁屏，「开始使用」指向 `/#start`；旧锚点 `#install`、`#resources`、`#devices` 保留为落点。新增霞鹜文楷示例子集 `web/public/assets/fonts/PicoPageWenKaiSample.woff` 和生成脚本 `tools/setup_web_font_sample.py`；`tools/check_handoff.py` 允许这个字体文件，并不再扫描 `dist` 构建产物。`web/README.md` 新增「首页」一节并更新「字体」「发布前设计稿」。
+- 文案核对：对照源码和 README 核对了 64 MiB 上限（`reader_store` 的 `import_limit`，只用于 Wi‑Fi 上传）、热点与已保存 Wi‑Fi 两种上传方式、`.picopage/` 伴随目录、TTF/OTF、FAT、清晰/均衡/快速三档、内置 3,500 字、「设置 → 使用说明」和锁屏设置的控件名称。与设计稿不符并已改正的两处：缺字示例中的「鄱」也不在内置字集里；64 MiB 和同名不覆盖不适用于 USB。其余差异见 `web/README.md`「首页」。
+- 界面图：2026-10-10 的导出程序可直接用当前接口编译，但其中的点按坐标对不上新的排版面板，正文页脚停在「正在统计页数」，且演示卡必须用绝对路径。修正后的程序在 `.local/website-20261012/`，原始帧与摘要在 `artifacts/website-20261012/`。与旧图逐像素比较：正文、休眠相同；书库（继续阅读行增加「今天」，列表不再重复继续阅读的书，排序改为「最近阅读」按钮）、阅读工具（「刷新」改为「刷新模式」）、排版（四列两行，新增字重、段距、首行缩进，「放弃修改」与「应用到此书」）、位置接续（远端示例改为第二章 66%）四张已替换。导出不联网、不操作设备，PGM 到 PNG 只做格式转换。
+- 环境与命令：Node.js v26.7.0。`cmake --build build/host --target app_test`（供导出程序链接）；`npm run build --prefix web` 通过，生成三个页面；`python3 tools/check_handoff.py`、`git diff --check` 通过。没有改动 C/C++ 源码，未运行 CTest 和固件构建。
+- 检查：仓库外的临时脚本驱动无头 Chrome，在独立端口提供 `web/dist/`。首页、安装页、404 页在 1280 和 390 px 宽度下无横向溢出、无脚本错误、无第三方请求、图片全部加载、示例字体已加载、页内锚点和旧锚点都有落点，27 个站内链接、图片和下载均返回 200；404 页返回 404。安装流程：在 `web/public/firmware/` 临时放入清单和 1 MiB 随机镜像，构建到仓库外的目录，用模拟串口和模拟 `esptool-js` 走完上次的全部检查项并通过，同一构建的首页显示「打开安装页」；临时固件已删除并重新构建。截图在 `artifacts/website-20261012/pages/` 和 `install-flow/`。
+- 未测项：未推送，CI 和 Codex 评审未运行；未在线上域名、Edge、Safari 和真实手机检查；Cloudflare 对脚本标签的改写未核对；外部链接（GitHub、QuotaFrame、Read Pico 官方文档）未访问；安装流程仍只有模拟检查，没有连接设备。网站没有 favicon，`/favicon.ico` 返回 404。
+- 下一步：项目所有者确认后推送并开 PR；合并会部署到生产环境，部署后核对线上三页和下载。
 
 ### 2026-10-12 · 网站安装页
 

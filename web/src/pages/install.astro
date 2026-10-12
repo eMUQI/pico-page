@@ -1,49 +1,11 @@
 ---
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import Site from "../layouts/Site.astro";
+import { firmware } from "../firmware.js";
 
-// Installing needs the full-flash image of the newest release beside its update manifest in
-// public/firmware. Until a release carries one, the page shows the steps without the installer.
-let firmware;
-try {
-  const { version } = JSON.parse(readFileSync("public/firmware/manifest.json", "utf8"));
-  const file = `pico-page-${version}-read_pico-release-full.bin`;
-  const image = readFileSync(`public/firmware/${file}`);
-  // The installer erases the flash before it writes, so an image that cannot fit is never offered.
-  if (image.length > 16 * 1024 * 1024) throw new Error(`${file} is larger than the 16 MiB flash of Read Pico`);
-  const sha256 = createHash("sha256").update(image).digest("hex");
-  firmware = { version, url: `/firmware/${file}`, sha256 };
-} catch (error) {
-  if (error.code !== "ENOENT") throw error;
-}
 const steps = ["安装前确认", "连接并写入", "放入书和字体", "开始阅读"];
 ---
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#f5f4ef">
-    <meta name="description" content="在电脑版 Chrome 或 Edge 中，用 USB 线把 Pico Page 安装到 Read Pico，再放入书和字体。">
-    <title>安装固件 · Pico Page</title>
-  </head>
-  <body>
-    <a class="skip-link" href="#main">跳到正文</a>
-    <div class="wrap">
-      <!-- TODO: 开源后恢复设计稿中的「文档」和「完整安装文档与手动安装方法」链接。 -->
-      <header class="site-header">
-        <div class="bar">
-          <a class="brand" href="/" aria-label="Pico Page 首页">
-            <span class="wordmark">Pico Page</span>
-            <span class="tagline">Read Pico<br>阅读固件</span>
-          </a>
-          <span class="here" aria-current="page">安装固件</span>
-        </div>
-        <nav aria-label="主导航">
-          <a href="/#install">开始使用</a><a href="/#fonts">字体</a><a href="/#features">功能</a><a href="/#screens">界面</a>
-        </nav>
-      </header>
-      <main id="main">
+<Site title="安装固件 · Pico Page" description="在电脑版 Chrome 或 Edge 中，用 USB 线把 Pico Page 安装到 Read Pico，再放入书和字体。" current="install">
+  <!-- TODO: 开源后恢复设计稿中的「完整安装文档与手动安装方法」链接。 -->
         <section class="intro">
           <div>
             <p class="eyebrow">安装固件</p>
@@ -180,16 +142,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
             </div>
           </aside>
         </div>
-      </main>
-      <footer class="site-footer">
-        <div>
-          <p class="wordmark">Pico Page</p>
-          <p>读自己的书，接着读下去。</p>
-        </div>
-        <nav aria-label="页脚导航"><a href="/assets/third-party-licenses.txt">第三方许可</a><a href="/">返回首页</a></nav>
-      </footer>
-    </div>
-    <script>
+  <script>
       // Installs the full-flash image over Web Serial. The serial protocol comes from esptool-js,
       // fetched when the visitor connects.
       const card = document.querySelector(".flash[data-url]");
@@ -332,149 +285,9 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
           el("connect").disabled = true;
         }
       }
-    </script>
-  </body>
-</html>
+  </script>
+</Site>
 <style is:global>
-  :root {
-    --bg: #f5f4ef;
-    --ink: #1d1d1b;
-    --text: #3d3d3a;
-    --muted: #5c5c58;
-    --line: #d9d7cf;
-    --accent: #2f5a4f;
-    --serif: "Noto Serif SC", "Songti SC", "Source Han Serif SC", "SimSun", serif;
-    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    --sans: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
-  }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--ink);
-    font-family: var(--sans);
-    -webkit-font-smoothing: antialiased;
-  }
-  h1,
-  h2,
-  h3,
-  p,
-  dl,
-  dd,
-  ol,
-  ul {
-    margin: 0;
-  }
-  ol,
-  ul {
-    padding: 0;
-    list-style: none;
-  }
-  a {
-    color: var(--ink);
-    text-underline-offset: 4px;
-  }
-  a:hover {
-    color: var(--accent);
-  }
-  strong {
-    font-weight: 600;
-  }
-  code,
-  .mono {
-    font-family: var(--mono);
-  }
-  code {
-    font-size: 0.92em;
-  }
-  [hidden] {
-    display: none !important;
-  }
-  :focus-visible {
-    outline: 3px solid var(--accent);
-    outline-offset: 3px;
-  }
-  .muted {
-    color: var(--muted);
-  }
-  .accent {
-    color: var(--accent);
-  }
-  .wrap {
-    max-width: 1160px;
-    margin: 0 auto;
-    padding: 0 clamp(20px, 4vw, 40px);
-  }
-  .skip-link {
-    position: absolute;
-    top: -80px;
-    left: 20px;
-    padding: 12px;
-    background: #fff;
-  }
-  .skip-link:focus {
-    top: 12px;
-  }
-  .wordmark {
-    font-family: var(--serif);
-    font-weight: 700;
-  }
-
-  /* Header */
-  .site-header {
-    border-bottom: 1px solid var(--ink);
-  }
-  .bar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px 20px;
-    padding: 16px 0 10px;
-  }
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    min-width: 0;
-    text-decoration: none;
-  }
-  .brand .wordmark {
-    font-size: 23px;
-  }
-  .tagline {
-    border-left: 1px solid var(--line);
-    padding-left: 14px;
-    font-size: 12px;
-    line-height: 1.4;
-    color: var(--muted);
-  }
-  .here {
-    display: inline-flex;
-    align-items: center;
-    min-height: 40px;
-    padding: 0 14px;
-    border: 1px solid var(--accent);
-    background: var(--accent);
-    color: var(--bg);
-    font-size: 14px;
-  }
-  nav {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 24px;
-  }
-  .site-header nav {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    white-space: nowrap;
-    scrollbar-width: none;
-    font-size: 14px;
-  }
-  .site-header nav a {
-    padding: 10px 0;
-    text-decoration: none;
-  }
-
   /* Introduction and step tracker */
   .intro {
     display: flex;
@@ -487,11 +300,6 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
   .intro > div {
     flex: 1 1 420px;
     min-width: 0;
-  }
-  .eyebrow {
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--accent);
   }
   h1 {
     margin-top: 12px;
@@ -696,39 +504,6 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
   .choices .primary {
     flex: 1 1 200px;
   }
-  .primary,
-  .secondary {
-    min-height: 48px;
-    font: inherit;
-    cursor: pointer;
-  }
-  .primary {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: 0;
-    background: var(--ink);
-    color: var(--bg);
-    font-size: 15px;
-    text-decoration: none;
-  }
-  .primary:hover {
-    background: var(--accent);
-    color: var(--bg);
-  }
-  .primary:disabled {
-    border: 1px dashed #b9b6ad;
-    background: transparent;
-    color: var(--muted);
-    cursor: not-allowed;
-  }
-  .secondary {
-    border: 1px solid var(--line);
-    padding: 0 18px;
-    background: transparent;
-    color: var(--ink);
-    font-size: 14px;
-  }
   .progress-line {
     display: flex;
     justify-content: space-between;
@@ -801,7 +576,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
     background: var(--ink);
   }
 
-  /* Sidebar and footer */
+  /* Sidebar */
   aside {
     flex: 0 1 340px;
     display: grid;
@@ -834,22 +609,5 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
     font-size: 14px;
     font-weight: 500;
     cursor: pointer;
-  }
-  .site-footer {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: end;
-    justify-content: space-between;
-    gap: 16px 24px;
-    border-top: 1px solid var(--ink);
-    padding: 28px 0 48px;
-    font-size: 13px;
-  }
-  .site-footer .wordmark {
-    font-size: 20px;
-  }
-  .site-footer .wordmark + p {
-    margin-top: 4px;
-    color: var(--muted);
   }
 </style>
