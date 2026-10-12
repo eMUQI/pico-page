@@ -172,11 +172,20 @@ struct Host {
             app.complete_wifi(wifi.id, {{"Preview-2.4", -48, false}, {"Preview-Open", -67, true}}, "");
         else app.complete_wifi(wifi.id, {}, "桌面预览不操作设备 Wi-Fi，请在真机连接。", LinkFailure::Other);
     }
+    // The preview has no update source and no firmware slot: every check or download is refused.
+    void answer_update() {
+        const auto update = app.take_update_request();
+        if (!update) return;
+        network::release(update->cancelled);
+        app.complete_update(update->id, UpdateFailure::Link, 0, "", "桌面预览不检查固件更新，请在真机上操作。");
+    }
     void poll_network() {
         if (const auto wifi = app.take_wifi_request()) {
             answer_wifi(*wifi);
             flush();
         }
+        answer_update();
+        flush();
         if (network.valid() &&
             network.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
             auto response = network.get();
@@ -214,6 +223,8 @@ struct Host {
         if (!flush()) return false;
         // Scripts have no event loop, so a Wi-Fi request is answered right after its page is shown.
         if (const auto wifi = app.take_wifi_request()) answer_wifi(*wifi);
+        if (!flush()) return false;
+        answer_update();
         return flush() && poll_portal();
     }
     bool scripted_gesture(Input key, bool touch = false, int x = 0, int y = 0, bool hold = false) {

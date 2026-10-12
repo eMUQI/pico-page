@@ -46,6 +46,8 @@ add_subdirectory(firmware/components/reader_app)
 target_compile_definitions(reader_app PRIVATE PICO_PAGE_VERSION="${PROJECT_VER}")
 add_test(NAME project_version COMMAND ${Python3_EXECUTABLE} -m unittest discover
     -s ${CMAKE_CURRENT_SOURCE_DIR}/tests -p test_project_version.py -v)
+add_test(NAME ota_manifest COMMAND ${Python3_EXECUTABLE} -m unittest discover
+    -s ${CMAKE_CURRENT_SOURCE_DIR}/tests -p test_ota_manifest.py -v)
 # Compile the firmware worker path with controlled queue, allocation and scheduling failures.
 add_executable(content_worker_test tests/content_worker_test.cpp firmware/components/reader_app/content_job.cpp)
 target_compile_definitions(content_worker_test PRIVATE ESP_PLATFORM)
@@ -93,6 +95,11 @@ add_executable(provision_test tests/provision_test.cpp)
 target_link_libraries(provision_test PRIVATE reader_sync)
 target_compile_options(provision_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME provision COMMAND provision_test)
+
+add_executable(update_test tests/update_test.cpp)
+target_link_libraries(update_test PRIVATE reader_sync)
+target_compile_options(update_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME update COMMAND update_test)
 
 # The transfer page script runs in the phone browser; Node executes it against a DOM stand-in.
 find_program(NODE_EXECUTABLE node)

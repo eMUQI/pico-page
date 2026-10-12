@@ -41,11 +41,13 @@ enum class View {
     Help,
     TextEntry,
     PageEffects,
-    LockScreens
+    LockScreens,
+    Update
 };
 enum class PageEffect { Off, TextTurnA, TextTurnB, TextTurnC, Ripple };
 enum class PowerAction { None, Shutdown, Restart };
-struct PowerRequest { PowerAction action = PowerAction::None; bool without_save = false; };
+/** install restarts into the firmware image that the last completed update download verified. */
+struct PowerRequest { PowerAction action = PowerAction::None; bool without_save = false; bool install = false; };
 enum class UsbTransferAction { None, Start, Exit };
 /** Upload runs over the device access point; UploadStation over a saved network. */
 enum class PortalAction { None, Stop, Upload, UploadStation };
@@ -102,6 +104,30 @@ struct NetworkOperation {
     network::Hold session = {};
     WifiTargets targets = {};
 };
+/** Why a firmware update check or download ended without a result. */
+enum class UpdateFailure {
+    None,
+    Cancelled,
+    Link,        // No station link or clock; detail holds a sentence for the user.
+    Network,     // The transfer failed or was interrupted.
+    Server,      // The server did not answer with the requested file.
+    Mismatch,    // Length or digest differs from the manifest.
+    TooLarge,    // The image does not fit the update slot.
+    WrongImage,  // Not an image of this board, project and version.
+    Flash,       // The update slot could not be written.
+};
+/** One update request for the network worker. Check fetches url as text; Download streams the image at url into the inactive slot. */
+struct UpdateOperation {
+    enum class Kind { Check, Download };
+    Kind kind = Kind::Check;
+    std::uint64_t id = 0;
+    std::string url;
+    /** Download only: expected length, SHA-256 in lowercase hexadecimal and the version the image must carry. */
+    std::uint32_t size = 0;
+    std::string sha256, version;
+    WifiTargets targets;
+    network::Hold cancelled;
+};
 struct AppInput {
     InputEvent event;
     bool touch = false;
@@ -141,8 +167,13 @@ class ReaderApp {
     bool initialize();
     /** Refuses during active sync or portal work; cancelled HTTP may drain while local reading resumes. */
     bool open_book(const std::string &relative_path);
-    /** Updates the latest battery reading for the next render; nullopt means unknown. */
-    void set_battery(std::optional<int> percent);
+    /** Updates the latest battery reading for the next render; nullopt means unknown. charging permits a firmware installation below 20%. */
+    void set_battery(std::optional<int> percent, bool charging = false);
+    /**
+     * Replaces the version that update decisions treat as the running firmware. Call before
+     * initialize(); host previews and tests use it in place of the build's own version.
+     */
+    void set_firmware_version(const std::string& version);
     void input(const AppInput &event);
     /** True when a held touch can open an image or a library book's details at this screen point. */
     bool can_long_press_at(int x, int y) const;
@@ -287,6 +318,19 @@ class ReaderApp {
     /** Marshal completion after worker resource release; matching cancelled work unlocks deferred navigation, old IDs are discarded. */
     void complete_network(std::uint64_t id, int status, const std::string &body,
                           const std::string &error, LinkFailure failure = LinkFailure::None);
+    /** Consumes one firmware update request when the display is idle; the worker reports through the two calls below. */
+    std::optional<UpdateOperation> take_update_request();
+    /** Bytes written so far by the download with this ID; redraws the progress in 5% steps. Stale IDs are ignored. */
+    void update_progress(std::uint64_t id, std::uint32_t bytes);
+    /**
+     * Ends the request with this ID after the worker released its resources. A check passes the
+     * HTTP status and body; a completed download passes UpdateFailure::None and leaves the
+     * verified image waiting for a restart requested through take_power_request().
+     */
+    void complete_update(std::uint64_t id, UpdateFailure failure, int status, const std::string& body,
+                         const std::string& detail);
+    /** True from a check or download request until its completion; the device stays awake meanwhile. */
+    bool update_busy() const;
     /** True while the on-screen keyboard is shown; every tap made during a refresh is then kept, in order. */
     bool keyboard_visible() const;
 

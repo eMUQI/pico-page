@@ -1,6 +1,8 @@
 # 开发状态
 
-## 当前摘要（2026-10-11）
+## 当前摘要（2026-10-12）
+
+联网固件更新第一批已有本地候选（2026-10-12，基于 main `8eb3de2`，分支 `claude/pico-ota-network-update-a2b4fc`，D40）：「设置 → 固件更新」手动检查、更新日志、安装条件、边下载边写入空闲应用槽、长度与 SHA-256 校验、重启安装、首次启动确认与回滚后的结果提示。出厂 bootloader 经只读核对支持应用回滚，应用配置已启用对应选项，构建分区表改为与实测布局一致。host Debug 与 AppleClang ASan/UBSan 各 24/24，标准、release 和 Diagnostic 固件构建通过；未提交、未烧录，下载、闪存写入、启动槽切换、自检和回滚都没有真机证据。「联网时顺便检查」和「下次开机再装」未实现，网站尚未发布清单。详见本日「联网固件更新第一批」记录。
 
 浅睡自行唤醒已定位并修正，候选已提交 PR、未合并（2026-10-11，分支 `claude/sleep-wake-issue-08fcba`，基于 `feee89a`）。原因是第一次 PMU 周期事件唤醒后，重新入睡前的触摸中断检查总是成立：真机上每次浅睡唤醒都会在触摸中断线记录一次下降沿，旧代码据此结束休眠。现在触摸中断只在第一次入睡前取消休眠；唤醒后 PMU 读取失败改为限时重试，入睡被拒按立即唤醒处理。按本次授权刷写后，设备不操作休眠约 183 秒，经历 6 次周期唤醒后由电源键唤醒。只有这一轮长休眠，PW02 的三次唤醒及 PW06 仍待验收，详见本日「浅睡自行唤醒」记录。
 
@@ -55,6 +57,40 @@ PR #52（分支 `feat/sync-map-images`，已整合 main `fd17171`）包含三项
 个人主目录、设备标识及私有样本名称已脱敏；占位路径不保证可直接执行。历史日期、验证数值和结果保留，历史授权不适用于新的设备操作。
 
 ## 历史摘要与开发记录
+
+### 2026-10-12 · 联网固件更新第一批（R11、D40）
+
+基于 main `8eb3de2`，分支 `claude/pico-ota-network-update-a2b4fc`。本批未提交、未推送、未连接或烧录设备。
+
+- 依据：设计稿《Read Pico OTA 更新》（claude.ai/design 项目，只读取未修改）。用户在本次会话确认四项：清单与镜像放在 `https://picopage.wulu.zone/firmware/`；本分支只做设备端和清单生成脚本，不改 `web/` 与网站 CI（PR #68 正在修改）；首次启动自检不要求 TF 卡；先做主链路，「联网时顺便检查」和「下次开机再装」放第二批。
+- 只读核对（未操作设备）：主检出 `.local/device/original-first-64k.bin` 是此前读回的出厂 bootloader（ESP-IDF v6.1-dirty）。与本项目未启用回滚的 bootloader 构建逐段比较，代码段差异集中在 `set_actual_ota_seq` 和 `bootloader_utility_get_selected_boot_partition`；反汇编后者可见把状态 `ESP_OTA_IMG_NEW` 改写为 `PENDING_VERIFY`、把未确认的 `PENDING_VERIFY` 改写为 `ABORTED` 并写回 otadata 的指令，即 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` 的行为。`original-partition-table.bin` 为 nvs `0x9000`/24 KiB、phy_init `0xf000`/4 KiB、ota_0 `0x10000`/4 MiB、ota_1 `0x410000`/4 MiB、otadata `0x810000`/8 KiB；`otadata-check.bin` 中唯一有效项 sequence 1、state 2。设计稿「实现前必须解决」的分区表迁移因此不需要。查证：乐鑫文档 MCP 的应用回滚章节描述的是较新版本的选项名，本机 v6.1 源码仍为 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`，按本地源码实现。
+- 共享逻辑：新增 `reader_sync/update.cpp` 与 `pico_page/update.h`，包含版本比较、清单解析、安装前判断、更新日志的 Markdown 解析和状态编码。新增 `tests/update_test.cpp`。
+- 平台层：`platform_read_pico/network.cpp` 新增 `download_firmware`、`activate_firmware`、`firmware_unconfirmed`、`confirm_firmware`、`reject_firmware`。下载使用 `OTA_WITH_SEQUENTIAL_WRITES` 逐扇区擦写；写入前核对镜像头、芯片型号、项目名和版本；摘要用 PSA SHA-256 流式计算。
+- 应用与主循环：`reader_app` 新增 `View::Update` 及其页面和请求；`app_main` 新增更新任务、进度事件队列、闪存写入与面板刷新的互斥锁，在首屏显示成功后确认新固件，初始化或首屏失败时回到旧槽；重启安装沿用电源请求路径，在保存阅读位置和安装记录、释放 TF 卡之后切换启动槽。检查和下载期间不自动休眠，电源键短按不响应。诊断控制台的页面名增加 `update`。host 预览对更新请求一律答复不可用。
+- 配置：`sdkconfig.defaults` 启用 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`；`partitions.build.csv` 改为与实测布局一致的条目，不刷写。三种构建的生效 sdkconfig 均含该选项。
+- 链接问题：加入更新页面后固件链接失败，报 `l32r: literal target out of range`。链接图显示 `app.cpp.obj` 的字面量池集中排在该目标文件全部代码之前，`ReaderApp::Impl::control` 的代码距其字面量已超过 L32R 的 256 KiB。改为仅对 `app.cpp` 使用 `-mtext-section-literals`。这是 `app.cpp` 体积造成的既有上限，其他继续增大该文件的分支也会遇到。
+- 界面：设置首页六组行高由 132 改为 116，加入「固件更新」行，「使用说明」行上移；十处测试点击坐标随之修改（七处 710→640、三处 840→760），断言未变。与设计稿的差异记录在 UI 实现说明第 24 节。host 画布在 `artifacts/ota-update-20261012/`（忽略产物）。
+- 工具：新增 `tools/ota_manifest.py` 与 `tests/test_ota_manifest.py`。脚本不上传；对本批开发构建镜像运行时按预期拒绝（版本带构建元数据）。
+- 文档：路线图 R11、决定 D40、验收 OTA01–OTA06、存储、架构、版本管理、环境、UI 实现说明和 README 路线图表已同步。
+
+命令与结果（macOS，AppleClang，EIM 的 ESP-IDF v6.1）：
+
+- `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host --output-on-failure`：24/24（原 22 项，新增 `update`、`ota_manifest`）。
+- 按环境文档的 ASan/UBSan 配置构建并运行 `ctest --test-dir build/sanitized --output-on-failure`：24/24。本机运行时不支持 LSan，未检查泄漏。
+- `sh tools/build_firmware.sh`：通过，应用 3,479,232 字节（`0x3516c0`），4 MiB 槽剩余 17%，SHA-256 `797f4969…`。同一提交未改动时的同配置构建为 3,421,856 字节（`0x3436a0`），本批增加 57,376 字节。
+- `sh tools/build_firmware.sh release`：通过，3,480,000 字节，SHA-256 `12e1e014…`。`sh tools/build_firmware.sh diagnostic`：通过，3,517,296 字节，剩余 16%，SHA-256 `fc2057f3…`。三次构建的来源摘要同为 `6812c622…`，dirty=true；其后只整理了一处 host 测试写法并补齐文档。
+- `python3 tools/check_handoff.py`：461 项通过。`git diff --check`：无输出。
+- 只读网络核对：`https://picopage.wulu.zone/firmware/manifest.json` 目前返回 200 和网站首页 HTML（站点对未知路径的回退），响应头单行最长 259 字节。设备会按清单无效处理并提示「更新服务器无响应」，直到清单发布。
+
+未测项（均需真机）：
+
+- OTA02–OTA06 的 D 项全部未执行：实际联网检查、完整下载、校验、取消与断网、重启安装、首次启动确认、无卡启动、断电回滚和跳过版本。
+- 下载期间网络任务栈余量、内部 RAM 低水位、下载耗时；闪存写入与面板刷新互斥后进度局部刷新是否正常，输入采样是否受影响。
+- `ota_1` 现有内容未读取；首次真机验证前需读取并记录。
+- 设备切到 `ota_1` 后的电脑刷写流程（先读 otadata 再选槽）没有演练。
+- 更新页面的灰阶、残影和淡色按钮在墨水屏上的可读性。
+
+下一步：提交并开 PR。设备只接受证书有效的 HTTPS 地址，真机验证前需先在网站 `firmware/` 目录发布一份测试清单和 release 镜像，并获得刷写授权，再按 OTA02–OTA06 逐项验证。之后实现第二批，并在 PR #68 合并后把清单发布接入网站 CI。
 
 ### 2026-10-11 · 浅睡自行唤醒
 

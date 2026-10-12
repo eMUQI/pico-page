@@ -7,18 +7,24 @@
 #include <cstring>
 #include <ctime>
 
+#include "esp_app_desc.h"
+#include "esp_app_format.h"
 #include "esp_crt_bundle.h"
 #include "esp_event.h"
+#include "esp_heap_caps.h"
 #include "esp_http_client.h"
+#include "esp_image_format.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
+#include "esp_ota_ops.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "esp_wifi_default.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
+#include "psa/crypto.h"
 
 namespace pico_page::platform {
 namespace {
@@ -475,6 +481,161 @@ bool http_request(const std::string& method, const std::string& url,
         if (request_started && method != "GET") error += "; remote write outcome is unknown";
     }
     return complete;
+}
+
+namespace {
+// The slot that the last completed download_firmware() verified; cleared when another begins.
+std::atomic<const esp_partition_t*> verified_slot{nullptr};
+// Image header, first segment header and application description: the start of every app image.
+constexpr std::size_t image_prefix = sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t);
+constexpr std::size_t firmware_block = 4096;
+constexpr std::int64_t firmware_deadline_us = 1'200'000'000;
+
+bool expected_image(const std::uint8_t* prefix, const std::string& version) {
+    esp_image_header_t header;
+    esp_app_desc_t description;
+    std::memcpy(&header, prefix, sizeof(header));
+    std::memcpy(&description, prefix + sizeof(header) + sizeof(esp_image_segment_header_t), sizeof(description));
+    const auto* running = esp_app_get_description();
+    return header.magic == ESP_IMAGE_HEADER_MAGIC && header.chip_id == ESP_CHIP_ID_ESP32S3 &&
+           description.magic_word == ESP_APP_DESC_MAGIC_WORD &&
+           strnlen(description.project_name, sizeof(description.project_name)) < sizeof(description.project_name) &&
+           std::strcmp(description.project_name, running->project_name) == 0 &&
+           strnlen(description.version, sizeof(description.version)) < sizeof(description.version) &&
+           version == description.version;
+}
+} // namespace
+
+bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, FirmwareFailure& failure,
+                       std::string& error, const std::atomic_bool* cancelled) {
+    error.clear();
+    verified_slot.store(nullptr);
+    const auto stop = [&](FirmwareFailure reason, const char* operation, esp_err_t result = ESP_FAIL) {
+        failure = reason;
+        return fail(error, operation, result);
+    };
+    const auto cancel_requested = [&] {
+        if (!cancelled || !cancelled->load(std::memory_order_acquire)) return false;
+        failure = FirmwareFailure::Cancelled;
+        error = "Download cancelled";
+        return true;
+    };
+    if (cancel_requested()) return false;
+    if (!connected || network_owner != xTaskGetCurrentTaskHandle() || !events ||
+        !(xEventGroupGetBits(events) & has_address)) return stop(FirmwareFailure::Network, "Wi-Fi is not connected");
+    const auto* slot = esp_ota_get_next_update_partition(nullptr);
+    if (!slot) return stop(FirmwareFailure::Flash, "No update slot", ESP_ERR_NOT_FOUND);
+    if (!valid_url(image.url) || image.sha256.size() != 64 || image.size < image_prefix)
+        return stop(FirmwareFailure::Mismatch, "Invalid firmware description", ESP_ERR_INVALID_ARG);
+    if (image.size > slot->size) return stop(FirmwareFailure::TooLarge, "Firmware exceeds the update slot", ESP_ERR_INVALID_SIZE);
+    // Flash writes take their data from internal RAM without an intermediate copy.
+    auto* block = static_cast<std::uint8_t*>(heap_caps_malloc(firmware_block, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    if (!block) return stop(FirmwareFailure::Flash, "Download buffer", ESP_ERR_NO_MEM);
+    esp_http_client_config_t configuration{};
+    configuration.url = image.url.c_str();
+    configuration.method = HTTP_METHOD_GET;
+    configuration.timeout_ms = 10000;
+    configuration.disable_auto_redirect = true;
+    configuration.crt_bundle_attach = esp_crt_bundle_attach;
+    configuration.buffer_size = firmware_block;
+    auto* client = esp_http_client_init(&configuration);
+    if (!client) { heap_caps_free(block); return stop(FirmwareFailure::Flash, "HTTP allocation", ESP_ERR_NO_MEM); }
+    esp_ota_handle_t handle = 0;
+    bool writing = false;
+    psa_hash_operation_t hash = PSA_HASH_OPERATION_INIT;
+    const auto flash = [&](bool begin) { if (hooks.flash) hooks.flash(hooks.context, begin); };
+    const auto deadline = esp_timer_get_time() + firmware_deadline_us;
+    auto perform = [&]() -> bool {
+        auto result = esp_http_client_open(client, 0);
+        if (result != ESP_OK) return stop(FirmwareFailure::Network, "HTTPS connection", result);
+        if (cancel_requested()) return false;
+        const auto length = esp_http_client_fetch_headers(client);
+        if (length < 0) return stop(FirmwareFailure::Network, "HTTP response headers");
+        if (esp_http_client_get_status_code(client) != 200) return stop(FirmwareFailure::Server, "HTTP status");
+        if (length > 0 && length != static_cast<std::int64_t>(image.size))
+            return stop(FirmwareFailure::Mismatch, "Firmware length", ESP_ERR_INVALID_SIZE);
+        if (psa_hash_setup(&hash, PSA_ALG_SHA_256) != PSA_SUCCESS) return stop(FirmwareFailure::Flash, "Digest setup");
+        std::uint32_t written = 0;
+        std::size_t held = 0;
+        bool complete = false;
+        while (!complete) {
+            if (cancel_requested()) return false;
+            if (esp_timer_get_time() >= deadline) return stop(FirmwareFailure::Network, "Firmware download", ESP_ERR_TIMEOUT);
+            const int count = esp_http_client_read(client, reinterpret_cast<char*>(block) + held,
+                                                   static_cast<int>(firmware_block - held));
+            if (count < 0) return stop(FirmwareFailure::Network, "Firmware read");
+            if (count == 0) {
+                if (!esp_http_client_is_complete_data_received(client)) return stop(FirmwareFailure::Network, "Incomplete firmware");
+                complete = true;
+            }
+            held += static_cast<std::size_t>(count);
+            // Nothing is written until the start of the image names this chip, project and version.
+            if (!writing && held < image_prefix && !complete) continue;
+            if (!held) break;
+            if (written + held > image.size) return stop(FirmwareFailure::Mismatch, "Firmware length", ESP_ERR_INVALID_SIZE);
+            if (!writing) {
+                if (held < image_prefix || !expected_image(block, image.version))
+                    return stop(FirmwareFailure::WrongImage, "Firmware identity", ESP_ERR_INVALID_VERSION);
+                flash(true);
+                result = esp_ota_begin(slot, OTA_WITH_SEQUENTIAL_WRITES, &handle);
+                flash(false);
+                if (result != ESP_OK) return stop(FirmwareFailure::Flash, "Update start", result);
+                writing = true;
+            }
+            if (psa_hash_update(&hash, block, held) != PSA_SUCCESS) return stop(FirmwareFailure::Flash, "Digest update");
+            flash(true);
+            result = esp_ota_write(handle, block, held);
+            flash(false);
+            if (result != ESP_OK) return stop(FirmwareFailure::Flash, "Firmware write", result);
+            written += static_cast<std::uint32_t>(held);
+            held = 0;
+            if (hooks.progress) hooks.progress(hooks.context, written);
+        }
+        if (cancel_requested()) return false;
+        std::uint8_t digest[32];
+        std::size_t digest_length = 0;
+        if (psa_hash_finish(&hash, digest, sizeof(digest), &digest_length) != PSA_SUCCESS || digest_length != sizeof(digest))
+            return stop(FirmwareFailure::Flash, "Digest");
+        char text[65];
+        for (std::size_t i = 0; i < sizeof(digest); ++i) std::snprintf(text + i * 2, 3, "%02x", digest[i]);
+        if (written != image.size || image.sha256 != text)
+            return stop(FirmwareFailure::Mismatch, "Firmware digest", ESP_ERR_INVALID_CRC);
+        // Reads the slot back and checks the digest appended to the image.
+        result = esp_ota_end(handle);
+        writing = false;
+        if (result != ESP_OK) return stop(FirmwareFailure::Mismatch, "Firmware validation", result);
+        return true;
+    };
+    const bool okay = perform();
+    psa_hash_abort(&hash);
+    if (writing) esp_ota_abort(handle);
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    heap_caps_free(block);
+    if (okay) { failure = FirmwareFailure::None; verified_slot.store(slot); }
+    return okay;
+}
+
+bool activate_firmware(std::string& error) {
+    const auto* slot = verified_slot.load();
+    if (!slot) return fail(error, "No verified firmware", ESP_ERR_INVALID_STATE);
+    const auto result = esp_ota_set_boot_partition(slot);
+    return result == ESP_OK || fail(error, "Boot slot", result);
+}
+
+bool firmware_unconfirmed() {
+    esp_ota_img_states_t state;
+    return esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) == ESP_OK &&
+           state == ESP_OTA_IMG_PENDING_VERIFY;
+}
+
+void confirm_firmware() {
+    const auto result = esp_ota_mark_app_valid_cancel_rollback();
+    if (result != ESP_OK) ESP_LOGE("pico_network", "Firmware confirmation: %s", esp_err_to_name(result));
+}
+
+void reject_firmware() {
+    esp_ota_mark_app_invalid_rollback_and_reboot();
 }
 
 } // namespace pico_page::platform

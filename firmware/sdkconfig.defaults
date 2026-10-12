@@ -28,9 +28,13 @@ CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
 # The main internal heap cannot hold a TLS session next to the resident Wi-Fi driver.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 
-# Local build layout only. Verify the device layout before any installation.
+# Matches the layout read from the device. The table itself is never flashed; verify the device
+# layout before any installation.
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.build.csv"
+# The device bootloader returns to the previous slot when an updated image restarts before
+# confirming itself; with this option the application marks an activated slot for that check.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
 # USB storage is initialized only by the explicit settings action.
 CONFIG_TINYUSB_MSC_ENABLED=y

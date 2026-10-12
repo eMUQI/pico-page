@@ -259,4 +259,61 @@ bool http_request(const std::string& method, const std::string& url,
                   const std::string& body, std::string& response, int& status,
                   std::string& error, const std::atomic_bool* cancelled = nullptr);
 
+/** Why download_firmware() stopped. */
+enum class FirmwareFailure {
+    None,
+    Cancelled,
+    Network,     // No link, a failed connection or an interrupted transfer.
+    Server,      // The server answered with a status other than 200.
+    Mismatch,    // Length, SHA-256 or the image's own digest differs from the description.
+    TooLarge,    // The image does not fit the update slot.
+    WrongImage,  // Not an ESP32-S3 image of this project and version.
+    Flash,       // The update slot, a buffer or a flash operation was unavailable.
+};
+
+struct FirmwareImage {
+    std::string url;      // https address; redirects are not followed.
+    std::uint32_t size;   // Exact length in bytes.
+    std::string sha256;   // 64 lowercase hexadecimal digits of the whole file.
+    std::string version;  // Version that the image's application description must carry.
+};
+
+/** Callbacks on the downloading task; each may be null. */
+struct FirmwareHooks {
+    /** After each written block, with the number of bytes written so far. */
+    void (*progress)(void* context, std::uint32_t written) = nullptr;
+    /**
+     * true before and false after every flash write of at most 4 KiB, including its sector
+     * erase. The caller uses the pair to keep flash writes apart from panel updates.
+     */
+    void (*flash)(void* context, bool begin) = nullptr;
+    void* context = nullptr;
+};
+
+/**
+ * Streams one application image over HTTPS into the inactive OTA slot after connect_network(),
+ * with certificate and server-name verification. Nothing is written until the first 288 bytes
+ * name an ESP32-S3 image of this project with image.version. The slot is erased sector by
+ * sector as data arrives. true means that the length and SHA-256 match and that the image in
+ * the slot passed its own digest check; the boot slot is not changed. On any failure the
+ * running firmware and the boot slot are untouched and the inactive slot is left unbootable.
+ * Blocks its task for up to 10 s per read and 20 min in total; cancelled is sampled between
+ * reads and writes and must outlive the call.
+ */
+bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, FirmwareFailure& failure,
+                       std::string& error, const std::atomic_bool* cancelled = nullptr);
+
+/**
+ * Selects the slot verified by the last successful download_firmware() for the next start and
+ * marks it for one unconfirmed start. Validates the image again. The caller restarts afterwards.
+ */
+bool activate_firmware(std::string& error);
+
+/** True on the first start of an activated image, until confirm_firmware(). A reset in this state returns to the previous slot. */
+bool firmware_unconfirmed();
+/** Keeps the running image for later starts. */
+void confirm_firmware();
+/** Marks the running image invalid and restarts into the previous slot; returns only on failure. */
+void reject_firmware();
+
 } // namespace pico_page::platform
