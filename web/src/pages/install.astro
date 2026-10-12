@@ -50,7 +50,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
                     <div class="flash-body">
                       <p class="notice" data-el="error" role="alert" hidden></p>
                       <div data-panel="idle">
-                        <p data-el="hint">尚未连接。弹窗里没有设备时，换一根数据线或 USB 接口再试。</p>
+                        <p data-el="hint">尚未连接。弹窗里没有设备时，按住电源键约 10 秒强制关机，松开后再按住 1 秒以上开机，再点「连接设备」；仍然没有时，换一根数据线或 USB 接口。</p>
                         <button class="primary" type="button" data-el="connect">连接设备</button>
                       </div>
                       <div data-panel="connected" hidden>
@@ -72,7 +72,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
                       </div>
                       <div data-panel="done" hidden>
                         <p class="finished">安装完成。</p>
-                        <p class="after">设备会自动重启并显示书库。屏幕没有变化时，长按电源键，在菜单中选择「重启」。</p>
+                        <p class="after">设备会自动重启并显示书库。屏幕没有变化时，按住电源键约 10 秒强制关机，松开后再按住 1 秒以上开机。</p>
                         <div class="choices"><a class="primary" href="#step3">下一步：放入书和字体 ↓</a></div>
                       </div>
                     </div>
@@ -121,7 +121,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
               <h3>遇到问题</h3>
               <details>
                 <summary>弹窗里没有设备</summary>
-                <p>确认数据线支持数据传输，换一个 USB 接口；关闭占用串口的其他程序和浏览器标签。</p>
+                <p>设备关机、休眠或没有响应时，电脑看不到它的串口：按住电源键约 10 秒强制关机，松开后再按住 1 秒以上开机，再点「连接设备」。仍然没有时，确认数据线支持数据传输，换一个 USB 接口；关闭占用串口的其他程序和浏览器标签。</p>
               </details>
               <details>
                 <summary>装过其他固件，还能装吗</summary>
@@ -133,7 +133,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
               </details>
               <details>
                 <summary>安装完成，屏幕没变化</summary>
-                <p>墨水屏断电后会保留旧画面。重新上电后再看；仍无变化时，重新连接并安装一次。</p>
+                <p>墨水屏断电后会保留旧画面。按住电源键约 10 秒强制关机，松开后再按住 1 秒以上开机；仍无变化时，重新连接并安装一次。</p>
               </details>
               <details>
                 <summary>书里有空白方框</summary>
@@ -278,7 +278,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
               reportProgress: (_, written, total) =>
                 progress(Math.floor((written / total) * 100), written < total ? "正在写入" : "正在校验"),
             });
-            show("done", (await release()) ? "" : "固件已写入并通过校验，但设备可能没有自动重启。请手动重启设备。");
+            show("done", (await release()) ? "" : "固件已写入并通过校验，但设备可能没有自动重启。请按住电源键约 10 秒强制关机，松开后再按住 1 秒以上开机。");
           } catch (error) {
             console.error(error);
             await release();
@@ -290,7 +290,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
         el("install").addEventListener("click", install);
         el("confirm").addEventListener("change", () => (el("install").disabled = !el("confirm").checked));
         el("disconnect").addEventListener("click", async () => {
-          show("idle", (await release()) ? "" : "串口没有正常释放，设备可能仍在下载模式。请手动重启设备；无法再次连接时，刷新本页。");
+          show("idle", (await release()) ? "" : "串口没有正常释放，设备可能仍在下载模式。请按住电源键约 10 秒强制关机，松开后再按住 1 秒以上开机；无法再次连接时，刷新本页。");
         });
         // A connected device runs the flasher stub until it is reset, and closing the page cannot
         // reset it. The browser asks before leaving while connected or writing.
