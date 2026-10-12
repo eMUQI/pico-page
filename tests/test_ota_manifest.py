@@ -1,6 +1,8 @@
 import hashlib
+import json
 import struct
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -43,6 +45,34 @@ class ManifestTest(unittest.TestCase):
                 self.build(image(), url=url)
         with self.assertRaises(ValueError):
             ota_manifest.build_manifest(image(), '', 'https://picopage.wulu.zone/firmware/', '18 Oct', (1, 1))
+
+    def test_check_accepts_only_a_manifest_that_describes_its_image(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / 'firmware'
+            url = 'https://picopage.wulu.zone/firmware/'
+            self.assertIsNone(ota_manifest.check_directory(directory, url))
+            directory.mkdir()
+            self.assertIsNone(ota_manifest.check_directory(directory, url))
+            data = image()
+            name, manifest = self.build(data)
+            (directory / name).write_bytes(data)
+            with self.assertRaises(ValueError):
+                ota_manifest.check_directory(directory, url)
+            (directory / 'manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
+            self.assertEqual(ota_manifest.check_directory(directory, url), '0.2.0-beta.2')
+            # Every field is recomputed from the image, so a stale digest, size or version is caught.
+            for key, value in (('sha256', '0' * 64), ('size', 1), ('version', '0.2.0-beta.3'), ('board', 'other'),
+                               ('url', 'https://example.com/firmware/' + name), ('extra', 1)):
+                (directory / 'manifest.json').write_text(json.dumps({**manifest, key: value}), encoding='utf-8')
+                with self.assertRaises(ValueError):
+                    ota_manifest.check_directory(directory, url)
+            (directory / 'manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
+            (directory / 'pico-page-0.2.0-beta.1-read_pico-release.bin').write_bytes(image('0.2.0-beta.1'))
+            with self.assertRaises(ValueError):
+                ota_manifest.check_directory(directory, url)
+            (directory / name).unlink()
+            with self.assertRaises(ValueError):
+                ota_manifest.check_directory(directory, url)
 
     def test_schema_defaults_follow_the_device_constants(self):
         self.assertEqual(ota_manifest.schema_defaults(), (1, 1))

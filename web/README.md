@@ -21,13 +21,33 @@ npm run preview --prefix web
 
 [网站构建工作流](../.github/workflows/web.yml) 在推送、拉取请求和手动运行时独立执行，与 host 检查并行。使用 Node.js 24，按 `package-lock.json` 缓存 npm 下载，执行 `npm ci --ignore-scripts` 和 `npm run build`；构建失败时不上传产物。
 
-构建成功后保存 `web/dist/` 为 `pico-page-web` artifact，缺少产物时报错。下载并解压后得到静态站内容，可供后续网站发布使用；artifact 遵循仓库的保留期限和访问权限，不作为设备 OTA 下载地址。当前工作流不部署网站、不发布固件；未来 OTA 的固件镜像、版本信息、校验和公开下载地址须随实际升级流程接入。
+构建前执行 `python3 tools/ota_manifest.py --check web/public/firmware`：目录中有更新清单时，清单必须与旁边的固件镜像逐项一致，否则工作流失败；没有清单时通过。
+
+构建成功后保存 `web/dist/` 为 `pico-page-web` artifact，缺少产物时报错。下载并解压后得到静态站内容，可供后续网站发布使用；artifact 遵循仓库的保留期限和访问权限，不作为设备 OTA 下载地址。当前工作流不部署网站、不发布固件。
 
 ## 部署
 
 网站地址为 https://picopage.wulu.zone，使用 Cloudflare Pages 的 `picopage` 项目，默认域名为 `picopage-91c.pages.dev`。当前采用手动直接上传，未连接 Git 仓库或设置自动部署；GitHub 仓库保持私有。
 
 更新时执行上述构建命令，在 Pages 项目中创建生产部署，仅上传 `web/dist/` 的内容。不要上传仓库根目录。部署后核对自定义域的 HTTPS 首页、界面图、样式、字体与锁屏下载包与本地构建产物一致。
+
+## 固件更新文件
+
+设备从 `https://picopage.wulu.zone/firmware/manifest.json` 读取更新清单，并下载清单指向的固件镜像。两者放在 `public/firmware/`，由静态站原样提供；目前尚未发布任何版本，这个目录不存在。
+
+发布一个版本时，在带有对应标签的干净检出上构建 release 配置，然后在仓库根目录执行：
+
+```sh
+python3 tools/ota_manifest.py --image build/firmware-release/pico_page.bin \
+  --notes <发布说明.md> --out web/public/firmware
+python3 tools/ota_manifest.py --check web/public/firmware
+```
+
+脚本写入 `manifest.json` 和按版本命名的镜像，并删除目录中上一个版本的镜像；清单只描述一个版本。提交这两个文件后构建并部署网站，设备才能检查到新版本。镜像每个版本约 3.5 MB，会留在 Git 历史中。发布说明不超过 8 KiB，写法见 [版本管理](../docs/versioning.md)。
+
+`src/pages/404.astro` 使不存在的地址返回 404。设备据此区分「还没有发布固件」和清单读取失败；删除这个页面后，Cloudflare Pages 会对未知地址返回首页和 200。部署后核对清单地址：未发布时为 404，发布后为 200 且内容与仓库中的文件一致。
+
+设备不验证发布者签名，能修改这个目录或控制该域名的人可以向设备提供任意固件，见 [功能路线图](../docs/roadmap.md) R11 的安全说明。
 
 ## 资源下载
 

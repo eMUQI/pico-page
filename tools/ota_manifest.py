@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Write the firmware update manifest and the published image name for one release build.
+"""Write or check the firmware update manifest and the published image for one release build.
 
 The device reads the manifest from the address compiled into the firmware and downloads the
-image the manifest names. Nothing here uploads or publishes; the output directory is copied to
-the web host separately.
+image the manifest names. The website serves both from web/public/firmware. Nothing here
+uploads or publishes.
 """
 import argparse
 import datetime
@@ -11,7 +11,6 @@ import hashlib
 import json
 from pathlib import Path
 import re
-import shutil
 import struct
 import sys
 
@@ -66,21 +65,64 @@ def build_manifest(image, notes, base_url, published, schema):
                       data_schema=dict(progress=schema[0], config=schema[1]), notes=notes)
 
 
+def check_directory(directory, base_url):
+    """Verify that a published directory holds one manifest that describes its one image.
+
+    Returns the published version, or None when the directory publishes nothing.
+    """
+    images = sorted(path.name for path in directory.glob('*.bin')) if directory.is_dir() else []
+    path = directory / 'manifest.json'
+    if not path.is_file():
+        if images:
+            raise ValueError('Images without manifest.json: ' + ', '.join(images))
+        return None
+    manifest = json.loads(path.read_text(encoding='utf-8'))
+    schema = manifest.get('data_schema') if isinstance(manifest, dict) else None
+    if (not isinstance(schema, dict) or not all(type(schema.get(key)) is int and schema[key] >= 1 for key in ('progress', 'config'))
+            or not all(isinstance(manifest.get(key), str) for key in ('url', 'notes', 'published_at'))):
+        raise ValueError('manifest.json lacks url, notes, published_at or data_schema')
+    name = manifest['url'].rsplit('/', 1)[-1]
+    if not (directory / name).is_file():
+        raise ValueError('manifest.json names ' + name + ', which is not in ' + str(directory))
+    expected = build_manifest((directory / name).read_bytes(), manifest['notes'], base_url, manifest['published_at'],
+                              (schema['progress'], schema['config']))[1]
+    if manifest != expected:
+        differing = sorted(key for key in set(manifest) | set(expected) if manifest.get(key) != expected.get(key))
+        raise ValueError('manifest.json does not describe ' + name + ': ' + ', '.join(differing))
+    if images != [name]:
+        raise ValueError('Images that the manifest does not name: ' + ', '.join(sorted(set(images) - {name})))
+    return manifest['version']
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--image', type=Path, required=True, help='release build of pico_page.bin')
-    parser.add_argument('--notes', type=Path, required=True, help='Markdown release notes, UTF-8')
+    parser.add_argument('--check', type=Path, metavar='DIR', help='verify a published directory instead of writing one')
+    parser.add_argument('--image', type=Path, help='release build of pico_page.bin')
+    parser.add_argument('--notes', type=Path, help='Markdown release notes, UTF-8')
     parser.add_argument('--base-url', default='https://picopage.wulu.zone/firmware/')
     parser.add_argument('--published', default=datetime.date.today().isoformat(), help='YYYY-MM-DD')
-    parser.add_argument('--out', type=Path, required=True, help='directory for manifest.json and the named image')
+    parser.add_argument('--out', type=Path, help='directory for manifest.json and the named image')
     arguments = parser.parse_args()
+    if arguments.check:
+        try:
+            version = check_directory(arguments.check, arguments.base_url)
+        except (OSError, ValueError) as error:
+            sys.exit(str(error))
+        print('Firmware ' + version + ' matches its manifest' if version else 'No firmware published')
+        return
+    if not (arguments.image and arguments.notes and arguments.out):
+        parser.error('--image, --notes and --out are required unless --check is given')
     try:
-        name, manifest = build_manifest(arguments.image.read_bytes(), arguments.notes.read_text(encoding='utf-8'),
+        image = arguments.image.read_bytes()
+        name, manifest = build_manifest(image, arguments.notes.read_text(encoding='utf-8'),
                                         arguments.base_url, arguments.published, schema_defaults())
     except (OSError, ValueError) as error:
         sys.exit(str(error))
     arguments.out.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(arguments.image, arguments.out / name)
+    # The manifest names one image; an earlier release in the directory would only be dead weight.
+    for stale in arguments.out.glob('pico-page-*-' + BOARD + '-release.bin'):
+        stale.unlink()
+    (arguments.out / name).write_bytes(image)
     (arguments.out / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     print(arguments.out / 'manifest.json')
 

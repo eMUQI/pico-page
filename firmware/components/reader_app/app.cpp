@@ -4676,6 +4676,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             update::Manifest manifest;
             std::string problem;
             if (failure == UpdateFailure::Link) update_notice = detail;
+            // The update host answers 404 until the first manifest is published.
+            else if (failure == UpdateFailure::None && status == 404) update_notice = "更新服务器上还没有发布固件。";
             else if (failure != UpdateFailure::None || status != 200 || !update::parse_manifest(body, manifest, problem))
                 update_notice = "更新服务器无响应，稍后再试。";
             else {
