@@ -26,7 +26,7 @@ npm run preview --prefix web
 
 [网站构建工作流](../.github/workflows/web.yml) 在推送、拉取请求和手动运行时独立执行，与 host 检查并行。使用 Node.js 24，按 `package-lock.json` 缓存 npm 下载，执行 `npm ci --ignore-scripts` 和 `npm run build`；构建失败时不上传产物。
 
-构建前，工作流从 GitHub Release 取回已发布的固件：在非草稿的发布中选出版本最高的 `v<版本>` 标签，把它附带的 `manifest.json` 和固件镜像下载到 `web/public/firmware/`，再用 `python3 tools/ota_manifest.py --check` 核对清单与镜像逐项一致、版本与标签相同，不一致时工作流失败。没有这样的发布时跳过下载。发布一个 Release 也会触发本工作流。
+构建前，工作流从 GitHub Release 取回已发布的固件：在非草稿的发布中选出版本最高的 `v<版本>` 标签，把它附带的 `manifest.json`、应用镜像和全量镜像（如果有）下载到 `web/public/firmware/`，再用 `python3 tools/ota_manifest.py --check` 核对清单与应用镜像逐项一致、版本与标签相同，全量镜像中的应用与应用镜像相同，不一致时工作流失败。没有这样的发布时跳过下载。发布一个 Release 也会触发本工作流。
 
 构建成功后保存 `web/dist/` 为 `pico-page-web` artifact，缺少产物时报错。下载并解压后得到静态站内容，可用于核对或手动部署；artifact 遵循仓库的保留期限和访问权限，不作为设备 OTA 下载地址。
 
@@ -46,7 +46,7 @@ GitHub 对 Release 事件使用标签所在提交中的工作流文件。标签�
 
 ## 固件更新文件
 
-设备从 `https://picopage.wulu.zone/firmware/manifest.json` 读取更新清单，并下载清单指向的固件镜像。这两个文件不放在仓库里：它们是 GitHub Release 的附件，由网站构建工作流取回，随 `pico-page-web` artifact 一起部署。`web/public/firmware/` 已被 Git 忽略。目前尚未发布任何版本。
+设备从 `https://picopage.wulu.zone/firmware/manifest.json` 读取更新清单，并下载清单指向的应用镜像；安装页另外使用同一版本的全量镜像（见「安装页」）。这些文件不放在仓库里：它们是 GitHub Release 的附件，由网站构建工作流取回，随 `pico-page-web` artifact 一起部署。`web/public/firmware/` 已被 Git 忽略。目前尚未发布任何版本。
 
 发布一个版本的步骤（创建 Release 需要项目所有者授权；Release 一经发布，工作流就会把它部署到线上）：
 
@@ -55,11 +55,13 @@ GitHub 对 Release 事件使用标签所在提交中的工作流文件。标签�
 
    ```sh
    python3 tools/ota_manifest.py --image build/firmware-release/pico_page.bin \
-     --notes <发布说明.md> --out build/release
+     --notes <发布说明.md> --out build/release --full
    ```
 
-3. 用同一个标签创建 Release，附上 `build/release/` 中的两个文件；测试版和候选版标为预发布。先存为草稿核对附件，草稿不会被取用。发布只是触发部署，设备要到下一步的部署成功之后才能检查到这个版本。
-4. 等待 Release 触发的网站构建工作流完成。它会取回这两个文件、核对、部署，并核对线上清单与附件一致。取回、核对或构建失败时不会部署，线上保持上一次的内容；部署之后的线上核对失败时，新内容可能已经生效，按「部署」一节处理。
+   `--full` 另外生成全量镜像 `pico-page-<版本>-read_pico-release-full.bin`。不加时只有清单和应用镜像：这样的版本可以联网更新，安装页保持「网页安装尚未开放」。
+
+3. 用同一个标签创建 Release，附上 `build/release/` 中的全部文件；测试版和候选版标为预发布。先存为草稿核对附件，草稿不会被取用。发布只是触发部署，设备要到下一步的部署成功之后才能检查到这个版本。
+4. 等待 Release 触发的网站构建工作流完成。它会取回这些文件、核对、部署，并核对线上清单与附件一致。取回、核对或构建失败时不会部署，线上保持上一次的内容；部署之后的线上核对失败时，新内容可能已经生效，按「部署」一节处理。
 
 说明：
 
@@ -106,7 +108,7 @@ GitHub 对 Release 事件使用标签所在提交中的工作流文件。标签�
 
 `/install/` 按设计稿《Pico Page 烧录》实现（Claude Design 项目 `9a2b4c9f-3f3d-4535-8b8e-032611291a02`，2026-10-12 读取）。页面在电脑版 Chrome 或 Edge 中通过 Web Serial 连接设备，擦除整片闪存后从 `0x0` 写入一个全量镜像，写完比对闪存内容的 MD5 并重启设备。串口协议使用 `esptool-js` 0.7.0，MD5 使用 `spark-md5` 3.0.2；两者在访问者点击「连接设备」后才加载。
 
-构建时页面读取 `public/firmware/manifest.json` 的 `version`，并查找同目录的 `pico-page-<版本>-read_pico-release-full.bin`。两者都存在时开放安装，页面内嵌该镜像的 SHA-256；缺少任何一个时显示「固件尚未发布」，页面上没有可用的安装按钮，安装脚本不执行任何操作。清单无法解析或全量镜像超过 16 MiB 时构建失败：安装时先擦除后写入，放不下的镜像不能上线。
+构建时页面读取 `public/firmware/manifest.json` 的 `version`，并查找同目录的 `pico-page-<版本>-read_pico-release-full.bin`。两者都存在时开放安装，页面内嵌该镜像的 SHA-256；缺少任何一个时显示「网页安装尚未开放」，页面上没有可用的安装按钮，安装脚本不执行任何操作。清单无法解析或全量镜像超过 16 MiB 时构建失败：安装时先擦除后写入，放不下的镜像不能上线。
 
 安装流程中的检查：
 
@@ -125,14 +127,15 @@ GitHub 对 Release 事件使用标签所在提交中的工作流文件。标签�
 - 页脚增加「第三方许可」链接。
 - 字体使用本机字体栈，不从 Google Fonts 加载 Noto Serif SC 和 IBM Plex Mono，网站仍不依赖第三方资源。
 - 设计稿中的「恢复说明」链接到 Read Pico 官方文档的 [DIY Your System](https://dot.mindreset.tech/docs/read_0/firmware)，并写明目前需要用 ESP-IDF 从源码构建后烧录；官方没有发布预编译镜像，本站不提供刷回官方系统的镜像。连接后的提示相应改为指向第 1 步，不再要求先备份。页头的「文档」链接到本站的使用文档；「完整安装文档与手动安装方法」暂未放入，手动安装方法尚未确定，源码中留有 TODO；「安装完成，屏幕没变化」改为建议重新安装。
-- 「尚未发布」时不显示版本号。页头、导航和页脚与首页共用，见「首页」。
+- 「尚未开放」时不显示版本号。页头、导航和页脚与首页共用，见「首页」。
 
-发布前事项（均未完成）：
+发布前事项：
 
-1. 全量镜像还没有生成和发布流程。`tools/ota_manifest.py` 只产出应用镜像，`--check` 拒绝目录中清单未指明的 `.bin`，网站构建工作流也只下载应用镜像。需要补上：用 release 构建的 bootloader、分区表和应用合并出全量镜像，核对其中的应用与联网更新镜像一致，随 Release 发布并由工作流取回。
-2. 整片覆盖与现行规定冲突：根目录 README 的「烧录前必读」、[功能路线图](../docs/roadmap.md) R11 和 [版本管理](../docs/versioning.md) 都写明电脑刷写只写应用，不改 bootloader、分区表、NVS 和 otadata。采用本页的安装方式前需要项目所有者确认，并同步修改这些文档和 `docs/decisions.md`。
-3. 真机验证：在出厂系统的设备和装过其他固件的设备上各完成一次浏览器安装，核对启动、工厂 VCOM 读取（官方文档写明 VCOM 保存在 PMU 中，不在闪存里）、联网更新的槽切换与回滚，以及擦除 NVS 后的 Wi-Fi 行为。本页的安装流程只用模拟的串口和烧录库检查过，没有连接过设备。
-4. 线上核对：Cloudflare 会改写首页的 script 标签（见开发状态 2026-10-11 的部署记录），部署后需确认安装页的模块脚本仍能加载。
+1. 已完成（2026-10-12）：全量镜像由 `tools/ota_manifest.py --full` 生成并核对，随 Release 发布，由网站构建工作流取回，见「固件更新文件」。还没有用带标签的构建实际发布过。
+2. 已确认（2026-10-12，[决定](../docs/decisions.md) D41）：电脑安装采用整片覆盖，根目录 README、[功能路线图](../docs/roadmap.md) R11 和 [版本管理](../docs/versioning.md) 已同步。
+3. 真机验证（未完成，见 [验收](../docs/acceptance.md) INST02、INST03）：在装过其他固件的设备上完成一次浏览器安装，核对启动、面板显示（官方文档写明 VCOM 保存在 PMU 中，不在闪存里）、联网更新的槽切换与回滚，以及擦除 NVS 后的 Wi-Fi 行为。目前没有保留出厂系统的设备可供验证。本页的安装流程只用模拟的串口和烧录库检查过，没有连接过设备。
+4. 连接不上时的说明（未完成）：其他固件运行时浏览器不一定能让设备自动进入下载模式（kiikoread 为此提供了「BOOT 刷机」菜单）。Read Pico 手动进入下载模式的方法确认后写进页面。
+5. 线上核对（未完成）：Cloudflare 会改写首页的 script 标签（见开发状态 2026-10-11 的部署记录），部署后需确认安装页的模块脚本仍能加载。
 
 ### 浏览器依赖的许可
 
@@ -179,7 +182,7 @@ GitHub 对 Release 事件使用标签所在提交中的工作流文件。标签�
 
 内容取自根目录 README 的「功能」「使用」、[Wi-Fi 传书](../docs/wifi-transfer.md)、[USB 文件传输](../docs/usb-storage-runtime.md)、[存储](../docs/storage.md)和设备内置说明 `firmware/components/reader_app/help_content.h`，控件名称按 `app.cpp` 核对。只写用法和限制，不写验收状态和实现细节。这些来源或界面文案变化时同步修改本页。
 
-- 没有全量镜像时，页首显示「网页安装尚未开放」；判断与安装页相同。首页和文档页不写「固件尚未发布」：联网更新的固件可以先于全量镜像发布，两者不是一回事。安装页自己的「固件尚未发布」文案不在这次改动范围内，全量镜像的发布流程确定时一并处理。
+- 没有全量镜像时，页首显示「网页安装尚未开放」；判断与安装页相同。三个页面都不写「固件尚未发布」：联网更新的固件可以先于全量镜像发布，两者不是一回事。
 - 没有「安装」一节，只链接到安装页。手动安装方法尚未确定，见「安装页」的发布前事项。
 - 没有写固件更新、Wi‑Fi 连接方式等设置的细节，设备内置说明已覆盖其中一部分；发布前按最终固件补充。
 

@@ -1,5 +1,6 @@
-# Same entries as the partition table read from the device (two 4 MiB application slots).
-# The build uses it for the image size check and for slot lookups; it is never flashed.
+# Partition table of an installed device: the full-flash image carries it. Same entries as the
+# table read from a factory Read Pico (two 4 MiB application slots). A change reaches only
+# devices that are installed again from the full-flash image.
 # Name,Type,SubType,Offset,Size,Flags
 nvs,data,nvs,0x9000,0x6000,
 phy_init,data,phy,0xf000,0x1000,

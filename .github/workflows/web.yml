@@ -33,8 +33,10 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: web/package-lock.json
-      # Firmware is not kept in the repository. The site serves the manifest and image attached
-      # to the newest release, and a manifest must describe the image beside it.
+      # Firmware is not kept in the repository. The site serves the manifest and the images attached
+      # to the newest release: the application image devices download, and the full-flash image of
+      # the installer when the release has one. The manifest must describe the application, and
+      # the full-flash image must hold the same application.
       - name: Fetch published firmware
         working-directory: ${{ github.workspace }}
         env:
@@ -45,7 +47,7 @@ jobs:
           tag=$(python3 tools/ota_manifest.py --pick-release "$RUNNER_TEMP/releases.json")
           if [ -n "$tag" ]; then
             gh release download "$tag" --dir web/public/firmware \
-              --pattern manifest.json --pattern 'pico-page-*-read_pico-release.bin'
+              --pattern manifest.json --pattern 'pico-page-*-read_pico-release*.bin'
             python3 tools/ota_manifest.py --check web/public/firmware --expect-version "${tag#v}"
           else
             python3 tools/ota_manifest.py --check web/public/firmware

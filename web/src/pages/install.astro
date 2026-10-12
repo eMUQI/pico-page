@@ -43,7 +43,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
                 <p>用 USB 线连接电脑，点击「连接设备」，在浏览器弹窗里选择 Read Pico 的串口。写入期间请保持页面打开、电脑唤醒、数据线不动。</p>
                 <div class="flash" data-phase={firmware ? "idle" : "unreleased"} data-url={firmware?.url} data-sha256={firmware?.sha256}>
                   <div class="flash-head">
-                    <span class="flash-status" aria-live="polite"><span class="dot"></span><span data-el="status">{firmware ? "未连接" : "尚未发布"}</span></span>
+                    <span class="flash-status" aria-live="polite"><span class="dot"></span><span data-el="status">{firmware ? "未连接" : "尚未开放"}</span></span>
                     {firmware && <span class="mono">Pico Page {firmware.version}</span>}
                   </div>
                   {firmware ? (
@@ -79,7 +79,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
                   ) : (
                     <div class="flash-body">
                       <div>
-                        <p>固件尚未发布。项目仍在开发中，发布后这里会开放安装。</p>
+                        <p>网页安装尚未开放。项目仍在开发中，开放后可以在这里安装。</p>
                         <button class="primary" type="button" disabled>连接设备</button>
                       </div>
                     </div>

@@ -2,6 +2,8 @@
 
 ## 当前摘要（2026-10-12）
 
+第一个版本的发布准备已有候选（2026-10-12，分支 `release/first-version-prep`，基于 main `a5235a5`，本地提交、未推送，D41）：用户确认电脑安装采用整片覆盖，第一个版本为 `0.2.0-beta.1`。`tools/ota_manifest.py --full` 由 release 构建的 bootloader、分区表和应用合并出全量镜像并核对，网站构建工作流一并取回；安装页在没有全量镜像时显示「网页安装尚未开放」；README、路线图 R11、版本管理和验收（新增 INST01–INST03）已同步；发布说明草稿在 `docs/releases/0.2.0-beta.1.md`。尚未发布任何版本，没有创建标签。整片安装和联网更新仍然没有真机证据；随镜像分发的第三方许可文件没有整理，项目总许可证未定，固件静态链接的 epdiy 为 LGPL-3.0-or-later，开放网页安装前必须解决。详见本日「第一个版本的发布准备」记录。
+
 网站首页已有候选（2026-10-12，分支 `web/home-v3`，基于 main `ef3bdb5`，PR #76）：首页按设计稿《Pico Page 官网 v3》重做，与安装页、404 页共用页头、页脚和样式；新增使用文档页 `/docs/`；界面图按 main `ef3bdb5` 重新导出，六张中四张有变化。固件尚未发布，首页第 1 步显示「网页安装尚未开放」。只在本机无头 Chrome 检查过，未在线上、Edge 和真实手机检查。详见本日「网站首页 v3 与界面图」记录。
 
 网站安装页已有候选（2026-10-12，分支 `web/install-page`，基于 main `95934bc`，已提交 PR）：`/install/` 按设计稿《Pico Page 烧录》实现，通过 Web Serial 整片擦除并写入全量镜像。固件尚未发布且没有全量镜像，页面显示「固件尚未发布」，不开放写入。安装流程只用模拟的串口和烧录库检查过，没有连接过设备；整片覆盖与现行「只写应用」的规定冲突，待项目所有者确认。详见本日「网站安装页」记录。
@@ -67,6 +69,20 @@ PR #52（分支 `feat/sync-map-images`，已整合 main `fd17171`）包含三项
 个人主目录、设备标识及私有样本名称已脱敏；占位路径不保证可直接执行。历史日期、验证数值和结果保留，历史授权不适用于新的设备操作。
 
 ## 历史摘要与开发记录
+
+### 2026-10-12 · 第一个版本的发布准备（D41）
+
+基于 main `a5235a5`，分支 `release/first-version-prep`。用户先要求只做调查并给出发布准备报告，随后确认两项决定：电脑安装采用整片覆盖，第一个版本为 `0.2.0-beta.1`。本批不创建标签、不发布、不推送、不合并、不连接设备。
+
+- 调查结论：没有打开的 PR，「当前摘要」提到的候选分支对应的 PR #63–#76 均已合并；没有 GitHub Release，线上清单返回 404。清单地址是固件中的常量（`update.h`），联网更新的真机验证只能对着线上清单进行。两台设备的原始分区不同（第二台烧录前为 `nvs` 20K、`phy_init`@`0xe000`、`ota_0`、5M FAT `storage`），固定偏移的只写应用不能通用。官方「DIY Your System」的 `idf.py flash` 同样写入 bootloader 和分区表；官方入门页列出的 CrossMux、kiikoread、RickyOS、WhiteOS、CrossLink、Just Read 都提供网页完整安装（只读了官方文档中各固件的介绍页，没有核对各家的烧录器和发布包）。Just Read 的烧录器列有「MindReset 原厂固件」选项，内容未验证。
+- 变更（工具）：`tools/ota_manifest.py` 新增 `--full`，从 `--image` 所在的构建目录读取 bootloader 和分区表，生成 `pico-page-<版本>-read_pico-release-full.bin`：bootloader 位于 `0x0`，分区表位于 `0x8000`，应用位于 `0x10000`，其余为擦除值，末尾不填充。生成和 `--check` 都核对：bootloader 是完整的 ESP32-S3 镜像且头部写明 16 MiB 闪存（安装页以 `keep` 沿用头部的闪存参数）；分区表的 MD5 正确，`ota_0` 位于 `0x10000`，`ota_0`、`ota_1` 均为 4 MiB，有 otadata，条目不超出 16 MiB；三部分之外没有数据；全量镜像中的应用与清单描述的应用镜像逐字节相同。`--check` 接受目录中同版本的全量镜像，其他 `.bin` 仍然拒绝。同时处理 Issue #74 的两项：拒绝长度不是 4 的倍数的段和短于应用描述的第一段；`--base-url` 中任何位置出现 `@` 都拒绝。
+- 变更（网站）：`.github/workflows/web.yml` 的下载模式改为 `pico-page-*-read_pico-release*.bin`，同时取回应用镜像和全量镜像。安装页没有全量镜像时的文案由「固件尚未发布」改为「网页安装尚未开放」，与首页和文档页一致；联网更新的固件先于全量镜像发布时这句话仍然成立。
+- 变更（文档）：`docs/decisions.md` 新增 D41；根目录 README 的「烧录前必读」、路线图 R11 的「分区与前提」「失败恢复」、`docs/versioning.md`、`docs/environment.md`、`web/README.md` 和 `firmware/partitions.build.csv` 的注释改为整片安装的说法，并消除 README 与路线图对 `partitions.build.csv` 是否与设备一致的矛盾。`docs/acceptance.md` 新增 INST01–INST03。新增发布说明草稿 `docs/releases/0.2.0-beta.1.md`（1,681 字节），内容待用户确认。`AGENTS.md` 中未经授权不刷写、不改分区、不擦除的工作边界不变。
+- 环境与命令：macOS，Python 3.14.7，Node.js v26.7.0，ESP-IDF v6.1 经 EIM 0.19.0 使用，未改动全局工具链。`python3 -m unittest discover -s tests -p test_ota_manifest.py` 7/7；host Debug CTest 24/24；`python3 tools/check_handoff.py` 和 `git diff --check` 通过。逐条停用新增的检查后对应测试均失败，确认每条检查有测试覆盖。`eim … run "sh tools/build_firmware.sh release" v6.1`：`build/firmware-release/sdkconfig` 是 10 月 10 日生成的旧文件，不含回滚选项，构建入口拒绝使用；按提示把它改名为 `sdkconfig.stale-20261010` 后重新生成。
+- 结果：release 构建的应用为 3,483,936 字节，占 4 MiB 槽的 83.1%；bootloader 21,232 字节，头部为 DIO、80 MHz、16 MiB；实际采用的配置含 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`。构建输出的烧录参数另有 `0x810000` 的 `ota_data_initial.bin`，内容为 8,192 字节的擦除值，整片擦除后不需要写入。用这三部分合并的全量镜像为 3,549,472 字节，与同一环境 esptool 5.3.1 的 `merge-bin`（DIO、80 MHz、16 MiB）输出逐字节相同。在 `web/public/firmware/` 临时放入清单和该全量镜像后，网站构建为可安装状态，页面内嵌的 SHA-256 与文件一致；检查后已删除。没有固件时三个页面都显示「网页安装尚未开放」。网站构建输出到仓库外的临时目录，没有改动本机预览服务使用的 `web/dist/`。这次构建来自带未提交改动的检出（版本 `0.2.0-beta.1+ga5235a5.dirty`），构建期间文档有改动，来源记录没有生成；它只用于核对工具，不是发布产物。
+- 未测项：没有连接设备。整片擦除、写入、启动、NVS 为空时的 Wi-Fi、自建 bootloader 的回滚、联网更新的全部真机项目（INST02、INST03、OTA02–OTA06）都没有证据。`--full` 和 `--check` 没有在带标签的 release 构建上实际运行过，开发构建的版本会被 `build_manifest` 拒绝，这一路径只有单元测试。工作流的下载模式没有对真实 Release 运行过。Read Pico 手动进入下载模式的方法没有确认，安装页没有相应提示。
+- 许可（未解决）：仓库没有 `LICENSE`，项目总许可证未定。固件静态链接 epdiy（LGPL-3.0-or-later，含本项目补丁），`docs/bsp-review.md` 已写明分发义务；FreeType（FTL）、两份字体 OFL、Apache-2.0 和 MIT 组件的声明也需要随镜像分发。本批没有整理随包许可文件：它需要按链接产物逐项核对，并取决于是否公开仓库，待用户决定。
+- 下一步：用户确认后推送并提交 PR；第二台设备用本机预览站做一次整片安装（INST02、INST03）；读取第一台的 otadata 和 `ota_1`；合并后在标签检出上构建并发布 `0.2.0-beta.1`（建议第一个 Release 不带全量镜像，网页安装保持关闭），再做 OTA02–OTA06。每一步设备操作和发布都需要单独授权。
 
 ### 2026-10-12 · 网站首页 v3 与界面图
 
