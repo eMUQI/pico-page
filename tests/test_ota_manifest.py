@@ -47,7 +47,8 @@ class ManifestTest(unittest.TestCase):
         # A valid start is not enough: every device would reject these only after a full download.
         whole = image()
         for data in (whole[:-1], whole[:2000], whole + b'\0', whole[:300] + bytes([whole[300] ^ 1]) + whole[301:],
-                     whole[:23] + b'\0' + whole[24:]):
+                     whole[:23] + b'\0' + whole[24:], whole[:1] + b'\x11' + whole[2:],
+                     whole[:1] + b'\x10' + whole[2:32] + bytes(256)):
             with self.assertRaises(ValueError):
                 self.build(data)
         with self.assertRaises(ValueError):

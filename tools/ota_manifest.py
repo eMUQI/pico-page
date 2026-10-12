@@ -46,8 +46,13 @@ def verify_image(image):
     """
     if len(image) < DESCRIPTION + 256 or image[0] != 0xE9:
         raise ValueError('Not an ESP application image')
+    # ESP_IMAGE_MAX_SEGMENTS: the bootloader refuses an image with more segments.
+    if image[1] > 16:
+        raise ValueError('Image has more than 16 segments')
     offset, checksum = 24, 0xEF
     for _ in range(image[1]):
+        if offset + 8 > len(image):
+            raise ValueError('Image is truncated')
         length, = struct.unpack_from('<I', image, offset + 4)
         offset += 8
         if offset + length > len(image):
