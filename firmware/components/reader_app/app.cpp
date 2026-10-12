@@ -7,6 +7,7 @@
 #include "pico_page/document.h"
 #include "pico_page/provision.h"
 #include "pico_page/store.h"
+#include "pico_page/update.h"
 #include <algorithm>
 #include <chrono>
 #include <cerrno>
@@ -148,7 +149,9 @@ enum Control {
     AccountEndpoint, AccountUser, AccountPassword, AccountVerify, AccountCancel, AccountRemove, AccountRemoveConfirm,
     EntryClear, EntryMask, EntryDefault,
     WifiSavedBase = 50100, WifiModeBase = 50200, WifiNearbyBase = 50300,
-    SleepCustom = 51000, SleepRotation, SleepChoose, SleepRefresh, LockScreenBase = 52000
+    SleepCustom = 51000, SleepRotation, SleepChoose, SleepRefresh, LockScreenBase = 52000,
+    UpdateOpen = 53000, UpdateCheck, UpdateNotes, UpdateStart, UpdateConfirm, UpdateCancel,
+    UpdateRetry, UpdateLater, UpdateRestart, UpdateDismiss
 };
 static_assert(ContentsBookmarks < EntryBase);
 std::string basename(const std::string &path) {
@@ -1957,6 +1960,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         load_fonts();
         scan_library();
         draw_library();
+        update_boot();
         overlay(true);
         return true;
     }
@@ -3748,18 +3752,24 @@ struct ReaderApp::Impl final : DisplayBackend {
         button(Back, "取消", 24, 1080, 306, 96);
         button(IntervalSave, "保存间隔", 354, 1080, 306, 96, true);
     }
-    /** A 132-pixel row with a title and a summary. A zero id draws a description without a hit. */
-    void settings_row(int id, const std::string &title, const std::string &value, int y, std::uint8_t rule = 12) {
-        text(title, 36, y + 20, 28, 554, 1, true);
-        text(value, 36, y + 70, 22, 554, 3);
-        canvas.line(24, y + 131, 660, y + 131, rule, 2);
+    static constexpr int settings_pitch = 116;
+    /**
+     * A row with a title and a summary, 132 pixels high unless height says otherwise. A zero id
+     * draws a description without a hit.
+     */
+    void settings_row(int id, const std::string &title, const std::string &value, int y, std::uint8_t rule = 12,
+                      int height = 132) {
+        const int lift = (132 - height) / 2;
+        text(title, 36, y + 20 - lift, 28, 554, 1, true);
+        text(value, 36, y + 70 - lift, 22, 554, 3);
+        canvas.line(24, y + height - 1, 660, y + height - 1, rule, 2);
         if (!id) return;
-        text("›", 620, y + 42, 28, 40);
-        hits.push_back({24, y, 636, 132, id});
+        text("›", 620, y + 42 - lift, 28, 40);
+        hits.push_back({24, y, 636, height, id});
     }
     bool wifi_enabled() const {
         // Preserve the admitted permission during a request; an upload session also owns card writes.
-        if (portal_live || network_worker_id) return true;
+        if (portal_live || network_worker_id || update_worker) return true;
         if (bookmark_job) return false;
         const auto cfg = store.load_settings();
         return cfg.diagnostics.empty() && cfg.settings.wifi_enabled;
@@ -4254,6 +4264,537 @@ struct ReaderApp::Impl final : DisplayBackend {
         entry = {};
         draw_sync_settings(); overlay();
     }
+    // Firmware update: the page under settings, its requests to the network worker and the
+    // report of an installation on the next start.
+    enum class UpdatePage { Home, Checking, Notes, Schema, Downloading, Failed, Ready, Result };
+    /** One laid-out line of release notes. block_rows is the line count of its block on the block's first line, otherwise 0. */
+    struct NoteLine {
+        std::u32string text;
+        std::vector<bool> bold;
+        int size = 26, indent = 0, gap = 0;
+        bool bullet = false;
+        std::size_t block_rows = 0;
+    };
+    update::State update_state;
+    UpdatePage update_page = UpdatePage::Home, notes_return = UpdatePage::Home;
+    std::optional<UpdateOperation> update_request;
+    network::Hold update_hold;
+    // update_active is the request the page waits for; update_worker is the one the worker holds.
+    std::uint64_t update_sequence = 0, update_active = 0, update_worker = 0;
+    bool update_cancelling = false, update_ready = false, update_rolled_back = false, battery_charging = false;
+    UpdateFailure update_failure = UpdateFailure::None;
+    std::uint32_t update_bytes = 0;
+    int update_step = 0;
+    std::string update_notice, update_from, update_to, running_version = firmware_version();
+    std::vector<NoteLine> note_lines;
+    std::vector<std::size_t> note_starts;
+    std::size_t note_page = 0;
+    // Text area of a notes screen: later screens start at notes_top, every screen ends at notes_bottom.
+    static constexpr int notes_top = 132, notes_first_top = 184, notes_bottom = 984;
+    // The state is kept in the rebuildable cache: clearing the cache also forgets a skipped
+    // version and an installation result that has not been shown yet.
+    void load_update_state() {
+        std::string cached;
+        update_state = {};
+        if (card_available && store.load_cache(update::state_cache, update::state_limit, cached) == StoreStatus::Ok)
+            update::decode_state(cached, update_state);
+    }
+    bool save_update_state() {
+        const auto encoded = update::encode_state(update_state);
+        return card_available && !encoded.empty() && store.save_cache(update::state_cache, encoded) == StoreStatus::Ok;
+    }
+    update::Offer update_offer() const {
+        return update_state.manifest ? update::evaluate(*update_state.manifest, running_version, update_state.skipped)
+                                     : update::Offer::Current;
+    }
+    static bool update_installable(update::Offer offer) {
+        return offer == update::Offer::Newer || offer == update::Offer::NewerSchema || offer == update::Offer::Development;
+    }
+    bool update_waiting() const { return update_request || update_worker; }
+    /** Why the battery forbids an installation now; empty at 20% or above, or on external power. */
+    std::string update_battery_block() const {
+        if (battery_charging || (battery_percent && *battery_percent >= 20)) return {};
+        return battery_percent ? "电量 " + std::to_string(*battery_percent) + "%。充电或电量到 20% 以上再安装。"
+                               : "电量未知。接上电源后再安装。";
+    }
+    /** Why an installation cannot start now; empty when it can. */
+    std::string update_block() const {
+        if (const auto battery = update_battery_block(); !battery.empty()) return battery;
+        if (active_network || portal_live || wifi_worker || content_loading || foreground_job || save_job || bookmark_job)
+            return "请先结束正在进行的同步、传书或书籍加载。";
+        return {};
+    }
+    static int note_line_height(int size) { return size * 31 / 20; }
+    /** Wraps and paginates release notes for screens whose first text area starts at first_top. */
+    void layout_notes(const std::string& markdown, bool truncated, int first_top) {
+        note_lines.clear(); note_starts.clear();
+        auto blocks = update::parse_notes(markdown);
+        if (blocks.empty()) blocks.push_back({update::NoteBlock::Kind::Text, {{"这一版没有附更新说明。", false}}});
+        if (truncated) blocks.push_back({update::NoteBlock::Kind::Text, {{"日志过长，后面的内容未显示。", false}}});
+        for (const auto& block : blocks) {
+            const bool heading = block.kind == update::NoteBlock::Kind::Heading;
+            const bool item = block.kind == update::NoteBlock::Kind::Item;
+            NoteLine line{{}, {}, heading ? 30 : 26, item ? 28 : 0, heading ? 28 : 12, item, 0};
+            ui.size(line.size);
+            std::u32string scalars;
+            std::vector<bool> bold;
+            for (const auto& span : block.spans)
+                for (auto scalar : decode_utf8(span.text)) { scalars.push_back(scalar); bold.push_back(heading || span.bold); }
+            const int width = 612 - line.indent;
+            const auto first = note_lines.size();
+            int used = 0;
+            for (std::size_t i = 0; i < scalars.size(); ++i) {
+                const int advance = ui.advance(scalars[i]), run = run_width(scalars, i);
+                const bool closing = std::u32string_view(U"，。、；：！？）」』”’》").find(scalars[i]) != std::u32string_view::npos;
+                if (used && !closing && (used + advance > width || (run <= width && used + run > width))) {
+                    const NoteLine next{{}, {}, line.size, line.indent, line.gap, false, 0};
+                    note_lines.push_back(std::exchange(line, next));
+                    used = 0;
+                }
+                if (!used && note_lines.size() > first && scalars[i] == U' ') continue;
+                line.text.push_back(scalars[i]); line.bold.push_back(bold[i]);
+                used += advance;
+            }
+            note_lines.push_back(std::move(line));
+            note_lines[first].block_rows = note_lines.size() - first;
+        }
+        // A block moves to the next screen whole when it fits there; a longer one is divided between
+        // lines. A heading also takes the first line of the block after it along.
+        int y = first_top;
+        note_starts.push_back(0);
+        for (std::size_t i = 0; i < note_lines.size(); ++i) {
+            const auto& line = note_lines[i];
+            const int height = note_line_height(line.size);
+            const auto after = i + line.block_rows;
+            const int block = static_cast<int>(line.block_rows) * height + (line.size == 30 && after < note_lines.size()
+                ? note_lines[after].gap + note_line_height(note_lines[after].size) : 0);
+            const bool top = i == note_starts.back();
+            const int gap = line.block_rows && !top ? line.gap : 0;
+            if (!top && y + gap + (line.block_rows && block <= notes_bottom - notes_top ? block : height) > notes_bottom) {
+                note_starts.push_back(i);
+                y = notes_top;
+            } else y += gap;
+            y += height;
+        }
+        note_page = std::min(note_page, note_starts.size() - 1);
+    }
+    /** Draws the lines of screen from top; with bottom set, stops there and marks omitted lines. */
+    void draw_note_lines(std::size_t screen, int top, int bottom = 0) {
+        const auto begin = note_starts[screen];
+        const auto end = screen + 1 < note_starts.size() ? note_starts[screen + 1] : note_lines.size();
+        int y = top;
+        for (auto i = begin; i < end; ++i) {
+            const auto& line = note_lines[i];
+            if (i != begin && line.block_rows) y += line.gap;
+            if (bottom && y + note_line_height(line.size) > bottom) { text("…", 36, y, 24, 612, 3); return; }
+            ui.size(line.size);
+            const int baseline = y + ui.metrics().ascender;
+            if (line.bullet && line.block_rows) ui.draw(canvas, ui.contains(U'•') ? U'•' : U'·', 36, baseline, 1);
+            int x = 36 + line.indent;
+            for (std::size_t k = 0; k < line.text.size(); ++k) {
+                ui.draw(canvas, line.text[k], x, baseline, 1, line.bold[k]);
+                x += ui.advance(line.text[k]);
+            }
+            y += note_line_height(line.size);
+        }
+        if (bottom && end < note_lines.size()) text("…", 36, y, 24, 612, 3);
+    }
+    static std::string update_stage(const std::string& version) {
+        return version.find("-beta.") != std::string::npos ? "测试版" : version.find("-rc.") != std::string::npos ? "候选版" : "正式版";
+    }
+    std::string update_checked() const {
+        const auto day = recent_date(update_state.checked_at);
+        const auto shifted = static_cast<std::time_t>(update_state.checked_at + 8 * 3600);
+        std::tm time{};
+        if (day.empty() || !gmtime_r(&shifted, &time)) return "上次检查时间未知";
+        char value[8];
+        std::strftime(value, sizeof(value), "%H:%M", &time);
+        return "上次检查 " + day + " " + value;
+    }
+    void update_head(const std::string& label, const std::string& version, const std::string& detail = "") {
+        text(label, 36, 136, 24, 612, 3);
+        text(version, 36, 176, version.size() > 18 ? 32 : 44, 612, 1, true);
+        if (!detail.empty()) text(detail, 36, 244, 24, 612, 3);
+    }
+    /** The three installation steps; steps before active are marked done. */
+    void update_steps(int active) {
+        static constexpr const char* names[] = {"1 下载", "2 校验", "3 重启"};
+        outline(36, 452, 612, 72);
+        for (int i = 0; i < 3; ++i) {
+            const int x = 36 + i * 204;
+            if (i) canvas.line(x, 452, x, 523, 1, 2);
+            if (i == active) outline(x, 452, 204, 72, 5);
+            center(std::string(names[i]) + (i >= active ? "" : ui.contains(U'✓') ? " ✓" : " 完成"), x, 474, 204, 24,
+                   i == active ? 1 : 3, i == active);
+        }
+    }
+    /** A bottom panel over the page already on the canvas; returns the top of its body. Only the panel's controls stay active. */
+    int update_sheet(int top, const std::string& title) {
+        hits.clear();
+        canvas.fill_rect(0, top, 684, 1216 - top, 15);
+        canvas.line(0, top, 683, top, 1, 3);
+        canvas.fill_rect(36, top + 36, 48, 48, 1);
+        center("!", 36, top + 42, 48, 32, 15, true);
+        text(title, 100, top + 42, 32, 548, 1, true);
+        return top + 112;
+    }
+    void update_install_button(int y, update::Offer offer) {
+        const auto label = offer == update::Offer::Development ? "换成发布构建" : "下载并安装";
+        if (update_installable(offer) && update_block().empty())
+            button(UpdateStart, label, 24, y, 636, 96, offer != update::Offer::Development);
+        else {
+            disabled_button(label, 24, y, 636, 96);
+            // Battery and activity change without a redraw; a tap evaluates them again.
+            if (update_installable(offer)) hits.push_back({24, y, 636, 96, UpdateStart});
+        }
+    }
+    /** preview_bottom limits the release-note excerpt; a panel drawn over the page passes its own top. */
+    void draw_update_home(update::Offer offer, int preview_bottom = 700) {
+        const auto& manifest = update_state.manifest;
+        header("固件更新", Back, "设置");
+        std::string problem;
+        const bool networks = !wifi_targets(problem).networks.empty();
+        const auto check_button = [&](int y, const char* label) {
+            if (networks) button(UpdateCheck, label, 24, y, 636, 88);
+            else button(WifiSettings, "先设置 Wi-Fi ›", 24, y, 636, 88);
+        };
+        const auto development = update::development_build(running_version);
+        if (!manifest || offer == update::Offer::Current || offer == update::Offer::Skipped) {
+            update_head(development ? "当前版本 · 开发构建" : "当前版本", running_version);
+            canvas.line(36, 300, 647, 300, 1, 2);
+            text(!manifest ? "尚未检查更新" : offer == update::Offer::Skipped ? "没有可安装的更新" : "已是最新版本", 36, 328, 30, 612, 1, true);
+            int y = 384;
+            if (manifest) { text(update_checked(), 36, y, 24, 612, 3); y += 52; }
+            if (offer == update::Offer::Skipped)
+                y += wrapped(manifest->version + " 上次没有启动成功，已跳过。清单出现更高的版本后可以更新。", 36, y, 612, 26) + 24;
+            if (manifest && manifest->version == running_version) value_row(UpdateNotes, "本版更新日志", "", "", y, 96);
+            wrapped(update_notice, 36, 940, 612, 24);
+            check_button(1088, "检查更新");
+            return;
+        }
+        if (note_lines.empty()) layout_notes(manifest->notes, manifest->notes_truncated, notes_first_top);
+        if (offer == update::Offer::Development) {
+            update_head("当前版本 · 开发构建", running_version);
+            canvas.line(36, 300, 647, 300, 1, 2);
+            text("清单版本", 36, 324, 24, 612, 3);
+            text(manifest->version, 36, 362, 36, 612, 1, true);
+            wrapped("开发构建无法判断新旧。安装后会换成清单里的发布构建，本机改动不保留。", 36, 432, 612, 26);
+            value_row(UpdateNotes, "更新日志", "", "", 716, 96);
+        } else {
+            update_head("新版本", manifest->version, "当前 " + running_version +
+                (manifest->published_at.size() == 10 ? " · 发布于 " + manifest->published_at.substr(5) : "") + " · " + file_size(manifest->size));
+            canvas.line(36, 300, 647, 300, 1, 2);
+            draw_note_lines(0, 324, preview_bottom);
+            value_row(UpdateNotes, "完整更新日志", "", note_starts.size() > 1 ? std::to_string(note_starts.size()) + " 屏" : "", 716, 96);
+        }
+        check_button(880, "重新检查");
+        update_install_button(992, offer);
+        const auto reason = offer == update::Offer::TooLarge ? "新固件 " + file_size(manifest->size) + "，超过 4 MiB 的分区，不能安装。"
+            : offer == update::Offer::OlderSchema ? std::string("这个版本写入的数据格式比本机旧，不能安装。") : update_block();
+        wrapped(update_notice.empty() ? reason : update_notice, 36, 1104, 612, 24);
+    }
+    void draw_update() {
+        view = View::Update;
+        const auto& manifest = update_state.manifest;
+        const auto offer = update_offer();
+        if (update_page == UpdatePage::Result && update_rolled_back) {
+            int y = update_sheet(700, "更新没有完成");
+            y += wrapped(update_to + " 没有启动成功，已回到 " + running_version + "。阅读进度没有变化。", 36, y, 612, 26) + 16;
+            wrapped("设备会跳过这个版本，直到清单出现更高的版本。", 36, y, 612, 24, true, 3);
+            button(UpdateDismiss, "知道了", 24, 1088, 636, 96, true);
+            return;
+        }
+        // Pages that describe a manifest fall back to the home page when it is gone.
+        if (!manifest && update_page != UpdatePage::Checking && update_page != UpdatePage::Result) update_page = UpdatePage::Home;
+        if (update_page == UpdatePage::Home && update_ready && manifest && manifest->version == update_to && update_installable(offer))
+            update_page = UpdatePage::Ready;
+        hits.clear(); canvas.clear();
+        const auto megabytes = [](std::uint32_t bytes) {
+            char value[16];
+            std::snprintf(value, sizeof(value), "%.1f", bytes / 1048576.0);
+            return std::string(value);
+        };
+        switch (update_page) {
+        case UpdatePage::Result: {
+            header("已更新", 0);
+            const bool described = manifest && manifest->version == update_to;
+            if (note_lines.empty()) layout_notes(described ? manifest->notes : "", described && manifest->notes_truncated, 284);
+            if (!note_page) {
+                text(update_from + " →", 36, 136, 24, 612, 3);
+                text(update_to, 36, 176, 44, 612, 1, true);
+                canvas.line(36, 256, 647, 256, 1, 2);
+            }
+            draw_note_lines(note_page, note_page ? notes_top : 284);
+            button(UpdateDismiss, "回到书库", 24, 1008, 636, 96, true);
+            footer_bar("", note_page, note_starts.size());
+            return;
+        }
+        case UpdatePage::Notes:
+            header(manifest->version, Back, "返回");
+            if (note_lines.empty()) layout_notes(manifest->notes, manifest->notes_truncated, notes_first_top);
+            if (!note_page)
+                text((manifest->published_at.empty() ? "" : "发布于 " + manifest->published_at + " · ") + update_stage(manifest->version),
+                     36, notes_top, 24, 612, 3);
+            draw_note_lines(note_page, note_page ? notes_top : notes_first_top);
+            if (update_installable(offer)) update_install_button(1008, offer);
+            footer_bar("", note_page, note_starts.size());
+            return;
+        case UpdatePage::Checking:
+            header("固件更新", 0);
+            update_head("当前版本", running_version);
+            canvas.line(36, 300, 647, 300, 1, 2);
+            text(update_cancelling ? "正在取消" : "正在检查", 36, 328, 30, 612, 1, true);
+            text("网络：" + network_label() + " · 读取更新清单", 36, 384, 24, 612, 3);
+            disabled_button(update_cancelling ? "正在取消…" : "正在检查…", 24, 976, 636, 96);
+            if (!update_cancelling) button(UpdateCancel, "取消", 24, 1088, 636, 88);
+            return;
+        case UpdatePage::Downloading: {
+            header("固件更新", 0);
+            const auto total = manifest->size, bytes = std::min(update_bytes, total);
+            update_head(update_cancelling ? "正在取消" : bytes >= total ? "正在校验" : "正在下载", manifest->version);
+            outline(36, 320, 612, 40);
+            canvas.fill_rect(36, 320, static_cast<int>(612ull * bytes / total), 40, 1);
+            text(megabytes(bytes) + " / " + file_size(total), 36, 376, 26, 400);
+            const auto percent = std::to_string(100ull * bytes / total) + "%";
+            text(percent, 648 - text_width(percent, 26), 376, 26, 120);
+            update_steps(bytes >= total ? 1 : 0);
+            wrapped("下载期间不会休眠。可以取消，当前固件不受影响。", 36, 556, 612, 24, true, 3);
+            if (update_cancelling) disabled_button("正在取消…", 24, 1088, 636, 88);
+            else button(UpdateCancel, "取消下载", 24, 1088, 636, 88);
+            return;
+        }
+        case UpdatePage::Failed: {
+            header("固件更新", Back, "设置");
+            const char* title = "无法写入固件";
+            std::string body = "设备无法写入更新分区。";
+            switch (update_failure) {
+            case UpdateFailure::Link: title = "没有连上网络"; body = update_notice; break;
+            case UpdateFailure::Network: title = "网络中断"; body = "下载到 " + megabytes(update_bytes) + " MiB 时网络断开。"; break;
+            case UpdateFailure::Server: title = "更新服务器无响应"; body = "没有取得固件文件，稍后再试。"; break;
+            case UpdateFailure::Mismatch: title = "校验没有通过"; body = "下载的文件和清单记录的不一致，已丢弃。"; break;
+            case UpdateFailure::TooLarge: title = "空间不够"; body = "新固件 " + file_size(manifest->size) + "，超过 4 MiB 的分区。"; break;
+            case UpdateFailure::WrongImage: title = "型号不符"; body = "这个固件不是给 Read Pico 的，或版本与清单不符。"; break;
+            default: break;
+            }
+            canvas.fill_rect(36, 140, 48, 48, 1);
+            center("!", 36, 146, 48, 32, 15, true);
+            text(title, 100, 144, 34, 548, 1, true);
+            wrapped(body + "仍在使用 " + running_version + "。", 36, 228, 612, 26);
+            button(UpdateRetry, "重新下载", 24, 976, 636, 96, true);
+            button(UpdateLater, "稍后", 24, 1088, 636, 88);
+            return;
+        }
+        case UpdatePage::Ready:
+            header("固件更新", 0);
+            update_head("已下载并校验", update_to);
+            update_steps(2);
+            wrapped("重启期间不要断电。重启前保存阅读位置，新固件启动后回到书库。", 36, 556, 612, 26);
+            wrapped(update_notice.empty() ? "选“稍后”回到设置。设备关机或重启后需要重新下载。" : update_notice, 36, 700, 612, 24, true, 3);
+            button(UpdateRestart, "重启并安装", 24, 976, 636, 96, true);
+            button(UpdateLater, "稍后", 24, 1088, 636, 88);
+            return;
+        default:
+            draw_update_home(offer, update_page == UpdatePage::Schema ? 590 : 700);
+            if (update_page != UpdatePage::Schema) return;
+            const bool progress = manifest->progress_schema > update::progress_schema;
+            const bool config = manifest->config_schema > update::config_schema;
+            int y = update_sheet(640, progress && config ? "阅读进度和设置格式会变化" : progress ? "阅读进度格式会变化" : "设置文件格式会变化");
+            y += wrapped("新版本按新格式保存。之后如果回到 " + running_version + "，新格式的" +
+                         (progress && config ? "阅读进度和设置" : progress ? "阅读进度" : "设置") + "不会显示。", 36, y, 612, 26) + 16;
+            wrapped("详见本版更新日志的“兼容性”一节。", 36, y, 612, 24, true, 3);
+            button(UpdateConfirm, "我知道了，安装", 24, 976, 636, 96, true);
+            button(UpdateCancel, "取消", 24, 1088, 636, 88);
+        }
+    }
+    /** Queues a check or a download for the network worker, or shows why it cannot start. */
+    void update_begin(UpdateOperation::Kind kind) {
+        std::string problem;
+        auto targets = wifi_targets(problem);
+        update_notice.clear();
+        if (!wifi_enabled()) update_notice = "Wi-Fi 已关闭。请先在 Wi-Fi 设置中打开。";
+        else if (active_network || portal_live || wifi_worker) update_notice = "请先结束当前任务。";
+        else if (targets.networks.empty()) update_notice = problem;
+        if (!update_notice.empty()) update_page = UpdatePage::Home;
+        else {
+            const bool download = kind == UpdateOperation::Kind::Download;
+            update_hold = std::make_shared<std::atomic_bool>(false);
+            update_active = ++update_sequence;
+            UpdateOperation operation{kind, update_active, update::manifest_url, 0, {}, {}, std::move(targets), update_hold};
+            if (download) {
+                const auto& manifest = *update_state.manifest;
+                operation.url = manifest.url; operation.size = manifest.size;
+                operation.sha256 = manifest.sha256; operation.version = manifest.version;
+                update_ready = false;
+            }
+            update_request = std::move(operation);
+            update_cancelling = false; update_bytes = 0; update_step = 0;
+            update_page = download ? UpdatePage::Downloading : UpdatePage::Checking;
+        }
+        draw_update(); overlay();
+    }
+    /** Ends a request the worker has not taken; otherwise asks the worker to stop and waits for its completion. */
+    void update_cancel() {
+        network::release(update_hold);
+        if (update_request) {
+            update_request.reset();
+            update_active = 0;
+            update_page = UpdatePage::Home;
+        } else if (update_worker) update_cancelling = true;
+    }
+    void update_progress(std::uint64_t id, std::uint32_t bytes) {
+        if (!id || id != update_worker || id != update_active || update_cancelling || display.busy() ||
+            view != View::Update || update_page != UpdatePage::Downloading || !update_state.manifest) return;
+        const auto total = update_state.manifest->size;
+        // Twenty 5% steps while downloading; the last value marks the verification that follows.
+        const int step = bytes >= total ? 21 : static_cast<int>(20ull * bytes / total);
+        if (step == update_step) return;
+        update_step = step;
+        update_bytes = bytes;
+        draw_update();
+        display.present({{"ui", 0, 0, ++ui_sequence}, {}, FramePurpose::Overlay, RefreshIntent::Content,
+                         step == 21 ? std::nullopt : std::optional<RefreshRegion>(RefreshRegion{0, 300, 684, 124})});
+    }
+    void update_complete(std::uint64_t id, UpdateFailure failure, int status, const std::string& body, const std::string& detail) {
+        if (!id || id != update_worker) return;
+        update_worker = 0;
+        const bool cancelled = std::exchange(update_cancelling, false) || failure == UpdateFailure::Cancelled || id != update_active;
+        const bool download = update_page == UpdatePage::Downloading;
+        update_active = 0;
+        network::release(update_hold);
+        if (view != View::Update || (update_page != UpdatePage::Downloading && update_page != UpdatePage::Checking)) {
+            if (update_page == UpdatePage::Downloading || update_page == UpdatePage::Checking) update_page = UpdatePage::Home;
+            return;
+        }
+        update_notice.clear();
+        update_page = UpdatePage::Home;
+        if (cancelled) update_notice = download ? "已取消下载，当前固件没有变化。" : "";
+        else if (download && failure == UpdateFailure::None) {
+            update_ready = true;
+            update_to = update_state.manifest->version;
+            update_page = UpdatePage::Ready;
+        } else if (download) {
+            update_failure = failure;
+            update_notice = detail;
+            update_page = UpdatePage::Failed;
+        } else {
+            update::Manifest manifest;
+            std::string problem;
+            if (failure == UpdateFailure::Link) update_notice = detail;
+            // The update host answers 404 until the first manifest is published.
+            else if (failure == UpdateFailure::None && status == 404) update_notice = "更新服务器上还没有发布固件。";
+            else if (failure != UpdateFailure::None || status != 200 || !update::parse_manifest(body, manifest, problem))
+                update_notice = "更新服务器无响应，稍后再试。";
+            else {
+                const auto later = update::compare_versions(manifest.version, update_state.skipped);
+                if (later && *later > 0) update_state.skipped.clear();
+                const auto now = static_cast<std::int64_t>(std::time(nullptr));
+                update_state.manifest = std::move(manifest);
+                update_state.checked_at = now >= provision::clock_floor ? now : 0;
+                note_lines.clear(); note_page = 0;
+                if (!save_update_state()) update_notice = "检查结果没有写入 TF 卡，下次需要重新检查。";
+            }
+        }
+        if (!display.busy()) { draw_update(); overlay(); }
+    }
+    /** Shows the outcome of an installation that restarted the device; the library is already drawn. */
+    void update_boot() {
+        load_update_state();
+        if (update_state.pending_to.empty()) return;
+        update_from = update_state.pending_from;
+        update_to = update_state.pending_to;
+        update_rolled_back = running_version != update_to;
+        update_page = UpdatePage::Result;
+        note_lines.clear(); note_page = 0;
+        draw_update();
+    }
+    /** Opens the update page from settings with the cached state, or returns to work in progress. */
+    void update_open() {
+        if (view != View::Settings || !bookmark_io_ready()) return;
+        message.clear(); update_notice.clear();
+        if (!update_waiting()) {
+            if (!update_ready) load_update_state();
+            update_page = UpdatePage::Home;
+            note_lines.clear(); note_page = 0;
+        }
+        draw_update(); overlay();
+    }
+    /** Handles a control of the update page; false leaves id to the common controls. */
+    bool update_control(int id) {
+        const auto offer = update_offer();
+        const bool startable = update_installable(offer) && update_block().empty() && !update_waiting();
+        switch (id) {
+        case UpdateCheck:
+            if (update_page == UpdatePage::Home && !update_waiting()) update_begin(UpdateOperation::Kind::Check);
+            return true;
+        case UpdateNotes:
+            if (update_page != UpdatePage::Home || !update_state.manifest) return true;
+            notes_return = update_page; update_page = UpdatePage::Notes; note_page = 0;
+            break;
+        case UpdateStart:
+            if ((update_page != UpdatePage::Home && update_page != UpdatePage::Notes) || !update_installable(offer) ||
+                update_waiting()) return true;
+            if (!startable) break;
+            if (offer != update::Offer::NewerSchema) { update_begin(UpdateOperation::Kind::Download); return true; }
+            update_page = UpdatePage::Schema;
+            break;
+        case UpdateConfirm:
+            if (update_page == UpdatePage::Schema && startable) update_begin(UpdateOperation::Kind::Download);
+            return true;
+        case UpdateRetry:
+            if (update_page != UpdatePage::Failed) return true;
+            update_page = UpdatePage::Home; update_notice.clear();
+            if (startable) { update_begin(UpdateOperation::Kind::Download); return true; }
+            break;
+        case UpdateCancel:
+            if (update_page == UpdatePage::Schema) update_page = UpdatePage::Home;
+            else if (update_page == UpdatePage::Checking || update_page == UpdatePage::Downloading) update_cancel();
+            else return true;
+            break;
+        case UpdateLater:
+            if (update_page == UpdatePage::Failed) { update_page = UpdatePage::Home; update_notice.clear(); break; }
+            if (update_page == UpdatePage::Ready) { update_notice.clear(); draw_settings(); overlay(); }
+            return true;
+        case UpdateRestart:
+            if (update_page != UpdatePage::Ready || !update_ready) return true;
+            // The download may have drained the battery or the charger may have been removed.
+            update_notice = update_battery_block();
+            if (!update_notice.empty()) break;
+            power_selected = PowerAction::Restart;
+            power_request = {PowerAction::Restart, false, true};
+            return true;
+        case UpdateDismiss:
+            if (update_page != UpdatePage::Result) return true;
+            if (update_rolled_back) update_state.skipped = update_to;
+            update_state.pending_from.clear(); update_state.pending_to.clear();
+            // An unsaved dismissal only repeats this report at the next start.
+            save_update_state();
+            update_page = UpdatePage::Home; update_rolled_back = false;
+            note_lines.clear(); note_page = 0;
+            draw_library(); overlay();
+            return true;
+        case Prev:
+        case Next:
+            if (update_page != UpdatePage::Notes && (update_page != UpdatePage::Result || update_rolled_back)) return true;
+            if (id == Prev && note_page) --note_page;
+            else if (id == Next && note_page + 1 < note_starts.size()) ++note_page;
+            else return true;
+            break;
+        default:
+            return false;
+        }
+        draw_update(); overlay();
+        return true;
+    }
+    /** The single frame shown while the device restarts into verified firmware; ends input like the power-off page. */
+    void draw_installing() {
+        view = View::PowerOff;
+        hits.clear(); canvas.clear();
+        text("正在安装", 72, 430, 24, 540, 3);
+        text(update_to, 72, 474, update_to.size() > 18 ? 34 : 48, 540, 1, true);
+        canvas.line(72, 566, 611, 566, 1, 3);
+        text("请勿断电", 72, 598, 34, 540, 1, true);
+        wrapped("屏幕会停在这一页，直到新固件画出首屏。如果安装没有完成，设备会自动回到原来的版本。", 72, 664, 540, 26);
+    }
     void draw_settings() {
         if (!bookmark_io_ready()) return;
         view = View::Settings;
@@ -4265,16 +4806,24 @@ struct ReaderApp::Impl final : DisplayBackend {
         const bool configured = sync::load_config(root, account, detail);
         std::uint64_t card_total = 0, card_free = 0;
         const bool measured = store.card_space(card_total, card_free);
-        settings_row(Import, "网络与传输", "Wi-Fi · " + wifi_summary(), 120);
-        settings_row(SyncSettings, "KOReader 同步", configured ? server_name(account) + " · " + account.username : "未配置", 252);
-        settings_row(Refresh, "显示与刷新", refresh_name(values) + " · " +
-                     (values.refresh_preset == "clear" ? "每页全刷" : "每 " + std::to_string(refresh_interval(values)) + " 页全刷"), 384);
-        settings_row(InputSettings, "输入与阅读", std::string(values.library_view == "grid" ? "卡片" : "列表") + "视图 · " + typography_summary(values), 516);
-        settings_row(PowerSettings, "电源与休眠", sleep_name(values) + " · " +
-                     (values.auto_sleep_minutes ? std::to_string(values.auto_sleep_minutes) + " 分钟" : "不自动休眠"), 648);
-        settings_row(StorageSettings, "存储与设备", (measured ? "可用 " + file_size(card_free) : "可用空间未知") + " · 固件 " + firmware_version(), 780);
-        entry_row(Help, "使用说明", "", "离线查看", 912, 80);
-        entry_row(About, "关于", "", "", 992, 80);
+        int y = 120;
+        const auto row = [&](int id, const std::string& title, const std::string& value) {
+            settings_row(id, title, value, y, 12, settings_pitch);
+            y += settings_pitch;
+        };
+        row(Import, "网络与传输", "Wi-Fi · " + wifi_summary());
+        row(SyncSettings, "KOReader 同步", configured ? server_name(account) + " · " + account.username : "未配置");
+        row(Refresh, "显示与刷新", refresh_name(values) + " · " +
+            (values.refresh_preset == "clear" ? "每页全刷" : "每 " + std::to_string(refresh_interval(values)) + " 页全刷"));
+        row(InputSettings, "输入与阅读", std::string(values.library_view == "grid" ? "卡片" : "列表") + "视图 · " + typography_summary(values));
+        row(PowerSettings, "电源与休眠", sleep_name(values) + " · " +
+            (values.auto_sleep_minutes ? std::to_string(values.auto_sleep_minutes) + " 分钟" : "不自动休眠"));
+        row(StorageSettings, "存储与设备", (measured ? "可用 " + file_size(card_free) : "可用空间未知") + " · 固件 " + firmware_version());
+        const auto offer = update_offer();
+        entry_row(UpdateOpen, "固件更新", "", offer == update::Offer::Newer || offer == update::Offer::NewerSchema
+                  ? "新版本 " + update_state.manifest->version : running_version, y, 80);
+        entry_row(Help, "使用说明", "", "离线查看", y + 80, 80);
+        entry_row(About, "关于", "", "", y + 160, 80);
         if (session.needs_save()) {
             // Unsaved progress outranks other notices; the whole footer retries the save.
             footer_bar("进度尚未保存 · 点此重试");
@@ -5617,6 +6166,13 @@ struct ReaderApp::Impl final : DisplayBackend {
             overlay();
             return;
         }
+        if (view == View::Update) {
+            if (update_page == UpdatePage::Notes) { update_page = notes_return; draw_update(); overlay(); return; }
+            // The other pages end through their own buttons.
+            if (update_page != UpdatePage::Home && update_page != UpdatePage::Failed) return;
+            update_page = UpdatePage::Home; update_notice.clear();
+            draw_settings(); overlay(); return;
+        }
         if (view == View::WifiSettings) {
             if (portal_live) { draw_portal(); overlay(); return; }
             if (wifi_page == WifiPage::Joining || wifi_page == WifiPage::JoinFailed || wifi_page == WifiPage::Joined)
@@ -5832,6 +6388,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         draw_wifi(); overlay();
     }
     void control(int id) {
+        if (view == View::Update && update_control(id)) return;
+        if (id == UpdateOpen) { update_open(); return; }
         if (id == SleepCustom) { draft.sleep_screen = "custom"; draw_power(); overlay(); return; }
         if (id == SleepChoose || id == SleepRefresh) { list_lock_screens(); return; }
         if (id == SleepRotation) {
@@ -6022,7 +6580,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             return;
         }
         case PowerMenu:
-            if (!display.busy() && !active_network && !content_loading && !foreground_job && !usb_prepared && view != View::Portal) {
+            if (!display.busy() && !active_network && !update_waiting() && !content_loading && !foreground_job && !usb_prepared && view != View::Portal) {
                 if (counting_job && (counting_job->request.kind == ContentJob::Kind::SleepCover || counting_job->request.kind == ContentJob::Kind::LockScreen)) {
                     counting_job->cancel();
                     power_menu_wait = view;
@@ -6488,6 +7046,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             return Context::Tools;
         case View::Contents:
         case View::Help:
+        case View::Update:
             return Context::Contents;
         case View::Typography:
             return Context::Typography;
@@ -6705,14 +7264,31 @@ bool ReaderApp::initialize() {
     return impl_->initialize();
 }
 bool ReaderApp::open_book(const std::string &path) {
-    if (impl_->portal_live || impl_->active_network) return false;
+    if (impl_->portal_live || impl_->active_network || impl_->update_waiting()) return false;
     impl_->clear_body_cache();
     impl_->clear_prefetch();
     impl_->release_counting();
     return !impl_->usb_prepared && impl_->open(path);
 }
-void ReaderApp::set_battery(std::optional<int> percent) {
+void ReaderApp::set_battery(std::optional<int> percent, bool charging) {
     impl_->battery_percent = percent && *percent >= 0 && *percent <= 100 ? percent : std::nullopt;
+    impl_->battery_charging = charging;
+}
+void ReaderApp::set_firmware_version(const std::string& version) { impl_->running_version = version; }
+std::optional<UpdateOperation> ReaderApp::take_update_request() {
+    if (impl_->display.busy() || impl_->update_worker || !impl_->update_request) return std::nullopt;
+    impl_->update_worker = impl_->update_request->id;
+    return std::exchange(impl_->update_request, std::nullopt);
+}
+void ReaderApp::update_progress(std::uint64_t id, std::uint32_t bytes) { impl_->update_progress(id, bytes); }
+void ReaderApp::complete_update(std::uint64_t id, UpdateFailure failure, int status, const std::string& body,
+                                const std::string& detail) {
+    impl_->update_complete(id, failure, status, body, detail);
+}
+bool ReaderApp::update_busy() const { return impl_->update_waiting(); }
+void ReaderApp::discard_install_record() {
+    impl_->update_state.pending_from.clear(); impl_->update_state.pending_to.clear();
+    impl_->save_update_state();
 }
 void ReaderApp::input(const AppInput &event) {
     impl_->input(event);
@@ -6856,6 +7432,10 @@ void ReaderApp::stop_wifi(bool for_sleep) {
     network::release(impl_->sync_hold);
     network::release(impl_->wifi_hold);
     if (impl_->wifi_request) { impl_->wifi_request.reset(); impl_->wifi_worker = 0; }
+    if (impl_->update_waiting()) {
+        impl_->update_cancel();
+        if (impl_->view == View::Update && !impl_->display.busy()) { impl_->draw_update(); impl_->overlay(); }
+    }
     if (impl_->portal_live) impl_->portal_action = PortalAction::Stop;
     if (impl_->network_worker_id) {
         if (impl_->view != View::NetworkClosing) impl_->wait_network(SyncCancel);
@@ -7017,7 +7597,10 @@ void ReaderApp::power_unavailable(const std::string& message) {
     impl_->overlay();
 }
 bool ReaderApp::prepare_power(PowerRequest request) {
-    if (request.action == PowerAction::None || impl_->view != View::PowerMenu ||
+    const bool install = request.install && request.action == PowerAction::Restart && !request.without_save &&
+        impl_->view == View::Update && impl_->update_page == Impl::UpdatePage::Ready && impl_->update_ready;
+    if (request.action == PowerAction::None || request.install != install ||
+        (!install && impl_->view != View::PowerMenu) ||
         request.action != impl_->power_selected || impl_->display.busy() || impl_->active_network ||
         impl_->usb_prepared || (request.without_save && !impl_->power_save_failed)) return false;
     bool saved = !request.without_save && impl_->persist();
@@ -7025,6 +7608,27 @@ bool ReaderApp::prepare_power(PowerRequest request) {
     if (saved && impl_->has_book() && impl_->session.visible_record() && impl_->card_available) {
         saved = impl_->store.save_last_book(impl_->book_path, detail) == StoreStatus::Ok;
         if (saved) { impl_->last_recorded = impl_->book_path; impl_->recent_save_failed = false; }
+    }
+    if (install) {
+        if (const auto battery = impl_->update_battery_block(); !battery.empty()) {
+            impl_->power_request = {}; impl_->power_selected = PowerAction::None;
+            impl_->update_notice = battery;
+            impl_->draw_update(); impl_->overlay();
+            return false;
+        }
+        // The marker lets the next start report the result; it is written only after the position.
+        if (saved) {
+            impl_->update_state.pending_from = impl_->running_version;
+            impl_->update_state.pending_to = impl_->update_to;
+            saved = impl_->save_update_state();
+        }
+        if (!saved) {
+            impl_->update_state.pending_from.clear(); impl_->update_state.pending_to.clear();
+            impl_->power_request = {}; impl_->power_selected = PowerAction::None;
+            impl_->update_notice = "阅读位置或更新记录没有写入 TF 卡，没有重启。";
+            impl_->draw_update(); impl_->overlay();
+            return false;
+        }
     }
     impl_->power_save_failed = !saved;
     impl_->power_progress_saved = saved;
@@ -7040,7 +7644,8 @@ bool ReaderApp::prepare_power(PowerRequest request) {
     // Saving is the last cancellable step. Never restore a snapshot after teardown starts.
     impl_->power_return_canvas.reset(); impl_->power_return_hits.clear();
     impl_->power_request = {};
-    impl_->draw_power_off(saved ? "本地阅读位置已保存。" : "本地阅读位置未完整保存。");
+    if (install) impl_->draw_installing();
+    else impl_->draw_power_off(saved ? "本地阅读位置已保存。" : "本地阅读位置未完整保存。");
     impl_->overlay(true);
     return true;
 }

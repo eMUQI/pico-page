@@ -56,9 +56,18 @@ struct NetworkJob {
     std::vector<provision::NearbyWifi> nearby = {};
     // Set when the station link could not be established; error then names the cause.
     pico_page::LinkFailure failure = pico_page::LinkFailure::None;
+    // A firmware update check or download; update_failure reports how it ended.
+    std::optional<pico_page::UpdateOperation> update = std::nullopt;
+    pico_page::UpdateFailure update_failure = pico_page::UpdateFailure::None;
 };
 QueueHandle_t requests = nullptr, responses = nullptr;
 QueueHandle_t wifi_events = nullptr;
+// Latest progress of a firmware download; the application task draws it between frames.
+struct UpdateEvent { std::uint64_t id; std::uint32_t bytes; };
+QueueHandle_t update_events = nullptr;
+// Held for each panel update and for each flash write of a firmware download. A flash
+// operation suspends cache access, which the panel's line timing cannot absorb.
+SemaphoreHandle_t flash_lock = nullptr;
 std::atomic_bool radio_active{false};
 pico_page::network::Holds holds;
 provision::WifiCredentials station_target;
@@ -368,6 +377,58 @@ void run_request(NetworkJob &job) {
         pico_page::network::release(job.operation.session);
     } else if (!cancelled.load()) holds.await_decision(job.operation.session, esp_timer_get_time());
 }
+void update_written(void* context, std::uint32_t written) {
+    const UpdateEvent event{*static_cast<const std::uint64_t*>(context), written};
+    xQueueOverwrite(update_events, &event);
+}
+void guard_flash(void*, bool begin) {
+    if (begin) xSemaphoreTake(flash_lock, portMAX_DELAY);
+    else xSemaphoreGive(flash_lock);
+}
+/**
+ * Fetches the update manifest or streams the firmware image into the inactive slot. The link
+ * is released afterwards unless another hold keeps it. A download blocks this task for up to
+ * 20 minutes; cancellation takes effect at the next read or write.
+ */
+void run_update(NetworkJob& job) {
+    using pico_page::UpdateFailure;
+    const auto& operation = *job.update;
+    const auto& cancelled = *operation.cancelled;
+    const auto perform = [&]() -> UpdateFailure {
+        if (cancelled.load()) return UpdateFailure::Cancelled;
+        if (!ensure_station(operation.targets, cancelled, job.error, job.failure)) return UpdateFailure::Link;
+        publish_wifi(pico_page::WifiPhase::Clock, station_target.ssid);
+        platform::ConnectFailure failure;
+        if (!platform::synchronize_clock(job.error, &failure, &cancelled)) {
+            job.error = wifi_failure(station_target.ssid, failure);
+            return UpdateFailure::Link;
+        }
+        publish_wifi(pico_page::WifiPhase::Request, station_target.ssid);
+        if (operation.kind == pico_page::UpdateOperation::Kind::Check)
+            return platform::http_request("GET", operation.url, {}, "", job.body, job.status, job.error, &cancelled)
+                ? UpdateFailure::None : UpdateFailure::Network;
+        auto reason = platform::FirmwareFailure::None;
+        std::uint64_t id = operation.id;
+        const platform::FirmwareHooks hooks{update_written, guard_flash, &id};
+        platform::download_firmware({operation.url, operation.size, operation.sha256, operation.version}, hooks, reason,
+                                    job.error, &cancelled);
+        if (reason != platform::FirmwareFailure::None) ESP_LOGW(tag, "Firmware download: %s", job.error.c_str());
+        switch (reason) {
+        case platform::FirmwareFailure::None: return UpdateFailure::None;
+        case platform::FirmwareFailure::Cancelled: return UpdateFailure::Cancelled;
+        case platform::FirmwareFailure::Network: return UpdateFailure::Network;
+        case platform::FirmwareFailure::Server: return UpdateFailure::Server;
+        case platform::FirmwareFailure::Mismatch: return UpdateFailure::Mismatch;
+        case platform::FirmwareFailure::TooLarge: return UpdateFailure::TooLarge;
+        case platform::FirmwareFailure::WrongImage: return UpdateFailure::WrongImage;
+        default: return UpdateFailure::Flash;
+        }
+    };
+    job.update_failure = perform();
+    // Only a link failure carries a sentence for the user; other diagnostics stay in the log.
+    if (job.update_failure != UpdateFailure::Link) job.error.clear();
+    if (cancelled.load() && job.update_failure != UpdateFailure::None) job.update_failure = UpdateFailure::Cancelled;
+}
 #ifdef CONFIG_PICO_PAGE_PERF_METRICS
 void run_request(NetworkJob &job) {
     PP_DIAGNOSTIC(const auto measurement = diag::begin(diag::Kind::Network, {0, 0, 0, job.operation.id});)
@@ -383,6 +444,7 @@ void network_worker(void *) {
         const auto wait = radio_active.load() || retained_station() ? pdMS_TO_TICKS(200) : portMAX_DELAY;
         if (xQueueReceive(requests, &job, wait) == pdTRUE) {
             if (job->portal) run_portal(*job);
+            else if (job->update) run_update(*job);
             else if (job->wifi) {
                 const auto& operation = *job->wifi;
                 if (!operation.cancelled->load()) {
@@ -453,6 +515,7 @@ bool present(pico_page::ReaderApp &app) {
                                 selected != PageWaveform::Gray16;
         pico_page::platform::set_page_waveform(use_effect ? selected :
             app.fast_page_updates() ? PageWaveform::Gray8 : PageWaveform::Gray16);
+        if (flash_lock) xSemaphoreTake(flash_lock, portMAX_DELAY);
         PP_DIAGNOSTIC(const auto measurement = diag::begin(diag::Kind::Frame,
             {app.pending_frame()->token.session, app.pending_frame()->token.layout,
              presentation_sequence, app.pending_frame()->token.request,
@@ -460,6 +523,7 @@ bool present(pico_page::ReaderApp &app) {
         const bool okay = pico_page::platform::present(
             app.canvas().data(), app.canvas().pixels().size(),
             app.pending_frame()->refresh == pico_page::RefreshIntent::FullClean, error, app.pending_frame()->region);
+        if (flash_lock) xSemaphoreGive(flash_lock);
         PP_DIAGNOSTIC(diag::end(measurement, okay ? diag::Outcome::Success : diag::Outcome::Failure);)
         pico_page::console::frame_completed(*app.pending_frame(), okay);
 #ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
@@ -488,8 +552,12 @@ extern "C" void app_main() {
     std::string error;
     if (!pico_page::console::initialize(error))
         ESP_LOGW(tag, "Diagnostic console unavailable: %s", error.c_str());
+    // First start of an installed update: the bootloader returns to the previous slot unless
+    // this start reaches a presented first frame and confirms the image.
+    const bool unconfirmed = pico_page::platform::firmware_unconfirmed();
     if (!pico_page::platform::initialize(error)) {
         ESP_LOGE(tag, "Board initialization failed: %s", error.c_str());
+        if (unconfirmed) pico_page::platform::reject_firmware();
         if (pico_page::platform::panel_ready()) {
             pico_page::ReaderApp diagnostic("/sdcard", "pico-page-diagnostic");
             if (diagnostic.initialize()) {
@@ -509,9 +577,14 @@ extern "C" void app_main() {
     auto app = std::make_unique<pico_page::ReaderApp>(card ? card : "/sdcard", writer, true, true);
     if (!app->initialize()) {
         ESP_LOGE(tag, "Reader initialization failed");
+        if (unconfirmed) pico_page::platform::reject_firmware();
         return;
     }
-    present(*app);
+    // A missing card is a supported state and does not count against the image.
+    const bool first_frame = present(*app);
+    // An image that cannot be confirmed would be dropped at a later reset, after this firmware
+    // may have written data; it is given up now instead.
+    if (unconfirmed && !(first_frame && pico_page::platform::confirm_firmware())) pico_page::platform::reject_firmware();
     if (!card) {
         app->card_removed();
         present(*app);
@@ -520,7 +593,9 @@ extern "C" void app_main() {
     responses = xQueueCreate(1, sizeof(NetworkJob *));
     portal_events = xQueueCreate(4, sizeof(pico_page::PortalStatus *));
     wifi_events = xQueueCreate(4, sizeof(pico_page::WifiStatus *));
+    update_events = xQueueCreate(1, sizeof(UpdateEvent));
     portal_emit_lock = xSemaphoreCreateMutex();
+    flash_lock = xSemaphoreCreateMutex();
     const bool worker_ready =
         requests && responses && portal_events && wifi_events && portal_emit_lock &&
         xTaskCreate(network_worker, "pico_network", 16384, nullptr, 3, nullptr) == pdPASS;
@@ -567,7 +642,7 @@ extern "C" void app_main() {
         app->poll_background(!resume_input.active() && (physical_source || pico_page::platform::input_waiting_before(
             std::numeric_limits<std::int64_t>::max())));
         const auto battery = pico_page::platform::battery();
-        app->set_battery(battery.valid ? std::optional<int>(battery.percent) : std::nullopt);
+        app->set_battery(battery.valid ? std::optional<int>(battery.percent) : std::nullopt, battery.valid && battery.charging);
         if (app->pending_frame())
             present(*app);
         const auto requested_power = app->take_power_request();
@@ -586,6 +661,12 @@ extern "C" void app_main() {
                 if (!app->close_power_files()) {
                     ESP_LOGE(tag, "Power teardown did not close file consumers");
                     for (;;) vTaskDelay(pdMS_TO_TICKS(1000));
+                }
+                // The boot slot is switched while the card is still mounted: without the switch the
+                // restart returns to this firmware, and the installation record must not remain.
+                if (power_request.install && !pico_page::platform::activate_firmware(error)) {
+                    ESP_LOGE(tag, "Firmware activation: %s", error.c_str());
+                    app->discard_install_record();
                 }
                 if (!pico_page::platform::finish_power(error))
                     ESP_LOGW(tag, "Power teardown: %s", error.c_str());
@@ -681,7 +762,10 @@ extern "C" void app_main() {
                     delete portal_status;
                 app->show_portal({pico_page::PortalPhase::Closed, "", "", "", completed->error, "", 0, "", completed->operation.id});
                 portal_stop.reset();
-            } else if (completed->wifi)
+            } else if (completed->update)
+                app->complete_update(completed->update->id, completed->update_failure, completed->status,
+                                     completed->body, completed->error);
+            else if (completed->wifi)
                 app->complete_wifi(completed->wifi->id, completed->nearby, completed->error, completed->failure);
             else
                 app->complete_network(completed->operation.id, completed->status, completed->body,
@@ -711,6 +795,25 @@ extern "C" void app_main() {
                 present(*app);
             }
         }
+        UpdateEvent written;
+        if (update_events && !app->pending_frame() && xQueueReceive(update_events, &written, 0) == pdTRUE) {
+            app->update_progress(written.id, written.bytes);
+            present(*app);
+        }
+        if (!usb_mode && !network_busy && !sleep_requested && !resume_input.active() && !pico_page::console::transfer_active()) {
+            if (auto update = app->take_update_request()) {
+                const auto id = update->id;
+                // Without its progress queue or flash lock only the update is refused; other network work continues.
+                auto* job = worker_ready && update_events && flash_lock ? new NetworkJob{} : nullptr;
+                if (job) job->update = std::move(*update);
+                if (job && xQueueSend(requests, &job, 0) == pdTRUE) network_busy = true;
+                else {
+                    delete job;
+                    app->complete_update(id, pico_page::UpdateFailure::Link, 0, "", "网络任务暂时不可用。");
+                    present(*app);
+                }
+            }
+        }
         if (!usb_mode && !network_busy && !sleep_requested && !resume_input.active() && !pico_page::console::transfer_active()) {
             const auto request = app->take_network_request();
             if (request) {
@@ -738,7 +841,8 @@ extern "C" void app_main() {
         if (event.kind == pico_page::platform::EventKind::None && !pico_page::platform::poll(event, error))
             ESP_LOGW(tag, "Input read failed: %s", error.c_str());
         using pico_page::platform::EventKind;
-        if (event.kind != EventKind::None || pico_page::console::transfer_active()) {
+        // An update check or download keeps the device awake and at full speed.
+        if (event.kind != EventKind::None || pico_page::console::transfer_active() || app->update_busy()) {
             last_activity = esp_timer_get_time();
             pico_page::platform::set_performance(true);
         }
@@ -829,7 +933,8 @@ extern "C" void app_main() {
             } else app->power_unavailable(usb_mode ? "请先弹出设备并结束 USB 传输。" : "请先结束网络或传输任务。");
             present(*app);
         } else if (event.kind == EventKind::Power) {
-            if (usb_mode || app->view() == pico_page::View::PowerMenu || app->view() == pico_page::View::PowerOff) continue;
+            if (usb_mode || app->view() == pico_page::View::PowerMenu || app->view() == pico_page::View::PowerOff ||
+                app->update_busy()) continue;
             if (sleep_requested) {
                 app->cancel_sleep();
                 sleep_requested = false;

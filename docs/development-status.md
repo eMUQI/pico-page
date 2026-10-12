@@ -2,6 +2,8 @@
 
 ## 当前摘要（2026-10-12）
 
+联网固件更新第一批已有候选（2026-10-12，分支 `claude/pico-ota-network-update-a2b4fc`，已整合 main `29be1fb`，D40）：「设置 → 固件更新」手动检查、更新日志、安装条件、边下载边写入空闲应用槽、长度与 SHA-256 校验、重启安装、首次启动确认与回滚后的结果提示。出厂 bootloader 经只读核对支持应用回滚，应用配置已启用对应选项，构建分区表改为与实测布局一致。host Debug 与 AppleClang ASan/UBSan 各 24/24，标准、release 和 Diagnostic 固件构建通过；未烧录，下载、闪存写入、启动槽切换、自检和回滚都没有真机证据。「联网时顺便检查」和「下次开机再装」未实现，网站尚未发布清单。详见本日「联网固件更新第一批」记录。
+
 2026-10-12 第二台 Read Pico 按用户指示完整烧录并完成一次 `reading-flow` 工作台采集：这台设备此前装有其他固件，现为本地构建的单 `factory` 槽布局，与第一台保留的出厂双槽布局不同。诊断固件（`29be1fb` 加工作台坐标修正，dirty）上冷、热缓存各一轮 3 轮 × 4 页均通过，68 帧中局部更新 528–624 ms、全刷约 1,582 ms，内部 RAM 三轮无下降。工作台追踪事件只是功能与耗时证据。随后用 `LEGACY_PERF_LOG` 隔离配置（`e715146`）采集完整串口日志并经 `tools/summarize_reader_perf.py` 汇总：每页停留 2.5 秒后向后翻页，30 次全部命中下一页位图，正文准备 P95 50.9 ms、P99 51.0 ms，P95 比 50 ms 的初始目标高 0.9 ms；向前翻页和不停留的连续翻页走未命中路径，后者 100 次的 P95 为 526 ms、最长 1,085 ms。ZIP 取消检查间隔 10 个样本中有 1 个为 231 ms，超过约 10–20 ms 的目标。输入等待需要实体操作，未测；没有同条件基线，不构成版本对比。详见本日两条记录。
 
 2026-10-11 锁屏优化与网站 CI 已通过 [PR #68](https://github.com/eMUQI/pico-page/pull/68) 正常合并（`20eaa70`），并部署到 https://picopage.wulu.zone。第 2、3、4 张为已确认的 16 级灰度抖动版，预览、单张下载与 ZIP 一致；网站工作流使用 Node.js 24，并归档静态产物。最终提交的四项远端 CI 全部通过，Codex review 未提出修改意见；合并后构建、Cloudflare 18/18 文件上传及正式域名逐文件核验通过。TF 卡升级先不推进，设备 OTA 尚未实现，锁屏实机效果待验；详情见本日「PR #68 合并与官网生产部署」记录。
@@ -61,6 +63,50 @@ PR #52（分支 `feat/sync-map-images`，已整合 main `fd17171`）包含三项
 个人主目录、设备标识及私有样本名称已脱敏；占位路径不保证可直接执行。历史日期、验证数值和结果保留，历史授权不适用于新的设备操作。
 
 ## 历史摘要与开发记录
+
+### 2026-10-12 · 联网固件更新第一批（R11、D40）
+
+基于 main `8eb3de2`，分支 `claude/pico-ota-network-update-a2b4fc`。本批未提交、未推送、未连接或烧录设备。
+
+- 依据：设计稿《Read Pico OTA 更新》（claude.ai/design 项目，只读取未修改）。用户在本次会话确认四项：清单与镜像放在 `https://picopage.wulu.zone/firmware/`；本分支只做设备端和清单生成脚本，不改 `web/` 与网站 CI（PR #68 正在修改）；首次启动自检不要求 TF 卡；先做主链路，「联网时顺便检查」和「下次开机再装」放第二批。
+- 只读核对（未操作设备）：主检出 `.local/device/original-first-64k.bin` 是此前读回的出厂 bootloader（ESP-IDF v6.1-dirty）。与本项目未启用回滚的 bootloader 构建逐段比较，代码段差异集中在 `set_actual_ota_seq` 和 `bootloader_utility_get_selected_boot_partition`；反汇编后者可见把状态 `ESP_OTA_IMG_NEW` 改写为 `PENDING_VERIFY`、把未确认的 `PENDING_VERIFY` 改写为 `ABORTED` 并写回 otadata 的指令，即 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` 的行为。`original-partition-table.bin` 为 nvs `0x9000`/24 KiB、phy_init `0xf000`/4 KiB、ota_0 `0x10000`/4 MiB、ota_1 `0x410000`/4 MiB、otadata `0x810000`/8 KiB；`otadata-check.bin` 中唯一有效项 sequence 1、state 2。设计稿「实现前必须解决」的分区表迁移因此不需要。查证：乐鑫文档 MCP 的应用回滚章节描述的是较新版本的选项名，本机 v6.1 源码仍为 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`，按本地源码实现。
+- 共享逻辑：新增 `reader_sync/update.cpp` 与 `pico_page/update.h`，包含版本比较、清单解析、安装前判断、更新日志的 Markdown 解析和状态编码。新增 `tests/update_test.cpp`。
+- 平台层：`platform_read_pico/network.cpp` 新增 `download_firmware`、`activate_firmware`、`firmware_unconfirmed`、`confirm_firmware`、`reject_firmware`。下载使用 `OTA_WITH_SEQUENTIAL_WRITES` 逐扇区擦写；写入前核对镜像头、芯片型号、项目名和版本；摘要用 PSA SHA-256 流式计算。
+- 应用与主循环：`reader_app` 新增 `View::Update` 及其页面和请求；`app_main` 新增更新任务、进度事件队列、闪存写入与面板刷新的互斥锁，在首屏显示成功后确认新固件，初始化或首屏失败时回到旧槽；重启安装沿用电源请求路径，在保存阅读位置和安装记录、释放 TF 卡之后切换启动槽。检查和下载期间不自动休眠，电源键短按不响应。诊断控制台的页面名增加 `update`。host 预览对更新请求一律答复不可用。
+- 配置：`sdkconfig.defaults` 启用 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`；`partitions.build.csv` 改为与实测布局一致的条目，不刷写。三种构建的生效 sdkconfig 均含该选项。
+- 链接问题：加入更新页面后固件链接失败，报 `l32r: literal target out of range`。链接图显示 `app.cpp.obj` 的字面量池集中排在该目标文件全部代码之前，`ReaderApp::Impl::control` 的代码距其字面量已超过 L32R 的 256 KiB。改为仅对 `app.cpp` 使用 `-mtext-section-literals`。这是 `app.cpp` 体积造成的既有上限，其他继续增大该文件的分支也会遇到。
+- 界面：设置首页六组行高由 132 改为 116，加入「固件更新」行，「使用说明」行上移；十处测试点击坐标随之修改（七处 710→640、三处 840→760），断言未变。与设计稿的差异记录在 UI 实现说明第 25 节。host 画布在 `artifacts/ota-update-20261012/`（忽略产物）。
+- 工具：新增 `tools/ota_manifest.py` 与 `tests/test_ota_manifest.py`。脚本不上传；对本批开发构建镜像运行时按预期拒绝（版本带构建元数据）。
+- 文档：路线图 R11、决定 D40、验收 OTA01–OTA06、存储、架构、版本管理、环境、UI 实现说明和 README 路线图表已同步。
+
+命令与结果（macOS，AppleClang，EIM 的 ESP-IDF v6.1）：
+
+- `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host --output-on-failure`：24/24（原 22 项，新增 `update`、`ota_manifest`）。
+- 按环境文档的 ASan/UBSan 配置构建并运行 `ctest --test-dir build/sanitized --output-on-failure`：24/24。本机运行时不支持 LSan，未检查泄漏。
+- `sh tools/build_firmware.sh`：通过，应用 3,479,232 字节（`0x3516c0`），4 MiB 槽剩余 17%，SHA-256 `797f4969…`。同一提交未改动时的同配置构建为 3,421,856 字节（`0x3436a0`），本批增加 57,376 字节。
+- `sh tools/build_firmware.sh release`：通过，3,480,000 字节，SHA-256 `12e1e014…`。`sh tools/build_firmware.sh diagnostic`：通过，3,517,296 字节，剩余 16%，SHA-256 `fc2057f3…`。三次构建的来源摘要同为 `6812c622…`，dirty=true；其后只整理了一处 host 测试写法并补齐文档。
+- `python3 tools/check_handoff.py`：461 项通过。`git diff --check`：无输出。
+- 只读网络核对：`https://picopage.wulu.zone/firmware/manifest.json` 目前返回 200 和网站首页 HTML（站点对未知路径的回退），响应头单行最长 259 字节。设备会按清单无效处理并提示「更新服务器无响应」，直到清单发布。
+
+未测项（均需真机）：
+
+- OTA02–OTA06 的 D 项全部未执行：实际联网检查、完整下载、校验、取消与断网、重启安装、首次启动确认、无卡启动、断电回滚和跳过版本。
+- 下载期间网络任务栈余量、内部 RAM 低水位、下载耗时；闪存写入与面板刷新互斥后进度局部刷新是否正常，输入采样是否受影响。
+- `ota_1` 现有内容未读取；首次真机验证前需读取并记录。
+- 设备切到 `ota_1` 后的电脑刷写流程（先读 otadata 再选槽）没有演练。
+- 更新页面的灰阶、残影和淡色按钮在墨水屏上的可读性。
+
+整合 main（2026-10-12）：功能提交 `2e922b0` 之后整合 main `29be1fb`（PR #66 的空书库与关于页、PR #68 的网站 CI），合并提交 `0adf159`。`app.cpp`、`app.h` 和 UI 实现说明冲突：`View::About` 与 `View::Update` 都保留；设置行组件保留 main 的 132 行高及其在「网络与传输」页的用法，另加行高参数，设置首页六组用 116，其下依次为「固件更新」「使用说明」「关于」，页脚的保存重试不变；本批的界面说明顺延为第 25 节。整合后在合并提交上重新验证：host Debug CTest 24/24，AppleClang ASan/UBSan 24/24；`sh tools/build_firmware.sh` 通过，应用 3,483,568 字节（`0x3527b0`），4 MiB 槽剩余 17%，SHA-256 `367b2fb2…`；release 3,484,336 字节，SHA-256 `b20c3e6a…`；diagnostic 3,521,648 字节，剩余 16%，SHA-256 `45fa0987…`。三次构建的来源为 `0adf159`、dirty=false。464 项交接检查与 `git diff --check` 通过。上文的体积数字是整合前的结果。
+
+网站侧配合（2026-10-12，用户在 PR #69 开出后要求）：PR #68 已合并，本批不再回避 `web/` 与网站 CI。新增 `web/src/pages/404.astro`，使未知地址返回 404；设备检查更新收到 404 时提示「更新服务器上还没有发布固件」，其余读取失败仍提示服务器无响应。`tools/ota_manifest.py` 新增 `--check <目录>`：由镜像重新计算清单并逐项比较，目录中有镜像而无清单、清单指向的镜像缺失、存在清单未指向的镜像时均报错，目录不存在或为空时通过；生成时删除输出目录中上一个版本的镜像，并改为先读入镜像再写出，可在同一目录重复执行。网站构建工作流在安装依赖前执行该检查。约定固件更新文件放在 `web/public/firmware/`，本批未放入任何文件。验证：Python 测试 4/4；用 release 构建产物改写版本字段得到的临时镜像（仅在暂存目录，未发布，其内置摘要已失效）生成清单两次、`--check` 通过，并把生成的清单交给设备端的 `update::parse_manifest` 解析成功；`npm ci --ignore-scripts` 与 `npm run build` 通过，产物含 `404.html`，本地预览中 `/firmware/manifest.json` 返回 404、首页返回 200。本机没有 actionlint，工作流改动未做静态检查，以远端运行结果为准。线上站点尚未重新部署，清单地址目前仍返回首页和 200。
+
+固件不入库（2026-10-12，用户要求）：上一条约定的「提交到 `web/public/firmware/`」作废。清单和镜像改为 GitHub Release 的附件；`web/public/firmware/` 加入 `.gitignore`。网站构建工作流新增 Release 发布触发，并在构建前列出发布、用 `tools/ota_manifest.py --pick-release` 选出非草稿中版本最高的 `v<版本>` 标签，下载其 `manifest.json` 和镜像，再以 `--check --expect-version` 核对；没有符合的发布时只做空目录检查。清单在发布时由带标签的源码生成一次，工作流不重新生成，避免用 main 上的数据格式常量描述旧版本。验证：Python 测试 5/5（含版本顺序与草稿、非版本标签的排除）；在本机按工作流脚本执行，仓库当前没有发布，结果为「No firmware published」；用模拟的发布列表和临时镜像走通选择、核对、版本不符时失败，以及 `npm run build` 后 `dist/firmware/` 含两个文件且 Git 状态不出现它们。`gh release download` 在工作流中的实际行为没有验证，需等第一次真实发布；仓库现有标签 `v0.1.0-mvp` 不符合版本形式，不会被选中。
+
+评审修正（2026-10-12，PR #69 的 Codex 评审，针对 `391fb9a`）：六条意见逐条对照源码核实，五条成立并已修改。其一，点「重启并安装」时和 `prepare_power()` 写安装记录前各再检查一次电量，下载期间电量下降、读数失效或拔掉电源后不再重启。其二，启动槽切换移到释放 TF 卡之前；切换失败时撤回安装记录，重启后不再把从未运行的版本报告为启动失败并跳过。其三，更新进度队列或闪存锁创建失败时只拒绝更新请求，网络工作任务照常启动，同步、配网和传书不受影响。其四，`progress_schema` 改为 2：`reader_store` 用 schema 2 读写「已清除进度」标记，原先的 1 会让只懂 schema 1 的固件被当作格式相同。其五，清单脚本按设备端 `plain_url()` 的规则校验地址，拒绝空主机、用户信息、空白、片段、反斜杠和超过 512 字节的地址。未采纳的一条：评审建议清单版本不高于已跳过版本时也一律不提供。现有行为只跳过启动失败的那个版本；发布方撤回它并改发另一个高于当前固件的版本时，设备应当可以安装，因此保持不变，并在路线图中写明。修正提交 `61c7ec0` 上的结果：host Debug CTest 24/24，AppleClang ASan/UBSan 24/24，清单脚本测试 5/5；标准固件 3,483,408 字节（`0x352710`，4 MiB 槽剩余 17%）、release 3,484,176 字节、diagnostic 3,521,968 字节（剩余 16%）构建通过，来源均为 `61c7ec0`、dirty=false；467 项交接检查通过。远端 Website build 在 `391fb9a` 上已执行取固件步骤，输出「No firmware published」。
+
+第二轮评审修正（2026-10-12，Codex 针对 `08ba461`）：三条新意见均成立并已修改。新固件的确认写入失败时不再只记日志后继续运行，而是立即放弃该镜像并回到旧固件，避免稍后复位才回滚而新固件已写过数据；开发构建同样不再提供启动失败的那个版本（先判断已跳过，再判断开发构建）；清单脚本的版本数字限制为最多九位，与设备端解析一致。上一轮未采纳的意见在本轮被重复提出，处理不变。随后整合 main `41dea10`（PR #70，仅工作台脚本与本文件，本文件冲突保留双方内容），合并提交 `838aac2`。在该提交上：host Debug CTest 24/24，AppleClang ASan/UBSan 24/24；标准固件 3,483,424 字节（`0x352720`，4 MiB 槽剩余 17%）、release 3,484,192 字节、diagnostic 3,521,968 字节（剩余 16%）构建通过，来源均为 `838aac2`、dirty=false；468 项交接检查通过。
+
+下一步：提交并开 PR。设备只接受证书有效的 HTTPS 地址，真机验证前需先发布一个带清单和 release 镜像的 Release 并部署网站，并获得刷写授权，再按 OTA02–OTA06 逐项验证。之后实现第二批，并在 PR #68 合并后把清单发布接入网站 CI。
 
 ### 2026-10-12 · 第二台设备阅读响应性采集（summarize_reader_perf）
 

@@ -6,6 +6,7 @@
 #include "pico_page/document.h"
 #include "pico_page/store.h"
 #include "pico_page/provision.h"
+#include "pico_page/update.h"
 #include "../firmware/components/platform_read_pico/include/pico_page/sleep_input.h"
 
 #include <algorithm>
@@ -1013,7 +1014,7 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         auto expected = run(true, "02.PNG"); assert(expected.image);
         assert(app.canvas().pixels() == expected.image->pixels());
         app.wake(); driver.present();
-        driver.tap(600, 50); driver.present(); driver.tap(340, 710); driver.present();
+        driver.tap(600, 50); driver.present(); driver.tap(340, 640); driver.present();
         assert(app.view() == View::PowerSettings);
         driver.tap(480, 350); driver.present(); driver.tap(330, 470); driver.present(); driver.complete_content();
         assert(app.view() == View::LockScreens); driver.refresh();
@@ -1031,7 +1032,7 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         assert(app.initialize()); driver.present(); opened(app, "Books/cover.epub"); driver.present();
         driver.complete_content();
         driver.tap(342, 500); driver.present(); driver.tap(50, 50); driver.present();
-        driver.tap(600, 50); driver.present(); driver.tap(340, 710); driver.present();
+        driver.tap(600, 50); driver.present(); driver.tap(340, 640); driver.present();
         assert(app.view() == View::PowerSettings);
         const auto prepare_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
         while (std::string(app.background_state()) != "sleep-cover") {
@@ -1080,7 +1081,7 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         if (app.pending_frame()) driver.present();
         driver.close(); driver.present();
         for (const auto& point : {std::pair{150, 240}, std::pair{480, 240}, std::pair{150, 350}}) {
-            driver.tap(600, 50); driver.present(); driver.tap(340, 710); driver.present();
+            driver.tap(600, 50); driver.present(); driver.tap(340, 640); driver.present();
             driver.tap(point.first, point.second); driver.present(); driver.tap(500, 1120); driver.present();
             assert(sleep_frame(app)); driver.present(); app.wake(); driver.present(); app.poll_background();
             assert(app.view() == View::Library);
@@ -1088,11 +1089,210 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
     }
 }
 
+static std::string update_manifest(const std::string& version, int progress_schema = update::progress_schema, const std::string& notes = "## 新增\\n- **书签**：可添加。") {
+    return "{\"manifest\":1,\"board\":\"read_pico\",\"version\":\"" + version + "\",\"published_at\":\"2026-10-18\","
+           "\"url\":\"https://picopage.wulu.zone/firmware/pico-page-" + version + "-read_pico-release.bin\",\"size\":2936012,"
+           "\"sha256\":\"" + std::string(64, 'a') + "\",\"data_schema\":{\"progress\":" + std::to_string(progress_schema) +
+           ",\"config\":1},\"notes\":\"" + notes + "\"}";
+}
+// Firmware update: check, release notes, installation conditions, download, restart and the report on the next start.
+static void update_test(const fs::path& root) {
+    fs::remove_all(root);
+    write(root / "PicoPage/network.toml", provision::network_toml({{{"home", "password123"}, 0}}));
+    const auto state = [&] {
+        update::State loaded;
+        assert(update::decode_state(read(root / "PicoPage/cache" / update::state_cache), loaded));
+        return loaded;
+    };
+    const auto step = [](ReaderApp& app, Driver& driver, int x, int y) {
+        driver.tap(x, y);
+        if (app.pending_frame()) driver.present();
+    };
+    const auto open_page = [&](ReaderApp& app, Driver& driver) {
+        assert(app.initialize()); driver.present(); assert(app.view() == View::Library);
+        driver.tap(600, 50); driver.present(); assert(app.view() == View::Settings);
+        driver.tap(300, 856); driver.present(); assert(app.view() == View::Update);
+    };
+    const auto check = [&](ReaderApp& app, Driver& driver, int y, const std::string& body, int status = 200,
+                           UpdateFailure failure = UpdateFailure::None, const std::string& detail = "") {
+        driver.tap(300, y); driver.present();
+        assert(app.update_busy());
+        const auto request = app.take_update_request();
+        assert(request && request->kind == UpdateOperation::Kind::Check && request->url == update::manifest_url &&
+               request->targets.networks.size() == 1 && network::live(request->cancelled) && !app.take_update_request());
+        app.complete_update(request->id, failure, status, body, detail);
+        driver.present();
+        assert(!app.update_busy() && app.view() == View::Update);
+    };
+    {
+        ReaderApp app(root.string()); Driver driver{app};
+        app.set_firmware_version("0.2.0-beta.1");
+        open_page(app, driver);
+        assert(!fs::exists(root / "PicoPage/cache" / update::state_cache));
+        // A failed check leaves nothing cached: no link, an HTTP error, another board, a malformed version.
+        check(app, driver, 1130, "", 0, UpdateFailure::Link, "找不到网络“home”。");
+        check(app, driver, 1130, "not found", 404);
+        check(app, driver, 1130, "{\"manifest\":1,\"board\":\"other\"}");
+        check(app, driver, 1130, update_manifest("0.2"));
+        assert(!fs::exists(root / "PicoPage/cache" / update::state_cache));
+        // A request the worker has not taken ends at once; one it holds ends with its completion.
+        driver.tap(300, 1130); driver.present(); assert(app.update_busy());
+        driver.tap(300, 1130); driver.present(); assert(!app.update_busy() && !app.take_update_request());
+        driver.tap(300, 1130); driver.present();
+        auto held = app.take_update_request(); assert(held);
+        driver.tap(300, 1130); driver.present();
+        assert(app.update_busy() && !network::live(held->cancelled));
+        step(app, driver, 300, 1130); assert(app.update_busy());
+        app.complete_update(held->id + 1, UpdateFailure::None, 200, update_manifest("0.2.0-beta.2"), "");
+        assert(app.update_busy() && !app.pending_frame());
+        app.complete_update(held->id, UpdateFailure::None, 200, update_manifest("0.2.0-beta.2"), "");
+        driver.present(); assert(!app.update_busy() && !fs::exists(root / "PicoPage/cache" / update::state_cache));
+
+        check(app, driver, 1130, update_manifest("0.2.0-beta.2", update::progress_schema,
+              "## 新增\\n" + [] { std::string items; for (int i = 0; i < 60; ++i) items += "- 第 " + std::to_string(i) + " 项改动，说明文字较长以便换行和分屏。\\n"; return items; }()));
+        auto cached = state();
+        assert(cached.manifest && cached.manifest->version == "0.2.0-beta.2" && cached.pending_to.empty());
+        // Release notes span several screens; K1/K3 turn them and the header returns.
+        driver.tap(300, 760); driver.present();
+        const auto first = app.canvas().pixels();
+        driver.key(Input::K3); driver.present(); assert(app.canvas().pixels() != first);
+        driver.key(Input::K1); driver.present(); assert(app.canvas().pixels() == first);
+        driver.key(Input::K1); assert(!app.pending_frame());
+        driver.tap(60, 50); driver.present(); assert(app.view() == View::Update);
+
+        // Installation needs 20% or a charger; an unknown level without one is refused.
+        step(app, driver, 300, 1040); assert(!app.update_busy());
+        app.set_battery(19); step(app, driver, 300, 1040); assert(!app.update_busy());
+        app.set_battery(std::nullopt, true); driver.tap(300, 1040); driver.present();
+        assert(app.update_busy() && !app.open_book("Books/none.epub"));
+        auto download = app.take_update_request();
+        assert(download && download->kind == UpdateOperation::Kind::Download && download->size == 2936012 &&
+               download->url == cached.manifest->url && download->sha256 == std::string(64, 'a') &&
+               download->version == "0.2.0-beta.2");
+        // Progress redraws once per 5% step, inside the progress area only.
+        app.update_progress(download->id, 2936012 / 2);
+        assert(app.pending_frame() && app.pending_frame()->region && app.pending_frame()->region->y == 300);
+        driver.present();
+        app.update_progress(download->id, 2936012 / 2 + 4096); assert(!app.pending_frame());
+        app.update_progress(download->id + 1, 2936012); assert(!app.pending_frame());
+        app.update_progress(download->id, 2936012); assert(app.pending_frame() && !app.pending_frame()->region);
+        driver.present();
+        // A failed download keeps the running firmware and can be repeated.
+        app.complete_update(download->id, UpdateFailure::Mismatch, 0, "", ""); driver.present();
+        assert(!app.update_busy() && app.take_power_request().action == PowerAction::None);
+        driver.tap(300, 1020); driver.present(); assert(app.update_busy());
+        download = app.take_update_request(); assert(download && download->kind == UpdateOperation::Kind::Download);
+        // Losing the page owner's network permission cancels the download.
+        app.stop_wifi(); if (app.pending_frame()) driver.present();
+        assert(!network::live(download->cancelled) && app.update_busy());
+        app.complete_update(download->id, UpdateFailure::Cancelled, 0, "", ""); driver.present();
+        assert(!app.update_busy() && app.view() == View::Update);
+        driver.tap(300, 1040); driver.present();
+        download = app.take_update_request(); assert(download);
+        app.complete_update(download->id, UpdateFailure::None, 0, "", ""); driver.present();
+        // "Later" keeps the verified image for this power session.
+        driver.tap(300, 1130); driver.present(); assert(app.view() == View::Settings);
+        driver.tap(300, 856); driver.present(); assert(app.view() == View::Update);
+        // The battery is judged again at the restart: a download can outlast the charge or the charger.
+        app.set_battery(19);
+        step(app, driver, 300, 1020); assert(app.take_power_request().action == PowerAction::None);
+        app.set_battery(40);
+        driver.tap(300, 1020);
+        auto drained = app.take_power_request(); assert(drained.install);
+        app.set_battery(std::nullopt);
+        assert(!app.prepare_power(drained) && app.view() == View::Update); driver.present();
+        assert(!fs::exists(root / "PicoPage/cache" / update::state_cache) || state().pending_to.empty());
+        app.set_battery(std::nullopt, true);
+        // The restart is refused while the result marker cannot be written; nothing is left pending.
+        fs::remove_all(root / "PicoPage/cache");
+        write(root / "PicoPage/cache", "not a directory");
+        driver.tap(300, 1020);
+        auto power = app.take_power_request();
+        assert(power.action == PowerAction::Restart && power.install && !power.without_save);
+        assert(!app.prepare_power(power) && app.view() == View::Update); driver.present();
+        fs::remove(root / "PicoPage/cache");
+        driver.tap(300, 1020);
+        power = app.take_power_request();
+        assert(power.install && app.prepare_power(power) && app.view() == View::PowerOff); driver.present();
+        assert(app.close_power_files());
+        cached = state();
+        // The cached notes travel with the marker, so the result page can show them offline.
+        assert(cached.pending_from == "0.2.0-beta.1" && cached.pending_to == "0.2.0-beta.2" &&
+               cached.manifest && cached.manifest->version == "0.2.0-beta.2");
+        // When the boot slot cannot be switched the record is withdrawn, so no failed start is reported.
+        app.discard_install_record();
+        assert(state().pending_to.empty() && state().pending_from.empty() && state().manifest);
+        write(root / "PicoPage/cache" / update::state_cache, update::encode_state(cached));
+    }
+    {
+        // The installed version reports success once.
+        ReaderApp app(root.string()); Driver driver{app};
+        app.set_firmware_version("0.2.0-beta.2");
+        assert(app.initialize() && app.view() == View::Update); driver.present();
+        // The cached notes of this version are shown and can be paged before leaving.
+        const auto summary = app.canvas().pixels();
+        driver.key(Input::K3); driver.present(); assert(app.canvas().pixels() != summary);
+        driver.tap(300, 1050); driver.present();
+        assert(app.view() == View::Library && state().pending_to.empty() && state().skipped.empty());
+    }
+    {
+        ReaderApp app(root.string()); Driver driver{app};
+        app.set_firmware_version("0.2.0-beta.2");
+        assert(app.initialize() && app.view() == View::Library); driver.present();
+    }
+    {
+        // The previous version running again means that the installed one did not start; it is then withheld.
+        update::State pending;
+        pending.pending_from = "0.2.0-beta.1"; pending.pending_to = "0.2.0-beta.2";
+        write(root / "PicoPage/cache" / update::state_cache, update::encode_state(pending));
+        ReaderApp app(root.string()); Driver driver{app};
+        app.set_firmware_version("0.2.0-beta.1"); app.set_battery(80);
+        assert(app.initialize() && app.view() == View::Update); driver.present();
+        step(app, driver, 300, 300); step(app, driver, 600, 50);
+        driver.key(Input::K3); assert(!app.pending_frame() && app.view() == View::Update);
+        driver.tap(300, 1130); driver.present();
+        assert(app.view() == View::Library && state().pending_to.empty() && state().skipped == "0.2.0-beta.2");
+        driver.tap(600, 50); driver.present(); driver.tap(300, 856); driver.present(); assert(app.view() == View::Update);
+        check(app, driver, 1130, update_manifest("0.2.0-beta.2"));
+        step(app, driver, 300, 1040); assert(!app.update_busy() && state().skipped == "0.2.0-beta.2");
+        // A later version lifts the hold; a newer data format asks before it installs.
+        check(app, driver, 1130, update_manifest("0.2.0-beta.3", update::progress_schema + 1));
+        assert(state().skipped.empty());
+        driver.tap(300, 1040); driver.present(); assert(!app.update_busy());
+        driver.tap(300, 1130); driver.present(); assert(!app.update_busy());
+        driver.tap(300, 1040); driver.present(); driver.tap(300, 1020); driver.present();
+        const auto download = app.take_update_request();
+        assert(download && download->version == "0.2.0-beta.3");
+        app.complete_update(download->id, UpdateFailure::Network, 0, "", ""); driver.present();
+        driver.tap(300, 1130); driver.present(); assert(!app.update_busy() && app.view() == View::Update);
+    }
+    {
+        // A development build cannot be ordered: the release is offered, never called newer.
+        ReaderApp app(root.string()); Driver driver{app};
+        app.set_firmware_version("0.2.0-beta.9+g1234567.dirty"); app.set_battery(80);
+        open_page(app, driver);
+        driver.tap(300, 1040); driver.present();
+        const auto download = app.take_update_request();
+        assert(download && download->version == "0.2.0-beta.3");
+        app.complete_update(download->id, UpdateFailure::Cancelled, 0, "", ""); driver.present();
+    }
+    {
+        // The running release is not offered again, and an older data format is refused.
+        ReaderApp app(root.string()); Driver driver{app};
+        app.set_firmware_version("0.2.0-beta.3"); app.set_battery(80);
+        open_page(app, driver);
+        step(app, driver, 300, 1040); assert(!app.update_busy());
+        check(app, driver, 1130, update_manifest("0.3.0", update::progress_schema - 1));
+        assert(state().manifest->version == "0.3.0");
+        step(app, driver, 300, 1040); assert(!app.update_busy());
+    }
+}
 int main(int argc, char** argv) {
     assert(argc == 3);
     char temporary[] = "/tmp/pico-app-XXXXXX";
     const char* directory = mkdtemp(temporary); assert(directory);
     const fs::path card(directory), fixtures(argv[1]);
+    update_test(card / "Update");
     lock_screen_test(card / "CustomLocks", fixtures);
     assert(reading_footer::percent(0) == "0.00%");
     assert(reading_footer::percent(.2697, false) == "27%");
@@ -1201,7 +1401,7 @@ int main(int argc, char** argv) {
             assert(app.initialize()); driver.present();
             const auto library = app.canvas().pixels();
             driver.tap(600, 50); driver.present();
-            driver.tap(300, 840); driver.present();
+            driver.tap(300, 760); driver.present();
             assert(app.view() == View::StorageSettings);
             return std::pair{library, app.canvas().pixels()};
         };
@@ -1479,7 +1679,7 @@ int main(int argc, char** argv) {
         write(config, "schema_version=1\n");
         ReaderApp app(root.string()); Driver driver{app};
         assert(app.initialize()); driver.present();
-        driver.tap(600, 50); driver.present(); driver.tap(340, 710); driver.present();
+        driver.tap(600, 50); driver.present(); driver.tap(340, 640); driver.present();
         assert(app.view() == View::PowerSettings);
         driver.tap(600, 750); driver.present();
         fs::create_directory(config.string() + ".tmp");
@@ -2649,13 +2849,13 @@ int main(int argc, char** argv) {
         assert(app.view() == View::BookDetails && *app.saved_record() == saved);
         driver.refresh(); driver.close(); driver.present();
         driver.tap(600, 50); driver.present();
-        driver.tap(340, 710); driver.present();
+        driver.tap(340, 640); driver.present();
         assert(app.view() == View::PowerSettings); driver.refresh();
         const auto global_before = read(card / "PicoPage/settings.toml");
         driver.tap(480, 240); driver.present(); driver.tap(600, 750); driver.present();
         driver.refresh(); driver.tap(150, 1120); driver.present();
         assert(read(card / "PicoPage/settings.toml") == global_before && app.auto_sleep_minutes() == 10);
-        driver.tap(340, 710); driver.present(); driver.tap(480, 240); driver.present();
+        driver.tap(340, 640); driver.present(); driver.tap(480, 240); driver.present();
         driver.tap(600, 750); driver.present(); driver.tap(500, 1120); driver.present();
         assert(app.auto_sleep_minutes() == 15 && FileStore(card.string()).load_settings().settings.sleep_screen == "reading");
         assert(sleep_frame(app));
@@ -2664,7 +2864,7 @@ int main(int argc, char** argv) {
         driver.key(Input::K3); assert(!app.pending_frame());
         app.wake(); driver.present(); assert(*app.saved_record() == saved);
         driver.tap(340, 500); driver.present(); driver.tap(50, 50); driver.present();
-        driver.tap(600, 50); driver.present(); driver.tap(340, 840); driver.present();
+        driver.tap(600, 50); driver.present(); driver.tap(340, 760); driver.present();
         assert(app.view() == View::StorageSettings); driver.refresh();
         write(card / "PicoPage/cache/layout", "cache");
         const auto book_before = read(card / "Books/book.epub");
@@ -2672,7 +2872,7 @@ int main(int argc, char** argv) {
         driver.tap(340, 1120); driver.present();
         assert(!fs::exists(card / "PicoPage/cache/layout") && read(progress) == progress_before);
         assert(read(card / "Books/book.epub") == book_before && *app.saved_record() == saved);
-        driver.close(); driver.present(); driver.tap(340, 710); driver.present();
+        driver.close(); driver.present(); driver.tap(340, 640); driver.present();
         driver.tap(180, 240); driver.present();
         write(card / "PicoPage/settings.toml", global_before + "# external edit\n");
         driver.tap(500, 1120); driver.present();
@@ -2809,7 +3009,7 @@ int main(int argc, char** argv) {
         driver.tap(60, 50); driver.present(); assert(app.view() == View::Settings);
         driver.tap(300, 310); driver.present(); assert(app.view() == View::SyncSettings); driver.refresh();
         driver.tap(60, 50); driver.present(); assert(app.view() == View::Settings);
-        driver.tap(300, 840); driver.present(); assert(app.view() == View::StorageSettings); driver.refresh();
+        driver.tap(300, 760); driver.present(); assert(app.view() == View::StorageSettings); driver.refresh();
         driver.tap(60, 50); driver.present(); assert(app.view() == View::Settings);
         driver.tap(300, 580); driver.present(); assert(app.view() == View::InputSettings);
         assert(FileStore(card.string()).load_settings().settings.library_view == "list");

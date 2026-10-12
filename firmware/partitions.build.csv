@@ -1,6 +1,8 @@
-# Local build profile. This is not a verified layout for an existing device.
-# The app size equals the 4 MiB ota_0 slot read from the device, so the build size check uses the same limit.
+# Same entries as the partition table read from the device (two 4 MiB application slots).
+# The build uses it for the image size check and for slot lookups; it is never flashed.
 # Name,Type,SubType,Offset,Size,Flags
-nvs,data,nvs,,24K,
-phy_init,data,phy,,4K,
-factory,app,factory,,4M,
+nvs,data,nvs,0x9000,0x6000,
+phy_init,data,phy,0xf000,0x1000,
+ota_0,app,ota_0,0x10000,0x400000,
+ota_1,app,ota_1,0x410000,0x400000,
+otadata,data,ota,0x810000,0x2000,
