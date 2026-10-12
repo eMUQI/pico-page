@@ -1,0 +1,817 @@
+---
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+
+// Installing needs the full-flash image of the newest release beside its update manifest in
+// public/firmware. Until a release carries one, the page shows the steps without the installer.
+let firmware;
+try {
+  const { version } = JSON.parse(readFileSync("public/firmware/manifest.json", "utf8"));
+  const file = `pico-page-${version}-read_pico-release-full.bin`;
+  const sha256 = createHash("sha256").update(readFileSync(`public/firmware/${file}`)).digest("hex");
+  firmware = { version, url: `/firmware/${file}`, sha256 };
+} catch (error) {
+  if (error.code !== "ENOENT") throw error;
+}
+const steps = ["安装前确认", "连接并写入", "放入书和字体", "开始阅读"];
+---
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f4ef">
+    <meta name="description" content="在电脑版 Chrome 或 Edge 中，用 USB 线把 Pico Page 安装到 Read Pico，再放入书和字体。">
+    <title>安装固件 · Pico Page</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到正文</a>
+    <div class="wrap">
+      <!-- TODO: 开源后恢复设计稿中的「文档」和「完整安装文档与手动安装方法」链接。 -->
+      <header class="site-header">
+        <div class="bar">
+          <a class="brand" href="/" aria-label="Pico Page 首页">
+            <span class="wordmark">Pico Page</span>
+            <span class="tagline">Read Pico<br>阅读固件</span>
+          </a>
+          <span class="here" aria-current="page">安装固件</span>
+        </div>
+        <nav aria-label="主导航">
+          <a href="/#install">开始使用</a><a href="/#fonts">字体</a><a href="/#features">功能</a><a href="/#screens">界面</a>
+        </nav>
+      </header>
+      <main id="main">
+        <section class="intro">
+          <div>
+            <p class="eyebrow">安装固件</p>
+            <h1>把 Read Pico，<br>变成 Pico Page。</h1>
+          </div>
+          <ul class="needs">
+            <li><span>设备</span><span>Read Pico 4.7″</span></li>
+            <li><span>数据线</span><span>支持数据传输的 USB 线</span></li>
+            <li><span>浏览器</span><span>电脑版 Chrome 或 Edge</span></li>
+            <li><span>TF 卡</span><span>FAT 文件系统</span></li>
+          </ul>
+        </section>
+        <ol class="tracker" aria-label="安装步骤">
+          {steps.map((title, index) => (
+            <li class={index < 1 ? "past" : undefined} aria-current={index === 1 ? "step" : undefined}><span>0{index + 1}</span><strong>{title}</strong></li>
+          ))}
+        </ol>
+        <div class="layout">
+          <div class="steps">
+            <article class="step">
+              <span class="number" aria-hidden="true">1</span>
+              <div>
+                <h2>安装前确认</h2>
+                <ul class="checks">
+                  <li><span aria-hidden="true">☐</span><span>写入会替换设备上现有的阅读程序。需要回到官方系统时，请先阅读<a href="https://dot.mindreset.tech/docs/read_0/firmware" target="_blank" rel="noopener">官方的构建与烧录说明</a>：目前需要用 ESP-IDF 从源码构建后烧录。</span></li>
+                  <li><span aria-hidden="true">☐</span><span>安装会<strong>整片覆盖</strong>设备闪存，包括 bootloader 和分区表。无论设备上现在是原厂系统还是其他固件，都可以直接安装。TF 卡不受影响。</span></li>
+                  <li><span aria-hidden="true">☐</span><span>设备电量充足，或保持 USB 供电。</span></li>
+                </ul>
+              </div>
+            </article>
+            <article class="step">
+              <span class="number" aria-hidden="true">2</span>
+              <div>
+                <h2>连接设备并写入</h2>
+                <p>用 USB 线连接电脑，点击「连接设备」，在浏览器弹窗里选择 Read Pico 的串口。写入期间请保持页面打开、电脑唤醒、数据线不动。</p>
+                <div class="flash" data-phase={firmware ? "idle" : "unreleased"} data-url={firmware?.url} data-sha256={firmware?.sha256}>
+                  <div class="flash-head">
+                    <span class="flash-status" aria-live="polite"><span class="dot"></span><span data-el="status">{firmware ? "未连接" : "尚未发布"}</span></span>
+                    {firmware && <span class="mono">Pico Page {firmware.version}</span>}
+                  </div>
+                  {firmware ? (
+                    <div class="flash-body">
+                      <p class="notice" data-el="error" role="alert" hidden></p>
+                      <div data-panel="idle">
+                        <p data-el="hint">尚未连接。弹窗里没有设备时，换一根数据线或 USB 接口再试。</p>
+                        <button class="primary" type="button" data-el="connect">连接设备</button>
+                      </div>
+                      <div data-panel="connected" hidden>
+                        <dl>
+                          <div><dt>设备</dt><dd>Read Pico</dd></div>
+                          <div><dt>方式</dt><dd>整片覆盖写入</dd></div>
+                        </dl>
+                        <p class="notice">设备闪存中的所有内容都会被清除，包括现有固件和设备内保存的 Wi‑Fi 等设置。回到官方系统的方法见第 1 步中的官方说明。</p>
+                        <div class="choices">
+                          <button class="primary" type="button" data-el="install">安装 Pico Page</button>
+                          <button class="secondary" type="button" data-el="disconnect">断开</button>
+                        </div>
+                      </div>
+                      <div data-panel="writing" hidden>
+                        <div class="progress-line"><span data-el="stage"></span><span class="mono" data-el="percent"></span></div>
+                        <div class="track" role="progressbar" aria-label="安装进度" aria-valuemin="0" aria-valuemax="100"><div data-el="bar"></div></div>
+                        <p class="keep">请勿拔线或关闭页面。</p>
+                      </div>
+                      <div data-panel="done" hidden>
+                        <p class="finished">安装完成。</p>
+                        <p class="after">设备会自动重启并显示书库。屏幕没有变化时，长按电源键，在菜单中选择「重启」。</p>
+                        <div class="choices"><a class="primary" href="#step3">下一步：放入书和字体 ↓</a></div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div class="flash-body">
+                      <div>
+                        <p>固件尚未发布。项目仍在开发中，发布后这里会开放安装。</p>
+                        <button class="primary" type="button" disabled>连接设备</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </article>
+            <article id="step3" class="step">
+              <span class="number" aria-hidden="true">3</span>
+              <div>
+                <h2>放入书和字体</h2>
+                <p>把 TF 卡接到电脑，或在设备上开启 USB 文件传输，按下面的结构放好文件。</p>
+                <div class="tree">
+                  <div class="muted">TF 卡/</div>
+                  <div><span>├─ <strong>Books/</strong></span><span>EPUB、TXT</span></div>
+                  <div><span>├─ <strong class="accent">Fonts/</strong></span><span class="accent">中文字体，强烈建议</span></div>
+                  <div><span>└─ LockScreens/</span><span class="muted">锁屏图片，可选</span></div>
+                </div>
+                <div class="font-note">
+                  <p>内置字体只有 3,500 个常用汉字，其余字符显示为方框。推荐霞鹜文楷，按 SIL OFL 1.1 免费分发。</p>
+                  <a href="/downloads/LXGWWenKai-Regular-v1.520.zip" download>下载霞鹜文楷 ↓</a>
+                </div>
+              </div>
+            </article>
+            <article class="step">
+              <span class="number" aria-hidden="true">4</span>
+              <div>
+                <h2>打开书，选字体</h2>
+                <p>在书库打开一本书，轻点正文中部 → 「排版」 → 选择放入的字体。按 K1、K3 翻页，有残影时按 K2 全刷。短按电源键休眠。离线说明在「设置 → 使用说明」。</p>
+              </div>
+            </article>
+          </div>
+          <aside>
+            <div>
+              <h3>已经在用 Pico Page？</h3>
+              <p>连接 Wi‑Fi 后可在设备上联网更新。也可以在这个页面重新安装。书、进度和设置保存在 TF 卡上，不受影响。</p>
+            </div>
+            <div>
+              <h3>遇到问题</h3>
+              <details>
+                <summary>弹窗里没有设备</summary>
+                <p>确认数据线支持数据传输，换一个 USB 接口；关闭占用串口的其他程序和浏览器标签。</p>
+              </details>
+              <details>
+                <summary>装过其他固件，还能装吗</summary>
+                <p>可以。安装会整片覆盖，替换原有的 bootloader 和分区表，不需要先刷回原厂系统。</p>
+              </details>
+              <details>
+                <summary>写入中断</summary>
+                <p>保持供电，重新连接并安装一次。</p>
+              </details>
+              <details>
+                <summary>安装完成，屏幕没变化</summary>
+                <p>墨水屏断电后会保留旧画面。重新上电后再看；仍无变化时，重新连接并安装一次。</p>
+              </details>
+              <details>
+                <summary>书里有空白方框</summary>
+                <p>这是内置字体缺字。把完整中文字体放进 <code>Fonts/</code>，并在「排版」中选择它。</p>
+              </details>
+            </div>
+          </aside>
+        </div>
+      </main>
+      <footer class="site-footer">
+        <div>
+          <p class="wordmark">Pico Page</p>
+          <p>读自己的书，接着读下去。</p>
+        </div>
+        <nav aria-label="页脚导航"><a href="/">返回首页</a></nav>
+      </footer>
+    </div>
+    <script>
+      // Installs the full-flash image over Web Serial. The serial protocol comes from esptool-js,
+      // fetched when the visitor connects.
+      const card = document.querySelector(".flash[data-url]");
+      if (card) {
+        const { url, sha256 } = card.dataset;
+        const el = (name) => card.querySelector(`[data-el="${name}"]`);
+        const steps = document.querySelectorAll(".tracker li");
+        const labels = { idle: "未连接", connected: "已连接", writing: "正在安装", done: "已完成" };
+        let transport, loader, md5;
+
+        function show(phase, error = "") {
+          card.dataset.phase = phase;
+          el("status").textContent = labels[phase];
+          el("error").textContent = error;
+          el("error").hidden = !error;
+          card.querySelectorAll("[data-panel]").forEach((panel) => (panel.hidden = panel.dataset.panel !== phase));
+          const current = phase === "done" ? 2 : 1;
+          steps.forEach((step, index) => {
+            step.classList.toggle("past", index < current);
+            if (index === current) step.setAttribute("aria-current", "step");
+            else step.removeAttribute("aria-current");
+          });
+        }
+
+        function progress(percent, stage) {
+          el("stage").textContent = stage;
+          el("percent").textContent = `${percent}%`;
+          el("bar").style.width = `${percent}%`;
+          el("bar").parentElement.setAttribute("aria-valuenow", percent);
+        }
+
+        // Restarts the device out of download mode and frees the port.
+        async function release() {
+          await loader?.after("hard_reset").catch(() => {});
+          await transport?.disconnect().catch(() => {});
+          transport = loader = undefined;
+        }
+
+        async function connect() {
+          let port;
+          try {
+            port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] });
+          } catch {
+            return; // The visitor closed the chooser.
+          }
+          const button = el("connect");
+          button.disabled = true;
+          button.textContent = "正在连接…";
+          try {
+            const [{ ESPLoader, Transport }, { default: SparkMD5 }] = await Promise.all([import("esptool-js"), import("spark-md5")]);
+            md5 = (image) => SparkMD5.ArrayBuffer.hash(image.slice().buffer);
+            transport = new Transport(port, false);
+            loader = new ESPLoader({ transport, baudrate: 115200 });
+            await loader.main();
+            // Read Pico is an ESP32-S3 with 16 MiB of flash. Only the stub that main() loads can
+            // erase the whole chip; without it the old boot data would survive the installation.
+            if (loader.IS_STUB && loader.chip.CHIP_NAME === "ESP32-S3" && (await loader.detectFlashSize()) === "16MB") {
+              show("connected");
+            } else {
+              await release();
+              show("idle", "连接的设备不是 Read Pico，没有写入任何内容。");
+            }
+          } catch (error) {
+            console.error(error);
+            await release();
+            show("idle", "没有连上设备。关闭占用串口的其他程序和浏览器标签，重新插拔数据线后再试。");
+          } finally {
+            button.disabled = false;
+            button.textContent = "连接设备";
+          }
+        }
+
+        async function install() {
+          show("writing");
+          progress(0, "正在下载固件");
+          let erasing = false;
+          try {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const image = new Uint8Array(await response.arrayBuffer());
+            const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", image));
+            if (Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("") !== sha256) {
+              throw new Error("The downloaded image does not match the published digest");
+            }
+            erasing = true;
+            progress(0, "正在擦除整片闪存");
+            await loader.writeFlash({
+              fileArray: [{ data: image, address: 0 }],
+              flashMode: "keep",
+              flashFreq: "keep",
+              flashSize: "keep",
+              eraseAll: true,
+              compress: true,
+              calculateMD5Hash: md5,
+              reportProgress: (_, written, total) =>
+                progress(Math.floor((written / total) * 100), written < total ? "正在写入" : "正在校验"),
+            });
+            await release();
+            show("done");
+          } catch (error) {
+            console.error(error);
+            await release();
+            show("idle", erasing ? "安装没有完成。保持供电，重新连接后再安装一次。" : "固件下载失败，设备没有改动。检查网络后重新连接再试。");
+          }
+        }
+
+        el("connect").addEventListener("click", connect);
+        el("install").addEventListener("click", install);
+        el("disconnect").addEventListener("click", async () => {
+          await release();
+          show("idle");
+        });
+        addEventListener("beforeunload", (event) => {
+          if (card.dataset.phase === "writing") event.preventDefault();
+        });
+        if (!("serial" in navigator)) {
+          el("hint").textContent = "这个浏览器不能连接设备。请用电脑版 Chrome 或 Edge 打开本页。";
+          el("connect").disabled = true;
+        }
+      }
+    </script>
+  </body>
+</html>
+<style is:global>
+  :root {
+    --bg: #f5f4ef;
+    --ink: #1d1d1b;
+    --text: #3d3d3a;
+    --muted: #5c5c58;
+    --line: #d9d7cf;
+    --accent: #2f5a4f;
+    --serif: "Noto Serif SC", "Songti SC", "Source Han Serif SC", "SimSun", serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  h1,
+  h2,
+  h3,
+  p,
+  dl,
+  dd,
+  ol,
+  ul {
+    margin: 0;
+  }
+  ol,
+  ul {
+    padding: 0;
+    list-style: none;
+  }
+  a {
+    color: var(--ink);
+    text-underline-offset: 4px;
+  }
+  a:hover {
+    color: var(--accent);
+  }
+  strong {
+    font-weight: 600;
+  }
+  code,
+  .mono {
+    font-family: var(--mono);
+  }
+  code {
+    font-size: 0.92em;
+  }
+  [hidden] {
+    display: none !important;
+  }
+  :focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 3px;
+  }
+  .muted {
+    color: var(--muted);
+  }
+  .accent {
+    color: var(--accent);
+  }
+  .wrap {
+    max-width: 1160px;
+    margin: 0 auto;
+    padding: 0 clamp(20px, 4vw, 40px);
+  }
+  .skip-link {
+    position: absolute;
+    top: -80px;
+    left: 20px;
+    padding: 12px;
+    background: #fff;
+  }
+  .skip-link:focus {
+    top: 12px;
+  }
+  .wordmark {
+    font-family: var(--serif);
+    font-weight: 700;
+  }
+
+  /* Header */
+  .site-header {
+    border-bottom: 1px solid var(--ink);
+  }
+  .bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 20px;
+    padding: 16px 0 10px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    text-decoration: none;
+  }
+  .brand .wordmark {
+    font-size: 23px;
+  }
+  .tagline {
+    border-left: 1px solid var(--line);
+    padding-left: 14px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--muted);
+  }
+  .here {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+    padding: 0 14px;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: var(--bg);
+    font-size: 14px;
+  }
+  nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 24px;
+  }
+  .site-header nav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    white-space: nowrap;
+    scrollbar-width: none;
+    font-size: 14px;
+  }
+  .site-header nav a {
+    padding: 10px 0;
+    text-decoration: none;
+  }
+
+  /* Introduction and step tracker */
+  .intro {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    justify-content: space-between;
+    gap: 24px 48px;
+    padding: 56px 0 40px;
+  }
+  .intro > div {
+    flex: 1 1 420px;
+    min-width: 0;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+  }
+  h1 {
+    margin-top: 12px;
+    font-family: var(--serif);
+    font-size: clamp(34px, 4.6vw, 54px);
+    font-weight: 700;
+    line-height: 1.25;
+  }
+  .needs {
+    flex: 0 1 380px;
+    display: grid;
+    gap: 8px;
+    border-top: 1px solid var(--ink);
+    padding-top: 14px;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .needs li {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+  .needs li span:first-child {
+    color: var(--muted);
+  }
+  .tracker {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+    gap: 1px;
+    border-block: 1px solid var(--ink);
+    background: var(--line);
+  }
+  .tracker li {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    padding: 14px 16px;
+    background: var(--bg);
+    color: var(--muted);
+  }
+  .tracker span {
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .tracker strong {
+    font-size: 15px;
+  }
+  .tracker .past {
+    color: var(--ink);
+  }
+  .tracker .past span::after {
+    content: " ✓";
+  }
+  .tracker [aria-current] {
+    background: var(--ink);
+    color: var(--bg);
+  }
+
+  /* Steps */
+  .layout {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 40px 56px;
+    padding: 48px 0 64px;
+  }
+  .steps {
+    flex: 1 1 520px;
+    min-width: 0;
+    border-top: 1px solid var(--ink);
+  }
+  .step {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 0 18px;
+    padding: 26px 0;
+  }
+  .step + .step {
+    border-top: 1px solid var(--line);
+  }
+  .number {
+    font-family: var(--serif);
+    font-size: 30px;
+    font-weight: 600;
+    line-height: 1;
+  }
+  h2 {
+    font-size: 20px;
+    font-weight: 600;
+  }
+  .step p {
+    margin-top: 8px;
+    font-size: 15px;
+    line-height: 1.75;
+    color: var(--text);
+  }
+  .checks {
+    display: grid;
+    gap: 10px;
+    margin-top: 12px;
+    font-size: 15px;
+    line-height: 1.7;
+    color: var(--text);
+  }
+  .checks li {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+
+  /* Installer */
+  .flash {
+    margin-top: 20px;
+    border: 1px solid var(--ink);
+    background: #fff;
+  }
+  .flash-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border-bottom: 1px solid var(--line);
+    padding: 12px 18px;
+    font-size: 13px;
+  }
+  .flash-head .mono {
+    color: var(--muted);
+  }
+  .flash-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 8px;
+    background: #b9b6ad;
+  }
+  [data-phase="connected"] .dot,
+  [data-phase="done"] .dot {
+    background: var(--ink);
+  }
+  [data-phase="writing"] .dot {
+    background: var(--accent);
+  }
+  .flash-body,
+  .flash-body > div {
+    display: grid;
+    gap: 16px;
+  }
+  .flash-body {
+    padding: 22px 18px 20px;
+  }
+  .flash p {
+    margin: 0;
+    line-height: 1.7;
+    color: var(--ink);
+  }
+  .flash p.notice {
+    border: 1px solid var(--accent);
+    padding: 12px 14px;
+    font-size: 14px;
+  }
+  .flash p.keep {
+    font-size: 13px;
+    color: var(--accent);
+  }
+  .flash p.finished {
+    font-size: 17px;
+    font-weight: 600;
+  }
+  .flash p.after {
+    color: var(--text);
+  }
+  .flash dl {
+    display: grid;
+    gap: 6px;
+    font-size: 14px;
+  }
+  .flash dl div {
+    display: grid;
+    grid-template-columns: 88px minmax(0, 1fr);
+  }
+  .flash dt {
+    color: var(--muted);
+  }
+  .choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .choices .primary {
+    flex: 1 1 200px;
+  }
+  .primary,
+  .secondary {
+    min-height: 48px;
+    font: inherit;
+    cursor: pointer;
+  }
+  .primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    background: var(--ink);
+    color: var(--bg);
+    font-size: 15px;
+    text-decoration: none;
+  }
+  .primary:hover {
+    background: var(--accent);
+    color: var(--bg);
+  }
+  .primary:disabled {
+    border: 1px dashed #b9b6ad;
+    background: transparent;
+    color: var(--muted);
+    cursor: not-allowed;
+  }
+  .secondary {
+    border: 1px solid var(--line);
+    padding: 0 18px;
+    background: transparent;
+    color: var(--ink);
+    font-size: 14px;
+  }
+  .progress-line {
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+  }
+  .track {
+    height: 8px;
+    background: #ebe9e2;
+  }
+  .track div {
+    width: 0;
+    height: 100%;
+    background: var(--ink);
+    transition: width 0.12s linear;
+  }
+
+  /* Card layout and font download */
+  .tree {
+    margin-top: 14px;
+    border: 1px solid var(--line);
+    padding: 14px 16px;
+    background: #fbfaf7;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.9;
+    overflow-x: auto;
+  }
+  .tree div {
+    display: flex;
+    gap: 24px;
+    white-space: nowrap;
+  }
+  .tree span:first-child {
+    min-width: 150px;
+  }
+  .tree span + span {
+    font-family: var(--sans);
+  }
+  .tree strong {
+    font-weight: 500;
+  }
+  .font-note {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 20px;
+    margin-top: 14px;
+    border: 1px solid var(--accent);
+    padding: 14px 16px;
+  }
+  .step .font-note p {
+    flex: 1 1 260px;
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--ink);
+  }
+  .font-note a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 42px;
+    padding: 0 16px;
+    background: var(--accent);
+    color: var(--bg);
+    font-size: 14px;
+    text-decoration: none;
+  }
+  .font-note a:hover {
+    background: var(--ink);
+  }
+
+  /* Sidebar and footer */
+  aside {
+    flex: 0 1 340px;
+    display: grid;
+    gap: 28px;
+    align-content: start;
+    min-width: 0;
+  }
+  aside > div {
+    border-top: 1px solid var(--ink);
+    padding-top: 16px;
+  }
+  h3 {
+    font-size: 16px;
+    font-weight: 600;
+  }
+  aside p {
+    margin-top: 8px;
+    font-size: 14px;
+    line-height: 1.75;
+    color: var(--text);
+  }
+  details {
+    border-bottom: 1px solid var(--line);
+    padding: 12px 0;
+  }
+  h3 + details {
+    margin-top: 6px;
+  }
+  summary {
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .site-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    justify-content: space-between;
+    gap: 16px 24px;
+    border-top: 1px solid var(--ink);
+    padding: 28px 0 48px;
+    font-size: 13px;
+  }
+  .site-footer .wordmark {
+    font-size: 20px;
+  }
+  .site-footer .wordmark + p {
+    margin-top: 4px;
+    color: var(--muted);
+  }
+</style>
