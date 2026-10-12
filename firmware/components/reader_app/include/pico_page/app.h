@@ -333,11 +333,11 @@ class ReaderApp {
     /** True from a check or download request until its completion; the device stays awake meanwhile. */
     bool update_busy() const;
     /**
-     * Removes the installation record that prepare_power() wrote for an installing restart. Call
-     * before the card is released when the boot slot could not be switched, so that the next
-     * start does not report a failed start of firmware that never ran. Best effort.
+     * Records the installing restart so that the next start reports its result once. Call after
+     * the boot slot has been switched and before the card is released: a record therefore always
+     * means that the new firmware was given a start. Best effort; without it no result is shown.
      */
-    void discard_install_record();
+    void record_install();
     /** True while the on-screen keyboard is shown; every tap made during a refresh is then kept, in order. */
     bool keyboard_visible() const;
 

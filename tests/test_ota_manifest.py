@@ -1,5 +1,7 @@
+import functools
 import hashlib
 import json
+import operator
 import struct
 import sys
 import tempfile
@@ -11,13 +13,17 @@ import ota_manifest
 
 
 def image(version='0.2.0-beta.2', project='pico_page', chip=9, size=4096):
-    data = bytearray(size)
-    data[0] = 0xE9
-    struct.pack_into('<H', data, 12, chip)
-    struct.pack_into('<I', data, 32, 0xABCD5432)
-    data[48:48 + len(version)] = version.encode()
-    data[80:80 + len(project)] = project.encode()
-    return bytes(data)
+    """A complete image: header, one segment that starts with the application description, checksum and digest."""
+    body = bytearray(size)
+    struct.pack_into('<I', body, 0, 0xABCD5432)
+    body[16:16 + len(version)] = version.encode()
+    body[48:48 + len(project)] = project.encode()
+    header = bytearray(24)
+    header[0], header[1], header[23] = 0xE9, 1, 1
+    struct.pack_into('<H', header, 12, chip)
+    data = bytes(header) + struct.pack('<II', 0x3C000020, len(body)) + bytes(body)
+    data += bytes((len(data) | 15) - len(data)) + bytes([functools.reduce(operator.xor, body, 0xEF)])
+    return data + hashlib.sha256(data).digest()
 
 
 class ManifestTest(unittest.TestCase):
@@ -38,12 +44,20 @@ class ManifestTest(unittest.TestCase):
                      image(size=ota_manifest.SLOT_BYTES + 1)):
             with self.assertRaises(ValueError):
                 self.build(data)
+        # A valid start is not enough: every device would reject these only after a full download.
+        whole = image()
+        for data in (whole[:-1], whole[:2000], whole + b'\0', whole[:300] + bytes([whole[300] ^ 1]) + whole[301:],
+                     whole[:23] + b'\0' + whole[24:]):
+            with self.assertRaises(ValueError):
+                self.build(data)
         with self.assertRaises(ValueError):
             self.build(image(), notes='长' * 3000)
         # The device refuses these addresses, so a manifest must never be written with them.
         for url in ('http://picopage.wulu.zone/firmware/', 'https://picopage.wulu.zone/firmware', 'https:///firmware/',
                     'https://user@picopage.wulu.zone/firmware/', 'https://picopage.wulu.zone/a b/', 'https://#/',
-                    'https://picopage.wulu.zone/firmware/#x/', 'https://picopage.wulu.zone/' + 'a' * 500 + '/'):
+                    'https://picopage.wulu.zone/firmware/#x/', 'https://picopage.wulu.zone/' + 'a' * 500 + '/',
+                    'https://?origin/', 'https://picopage.wulu.zone/firmware/?v=1/', 'https://:443/firmware/',
+                    'https://picopage.wulu.zone\\firmware/'):
             with self.assertRaises(ValueError):
                 self.build(image(), url=url)
         with self.assertRaises(ValueError):

@@ -14,6 +14,7 @@ from pathlib import Path
 import re
 import struct
 import sys
+import urllib.parse
 
 ROOT = Path(__file__).resolve().parents[1]
 BOARD = 'read_pico'
@@ -24,7 +25,6 @@ ESP32S3_CHIP_ID = 9
 # The device reads version numbers of at most nine digits.
 NUMBER = r'(?:0|[1-9][0-9]{0,8})'
 RELEASE = re.compile(rf'{NUMBER}\.{NUMBER}\.{NUMBER}(?:-(?:beta|rc)\.[1-9][0-9]{{0,8}})?')
-IMAGE_URL = re.compile(r'https://[!-"$-.0-?A-\[\]-~][!-"$-?A-\[\]-~]*')
 # esp_image_header_t (24 bytes), esp_image_segment_header_t (8 bytes), then esp_app_desc_t.
 DESCRIPTION = 32
 
@@ -38,10 +38,38 @@ def schema_defaults(root=ROOT):
     return int(found.group(1)), int(found.group(2))
 
 
-def image_version(image):
-    """Version from the application description of an ESP32-S3 pico_page image."""
+def verify_image(image):
+    """Check the whole image as the device's bootloader does: segments, checksum, appended digest.
+
+    An image that keeps a valid start but is truncated or altered would otherwise be published
+    and fail on every device only after its complete download.
+    """
     if len(image) < DESCRIPTION + 256 or image[0] != 0xE9:
         raise ValueError('Not an ESP application image')
+    offset, checksum = 24, 0xEF
+    for _ in range(image[1]):
+        length, = struct.unpack_from('<I', image, offset + 4)
+        offset += 8
+        if offset + length > len(image):
+            raise ValueError('Image is truncated')
+        for word in struct.iter_unpack('<I', image[offset:offset + length - length % 4]):
+            checksum ^= word[0] ^ word[0] >> 8 ^ word[0] >> 16 ^ word[0] >> 24
+        for byte in image[offset + length - length % 4:offset + length]:
+            checksum ^= byte
+        offset += length
+    # Zero padding places the checksum in the last byte of a 16-byte block.
+    offset = (offset | 15) + 1
+    if offset > len(image) or image[offset - 1] != checksum & 0xFF:
+        raise ValueError('Image checksum does not match')
+    if image[23] != 1:
+        raise ValueError('Image has no appended SHA-256')
+    if image[offset:] != hashlib.sha256(image[:offset]).digest():
+        raise ValueError('Image digest does not match its contents')
+
+
+def image_version(image):
+    """Version from the application description of a complete ESP32-S3 pico_page image."""
+    verify_image(image)
     if struct.unpack_from('<H', image, 12)[0] != ESP32S3_CHIP_ID:
         raise ValueError('Image is not built for ESP32-S3')
     magic, = struct.unpack_from('<I', image, DESCRIPTION)
@@ -62,9 +90,12 @@ def build_manifest(image, notes, base_url, published, schema):
         raise ValueError('Release notes exceed 8 KiB; the device would cut them')
     datetime.date.fromisoformat(published)
     name = f'pico-page-{version}-{BOARD}-release.bin'
-    # The device accepts only such addresses: a host directly after the scheme, printable ASCII
-    # without user information, fragment or backslash, at most 512 bytes.
-    if not IMAGE_URL.fullmatch(base_url) or not base_url.endswith('/') or len(base_url + name) > 512:
+    # The device accepts only such addresses: https with a host, printable ASCII without user
+    # information, query, fragment or backslash, at most 512 bytes.
+    parts = urllib.parse.urlsplit(base_url)
+    if (parts.scheme != 'https' or not parts.hostname or '@' in parts.netloc or parts.query or parts.fragment
+            or not parts.path.endswith('/') or not base_url.startswith('https://' + parts.netloc)
+            or any(not '!' <= c <= '~' or c in '\\#?' for c in base_url) or len(base_url + name) > 512):
         raise ValueError('Base URL must be a plain https:// address that ends with /')
     return name, dict(manifest=1, board=BOARD, version=version, published_at=published, url=base_url + name,
                       size=len(image), sha256=hashlib.sha256(image).hexdigest(),
