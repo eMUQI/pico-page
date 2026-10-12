@@ -219,7 +219,7 @@
 
 ### 升级来源
 
-1. 联网下载：已实现第一批。清单地址内置在固件中，为 `https://picopage.wulu.zone/firmware/manifest.json`，固件镜像放在同一目录（2026-10-12 用户确认）。使用 HTTPS 并校验证书，不跟随重定向，不关闭 TLS 验证。依赖 Wi-Fi 开关（R2）。
+1. 联网下载：已实现第一批。清单地址内置在固件中，为 `https://picopage.wulu.zone/firmware/manifest.json`，固件镜像放在同一目录（2026-10-12 用户确认）。使用 HTTPS 并校验证书，不跟随重定向，不关闭 TLS 验证。该站点经 Cloudflare 提供，证书链以 GlobalSign Root CA 交叉签名的 GTS Root R4 结尾，固件须启用 `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY` 才能验证；`0.2.0-beta.1` 没有启用，检查更新会失败。依赖 Wi-Fi 开关（R2）。
 2. TF 卡：用户把固件文件放到 `PicoPage/update/`，在「设置」中选择安装。尚未实现，暂不推进。
 
 ### 联网更新
