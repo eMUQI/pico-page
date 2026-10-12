@@ -176,12 +176,29 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
           el("bar").parentElement.setAttribute("aria-valuenow", percent);
         }
 
-        // Restarts the device out of download mode and frees the port. Returns whether both
-        // succeeded; a page reload frees a port that did not close.
+        // Restarts an ESP32-S3 with its RTC watchdog, as esptool's watchdog_reset does. Read Pico
+        // stays in download mode after the RTS reset of esptool-js.
+        async function restart() {
+          await loader.writeReg(0x600080b0, 0x50d83aa1); // RTC_CNTL_WDTWPROTECT: unlock
+          await loader.writeReg(0x6000809c, 2000); // RTC_CNTL_WDTCONFIG1: timeout
+          await loader.writeReg(0x60008098, ((1 << 31) | (5 << 28) | (1 << 8) | 2) >>> 0); // RTC_CNTL_WDTCONFIG0: enable, reset the system
+          // The chip may restart before it answers the write that locks the registers again.
+          await loader.writeReg(0x600080b0, 0).catch(() => {});
+        }
+
+        // Restarts the device out of download mode and frees the port. Returns whether the device
+        // restarted; a page reload frees a port that did not close.
         async function release() {
           let clean = true;
-          await loader?.after("hard_reset").catch(() => (clean = false));
-          await transport?.disconnect().catch(() => (clean = false));
+          if (loader?.chip?.CHIP_NAME === "ESP32-S3") {
+            // The restart removes the USB serial port, so closing it afterwards may fail.
+            await restart().then(() => transport.disconnect().catch(() => {}), () => (clean = false));
+          }
+          if (!clean || loader?.chip?.CHIP_NAME !== "ESP32-S3") {
+            clean = true;
+            await loader?.after("hard_reset").catch(() => (clean = false));
+            await transport?.disconnect().catch(() => (clean = false));
+          }
           transport = loader = undefined;
           return clean;
         }
