@@ -40,9 +40,9 @@ const { title, description, current, noindex = false } = Astro.props;
         </div>
         <nav aria-label="页脚导航">
           {current !== "install" && <a href="/install/">安装固件</a>}
-          <a href="/assets/third-party-licenses.txt">第三方许可</a>
+          {current === "install" && <a href="/assets/third-party-licenses.txt">第三方许可</a>}
           {current !== "home" && <a href="/">返回首页</a>}
-          <a class="muted" href="https://quotaframe.com">QuotaFrame</a>
+          {current === "home" && <a class="muted" href="https://quotaframe.com">QuotaFrame</a>}
         </nav>
       </footer>
     </div>

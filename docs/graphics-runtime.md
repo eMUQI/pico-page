@@ -72,7 +72,7 @@ python3 -m venv .local/font-tools
 
 字体字节编译进固件只读数据段，由 Flash 映射读取，不复制到 RAM。真机用内置字体阅读时，内部空闲内存与使用卡上字体时相同（约 137 KB）；字体打开耗时没有单独测量。
 
-fonttools 只用于维护生成步骤，普通构建不需要它。字体子集修改了字形范围和字体名称，名称表及 CFF 名称已改为 `Pico Page Fallback`，保持 OFL 1.1。已阅读上游 OFL 及字体版权字段；随字体分发的版权是 © 2014–2021 Adobe。上游 LICENSE 未另列 Reserved Font Name；派生字体仍主动改名。`Noto-OFL.txt` 和 `LXGW-OFL.txt` 随准备目录字体一起复制；内置子集保留版权与许可元数据。
+fonttools 只用于维护生成步骤，普通构建不需要它。字体子集修改了字形范围和字体名称，名称表及 CFF 名称已改为 `Pico Page Fallback`，保持 OFL 1.1。已阅读上游 OFL 及字体版权字段；随字体分发的版权是 © 2014–2021 Adobe。上游 LICENSE 未另列 Reserved Font Name；派生字体仍主动改名。`Noto-OFL.txt` 和 `LXGW-OFL.txt` 随准备目录字体一起复制；内置子集保留版权与许可元数据。网站首页另有一个霞鹜文楷示例子集，按同样做法生成和改名，见 [网站说明](../web/README.md) 的「字体」。
 
 本软件部分基于 FreeType Team 的工作。Portions of this software are copyright © 2025 The FreeType Project (https://freetype.org). All rights reserved. FreeType 采用 FTL，见组件内 `FreeType-FTL.txt`；`fthash` 的 MIT 风格许可和 Adobe CFF 解释器的附加专利条款见 `FreeType-extra-notices.txt`。二进制分发时必须保留这些说明和字体 OFL。这只说明本组件义务，不替代 BSP 或整个项目的发布许可核对。
 
