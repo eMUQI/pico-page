@@ -114,10 +114,25 @@ code {
   color: var(--bg);
   font-size: 14px;
 }
-.bar .primary {
+.bar-links {
+  display: flex;
+  gap: 8px;
+}
+.bar .primary,
+.outline {
   min-height: 40px;
   padding: 0 14px;
   font-size: 14px;
+}
+.outline {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--ink);
+  text-decoration: none;
+}
+.outline:hover {
+  background: var(--ink);
+  color: var(--bg);
 }
 nav {
   display: flex;

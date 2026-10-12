@@ -19,13 +19,12 @@ const lockscreens = [
 ];
 ---
 <Site title="Pico Page · 读自己的书，接着读下去" description="Pico Page，为 Read Pico 设计的墨水屏阅读固件。离线阅读 TF 卡上的 EPUB 和 TXT，与 KOReader 接续同一本 EPUB 的阅读位置。书籍、进度和设置，以本地文件保存。" current="home">
-  <!-- TODO: 开源后恢复设计稿中的「阅读完整文档」和「传书方式详解」链接；目前没有可公开访问的文档。 -->
   <section class="hero">
     <div class="hero-copy">
       <p class="lede">为 Read Pico 4.7 英寸墨水屏设计的阅读固件</p>
       <h1>读自己的书，<br>接着读下去。</h1>
       <p class="summary">离线阅读 TF 卡上的 EPUB 和 TXT。<br>与 KOReader 接续同一本 EPUB 的阅读位置。</p>
-      <p class="actions"><a class="primary" href="#start">三步开始使用 <span aria-hidden="true">↓</span></a></p>
+      <p class="actions"><a class="primary" href="#start">三步开始使用 <span aria-hidden="true">↓</span></a><a href="/docs/">阅读完整文档</a></p>
     </div>
     <figure>
       <div class="hero-screens">
@@ -79,7 +78,7 @@ const lockscreens = [
         </div>
       </li>
     </ol>
-    <p class="footnote">不想拔卡？在设备上开启 USB 文件传输，或用 Wi‑Fi 传书（设备热点或已保存的 Wi‑Fi）从浏览器上传，也能完成第 2 步。</p>
+    <p class="footnote">不想拔卡？在设备上开启 USB 文件传输，或用 Wi‑Fi 传书（设备热点或已保存的 Wi‑Fi）从浏览器上传，也能完成第 2 步。<a href="/docs/#transfer">传书方式详解</a></p>
   </section>
 
   <section id="fonts" class="band">
@@ -292,7 +291,12 @@ const lockscreens = [
     line-height: 1.8;
   }
   .actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px 24px;
     margin-top: 34px;
+    font-size: 15px;
   }
   .hero figure {
     flex: 0 1 400px;

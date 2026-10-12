@@ -1,0 +1,295 @@
+---
+import Site from "../layouts/Site.astro";
+import { firmware } from "../firmware.js";
+
+const sections = [
+  ["start", "开始使用"],
+  ["controls", "按键与触摸"],
+  ["typography", "排版与刷新"],
+  ["transfer", "传书"],
+  ["files", "TF 卡上的文件"],
+  ["sync", "与 KOReader 接续位置"],
+  ["power", "休眠、关机与锁屏"],
+  ["limits", "限制"],
+  ["faq", "常见问题"],
+];
+---
+<Site title="使用文档 · Pico Page" description="Pico Page 的使用文档：按键与触摸、排版与刷新、USB 和 Wi‑Fi 传书、TF 卡上的文件、与 KOReader 接续阅读位置、休眠与锁屏。" current="docs">
+  <!-- TODO: 手动安装方法确定后补充「安装」一节，并恢复安装页设计稿中的「完整安装文档与手动安装方法」链接。 -->
+  <div class="docs">
+    <nav class="toc" aria-label="文档目录">
+      <p class="eyebrow">使用文档</p>
+      <ol>
+        {sections.map(([id, title]) => <li><a href={`#${id}`}>{title}</a></li>)}
+      </ol>
+    </nav>
+    <article>
+      <h1>使用文档</h1>
+      <p class="lead">这里说明 Pico Page 在 Read Pico 上的用法。同样的要点也在设备的「设置 → 使用说明」中，无需联网即可查看。</p>
+      {!firmware && <p class="notice">固件尚未发布。项目仍在开发中，本文档描述的是当前开发版本，发布时可能调整。</p>}
+
+      <h2 id="start">开始使用</h2>
+      <ol>
+        <li>安装固件。步骤见<a href="/install/">安装页</a>。</li>
+        <li>准备一张 FAT 文件系统的 TF 卡，把 EPUB、TXT 放进 <code>Books/</code>，把中文字体和它的许可证放进 <code>Fonts/</code>。字体可在<a href="/#fonts">首页</a>下载。</li>
+        <li>把 TF 卡插入设备。在书库点按一本书开始阅读，点按文件夹查看其中的书。</li>
+        <li>轻点正文中部打开阅读工具，在「排版」中选择放入的字体。</li>
+      </ol>
+      <p>再次打开同一本书时，设备恢复已保存的位置。书库顶部的「继续阅读」打开上次阅读的书。</p>
+
+      <h2 id="controls">按键与触摸</h2>
+      <p>以下是默认映射。</p>
+      <table>
+        <thead><tr><th>操作</th><th>结果</th></tr></thead>
+        <tbody>
+          <tr><td>K1，或点正文左侧</td><td>上一页</td></tr>
+          <tr><td>K3，或点正文右侧</td><td>下一页</td></tr>
+          <tr><td>K2</td><td>立即全刷当前画面</td></tr>
+          <tr><td>点正文中部</td><td>打开阅读工具</td></tr>
+          <tr><td>在正文左右轻扫</td><td>翻页</td></tr>
+          <tr><td>长按书库中的一本书</td><td>查看书籍详情</td></tr>
+          <tr><td>长按正文中的图片</td><td>放大查看图片</td></tr>
+          <tr><td>短按电源键</td><td>休眠</td></tr>
+          <tr><td>长按电源键</td><td>打开关机、重启菜单</td></tr>
+        </tbody>
+      </table>
+      <ul>
+        <li>K2 在所有可交互页面都只全刷当前画面。它不翻页、不关闭面板、不确认或取消操作，也不退出传输。关闭、取消和确认使用屏幕上的控件。</li>
+        <li>在书库、目录和使用说明中，K1、K3 和左右轻扫用于翻屏。工具和排版面板打开时，K1、K3 不翻动背后的正文。</li>
+        <li>正文页脚左侧可切换页数、章节或百分比，右侧可切换电量或时钟。</li>
+      </ul>
+
+      <h2 id="typography">排版与刷新</h2>
+      <p>轻点正文中部，选择「排版」。可以调整字体、字重、字号、行距、页边距、段距和首行缩进。调整时正文先显示预览，此时还没有保存：</p>
+      <ul>
+        <li>点「应用到此书」，设置只用于这本书。</li>
+        <li>点「设为阅读默认」，设置用于所有没有单独设置的书。</li>
+        <li>点「放弃修改」，恢复原来的排版。</li>
+      </ul>
+      <p>刷新模式有清晰、均衡、快速三档，在阅读工具的「刷新模式」或「设置 → 显示与刷新」中选择。清晰模式每页全刷；均衡和快速可以调整自动全刷的间隔。画面有残影时，随时按 K2 全刷。</p>
+
+      <h2 id="transfer">传书</h2>
+      <p>除了把 TF 卡取出接到电脑，还有三种不拔卡的方式。Wi‑Fi 传书可上传 EPUB，以及 UTF-8 或 GB18030 编码的 TXT。</p>
+
+      <h3>USB 文件传输</h3>
+      <ol>
+        <li>用 USB 线连接设备和电脑，在设备上打开「设置 → 网络与传输」，点「开启 USB 传输」。设备先保存阅读位置，再把 TF 卡交给电脑。</li>
+        <li>等待电脑把 TF 卡识别为可移动磁盘，然后管理文件。</li>
+        <li>在电脑上安全弹出 TF 卡，等待弹出完成。</li>
+        <li>在设备上选择退出并确认重启。设备重新读取 TF 卡上的配置和书库。</li>
+      </ol>
+      <p>传输期间设备暂停阅读、同步和自动休眠。电脑还没有完成安全弹出时，不要拔线或重启设备，否则文件可能损坏。</p>
+
+      <h3>经设备热点传书</h3>
+      <p>不需要路由器。传书期间，手机连着设备的热点，暂时不能上网。</p>
+      <ol>
+        <li>在设备上打开「设置 → 网络与传输」。没有保存过 Wi‑Fi 时点「Wi‑Fi 传书」，保存过时点「经设备热点传书」。</li>
+        <li>用手机扫描屏幕上的热点二维码，或在手机、电脑的 Wi‑Fi 设置中连接屏幕显示的热点并输入密码。</li>
+        <li>打开屏幕上的传书页，选择一个或多个文件。选择后立即开始上传，文件依次保存到 <code>Books/</code>。</li>
+        <li>浏览器逐本显示结果，设备屏幕显示已保存的数量。</li>
+        <li>在设备上点「结束传书」。设备关闭热点并重新扫描书库，不需要重启。</li>
+      </ol>
+
+      <h3>经已保存的 Wi‑Fi 传书</h3>
+      <p>设备和手机连同一个网络，手机传书时仍能上网。需要先在「设置 → 网络与传输 → Wi‑Fi 设置」中添加网络：从附近的网络中选择，用屏幕键盘输入密码，连接成功后才保存。设备只支持 2.4 GHz 网络，最多保存 5 个。</p>
+      <ol>
+        <li>在设备上打开「设置 → 网络与传输」，点「经已保存的 Wi‑Fi 传书」。</li>
+        <li>确认手机或电脑连着屏幕上写明的网络，扫描二维码，或在浏览器输入屏幕上的完整地址。地址末尾的字母和数字每次随机生成，只输入 IP 地址打不开传书页。</li>
+        <li>之后的上传和结束步骤与经设备热点传书相同。</li>
+      </ol>
+      <p>同一网络中的其他设备只要知道完整地址，也能打开传书页。传完后请及时结束传书。</p>
+
+      <h3>Wi‑Fi 传书的限制</h3>
+      <ul>
+        <li>单个文件最大 64 MiB。不提供下载、删除、覆盖和断点续传。</li>
+        <li>同名文件不覆盖。需要导入另一个版本时，先在电脑上改名。</li>
+        <li>同名、格式不支持、超过大小或空的文件标记为「未上传」，设备跳过这本，继续下一本。</li>
+        <li>网络中断或停止上传后，当前这本可能已经保存。先在书库核对，再重试。</li>
+        <li>传书期间设备暂停阅读、同步和自动休眠。</li>
+      </ul>
+
+      <h2 id="files">TF 卡上的文件</h2>
+      <pre>Books/                     EPUB、TXT，可以建子文件夹
+Fonts/                     字体（TTF、OTF）和它们的许可证
+LockScreens/               锁屏图片（PNG、JPEG），可选
+PicoPage/settings.toml     阅读配置
+PicoPage/network.toml      Wi‑Fi 配置，含密码
+PicoPage/sync.toml         KOReader 同步账户，含凭据</pre>
+      <ul>
+        <li>书籍、阅读进度和设置都是 TF 卡上的普通文件，可以在电脑上查看和备份。</li>
+        <li>每本书的进度和单书设置保存在原书旁边、以完整文件名加 <code>.picopage</code> 命名的目录里，例如 <code>书名.epub.picopage/</code>。移动书籍时把这个目录一起移动，进度和设置才会跟随。</li>
+        <li><code>PicoPage/</code> 由设备管理，其中还有缓存。清理缓存请用设备上的「清理全部缓存」，它不会删除原书和阅读进度。</li>
+        <li><code>network.toml</code> 和 <code>sync.toml</code> 含有凭据，分享或备份 TF 卡内容时请留意。</li>
+        <li>TF 卡上没有可用字体时，正文使用内置字体。内置字体只包含 3,500 个常用汉字，其余字符显示为方框。放入新字体后重新启动设备，再到「排版」中选择。</li>
+      </ul>
+
+      <h2 id="sync">与 KOReader 接续位置</h2>
+      <p>设备使用 KOReader 的进度同步服务，与 KOReader 互相接续同一本 EPUB 的阅读位置。同步由你手动发起：设备不会自动跳转，也不会自动上传。</p>
+      <p>前置条件：两端使用内容完全相同的原始 EPUB，并使用同一个同步账户。账户在「设置 → KOReader 同步」中填写，验证通过后才保存；使用同步需要先添加 Wi‑Fi。</p>
+      <ol>
+        <li>打开这本书，轻点正文中部，选择「同步」。</li>
+        <li>点「检查远端位置」。设备只查询，不跳转，也不上传。</li>
+        <li>两端位置不同时，点「留在这里」或「跳到这里」。</li>
+        <li>要用本机位置更新远端，点「上传本机位置…」，在确认页核对两端位置后上传。</li>
+      </ol>
+      <ul>
+        <li>书籍按内容识别。两端排版不同，页码也不同，这是正常的。</li>
+        <li>设备只在能精确定位远端位置时提供跳转，不按百分比推测。</li>
+        <li>取消只能停止还没有发出的请求。已经发出的上传，服务器仍可能收到；结果不确定时，先重新检查远端位置。</li>
+        <li>TXT 只保存本机进度，不支持接续。</li>
+      </ul>
+
+      <h2 id="power">休眠、关机与锁屏</h2>
+      <ul>
+        <li>短按电源键休眠，再按电源键唤醒。K1、K2、K3 不能唤醒设备。</li>
+        <li>自动休眠时间在「设置 → 电源与休眠」中调整。</li>
+        <li>长按电源键打开关机、重启菜单。设备先保存阅读进度，再关机或重启。</li>
+        <li>休眠画面可选书籍封面、保留正文、简洁屏保或自定义图片，选好后点「保存设置」。书没有封面时显示书名与作者。</li>
+      </ul>
+      <p>使用自定义图片：把 PNG 或 JPEG 放进 TF 卡根目录的 <code>LockScreens/</code>，在「设置 → 电源与休眠」选「自定义图片」，再在「选择图片 / 轮播」中固定一张或选择轮播，最后点「保存设置」。保存后让设备空闲片刻，等待图片准备完成；没有准备好时显示简洁屏保。可用的图片在<a href="/#lockscreens">首页</a>下载。</p>
+
+      <h2 id="limits">限制</h2>
+      <ul>
+        <li>支持 EPUB，以及 UTF-8（可带 BOM）和 GB18030 编码的 TXT。不支持 UTF-16；其他编码的 TXT 可能显示错误或无法打开。</li>
+        <li>EPUB 使用统一的正文排版。表格、复杂的图形和样式会简化显示，或无法打开。图片支持 PNG 和 JPEG，文字不环绕图片。</li>
+        <li>不支持 PDF、批注、高亮、词典、插件、阅读统计和多个主题。</li>
+        <li>与 KOReader 接续位置仅支持 EPUB。</li>
+      </ul>
+
+      <h2 id="faq">常见问题</h2>
+      <dl>
+        <dt>书里有空白方框</dt>
+        <dd>当前字体缺少这些字符。把包含这些字符的完整中文字体放进 <code>Fonts/</code>，重新启动设备后在「排版」中选择它。</dd>
+        <dt>画面有残影</dt>
+        <dd>按 K2 全刷当前画面。经常出现时，把刷新模式改为清晰，或缩短自动全刷的间隔。</dd>
+        <dt>提示保存失败或「尚未保存」</dt>
+        <dd>检查 TF 卡是否插好、空间是否足够，然后重试。保存失败时设备不会进入休眠。不要用清理缓存代替处理保存错误。</dd>
+        <dt>搜不到自己的 Wi‑Fi</dt>
+        <dd>设备只支持 2.4 GHz 网络。确认路由器或手机热点开启了 2.4 GHz。</dd>
+        <dt>换了位置后，书的进度没有了</dt>
+        <dd>把原位置上同名的 <code>.picopage</code> 目录移到书的新位置旁边。</dd>
+      </dl>
+    </article>
+  </div>
+</Site>
+<style>
+  .docs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 32px 64px;
+    padding: 56px 0 72px;
+  }
+  .toc {
+    flex: 0 1 200px;
+    display: block;
+    position: sticky;
+    top: 24px;
+    border-top: 1px solid var(--ink);
+    padding-top: 14px;
+    font-size: 14px;
+    line-height: 2;
+  }
+  .toc a {
+    text-decoration: none;
+  }
+  article {
+    flex: 1 1 520px;
+    min-width: 0;
+    max-width: 46em;
+    font-size: 16px;
+    line-height: 1.85;
+    color: var(--text);
+  }
+  h1 {
+    font-family: var(--serif);
+    font-size: clamp(34px, 4.6vw, 54px);
+    font-weight: 700;
+    line-height: 1.25;
+    color: var(--ink);
+  }
+  h2 {
+    margin-top: 56px;
+    border-top: 1px solid var(--ink);
+    padding-top: 20px;
+    font-family: var(--serif);
+    font-size: 28px;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--ink);
+    scroll-margin-top: 24px;
+  }
+  h3 {
+    margin-top: 32px;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  article p,
+  article ul,
+  article ol,
+  article dl,
+  table,
+  pre {
+    margin-top: 14px;
+  }
+  .lead {
+    margin-top: 18px;
+    font-size: 17px;
+  }
+  .notice {
+    border: 1px solid var(--accent);
+    padding: 12px 14px;
+    font-size: 14px;
+    color: var(--ink);
+  }
+  article ul,
+  article ol {
+    padding-left: 1.4em;
+  }
+  article ul {
+    list-style: disc;
+  }
+  article ol {
+    list-style: decimal;
+  }
+  article li + li {
+    margin-top: 6px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 15px;
+  }
+  th,
+  td {
+    border-bottom: 1px solid var(--line);
+    padding: 8px 12px 8px 0;
+    text-align: left;
+  }
+  th {
+    border-bottom-color: var(--ink);
+    font-weight: 600;
+    color: var(--ink);
+  }
+  pre {
+    border: 1px solid var(--line);
+    padding: 14px 16px;
+    background: #fbfaf7;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.9;
+    overflow-x: auto;
+  }
+  dt {
+    margin-top: 18px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  @media (max-width: 760px) {
+    .toc {
+      position: static;
+      flex-basis: 100%;
+    }
+  }
+</style>

@@ -1,7 +1,7 @@
 ---
 import "../styles/site.css";
 
-// current names the page the header and footer must not link to: "home" or "install".
+// current names the page the header and footer must not link to: "home", "install" or "docs".
 const { title, description, current, noindex = false } = Astro.props;
 ---
 <!doctype html>
@@ -17,14 +17,16 @@ const { title, description, current, noindex = false } = Astro.props;
   <body>
     <a class="skip-link" href="#main">跳到正文</a>
     <div class="wrap">
-      <!-- TODO: 开源后恢复设计稿页头和页脚中的「文档」链接；目前没有可公开访问的文档。 -->
       <header class="site-header">
         <div class="bar">
           <a class="brand" href="/" aria-label="Pico Page 首页">
             <span class="wordmark">Pico Page</span>
             <span class="tagline">Read Pico<br>阅读固件</span>
           </a>
-          {current === "install" ? <span class="here" aria-current="page">安装固件</span> : <a class="primary" href="/install/">安装固件</a>}
+          <div class="bar-links">
+            {current === "docs" ? <span class="here" aria-current="page">文档</span> : <a class="outline" href="/docs/">文档</a>}
+            {current === "install" ? <span class="here" aria-current="page">安装固件</span> : <a class="primary" href="/install/">安装固件</a>}
+          </div>
         </div>
         <nav aria-label="主导航">
           <a href="/#start">开始使用</a><a href="/#fonts">字体</a><a href="/#features">功能</a><a href="/#screens">界面</a><a href="/#lockscreens">锁屏</a>
@@ -39,6 +41,7 @@ const { title, description, current, noindex = false } = Astro.props;
           <p>读自己的书，接着读下去。</p>
         </div>
         <nav aria-label="页脚导航">
+          {current !== "docs" && <a href="/docs/">文档</a>}
           {current !== "install" && <a href="/install/">安装固件</a>}
           {current === "install" && <a href="/assets/third-party-licenses.txt">第三方许可</a>}
           {current !== "home" && <a href="/">返回首页</a>}
