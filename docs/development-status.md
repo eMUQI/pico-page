@@ -64,6 +64,16 @@ PR #52（分支 `feat/sync-map-images`，已整合 main `fd17171`）包含三项
 
 ## 历史摘要与开发记录
 
+### 2026-10-12 · 网站自动部署（Cloudflare Pages）
+
+基于 main `76cc595`（PR #69 已合并），分支 `ci/pages-deploy`。用户已在仓库设置密钥 `CLOUDFLARE_API_TOKEN` 和 `CLOUDFLARE_ACCOUNT_ID`（`gh secret list` 只核对了名称）。
+
+- 变更：网站构建工作流在 `main` 推送、发布 Release、或在 `main` 上手动运行时，用固定版本的 wrangler 4.144.0 把 `web/dist/` 部署到 Pages 项目 `picopage` 的生产分支 `main`；拉取请求和其他分支只构建。Release 触发的运行改为检出默认分支构建网站，避免标签落在旧提交时部署旧版网站。部署运行归入同一并发组，依次执行。部署后核对线上更新清单地址：有固件时与产物中的清单逐字节一致，没有固件时返回 404，一分钟内不符则失败。
+- 未加人工审批环节：发布 Release 本身就是把固件交给设备的决定，草稿不会被取用。
+- 文档：`web/README.md` 的持续集成、部署和固件更新文件三节，路线图 R11。
+- 验证：工作流文件通过 YAML 解析；本机没有 actionlint。拉取请求上的运行不执行部署步骤，部署、wrangler 调用、Pages 项目的生产分支是否为 `main`、部署后核对，都要等合并到 `main` 后的第一次运行才有结果。
+- 影响：合并本分支会触发第一次自动生产部署，线上将带上 404 页。仓库目前没有 Release，部署后清单地址应返回 404，设备提示「更新服务器上还没有发布固件」。
+
 ### 2026-10-12 · 联网固件更新第一批（R11、D40）
 
 基于 main `8eb3de2`，分支 `claude/pico-ota-network-update-a2b4fc`。本批未提交、未推送、未连接或烧录设备。
