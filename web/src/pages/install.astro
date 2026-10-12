@@ -31,7 +31,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
                 <h2>安装前确认</h2>
                 <ul class="checks">
                   <li><span aria-hidden="true">☐</span><span>写入会替换设备上现有的阅读程序。需要回到官方系统时，请先阅读<a href="https://dot.mindreset.tech/docs/read_0/firmware" target="_blank" rel="noopener">官方的构建与烧录说明</a>：目前需要用 ESP-IDF 从源码构建后烧录。</span></li>
-                  <li><span aria-hidden="true">☐</span><span>安装会<strong>整片覆盖</strong>设备闪存，包括 bootloader 和分区表。无论设备上现在是原厂系统还是其他固件，都可以直接安装。TF 卡不受影响。</span></li>
+                  <li><span aria-hidden="true">☐</span><span>安装会<strong>整片覆盖</strong>设备闪存，包括 bootloader 和分区表。无论设备上现在是原厂系统还是其他固件，都可以直接安装；启用了闪存加密或安全启动的设备除外，本页会拒绝写入。TF 卡不受影响。</span></li>
                   <li><span aria-hidden="true">☐</span><span>设备电量充足，或保持 USB 供电。</span></li>
                 </ul>
               </div>
@@ -125,7 +125,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
               </details>
               <details>
                 <summary>装过其他固件，还能装吗</summary>
-                <p>可以。安装会整片覆盖，替换原有的 bootloader 和分区表，不需要先刷回原厂系统。</p>
+                <p>可以。安装会整片覆盖，替换原有的 bootloader 和分区表，不需要先刷回原厂系统。例外是启用了闪存加密或安全启动的设备：本页写入的固件无法在它上面启动，连接后会拒绝安装。</p>
               </details>
               <details>
                 <summary>写入中断</summary>
