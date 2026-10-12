@@ -629,9 +629,10 @@ bool firmware_unconfirmed() {
            state == ESP_OTA_IMG_PENDING_VERIFY;
 }
 
-void confirm_firmware() {
+bool confirm_firmware() {
     const auto result = esp_ota_mark_app_valid_cancel_rollback();
     if (result != ESP_OK) ESP_LOGE("pico_network", "Firmware confirmation: %s", esp_err_to_name(result));
+    return result == ESP_OK;
 }
 
 void reject_firmware() {

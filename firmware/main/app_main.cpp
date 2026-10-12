@@ -582,10 +582,9 @@ extern "C" void app_main() {
     }
     // A missing card is a supported state and does not count against the image.
     const bool first_frame = present(*app);
-    if (unconfirmed) {
-        if (first_frame) pico_page::platform::confirm_firmware();
-        else pico_page::platform::reject_firmware();
-    }
+    // An image that cannot be confirmed would be dropped at a later reset, after this firmware
+    // may have written data; it is given up now instead.
+    if (unconfirmed && !(first_frame && pico_page::platform::confirm_firmware())) pico_page::platform::reject_firmware();
     if (!card) {
         app->card_removed();
         present(*app);

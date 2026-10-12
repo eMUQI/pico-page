@@ -59,7 +59,10 @@ int main() {
     assert(update::evaluate(manifest, "0.2.0", "") == Offer::Current);
     assert(update::evaluate(manifest, "0.2.0-beta.1", "0.2.0-beta.2") == Offer::Skipped);
     assert(update::evaluate(manifest, "0.2.0-beta.1", "0.2.0-beta.1") == Offer::Newer);
-    assert(update::evaluate(manifest, "0.2.0-beta.3+g1234567", "0.2.0-beta.2") == Offer::Development);
+    assert(update::evaluate(manifest, "0.2.0-beta.3+g1234567", "") == Offer::Development);
+    // A development build also withholds the exact version that failed to start.
+    assert(update::evaluate(manifest, "0.2.0-beta.3+g1234567", "0.2.0-beta.2") == Offer::Skipped);
+    assert(update::evaluate(manifest, "0.2.0-beta.3+g1234567", "0.2.0-beta.1") == Offer::Development);
     assert(update::evaluate(manifest, "unknown", "") == Offer::Development);
     auto changed = manifest;
     changed.progress_schema = update::progress_schema + 1;

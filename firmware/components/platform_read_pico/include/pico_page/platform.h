@@ -311,8 +311,8 @@ bool activate_firmware(std::string& error);
 
 /** True on the first start of an activated image, until confirm_firmware(). A reset in this state returns to the previous slot. */
 bool firmware_unconfirmed();
-/** Keeps the running image for later starts. */
-void confirm_firmware();
+/** Keeps the running image for later starts. false when the state could not be written; the image then stays unconfirmed. */
+bool confirm_firmware();
 /** Marks the running image invalid and restarts into the previous slot; returns only on failure. */
 void reject_firmware();
 

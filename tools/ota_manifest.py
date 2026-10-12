@@ -21,7 +21,9 @@ PROJECT = 'pico_page'
 SLOT_BYTES = 4 * 1024 * 1024
 NOTES_LIMIT = 8 * 1024
 ESP32S3_CHIP_ID = 9
-RELEASE = re.compile(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:beta|rc)\.[1-9][0-9]*)?')
+# The device reads version numbers of at most nine digits.
+NUMBER = r'(?:0|[1-9][0-9]{0,8})'
+RELEASE = re.compile(rf'{NUMBER}\.{NUMBER}\.{NUMBER}(?:-(?:beta|rc)\.[1-9][0-9]{{0,8}})?')
 IMAGE_URL = re.compile(r'https://[!-"$-.0-?A-\[\]-~][!-"$-?A-\[\]-~]*')
 # esp_image_header_t (24 bytes), esp_image_segment_header_t (8 bytes), then esp_app_desc_t.
 DESCRIPTION = 32

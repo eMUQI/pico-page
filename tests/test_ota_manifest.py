@@ -34,7 +34,7 @@ class ManifestTest(unittest.TestCase):
             sha256=hashlib.sha256(data).hexdigest(), data_schema=dict(progress=1, config=1), notes='## 新增\n- 书签'))
 
     def test_rejects_what_the_device_would_refuse(self):
-        for data in (image('0.2.0-beta.2+g1234567'), image(project='other'), image(chip=5), b'\xe9' * 64,
+        for data in (image('0.2.0-beta.2+g1234567'), image('1234567890.0.0'), image(project='other'), image(chip=5), b'\xe9' * 64,
                      image(size=ota_manifest.SLOT_BYTES + 1)):
             with self.assertRaises(ValueError):
                 self.build(data)

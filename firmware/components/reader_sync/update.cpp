@@ -167,8 +167,8 @@ Offer evaluate(const Manifest& manifest, std::string_view running, std::string_v
     if (!development && *order <= 0) return Offer::Current;
     if (manifest.size > slot_bytes) return Offer::TooLarge;
     if (manifest.progress_schema < progress_schema || manifest.config_schema < config_schema) return Offer::OlderSchema;
-    if (development) return Offer::Development;
     if (manifest.version == skipped) return Offer::Skipped;
+    if (development) return Offer::Development;
     return manifest.progress_schema > progress_schema || manifest.config_schema > config_schema
         ? Offer::NewerSchema : Offer::Newer;
 }
