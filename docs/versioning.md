@@ -40,7 +40,7 @@ ESP-IDF 应用描述的版本字段为 32 字节，其中一字节用于终止�
 1. 修改 `firmware/version.txt`，更新本轮发布说明，列出改动、验证结果、已知问题及兼容性影响。
 2. 完成约定检查并提交本轮内容。发布来源必须是干净检出，Git 标签使用 `v<版本>`；不得移动已发布标签。
 3. 在候选标签检出上执行 `python3 tools/project_version.py --check-release`。该命令只检查，不创建标签、不发布；缺少匹配标签、存在其他不匹配的 v 前缀标签或工作区有改动时拒绝。
-4. 构建 `release` 配置，核对应用版本与来源记录，完成本轮要求的设备验证。打包时使用 `pico-page-<版本>-read_pico-<配置>.bin` 命名应用镜像，并附带对应 `provenance.json`、发布说明和适用许可。该应用镜像不是全量 Flash 镜像，安装仍遵守目标设备的分区约束。
+4. 构建 `release` 配置，核对应用版本与来源记录，完成本轮要求的设备验证。打包时使用 `pico-page-<版本>-read_pico-<配置>.bin` 命名应用镜像，并附带对应 `provenance.json`、发布说明和适用许可。应用镜像用于联网更新，不是全量镜像，不能从 `0x0` 写入。全量镜像命名为 `pico-page-<版本>-read_pico-release-full.bin`，含 bootloader、分区表和同一个应用，用于擦除整片闪存后的首次安装（[决定](decisions.md) D41）。
 5. 发布前再次执行标签检查，确认产物属于该提交且未被替换。Beta 和 RC 标为预发布；发布动作须单独获得授权。
 
 不设置独立流水号，不引入自动发版服务。
@@ -49,4 +49,4 @@ ESP-IDF 应用描述的版本字段为 32 字节，其中一字节用于终止�
 
 设备端的版本比较在 `firmware/components/reader_sync/update.cpp`，与 `tools/project_version.py` 接受同一组版本形式：`+` 后的构建元数据不参与排序；带构建元数据的版本视为开发构建，不能据此判断新旧。清单中的版本必须是不带构建元数据的发布版本，并与镜像应用描述中的版本一致，否则设备拒绝写入。
 
-更新清单由 `python3 tools/ota_manifest.py --image <release 构建的 pico_page.bin> --notes <发布说明.md> --out <目录>` 生成（`--out` 可以是任意目录，例如 `build/release`）。清单和镜像作为该版本 GitHub Release 的附件发布，不提交到仓库；网站构建工作流取回版本最高的发布，用同一脚本的 `--check` 核对后放进网站产物。步骤见 [网站说明](../web/README.md) 的「固件更新文件」。脚本先按 ESP 镜像格式校验整个文件（各段长度、校验和与末尾的 SHA-256），再从镜像读取版本，拒绝截断或损坏的镜像、开发构建、其他项目或芯片的镜像、超过 4 MiB 的镜像和超过 8 KiB 的发布说明，并按上文的命名复制镜像。清单的 `data_schema` 取自设备源码中的 `progress_schema` 和 `config_schema`；修改进度或配置文件格式时同步修改这两个常量。脚本不上传文件，发布到网站需单独授权。
+更新清单由 `python3 tools/ota_manifest.py --image <release 构建的 pico_page.bin> --notes <发布说明.md> --out <目录>` 生成（`--out` 可以是任意目录，例如 `build/release`）。清单和镜像作为该版本 GitHub Release 的附件发布，不提交到仓库；网站构建工作流取回版本最高的发布，用同一脚本的 `--check` 核对后放进网站产物。步骤见 [网站说明](../web/README.md) 的「固件更新文件」。脚本先按 ESP 镜像格式校验整个文件（各段长度、校验和与末尾的 SHA-256），再从镜像读取版本，拒绝截断或损坏的镜像、开发构建、其他项目或芯片的镜像、超过 4 MiB 的镜像和超过 8 KiB 的发布说明，并按上文的命名复制镜像。加上 `--full` 时，脚本从同一个构建目录读取 `bootloader/bootloader.bin` 和 `partition_table/partition-table.bin`，合并出全量镜像；`--check` 在目录中有全量镜像时核对它的 bootloader、分区表，以及其中的应用与清单描述的应用镜像逐字节相同。每个版本同时发布全量镜像和应用镜像（D41）。脚本和网站也接受只有应用镜像的发布，此时设备可以联网更新，网站安装页不开放。清单的 `data_schema` 取自设备源码中的 `progress_schema` 和 `config_schema`；修改进度或配置文件格式时同步修改这两个常量。脚本不上传文件，发布到网站需单独授权。
