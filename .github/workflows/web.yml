@@ -21,7 +21,8 @@ jobs:
       run:
         working-directory: web
     steps:
-      # A release may be tagged on an older commit; the site itself is always built from the default branch.
+      # A release run uses the workflow file of its tag, but builds the site from the default
+      # branch, so a tag behind the default branch does not publish an older site.
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'release' && github.event.repository.default_branch || github.ref }}
@@ -70,9 +71,9 @@ jobs:
           url=https://picopage.wulu.zone/firmware/manifest.json
           for attempt in 1 2 3 4 5 6; do
             if [ -f dist/firmware/manifest.json ]; then
-              curl -fsS "$url" | cmp -s - dist/firmware/manifest.json && exit 0
+              curl -fsS --max-time 8 "$url" | cmp -s - dist/firmware/manifest.json && exit 0
             else
-              [ "$(curl -s -o /dev/null -w '%{http_code}' "$url")" = 404 ] && exit 0
+              [ "$(curl -s --max-time 8 -o /dev/null -w '%{http_code}' "$url")" = 404 ] && exit 0
             fi
             sleep 10
           done
