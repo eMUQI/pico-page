@@ -129,6 +129,19 @@ GB18030 解码表的来源与复核（2026-10-07）：`firmware/components/reade
 | [KOReader 手势识别](https://github.com/koreader/koreader/blob/master/frontend/device/gesturedetector.lua)、[菜单方向](https://github.com/koreader/koreader/blob/master/frontend/ui/widget/menu.lua) | master，2026-10-10 在线读取，AGPL-3.0；只参考行为 | `gesturedetector.lua` 的约 30°–60° 对角带和超时不认定轻扫；`menu.lua` 左滑下一页。Pico Page 的慢拖直接忽略，不采用 KOReader 的对角全刷、循环或纵向关闭 |
 | Espressif [esp_lcd_touch](https://components.espressif.com/components/espressif/esp_lcd_touch)、[esp_lvgl_port](https://components.espressif.com/components/espressif/esp_lvgl_port)、[touch_slider_sensor](https://docs.espressif.com/projects/esp-iot-solution/en/latest/touch/touch_slider_sensor.html) | 官方组件/文档，2026-10-11 复核 | 前者提供坐标读取；LVGL port 的输入依赖 LVGL；slider 面向电容触摸通道。在这三项中没有适合当前非 LVGL 坐标事件路径直接复用的轻扫实现，因此不增加依赖 |
 
+## 2026-10-12 · 网站安装页的浏览器依赖
+
+网站安装页（`web/src/pages/install.astro`）在访问者的浏览器中运行两个直接依赖及其传递依赖，均为 npm 发布的原包，源码未修改，由 Astro 打包进网站产物。它们不进入固件和 host 程序。
+
+| 包 | 版本（`web/package-lock.json`） | 许可证 | 用途 |
+|---|---|---|---|
+| [esptool-js](https://github.com/espressif/esptool-js) | 0.7.0 | Apache-2.0；npm 包内只有 `LICENSE`，没有 NOTICE 文件 | 通过 Web Serial 执行 ESP 串口烧录协议，包内带各芯片的烧录 stub |
+| [pako](https://github.com/nodeca/pako) | 2.2.0 | MIT AND Zlib | esptool-js 的依赖，压缩写入的数据 |
+| [atob-lite](https://github.com/hughsk/atob-lite) | 2.0.0 | MIT | esptool-js 的依赖，解码 stub |
+| [spark-md5](https://github.com/satazor/js-spark-md5) | 3.0.2 | WTFPL OR MIT | 计算镜像的 MD5，与闪存内容比对 |
+
+分发方式：四份许可证全文合并为 `web/public/assets/third-party-licenses.txt`，随网站发布，安装页页脚提供链接；清单同时记录在[网站说明](../web/README.md)的「浏览器依赖的许可」。升级这些包时同步更新许可证文件和两处清单。尚未确认：打包产物中是否保留了各源文件的版权注释；esptool-js 内置 stub 的上游来源和许可只按该包的 `LICENSE` 处理，没有单独追溯。
+
 ## 2026-10-11 · PMU RTC 接入
 
 RTC 沿用已锁定的 MindReset BSP `5f3406deec33304de8801046db583dec7c49e55b`，参考该提交的 PMU 演示、自检、驱动及协议文档；不新增第三方依赖。`read_pico_pmu`（Apache-2.0）构建副本新增 TIME_GET 响应长度与快照有效性校验，原件不变，补丁随源码保留；源码版权与许可证继续保留。实现和修改范围见 [BSP 审查](bsp-review.md#rtc-响应校验与接入2026-10-11)。未复制 PMU 工厂标定、自检时间来源或额外驱动。
