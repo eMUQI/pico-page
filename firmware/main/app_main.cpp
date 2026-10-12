@@ -662,11 +662,11 @@ extern "C" void app_main() {
                     ESP_LOGE(tag, "Power teardown did not close file consumers");
                     for (;;) vTaskDelay(pdMS_TO_TICKS(1000));
                 }
-                // The boot slot is switched while the card is still mounted: without the switch the
-                // restart returns to this firmware, and the installation record must not remain.
-                if (power_request.install && !pico_page::platform::activate_firmware(error)) {
-                    ESP_LOGE(tag, "Firmware activation: %s", error.c_str());
-                    app->discard_install_record();
+                // The record is written only once the boot slot is switched and while the card is
+                // still mounted. Without the switch the restart returns to this firmware unreported.
+                if (power_request.install) {
+                    if (pico_page::platform::activate_firmware(error)) app->record_install();
+                    else ESP_LOGE(tag, "Firmware activation: %s", error.c_str());
                 }
                 if (!pico_page::platform::finish_power(error))
                     ESP_LOGW(tag, "Power teardown: %s", error.c_str());

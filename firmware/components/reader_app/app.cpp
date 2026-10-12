@@ -4282,6 +4282,12 @@ struct ReaderApp::Impl final : DisplayBackend {
     // update_active is the request the page waits for; update_worker is the one the worker holds.
     std::uint64_t update_sequence = 0, update_active = 0, update_worker = 0;
     bool update_cancelling = false, update_ready = false, update_rolled_back = false, battery_charging = false;
+    // The manifest came from the update server since this start. A cached one is shown, but its
+    // address and digest are read from the card and are not used for a download.
+    bool update_fresh = false;
+    // An installation was requested on a cached manifest; the check in flight continues into it
+    // when the server still names the same image.
+    bool update_confirming = false;
     UpdateFailure update_failure = UpdateFailure::None;
     std::uint32_t update_bytes = 0;
     int update_step = 0;
@@ -4296,6 +4302,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     void load_update_state() {
         std::string cached;
         update_state = {};
+        update_fresh = false;
         if (card_available && store.load_cache(update::state_cache, update::state_limit, cached) == StoreStatus::Ok)
             update::decode_state(cached, update_state);
     }
@@ -4454,9 +4461,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         header("固件更新", Back, "设置");
         std::string problem;
         const bool networks = !wifi_targets(problem).networks.empty();
+        const bool enabled = wifi_enabled();
         const auto check_button = [&](int y, const char* label) {
-            if (networks) button(UpdateCheck, label, 24, y, 636, 88);
-            else button(WifiSettings, "先设置 Wi-Fi ›", 24, y, 636, 88);
+            if (networks && enabled) button(UpdateCheck, label, 24, y, 636, 88);
+            else button(WifiSettings, enabled ? "先设置 Wi-Fi ›" : "先打开 Wi-Fi ›", 24, y, 636, 88);
         };
         const auto development = update::development_build(running_version);
         if (!manifest || offer == update::Offer::Current || offer == update::Offer::Skipped) {
@@ -4635,6 +4643,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     /** Ends a request the worker has not taken; otherwise asks the worker to stop and waits for its completion. */
     void update_cancel() {
         network::release(update_hold);
+        update_confirming = false;
         if (update_request) {
             update_request.reset();
             update_active = 0;
@@ -4659,6 +4668,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         update_worker = 0;
         const bool cancelled = std::exchange(update_cancelling, false) || failure == UpdateFailure::Cancelled || id != update_active;
         const bool download = update_page == UpdatePage::Downloading;
+        const bool confirming = std::exchange(update_confirming, false);
         update_active = 0;
         network::release(update_hold);
         if (view != View::Update || (update_page != UpdatePage::Downloading && update_page != UpdatePage::Checking)) {
@@ -4688,10 +4698,20 @@ struct ReaderApp::Impl final : DisplayBackend {
                 const auto later = update::compare_versions(manifest.version, update_state.skipped);
                 if (later && *later > 0) update_state.skipped.clear();
                 const auto now = static_cast<std::int64_t>(std::time(nullptr));
+                const auto& shown = update_state.manifest;
+                const bool same = shown && shown->version == manifest.version && shown->sha256 == manifest.sha256 &&
+                                  shown->url == manifest.url && shown->size == manifest.size;
                 update_state.manifest = std::move(manifest);
+                update_fresh = true;
                 update_state.checked_at = now >= provision::clock_floor ? now : 0;
                 note_lines.clear(); note_page = 0;
                 if (!save_update_state()) update_notice = "检查结果没有写入 TF 卡，下次需要重新检查。";
+                if (confirming && !same) update_notice = "更新清单有变化，请确认后再安装。";
+                const auto offer = update_offer();
+                if (confirming && same && update_installable(offer) && update_block().empty()) {
+                    if (offer != update::Offer::NewerSchema) { update_begin(UpdateOperation::Kind::Download); return; }
+                    update_page = UpdatePage::Schema;
+                }
             }
         }
         if (!display.busy()) { draw_update(); overlay(); }
@@ -4712,7 +4732,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (view != View::Settings || !bookmark_io_ready()) return;
         message.clear(); update_notice.clear();
         if (!update_waiting()) {
-            if (!update_ready) load_update_state();
+            // A manifest fetched since this start stays; the card is read only for one that is not.
+            if (!update_ready && !update_fresh) load_update_state();
             update_page = UpdatePage::Home;
             note_lines.clear(); note_page = 0;
         }
@@ -4734,16 +4755,22 @@ struct ReaderApp::Impl final : DisplayBackend {
             if ((update_page != UpdatePage::Home && update_page != UpdatePage::Notes) || !update_installable(offer) ||
                 update_waiting()) return true;
             if (!startable) break;
+            // A manifest read from the card is confirmed with the server before it directs a download.
+            if (!update_fresh) {
+                update_begin(UpdateOperation::Kind::Check);
+                update_confirming = update_waiting();
+                return true;
+            }
             if (offer != update::Offer::NewerSchema) { update_begin(UpdateOperation::Kind::Download); return true; }
             update_page = UpdatePage::Schema;
             break;
         case UpdateConfirm:
-            if (update_page == UpdatePage::Schema && startable) update_begin(UpdateOperation::Kind::Download);
+            if (update_page == UpdatePage::Schema && startable && update_fresh) update_begin(UpdateOperation::Kind::Download);
             return true;
         case UpdateRetry:
             if (update_page != UpdatePage::Failed) return true;
             update_page = UpdatePage::Home; update_notice.clear();
-            if (startable) { update_begin(UpdateOperation::Kind::Download); return true; }
+            if (startable && update_fresh) { update_begin(UpdateOperation::Kind::Download); return true; }
             break;
         case UpdateCancel:
             if (update_page == UpdatePage::Schema) update_page = UpdatePage::Home;
@@ -7286,8 +7313,9 @@ void ReaderApp::complete_update(std::uint64_t id, UpdateFailure failure, int sta
     impl_->update_complete(id, failure, status, body, detail);
 }
 bool ReaderApp::update_busy() const { return impl_->update_waiting(); }
-void ReaderApp::discard_install_record() {
-    impl_->update_state.pending_from.clear(); impl_->update_state.pending_to.clear();
+void ReaderApp::record_install() {
+    impl_->update_state.pending_from = impl_->running_version;
+    impl_->update_state.pending_to = impl_->update_to;
     impl_->save_update_state();
 }
 void ReaderApp::input(const AppInput &event) {
@@ -7616,16 +7644,9 @@ bool ReaderApp::prepare_power(PowerRequest request) {
             impl_->draw_update(); impl_->overlay();
             return false;
         }
-        // The marker lets the next start report the result; it is written only after the position.
-        if (saved) {
-            impl_->update_state.pending_from = impl_->running_version;
-            impl_->update_state.pending_to = impl_->update_to;
-            saved = impl_->save_update_state();
-        }
         if (!saved) {
-            impl_->update_state.pending_from.clear(); impl_->update_state.pending_to.clear();
             impl_->power_request = {}; impl_->power_selected = PowerAction::None;
-            impl_->update_notice = "阅读位置或更新记录没有写入 TF 卡，没有重启。";
+            impl_->update_notice = "阅读位置没有写入 TF 卡，没有重启。";
             impl_->draw_update(); impl_->overlay();
             return false;
         }
