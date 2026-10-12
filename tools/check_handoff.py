@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def project_files():
     """Exclude downloaded dependencies, private data and generated build products."""
-    excluded = {'build', 'third_party', 'managed_components', 'node_modules', 'local', 'private', 'artifacts', '__pycache__'}
+    excluded = {'build', 'dist', 'third_party', 'managed_components', 'node_modules', 'local', 'private', 'artifacts', '__pycache__'}
     for directory, dirs, files in os.walk(ROOT):
         dirs[:] = [name for name in dirs if not name.startswith('.') and name not in excluded]
         for name in files:
@@ -116,8 +116,10 @@ def main() -> int:
     check(len(agents.encode('utf-8')) < 16000, 'Root AGENTS is too long for this handoff')
     font_ext = {'.ttf', '.otf', '.ttc', '.otc', '.woff', '.woff2', '.dfont'}
     licensed_fallback = ROOT / 'firmware/components/reader_graphics/fonts/PicoPageFallback.otf'
-    check(all(p == licensed_fallback for p in project_files() if p.suffix.lower() in font_ext),
-          'Unexpected font file outside the reviewed embedded UI subset')
+    web_sample = ROOT / 'web/public/assets/fonts/PicoPageWenKaiSample.woff'
+    check(all(p in (licensed_fallback, web_sample) for p in project_files() if p.suffix.lower() in font_ext),
+          'Unexpected font file outside the reviewed embedded UI subset and the website sample')
+    check((ROOT / 'web/public/downloads/LXGWWenKai-v1.520-OFL.txt').is_file(), 'Missing website sample font license')
     check((licensed_fallback.parent / 'Noto-OFL.txt').is_file(), 'Missing embedded font license')
 
     if errors:
