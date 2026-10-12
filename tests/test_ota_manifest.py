@@ -74,6 +74,19 @@ class ManifestTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ota_manifest.check_directory(directory, url)
 
+    def test_newest_release_follows_version_order(self):
+        tags = ['v0.2.0-beta.2', 'v0.2.0-beta.10', 'v0.2.0-rc.1', 'v0.2.0', 'v0.2.1-beta.1', 'v0.10.0-beta.1', 'v0.9.9']
+        releases = [dict(tagName=tag, isDraft=False) for tag in tags]
+        self.assertEqual(ota_manifest.newest_release(releases), 'v0.10.0-beta.1')
+        self.assertEqual(ota_manifest.newest_release(releases[:4]), 'v0.2.0')
+        self.assertEqual(ota_manifest.newest_release(releases[:3]), 'v0.2.0-rc.1')
+        self.assertEqual(ota_manifest.newest_release(releases[:2]), 'v0.2.0-beta.10')
+        # Drafts and tags outside the version scheme are never published to devices.
+        self.assertIsNone(ota_manifest.newest_release(
+            [dict(tagName='v0.1.0-mvp', isDraft=False), dict(tagName='v0.3.0', isDraft=True),
+             dict(tagName='0.3.0', isDraft=False), dict(tagName='nightly', isDraft=False)]))
+        self.assertIsNone(ota_manifest.newest_release([]))
+
     def test_schema_defaults_follow_the_device_constants(self):
         self.assertEqual(ota_manifest.schema_defaults(), (1, 1))
 

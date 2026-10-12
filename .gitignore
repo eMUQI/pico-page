@@ -29,4 +29,6 @@ artifacts/
 # Website build output
 /web/node_modules/
 /web/dist/
+# Fetched from the newest release by the website build; never committed.
+/web/public/firmware/
 /web/.astro/

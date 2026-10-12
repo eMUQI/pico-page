@@ -21,7 +21,7 @@ npm run preview --prefix web
 
 [网站构建工作流](../.github/workflows/web.yml) 在推送、拉取请求和手动运行时独立执行，与 host 检查并行。使用 Node.js 24，按 `package-lock.json` 缓存 npm 下载，执行 `npm ci --ignore-scripts` 和 `npm run build`；构建失败时不上传产物。
 
-构建前执行 `python3 tools/ota_manifest.py --check web/public/firmware`：目录中有更新清单时，清单必须与旁边的固件镜像逐项一致，否则工作流失败；没有清单时通过。
+构建前，工作流从 GitHub Release 取回已发布的固件：在非草稿的发布中选出版本最高的 `v<版本>` 标签，把它附带的 `manifest.json` 和固件镜像下载到 `web/public/firmware/`，再用 `python3 tools/ota_manifest.py --check` 核对清单与镜像逐项一致、版本与标签相同，不一致时工作流失败。没有这样的发布时跳过下载。发布一个 Release 也会触发本工作流。
 
 构建成功后保存 `web/dist/` 为 `pico-page-web` artifact，缺少产物时报错。下载并解压后得到静态站内容，可供后续网站发布使用；artifact 遵循仓库的保留期限和访问权限，不作为设备 OTA 下载地址。当前工作流不部署网站、不发布固件。
 
@@ -33,21 +33,30 @@ npm run preview --prefix web
 
 ## 固件更新文件
 
-设备从 `https://picopage.wulu.zone/firmware/manifest.json` 读取更新清单，并下载清单指向的固件镜像。两者放在 `public/firmware/`，由静态站原样提供；目前尚未发布任何版本，这个目录不存在。
+设备从 `https://picopage.wulu.zone/firmware/manifest.json` 读取更新清单，并下载清单指向的固件镜像。这两个文件不放在仓库里：它们是 GitHub Release 的附件，由网站构建工作流取回，随 `pico-page-web` artifact 一起部署。`web/public/firmware/` 已被 Git 忽略。目前尚未发布任何版本。
 
-发布一个版本时，在带有对应标签的干净检出上构建 release 配置，然后在仓库根目录执行：
+发布一个版本的步骤（创建 Release 和部署网站都需要项目所有者授权）：
 
-```sh
-python3 tools/ota_manifest.py --image build/firmware-release/pico_page.bin \
-  --notes <发布说明.md> --out web/public/firmware
-python3 tools/ota_manifest.py --check web/public/firmware
-```
+1. 在带有 `v<版本>` 标签的干净检出上构建 release 配置，并完成该版本要求的设备验证。
+2. 在仓库根目录生成清单和按版本命名的镜像：
 
-脚本写入 `manifest.json` 和按版本命名的镜像，并删除目录中上一个版本的镜像；清单只描述一个版本。提交这两个文件后构建并部署网站，设备才能检查到新版本。镜像每个版本约 3.5 MB，会留在 Git 历史中。发布说明不超过 8 KiB，写法见 [版本管理](../docs/versioning.md)。
+   ```sh
+   python3 tools/ota_manifest.py --image build/firmware-release/pico_page.bin \
+     --notes <发布说明.md> --out build/release
+   ```
 
-`src/pages/404.astro` 使不存在的地址返回 404。设备据此区分「还没有发布固件」和清单读取失败；删除这个页面后，Cloudflare Pages 会对未知地址返回首页和 200。部署后核对清单地址：未发布时为 404，发布后为 200 且内容与仓库中的文件一致。
+3. 用同一个标签创建 Release，附上 `build/release/` 中的两个文件；测试版和候选版标为预发布。Release 一经发布，设备就会在网站下一次部署后看到它，草稿不会被取用。
+4. 等待网站构建工作流完成，下载 `pico-page-web` artifact，确认其中 `firmware/` 有这两个文件，再按「部署」一节上传。
+5. 部署后核对线上清单地址返回 200，内容与 Release 附件一致。
 
-设备不验证发布者签名，能修改这个目录或控制该域名的人可以向设备提供任意固件，见 [功能路线图](../docs/roadmap.md) R11 的安全说明。
+说明：
+
+- 清单在第 2 步由带标签的源码生成，其中的数据格式版本取自该版本的源码；工作流只取回和核对，不重新生成。
+- 设备只有一个更新通道，取版本最高的发布，预发布也算在内。撤回一个版本时删除或改为草稿，然后重新构建并部署网站。
+- 任何分支构建出的 artifact 都带有当前最新发布的固件，部署任一份都不会让设备失去更新文件。
+- 发布说明不超过 8 KiB，写法见 [版本管理](../docs/versioning.md)。
+- `src/pages/404.astro` 使不存在的地址返回 404。设备据此区分「还没有发布固件」和清单读取失败；删除这个页面后，Cloudflare Pages 会对未知地址返回首页和 200。
+- 设备不验证发布者签名，能发布 Release、部署网站或控制该域名的人可以向设备提供任意固件，见 [功能路线图](../docs/roadmap.md) R11 的安全说明。
 
 ## 资源下载
 
