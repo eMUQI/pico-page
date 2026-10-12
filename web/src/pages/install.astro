@@ -44,7 +44,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
                 <div class="flash" data-phase={firmware ? "idle" : "unreleased"} data-url={firmware?.url} data-sha256={firmware?.sha256}>
                   <div class="flash-head">
                     <span class="flash-status" aria-live="polite"><span class="dot"></span><span data-el="status">{firmware ? "未连接" : "尚未开放"}</span></span>
-                    {firmware && <span class="mono">Pico Page {firmware.version}</span>}
+                    {firmware && <span class="mono">Pico Page {firmware.version} · <a href={`/changelog/#v${firmware.version}`}>更新日志</a></span>}
                   </div>
                   {firmware ? (
                     <div class="flash-body">

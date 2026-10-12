@@ -70,6 +70,14 @@ PR #52（分支 `feat/sync-map-images`，已整合 main `fd17171`）包含三项
 
 ## 历史摘要与开发记录
 
+### 2026-10-13 · 网站更新日志页
+
+基于 main `d40840e`，分支 `web/changelog`。用户询问网站上是否有显示发布说明的地方（没有），并同意增加列出全部版本的更新日志页。
+
+- 变更：新增 `web/src/pages/changelog.astro`（`/changelog/`），构建时读取 `docs/releases/*.md`，按版本从新到旧排列，按设备支持的 Markdown 子集渲染，没有新增依赖。`.github/workflows/web.yml` 在取回固件前用 `gh release list --exclude-drafts --json tagName,publishedAt` 写出 `web/public/firmware/releases.json`；页面据此只显示已发布的版本并标出发布日期。安装页的版本号旁边增加「更新日志」链接，各页页脚增加「更新日志」。`web/README.md` 新增「更新日志」一节。
+- 检查：Node.js v26.7.0。构建到仓库外的目录：没有发布列表时两份说明都显示、不带日期；列表只有 beta.1 时只显示 beta.1；列表含两个版本时 beta.2 在前，日期分别为 2026-10-13 和 2026-10-12（发布时间 2026-10-12T23:42:28Z 按北京时间为 13 日）。无头 Chrome 截图检查了 1280 px 和 390 px 两种宽度，安装页的模拟串口检查通过。临时放入 `web/public/firmware/` 的文件已删除。
+- 未测项：工作流新增的一步没有在 GitHub 上运行过，以合并后的部署为准；没有在 Edge 和真实手机上检查。
+
 ### 2026-10-13 · 发布 0.2.0-beta.2
 
 用户确认发布。本批没有连接设备。
