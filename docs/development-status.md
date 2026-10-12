@@ -2,7 +2,7 @@
 
 ## 当前摘要（2026-10-12）
 
-网站首页已有候选（2026-10-12，分支 `web/home-v3`，基于 main `ef3bdb5`，本地提交，未推送）：首页按设计稿《Pico Page 官网 v3》重做，与安装页、404 页共用页头、页脚和样式；新增使用文档页 `/docs/`；界面图按 main `ef3bdb5` 重新导出，六张中四张有变化。固件尚未发布，首页第 1 步显示「固件尚未发布」。只在本机无头 Chrome 检查过，未在线上、Edge 和真实手机检查。详见本日「网站首页 v3 与界面图」记录。
+网站首页已有候选（2026-10-12，分支 `web/home-v3`，基于 main `ef3bdb5`，PR #76）：首页按设计稿《Pico Page 官网 v3》重做，与安装页、404 页共用页头、页脚和样式；新增使用文档页 `/docs/`；界面图按 main `ef3bdb5` 重新导出，六张中四张有变化。固件尚未发布，首页第 1 步显示「网页安装尚未开放」。只在本机无头 Chrome 检查过，未在线上、Edge 和真实手机检查。详见本日「网站首页 v3 与界面图」记录。
 
 网站安装页已有候选（2026-10-12，分支 `web/install-page`，基于 main `95934bc`，已提交 PR）：`/install/` 按设计稿《Pico Page 烧录》实现，通过 Web Serial 整片擦除并写入全量镜像。固件尚未发布且没有全量镜像，页面显示「固件尚未发布」，不开放写入。安装流程只用模拟的串口和烧录库检查过，没有连接过设备；整片覆盖与现行「只写应用」的规定冲突，待项目所有者确认。详见本日「网站安装页」记录。
 
@@ -70,7 +70,7 @@ PR #52（分支 `feat/sync-map-images`，已整合 main `fd17171`）包含三项
 
 ### 2026-10-12 · 网站首页 v3 与界面图
 
-基于 main `ef3bdb5`，分支 `web/home-v3`，本地提交；未推送、未开 PR、未部署。设计稿《Pico Page 官网 v3》经 DesignSync 从 Claude Design 项目只读读取。
+基于 main `ef3bdb5`，分支 `web/home-v3`，PR #76；合并与线上核对结果不在本记录内。设计稿《Pico Page 官网 v3》经 DesignSync 从 Claude Design 项目只读读取。
 
 - 变更：`web/src/components/HomePage.astro` 按 v3 重写；新增 `web/src/layouts/Site.astro`（页头、导航、页脚）、`web/src/styles/site.css`（从安装页提取的色板、字体栈、页头、页脚、按钮）和 `web/src/firmware.js`（从安装页原样移出的全量镜像查找，首页和安装页共用）；安装页和 404 页改用它们，安装脚本未改；删除 `web/public/assets/styles.css`。导航统一为开始使用、字体、功能、界面、锁屏，「开始使用」指向 `/#start`；旧锚点 `#install`、`#resources`、`#devices` 保留为落点。新增霞鹜文楷示例子集 `web/public/assets/fonts/PicoPageWenKaiSample.woff` 和生成脚本 `tools/setup_web_font_sample.py`；`tools/check_handoff.py` 允许这个字体文件，并不再扫描 `dist` 构建产物。`web/README.md` 新增「首页」一节并更新「字体」「发布前设计稿」。
 - 文案核对：对照源码和 README 核对了 64 MiB 上限（`reader_store` 的 `import_limit`，只用于 Wi‑Fi 上传）、热点与已保存 Wi‑Fi 两种上传方式、`.picopage/` 伴随目录、TTF/OTF、FAT、清晰/均衡/快速三档、内置 3,500 字、「设置 → 使用说明」和锁屏设置的控件名称。与设计稿不符并已改正的两处：缺字示例中的「鄱」也不在内置字集里；64 MiB 和同名不覆盖不适用于 USB。其余差异见 `web/README.md`「首页」。
@@ -79,7 +79,8 @@ PR #52（分支 `feat/sync-map-images`，已整合 main `fd17171`）包含三项
 - 检查：仓库外的临时脚本驱动无头 Chrome，在独立端口提供 `web/dist/`。首页、安装页、404 页在 1280 和 390 px 宽度下无横向溢出、无脚本错误、无第三方请求、图片全部加载、示例字体已加载、页内锚点和旧锚点都有落点，27 个站内链接、图片和下载均返回 200；404 页返回 404。安装流程：在 `web/public/firmware/` 临时放入清单和 1 MiB 随机镜像，构建到仓库外的目录，用模拟串口和模拟 `esptool-js` 走完上次的全部检查项并通过，同一构建的首页显示「打开安装页」；临时固件已删除并重新构建。截图在 `artifacts/website-20261012/pages/` 和 `install-flow/`。
 - 跟进（同日）：页脚合并后安装页和 404 页多出「QuotaFrame」、首页多出「第三方许可」，超出设计稿。按用户决定改为按页面显示：首页「安装固件、QuotaFrame」，安装页「第三方许可、返回首页」，404 页「安装固件、返回首页」。重新构建后三页检查通过，27 个站内目标仍全部可达。
 - 使用文档（同日，按用户要求）：新增 `web/src/pages/docs.astro`（`/docs/`），九节：开始使用、按键与触摸、排版与刷新、传书、TF 卡上的文件、与 KOReader 接续位置、休眠关机与锁屏、限制、常见问题。内容取自根目录 README、`docs/wifi-transfer.md`、`docs/usb-storage-runtime.md`、`docs/storage.md` 和设备内置说明，控件名称按 `app.cpp` 核对。页头恢复设计稿中的「文档」按钮，页脚增加「文档」，首页恢复「阅读完整文档」和「传书方式详解」（后者指向 `/docs/#transfer`）。没有对应设计稿；没有写手动安装方法。四页在 1280 和 390 px 下的检查通过，38 个站内目标可达；安装流程的模拟检查在临时构建上重跑通过，临时固件已删除并重新构建。
-- 未测项：未推送，CI 和 Codex 评审未运行；未在线上域名、Edge、Safari 和真实手机检查；Cloudflare 对脚本标签的改写未核对；外部链接（GitHub、QuotaFrame、Read Pico 官方文档）未访问；安装流程仍只有模拟检查，没有连接设备。网站没有 favicon，`/favicon.ico` 返回 404。
+- 评审修正（PR #76 首轮，Codex 四条意见，均属实）：首页和文档页的未开放提示改为「网页安装尚未开放」，不再把全量镜像缺失说成固件未发布；首页第 3 步、文档「开始使用」和安装页第 4 步写明 TF 卡插回后要重启（固件不支持热插拔）；首页和文档写明 Wi‑Fi 传书只能传书到 `Books/`，字体和锁屏图片不能经 Wi‑Fi 上传；文档目录只在 900 px 以上、与正文并排时才固定。
+- 未测项：未在线上域名、Edge、Safari 和真实手机检查；Cloudflare 对脚本标签的改写未核对；外部链接（GitHub、QuotaFrame、Read Pico 官方文档）未访问；安装流程仍只有模拟检查，没有连接设备。网站没有 favicon，`/favicon.ico` 返回 404。
 - 下一步：项目所有者确认后推送并开 PR；合并会部署到生产环境，部署后核对线上三页和下载。
 
 ### 2026-10-12 · 网站安装页

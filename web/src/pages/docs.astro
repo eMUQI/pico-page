@@ -26,13 +26,14 @@ const sections = [
     <article>
       <h1>使用文档</h1>
       <p class="lead">这里说明 Pico Page 在 Read Pico 上的用法。同样的要点也在设备的「设置 → 使用说明」中，无需联网即可查看。</p>
-      {!firmware && <p class="notice">固件尚未发布。项目仍在开发中，本文档描述的是当前开发版本，发布时可能调整。</p>}
+      {!firmware && <p class="notice">网页安装尚未开放，项目仍在开发中。本文档按开发中的固件编写，内容可能调整。</p>}
 
       <h2 id="start">开始使用</h2>
       <ol>
         <li>安装固件。步骤见<a href="/install/">安装页</a>。</li>
         <li>准备一张 FAT 文件系统的 TF 卡，把 EPUB、TXT 放进 <code>Books/</code>，把中文字体和它的许可证放进 <code>Fonts/</code>。字体可在<a href="/#fonts">首页</a>下载。</li>
-        <li>把 TF 卡插入设备。在书库点按一本书开始阅读，点按文件夹查看其中的书。</li>
+        <li>把 TF 卡插入设备并重启：长按电源键，在菜单中选择「重启」。设备不支持热插拔，取出或插入 TF 卡后都需要重启。</li>
+        <li>在书库点按一本书开始阅读，点按文件夹查看其中的书。</li>
         <li>轻点正文中部打开阅读工具，在「排版」中选择放入的字体。</li>
       </ol>
       <p>再次打开同一本书时，设备恢复已保存的位置。书库顶部的「继续阅读」打开上次阅读的书。</p>
@@ -69,7 +70,7 @@ const sections = [
       <p>刷新模式有清晰、均衡、快速三档，在阅读工具的「刷新模式」或「设置 → 显示与刷新」中选择。清晰模式每页全刷；均衡和快速可以调整自动全刷的间隔。画面有残影时，随时按 K2 全刷。</p>
 
       <h2 id="transfer">传书</h2>
-      <p>除了把 TF 卡取出接到电脑，还有三种不拔卡的方式。Wi‑Fi 传书可上传 EPUB，以及 UTF-8 或 GB18030 编码的 TXT。</p>
+      <p>除了把 TF 卡取出接到电脑，还有三种不拔卡的方式。USB 文件传输可以管理 TF 卡上的所有文件。Wi‑Fi 传书只能把 EPUB，以及 UTF-8 或 GB18030 编码的 TXT 上传到 <code>Books/</code>；字体和锁屏图片要用 USB 文件传输或读卡器放入。</p>
 
       <h3>USB 文件传输</h3>
       <ol>
@@ -183,8 +184,6 @@ PicoPage/sync.toml         KOReader 同步账户，含凭据</pre>
   .toc {
     flex: 0 1 200px;
     display: block;
-    position: sticky;
-    top: 24px;
     border-top: 1px solid var(--ink);
     padding-top: 14px;
     font-size: 14px;
@@ -286,9 +285,15 @@ PicoPage/sync.toml         KOReader 同步账户，含凭据</pre>
     font-weight: 600;
     color: var(--ink);
   }
-  @media (max-width: 760px) {
+  /* From this width the contents list and the article fit side by side. */
+  @media (min-width: 900px) {
     .toc {
-      position: static;
+      position: sticky;
+      top: 24px;
+    }
+  }
+  @media (max-width: 899px) {
+    .toc {
       flex-basis: 100%;
     }
   }

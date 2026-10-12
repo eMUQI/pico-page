@@ -52,7 +52,7 @@ const lockscreens = [
         {firmware ? (
           <p class="outcome"><span class="muted">完成标志</span>　设备重启后显示书库。</p>
         ) : (
-          <p class="outcome">固件尚未发布。项目仍在开发中，发布后在安装页开放安装。</p>
+          <p class="outcome">网页安装尚未开放。项目仍在开发中，开放后在安装页写入。</p>
         )}
         <a class="primary spread" href="/install/">{firmware ? "打开安装页" : "查看安装步骤"} <span aria-hidden="true">→</span></a>
       </li>
@@ -70,7 +70,7 @@ const lockscreens = [
       <li>
         <div class="step-head"><span class="numeral">3</span><span>设备</span></div>
         <h3>打开书，选字体</h3>
-        <p>把 TF 卡插回设备，在书库里打开一本书。轻点正文中部 → 「排版」 → 选择你放入的字体。离线说明在「设置 → 使用说明」。</p>
+        <p>把 TF 卡插回设备并重启（长按电源键，选「重启」），在书库里打开一本书。轻点正文中部 → 「排版」 → 选择你放入的字体。离线说明在「设置 → 使用说明」。</p>
         <div class="keys" aria-label="默认按键">
           <div><kbd>K1</kbd><span>上一页</span></div>
           <div><kbd>K2</kbd><span>全刷</span></div>
@@ -78,7 +78,7 @@ const lockscreens = [
         </div>
       </li>
     </ol>
-    <p class="footnote">不想拔卡？在设备上开启 USB 文件传输，或用 Wi‑Fi 传书（设备热点或已保存的 Wi‑Fi）从浏览器上传，也能完成第 2 步。<a href="/docs/#transfer">传书方式详解</a></p>
+    <p class="footnote">不想拔卡？在设备上开启 USB 文件传输，同样可以放入书和字体。只传书时，也可以用 Wi‑Fi 传书（设备热点或已保存的 Wi‑Fi）从浏览器上传；字体不能经 Wi‑Fi 上传。<a href="/docs/#transfer">传书方式详解</a></p>
   </section>
 
   <section id="fonts" class="band">
