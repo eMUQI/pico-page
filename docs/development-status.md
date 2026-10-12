@@ -70,6 +70,17 @@ PR #52（分支 `feat/sync-map-images`，已整合 main `fd17171`）包含三项
 
 ## 历史摘要与开发记录
 
+### 2026-10-13 · 检查更新失败：证书链含交叉签名的根
+
+基于 main `d983e47`，分支 `fix/tls-cross-signed-root`。用户在整片安装了 `0.2.0-beta.1` 的设备上点「检查更新」，设备提示「更新服务器无响应，稍后再试。」
+
+- 排查：这句提示对应三种情况：HTTPS 请求失败、状态码不是 200 或 404、清单解析失败（`app.cpp` 的 `complete_update`）。线上清单与 Release 附件相同；用设备同一份 `update::parse_manifest` 在 host 上解析线上清单，结果为接受。以默认和空的 User-Agent 请求线上清单均为 200，响应头 775–781 字节、最长一行 257 字节，带 `Content-Length`，小于请求使用的 1,024 字节接收缓冲。剩下 HTTPS 请求失败。
+- 原因：`picopage.wulu.zone` 的证书链为叶子证书 → Google Trust Services WE1 → GTS Root R4，其中 GTS Root R4 是由 GlobalSign Root CA 交叉签名的版本（`openssl s_client -showcerts`）。ESP-IDF v6.1 的完整证书包有 145 张证书，含自签名的 GTS Root R4，不含 GlobalSign Root CA，弃用列表里也没有。`esp_crt_bundle.c` 的 `esp_crt_verify_callback` 在未启用 `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY` 时，只按链中最后一张证书的颁发者在证书包里查找，找不到即返回验证失败。release 构建实际采用的 sdkconfig 中该选项未启用。乐鑫文档 MCP 返回的「Cross-Signed Certificate Support」一节说明该选项用于验证含交叉签名根的证书链，握手期间峰值堆增加约 1 KB，握手结束后释放。此前的 KOSync 服务器使用别的证书链，没有暴露这个问题；联网更新在发布前没有真机验证，发布准备的调查也没有核对站点的证书链。
+- 影响：`0.2.0-beta.1` 的检查更新和下载都使用同一套 TLS 配置，因此这个版本无法联网更新，只能在网站安装页重新整片安装。
+- 变更：`firmware/sdkconfig.defaults` 启用 `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY`；`firmware/version.txt` 改为 `0.2.0-beta.2`；新增 `docs/releases/0.2.0-beta.2.md`；路线图 R11 写明这一要求。项目代码没有自己设置 mbedTLS 的可信证书回调，与该选项不冲突。
+- 执行上下文与资源：TLS 握手在网络工作任务上运行，会话内存已从 PSRAM 分配（`CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC`），新增的约 1 KB 为握手期间的临时分配。不改变取消、超时和失败回退。
+- 未测项：没有连接设备。结论来自证书链、证书包内容和 IDF 源码的对照，没有设备串口日志佐证；修复后的握手、握手期间的堆和网络任务栈余量都没有在真机上测量。验证方法是安装 `0.2.0-beta.2` 后检查更新，应显示「已是最新版本」。
+
 ### 2026-10-13 · 安装页写明强制关机再开机
 
 基于 main `d8a5e70`，分支 `web/install-power-key-hint`。
