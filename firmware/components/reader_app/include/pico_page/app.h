@@ -42,6 +42,7 @@ enum class View {
     TextEntry,
     PageEffects,
     LockScreens,
+    About,
     Update
 };
 enum class PageEffect { Off, TextTurnA, TextTurnB, TextTurnC, Ripple };

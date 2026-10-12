@@ -141,6 +141,7 @@ const char *view_name(View view) {
     case View::BookDetails: return "book_details";
     case View::WifiSettings: return "wifi_settings";
     case View::Help: return "help";
+    case View::About: return "about";
     case View::PowerSettings: return "power_settings";
     case View::LockScreens: return "lock_screens";
     case View::PowerMenu: return "power_menu";

@@ -17,6 +17,12 @@ npm run preview --prefix web
 
 网站文案面向读者。验证状态、验收标准和开发注意事项写在根目录 README 和 `docs/` 中。
 
+## 持续集成
+
+[网站构建工作流](../.github/workflows/web.yml) 在推送、拉取请求和手动运行时独立执行，与 host 检查并行。使用 Node.js 24，按 `package-lock.json` 缓存 npm 下载，执行 `npm ci --ignore-scripts` 和 `npm run build`；构建失败时不上传产物。
+
+构建成功后保存 `web/dist/` 为 `pico-page-web` artifact，缺少产物时报错。下载并解压后得到静态站内容，可供后续网站发布使用；artifact 遵循仓库的保留期限和访问权限，不作为设备 OTA 下载地址。当前工作流不部署网站、不发布固件；未来 OTA 的固件镜像、版本信息、校验和公开下载地址须随实际升级流程接入。
+
 ## 部署
 
 网站地址为 https://picopage.wulu.zone，使用 Cloudflare Pages 的 `picopage` 项目，默认域名为 `picopage-91c.pages.dev`。当前采用手动直接上传，未连接 Git 仓库或设置自动部署；GitHub 仓库保持私有。
@@ -31,7 +37,7 @@ npm run preview --prefix web
 
 `public/downloads/lockscreens/` 收录用户选定的五张 GPT Image 生成图：读自己的书、接着读下去、把时间留给一页书、暂时离线进入书中、下一页自有天地。来源为 Pico Page 项目制作的图集（https://picopage.wulu.zone/），本次按项目所有者要求提供下载；不标注为 CC0 或公共领域。原图与生成提示词仍保存在本地设计归档中。
 
-- 页面预览、单张下载、ZIP 中的 PNG 字节完全一致，均为 684 × 1216、16 级灰度、无抖动；不另作视觉增强。点击缩略图在浏览器查看原图，返回即可继续选择。
+- 页面预览、单张下载、ZIP 中的 PNG 字节完全一致，均为 684 × 1216、16 级灰度。第 2、3、4 张采用灰度抖动，减轻渐变断层；第 1、5 张无抖动。页面不另作视觉增强。点击缩略图在浏览器查看原图，返回即可继续选择。
 - `PicoPage-LockScreens-01.zip` 包含 `LockScreens/` 下的五张 PNG，以及顶层 `README.txt` 和 `manifest.json`；清单文件名相对于 ZIP 的 `LockScreens/` 目录，记录来源、规格与 SHA-256。
 - 使用说明要求支持自定义图片的固件，并说明目录、固定图片或轮播、保存设置及准备未完成时的回退。素材未嵌入固件。
 - 更新图集时同步更新 PNG、清单摘要、ZIP 与页面。ZIP 仅打包上述七个文件，禁止带入本机路径、原始会话或其他未选素材；逐张核对尺寸、灰阶、摘要与包内文件。
