@@ -217,6 +217,12 @@ void ContentJob::run() {
 #endif
     result.offset = request.offset;
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
+    if (request.kind == Kind::SaveLockScreen) {
+        // A displayed image's small cursor commit must finish before storage is suspended.
+        if (FileStore(request.root).save_lock_screen(request.sleep_image) != StoreStatus::Ok)
+            result.error = "轮播位置未保存，下次可能重复此图";
+        return;
+    }
     if (request.kind == Kind::SaveProgress) {
         const StageTimer timer{"progress_commit"};
         FileStore store(request.root);
@@ -415,7 +421,9 @@ void ContentJob::map_position() {
         (source.text.empty() ? 0. : static_cast<double>(offset) / source.text.size())) / document.spine().size();
 }
 void ContentJob::prepare_lock_screen() {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    const StageTimer timer{"lock_screen_prepare"};
+    const auto deadline = request.lock_screen_deadline == std::chrono::steady_clock::time_point{} ?
+        std::chrono::steady_clock::now() + kLockScreenPrepareBudget : request.lock_screen_deadline;
     const auto stop = [this, deadline] {
         const bool stopped = cancelled_.load(std::memory_order_relaxed) || std::chrono::steady_clock::now() >= deadline;
         if (stopped) result.retryable_failure = true;
@@ -437,74 +445,90 @@ void ContentJob::prepare_lock_screen() {
         const auto it = std::upper_bound(result.lock_screens.begin(), result.lock_screens.end(), store.last_lock_screen());
         if (it != result.lock_screens.end()) index = static_cast<std::size_t>(it - result.lock_screens.begin());
     }
-    result.lock_screen = result.lock_screens[index];
-    const auto path = request.root + "/LockScreens/" + result.lock_screen;
-    struct stat before{}, after{};
-    if (stat(path.c_str(), &before) || !S_ISREG(before.st_mode) || before.st_size <= 0 || before.st_size > 2 * 1024 * 1024) {
-        result.error = "图片不可读或超过 2 MiB"; return;
-    }
-    const auto identity = sha256_file(path, stop);
-    if (identity.empty() || stop()) { result.error = "图片身份校验失败或已取消"; return; }
-    const std::string cache = "lockscreens/current";
-    const auto header = "PPLOCK3\n" + identity + "\n" + result.lock_screen + "\n" + std::to_string(before.st_size) + "\n" +
-                        std::to_string(before.st_mtime) + "\n684x1216-fit\n";
-    constexpr std::size_t count = 342 * 1216;
-#ifdef ESP_PLATFORM
-    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2 * (count + header.size() + 32) + 256U * 1024 ||
-        heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < count + header.size() + 32) {
-        result.retryable_failure = true;
-        result.error = "图片准备内存不足"; return;
-    }
-#endif
-    {
-        std::string cached;
-        if (store.load_cache(cache, header.size() + count + 32, cached) == StoreStatus::Ok &&
-            cached.size() == header.size() + count + 32 && cached.compare(0, header.size(), header) == 0 &&
-            cached.compare(header.size() + count, 32, md5_hex(std::string_view(cached.data() + header.size(), count))) == 0) {
-            if (!request.lock_screen_prepare) {
-                result.image = std::make_unique<graphics::Canvas>(684, 1216);
-                std::memcpy(result.image->data(), cached.data() + header.size(), count);
-            }
-            result.cache_finished = true;
+    const auto attempts = request.sleep_image.empty() ? result.lock_screens.size() : 1;
+    for (std::size_t attempt = 0; attempt < attempts; ++attempt) {
+        if (stop()) { result.error = "休眠图片准备已取消或超时"; return; }
+        result.lock_screen = result.lock_screens[(index + attempt) % result.lock_screens.size()];
+        const auto path = request.root + "/LockScreens/" + result.lock_screen;
+        struct stat before{}, after{};
+        if (stat(path.c_str(), &before)) {
+            result.error = "图片不可读"; result.retryable_failure = true; return;
         }
-    }
-    // Sleep requests validate the source identity but never decode an uncached image.
-    if (!result.cache_finished && request.preview) { result.error = "图片缓存尚未就绪"; return; }
-    if (!result.cache_finished) {
+        if (!S_ISREG(before.st_mode) || before.st_size <= 0 || before.st_size > 2 * 1024 * 1024) {
+            result.error = "图片为空或超过 2 MiB"; continue;
+        }
+        const auto identity = sha256_file(path, stop);
+        if (identity.empty() || stop()) {
+            result.retryable_failure = true; result.error = "图片身份校验失败或已取消"; return;
+        }
+        const std::string cache = "lockscreens/current";
+        const auto header = "PPLOCK3\n" + identity + "\n" + result.lock_screen + "\n" + std::to_string(before.st_size) + "\n" +
+                            std::to_string(before.st_mtime) + "\n684x1216-fit\n";
+        constexpr std::size_t count = 342 * 1216;
 #ifdef ESP_PLATFORM
-        // The source size is bounded above; reserve both canvases and decoder headroom before reading it.
-        const auto encoded_size = static_cast<std::size_t>(before.st_size);
-        if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < encoded_size + 2 * count + 768U * 1024 ||
-            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < std::max(encoded_size, count)) {
+        if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2 * (count + header.size() + 32) + 256U * 1024 ||
+            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < count + header.size() + 32) {
             result.retryable_failure = true;
             result.error = "图片准备内存不足"; return;
         }
 #endif
-        std::vector<std::uint8_t> encoded;
-        if (stop() || store.read_lock_screen(result.lock_screen, encoded, stop) != StoreStatus::Ok) {
-            result.error = "图片不可读或超过 2 MiB"; return;
+        {
+            std::string cached;
+            if (store.load_cache(cache, header.size() + count + 32, cached) == StoreStatus::Ok &&
+                cached.size() == header.size() + count + 32 && cached.compare(0, header.size(), header) == 0 &&
+                cached.compare(header.size() + count, 32, md5_hex(std::string_view(cached.data() + header.size(), count))) == 0) {
+                if (!request.lock_screen_prepare) {
+                    result.image = std::make_unique<graphics::Canvas>(684, 1216);
+                    std::memcpy(result.image->data(), cached.data() + header.size(), count);
+                }
+                result.cache_finished = true;
+            }
         }
-        auto image = std::make_unique<graphics::Canvas>(684, 1216);
-        image->clear();
-        if (!graphics::render_image(*image, encoded, 0, 0, 684, 1216, result.error, false, stop) || stop()) {
-            result.error = "图片损坏、不支持或准备超时"; return;
-        }
-        std::vector<std::uint8_t>().swap(encoded);
-        if (stat(path.c_str(), &after) || before.st_size != after.st_size || before.st_mtime != after.st_mtime ||
-            sha256_file(path, stop) != identity || stop()) {
-            result.error = "图片已改变，请重试"; return;
-        }
-        auto bytes = header;
-        bytes.append(reinterpret_cast<const char*>(image->data()), count);
-        bytes += md5_hex(std::string_view(bytes.data() + header.size(), count));
-        result.cache_finished = store.save_cache(cache, bytes) == StoreStatus::Ok;
-        if (!result.cache_finished) { result.retryable_failure = true; result.error = "图片缓存未保存"; return; }
-        if (!request.lock_screen_prepare) result.image = std::move(image);
+        if (!result.cache_finished) {
+#ifdef ESP_PLATFORM
+            // The source size is bounded above; reserve both canvases and decoder headroom before reading it.
+            const auto encoded_size = static_cast<std::size_t>(before.st_size);
+            if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < encoded_size + 2 * count + 768U * 1024 ||
+                heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < std::max(encoded_size, count)) {
+                result.retryable_failure = true;
+                result.error = "图片准备内存不足"; return;
+            }
+#endif
+            std::vector<std::uint8_t> encoded;
+            if (stop() || store.read_lock_screen(result.lock_screen, encoded, stop) != StoreStatus::Ok) {
+                result.retryable_failure = true; result.error = "图片读取失败或已取消"; return;
+            }
+            auto image = std::make_unique<graphics::Canvas>(684, 1216);
+            image->clear();
+            const bool rendered = graphics::render_image(*image, encoded, 0, 0, 684, 1216, result.error, false, stop);
+            if (stop()) { result.error = "休眠图片准备已取消或超时"; return; }
+            if (!rendered) {
+                if (result.error.find("allocation failed") != std::string::npos) {
+                    result.retryable_failure = true; result.error = "图片准备内存不足"; return;
+                }
+                result.error = "图片损坏、不支持或像素超限"; continue;
+            }
+            std::vector<std::uint8_t>().swap(encoded);
+            if (stat(path.c_str(), &after) || before.st_size != after.st_size || before.st_mtime != after.st_mtime ||
+                sha256_file(path, stop) != identity || stop()) {
+                result.retryable_failure = true; result.error = "图片已改变，请重试"; return;
+            }
+            auto bytes = header;
+            bytes.reserve(header.size() + count + 32);
+            bytes.append(reinterpret_cast<const char*>(image->data()), count);
+            bytes += md5_hex(std::string_view(bytes.data() + header.size(), count));
+            result.cache_finished = store.save_cache(cache, bytes) == StoreStatus::Ok;
+            if (!result.cache_finished) {
+                result.retryable_failure = true; result.error = "休眠图片缓存未保存，下次将重新准备";
+                if (request.lock_screen_prepare) return;
+            } else result.error.clear();
+            if (!request.lock_screen_prepare) result.image = std::move(image);
+        } else result.error.clear();
+        if (stop()) { result.image.reset(); result.error = "图片准备已取消"; return; }
+        return;
     }
-    if (stop()) { result.image.reset(); result.error = "图片准备已取消"; return; }
-    if (request.preview && request.sleep_image.empty() && result.image &&
-        store.save_lock_screen(result.lock_screen) != StoreStatus::Ok)
-        result.error = "轮播位置未保存";
+    if (request.sleep_image.empty()) result.error = "轮播图片均不可用：" + result.error;
+    result.lock_screen.clear();
 }
 void ContentJob::prepare_cover() {
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };

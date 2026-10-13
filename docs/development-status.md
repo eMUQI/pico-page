@@ -6,6 +6,10 @@
 
 书库翻屏后保留继续阅读卡片已有修复候选（2026-10-13，分支 `fix/library-resume-pagination`，基于 main `4622223`）：书库首页各屏均显示卡片，列表有卡片时每屏 5 项，卡片视图每屏 6 项；分页起点和总屏数共用同一容量。Linux host Debug 与 ASan/UBSan（含 LSan）各 24/24，release 固件构建与来源核验通过。列表和卡片视图的首、中、末屏画布已检查；未烧录，实体输入与墨水屏显示待真机验证。详见本日记录。
 
+锁屏失败后的唤醒恢复已继续修正（2026-10-13，分支 `fix/lockscreen-rotation-wake`）：失败提示原先调用通用错误页，会取消正文图片任务，错误页又按是否有已打开书籍显示正文及「恢复阅读」，覆盖从书库休眠的返回目标。已改为唤醒后在原页面局部更新一次页脚结果提示，并在休眠请求开始时固定返回目标。冷缓存含图正文能继续完成补图，已打开书籍时从书库连续两轮失败休眠仍回书库；新增回归在修复前稳定失败。整合 main `1f6c9ff` 后 host Debug 与 GCC ASan/UBSan/LSan 各 24/24；release 固件、网站构建与 486 项交接检查通过；未刷写，真机交接待 PW06。
+
+自定义锁屏成功率优化已整理到分支 `fix/lockscreen-rotation-wake`（2026-10-13，D43，已整合 main `1f6c9ff`）：休眠时补齐缺失或损坏的缓存，有界跳过坏图，显示成功后异步保存轮播记录；准备允许共用 20 秒取消预算，超过 1 秒只显示一次页脚提示。缓存提交失败仍可显示本次有效图片，不新增格式，不更改官网五张 PNG。整合后 host Debug 与 GCC ASan/UBSan/LSan 各 24/24，release 固件、网站构建与 486 项交接检查通过；官网五图各 3 次的 host 冷缓存对照由旧逻辑 0/15 出图变为 15/15，热缓存均不解码。未连接或刷写设备，真机耗时、面板效果及取消交接待 PW06 验收。
+
 Wi-Fi 传书接收字体和锁屏图片已有候选（2026-10-13，分支 `feat/wifi-transfer-fonts-lockscreens`，基于 main `8622f04`，D42，PR #86）：传书页按扩展名把 TTF、OTF 存入 `Fonts/`，把 PNG、JPEG 存入 `LockScreens/`，会话结束后字体列表不重启即更新。host、sanitizer 和 release 固件构建通过；首轮提交的诊断版已装到第二台设备，只确认了启动和热点会话的开启与结束，实际上传未测，真机验收见 WIFI09。`firmware/version.txt` 已改为 `0.2.0-beta.3`。详见本日记录。
 
 `0.2.0-beta.2` 已于 2026-10-13 作为预发布发布（标签 `v0.2.0-beta.2`，main `952e4ae`，PR #81），线上清单、两个镜像和安装页都是这个版本。它修复 `0.2.0-beta.1`（2026-10-12 发布，D41）检查更新时的 TLS 证书验证失败：beta.1 不能联网更新，需要在安装页重新安装。电脑安装采用整片覆盖，全量镜像由 `tools/ota_manifest.py --full` 生成并核对；安装页用 RTC 看门狗重启设备（PR #79），并写明强制关机再开机的按键时长（PR #80）。真机证据只有用户的使用反馈：在线上安装页完成过整片安装，看门狗重启修复后反馈「正常了」；没有按验收表逐项执行，INST02、INST03 不记为通过，beta.2 的检查更新是否成功尚待用户确认，OTA03–OTA06 没有证据。随镜像分发的第三方许可文件没有整理，项目总许可证未定，固件静态链接的 epdiy 为 LGPL-3.0-or-later，公开提供镜像的分发义务尚未满足。详见 2026-10-12、2026-10-13 的发布与修复记录。
@@ -5491,3 +5495,40 @@ PR 首轮网站构建通过、artifact 上传成功；GitHub 提示 `checkout`�
 - 线上验证：curl 从正式域 https://picopage.wulu.zone 读取全部 18 个文件，均为 HTTPS 200；其中 17 个非 HTML 文件与合并后的构建逐字节一致，覆盖五张锁屏 PNG、锁屏 ZIP、清单、说明、六张界面图、CSS、字体包和许可证。首页差异仅为 Cloudflare Rocket Loader 对 script 标签的改写及加载脚本；去除这两处改写后与本地 HTML 一致。Chrome 线上页面已查看，五张锁屏预览及下载入口正常，网页不再显示 GPT 生成说明。
 - 检查与未测项：合并后构建、462 项交接检查及 diff 检查通过；本次仅部署静态网站，没有修改或刷写固件，没有实现 TF 卡升级或设备 OTA。未执行新的真机锁屏验收、真实手机或多网络验收。部署结果已补入本地开发记录，尚未另行提交该记录。
 - 下一步：需要固件 OTA 时另行确定发布镜像、版本清单和公开 HTTPS 下载地址；三张优化锁屏仍需实机检查颗粒感、灰阶与残影。
+
+
+## 2026-10-13 · 自定义锁屏成功率与休眠准备（D43）
+
+用户确认允许休眠时等待图片准备，优先兑现下一张轮播；本批基于 `46222239b9d2a07b7471f042aa10261acecfff98`，当前分支 `work`，未提交、未推送。暂不新增 BMP 或调整图集格式。
+
+- 行为：空闲预准备保留；首次选择、清缓存、缓存像素损坏及原图改变时，休眠 worker 可补做转换。按文件名轮播最多检查一轮，跳过确定损坏、空文件、不支持及超限图片；指定模式不换图。读卡失败、文件在转换中改变、内存不足、取消和超时结束本次尝试，不把临时问题当作坏图继续处理。
+- 预算与提示：等待在途自定义任务及后续候选共用 20 秒取消预算，空闲任务同样检查期限。超过 1 秒只在原页页脚显示一次准备提示，取消恢复原页脚，保留其他画面、草稿和交互；资源不足省略提示。单次 TF I/O、摘要及已开始的原子文件提交仍须安全完成，未测其最长不可取消区间；20 秒不是整条休眠路径的硬上限。
+- 显示与提交：缓存未保存时仍采用本次已准备的有效画布。锁屏成功呈现后才由 `finish_sleep()` 调度既有 worker 提交轮播位置，主循环继续轮询；提交未完成不得暂停存储，取消后的页面恢复也须等其交还资源。第二次短按仅取消，不再次休眠；其他取消输入沿用保留输入机制。任务启动或记录提交失败允许休眠，唤醒后说明可能重复此图。刷屏失败或图片准备阶段取消不推进轮播。
+- 执行上下文与资源：扫描、SHA-256、解码、缓存和轮播记录提交均在现有内容 worker，不新增任务、队列或栈。主线程只保存与恢复 30,096 字节页脚像素并绘制提示；显示完成回调只确认状态。冷解码继续按编码文件实际大小、两份最多 415,872 字节画布及 768 KiB 余量准入，缓存读取同时检查总余量与最大连续块；休眠先释放正文位图、预取、统计和缩略图，并按原机制裁剪可重建字形。缓存序列化预留完整头部、像素和摘要空间，避免最后追加摘要时大块扩容。以上是预算，不是真机峰值测量。
+- 回归：`source /workspace/cloud-tools/activate-host.sh` 后用 GCC 14.2.0、Debug 构建。`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、注册项目检查与 `ctest --test-dir build/host --output-on-failure` 最终 24/24（43.19 秒）。GCC ASan/UBSan 构建启用 `PICO_PAGE_HOST_TRACE_EVENTS=ON`，C/C++ 使用 `-fsanitize=address,undefined -fno-omit-frame-pointer`，链接使用 `-fsanitize=address,undefined`；`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure` 最终 24/24（85.37 秒），覆盖冷缓存、缓存损坏、连续轮播、重启接续、显示失败、取消、共享期限、缓存与轮播记录写入失败、任务启动失败，以及 ESP_PLATFORM worker 的低内存/碎片与不可抢断提交。
+- 同条件 host 对照：官网五张 684×1216 PNG，各 3 次，固定图片名、每次清除应用转换缓存；旧版锁屏 worker 从 HEAD 单独编译，与候选使用相同 Debug host 库及当前请求结构。旧版冷缓存 0/15 出图，新版 15/15 出图并各解码一次；两者热缓存均 15/15，解码次数均为零。新版冷准备 P50 98.9412 ms，P95/P99/最大 113.463 ms；旧版热读取 P50 1.21859 ms、最大 1.55126 ms，新版热读取 P50 1.03842 ms、最大 3.75566 ms。OS 文件缓存未清除，这里的冷指应用转换缓存；这些是内容任务墙钟时间，不包括墨水屏、设备保存和入睡。进程最高 RSS 旧版 9,216 KiB、新版 6,252 KiB，不能据此推断固件 PSRAM 峰值或节省量。原始逐次数据与汇总在忽略目录 `.local/lockscreens-20261013/{baseline,candidate}.jsonl`、`summary.json`，探针源码和旧 worker 副本同目录。
+- 桌面烟测：标准与 sanitizer 预览均执行 `--headless --card <临时卡> --script <sleep/wake/sleep>`，使用合成 4096×2048 灰度 PNG。两次休眠完成且记录正确；sanitizer 的冷准备触发一次原页内容帧提示，随后呈现锁屏，第二次热缓存直接锁屏，没有循环卡住或 sanitizer 报告。日志同目录 `large-debug-smoke.log`、`large-sanitized-smoke.log`；这不证明真机耗时或实体输入时序。
+- 文档与网站：D43、R4、PW06、架构、UI 与内置说明同步；官网说明区分 0.2.0-beta.3 与旧固件行为。Node.js 24.19.0、npm 11.9.0，使用临时 npm/XDG 缓存并关闭构建遥测，`npm ci --ignore-scripts --no-audit --no-fund` 与 `npm run build` 通过（5 页）。ZIP 只更新 README；清单及五张 PNG 与 HEAD 逐字节及 SHA-256 一致，未部署网站。
+- 固件：既有 `firmware/sdkconfig` 缺少当前默认的回滚、交叉签名证书和外部 TLS 内存配置，标准入口拒绝使用；保留原文件，改用独立 release 构建。首次完整编译后源码仍有修正，来源检查拒绝登记；最终 `source /workspace/cloud-tools/activate-idf.sh`、`sh tools/build_firmware.sh release` 与来源核验通过，ESP-IDF 6.1、锁定 BSP `5f3406deec33304de8801046db583dec7c49e55b`，版本 `0.2.0-beta.3+g4622223.dirty`，镜像 3,488,272 字节，4 MiB 应用槽剩余 17%。`build/firmware-release/provenance.json` 核对构建模式、实际配置、源码和镜像摘要；最终源码指纹在开发记录完成后重新核对。`python3 tools/check_handoff.py` 486 项和 `git diff --check` 通过。未刷写设备。
+- 未测与下一步：没有连接真机。PW06 仍需测官网五图、大 PNG/JPEG、慢卡、2 MiB 边界及长目录的冷/热耗时与全流程耗时，实体 K2/电源/触摸取消、长按菜单、刷屏失败、记录提交期间取消和 TF 交接，以及整机 RAM/最大连续块/栈峰值、灰阶与残影。host 出图不等于面板显示成功，不宣称真机成功率或等待时间已经验收。
+
+
+## 2026-10-13 · 锁屏失败后的提示与唤醒页面恢复
+
+接续本轮 D43 候选，用户反馈三个旧现象：唤醒时的错误提示不友好，含图片正文停在「正在准备图片」，从主页休眠失败后又进入阅读。
+
+- 原因：`custom_notice_pending` 调用通用 `error()`，后者通过 `abandon_content()` 取消正文图片准备，并把页面切成 Error；补图只在 Reading 状态运行，原来的图片占位会留在错误页背景中。错误页依据 `has_book()` 决定显示正文背景及「恢复阅读」，没有区分这次从书库还是正文休眠，因此已打开书籍时，刚恢复的书库也被替换。休眠准备多次进入时又重新读取当前 view 计算返回目标，缺少请求范围内固定的目的地。
+- 修改：锁屏图片失败、缓存或轮播记录提交失败只给原页面一次简短页脚提示，分别为「本次使用简洁屏保」「下次休眠需重新准备图片」「轮播记录未保存」。提示不进入通用错误页，不要求确认，不取消正文图片任务；详细原因保留在 ESP 诊断日志。只刷新页脚区域，保留正文像素、进度与书库分页，不覆盖保存失败提示。休眠请求首次进入时固定返回书库或阅读，取消和唤醒结束后释放该请求标记。
+- 回归证据：新增合成书 `image-cover.epub`、指定损坏 PNG 的测试，在修复前于唤醒后的 Reading 状态断言稳定失败，原始输出 `.local/wake-failure-20261013/regression-before.log`。修复后覆盖清除正文图片缓存后唤醒、提示只在阅读页脚局部刷新、补图完成且正文像素/保存记录不变，以及已打开书籍时从书库连续两轮失败休眠仍返回书库；另更新空目录、轮播记录磁盘提交和任务启动失败的结果提示回归。测试驱动观察实际提交帧，包含其内部保存轮询发布的帧，避免漏记瞬间提示帧。
+- 验证：Linux、GCC 14.2.0；`source /workspace/cloud-tools/activate-host.sh`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host --output-on-failure` 最终 24/24（45.61 秒）。GCC ASan/UBSan/LSan 沿用本轮配置并开启 host trace，`cmake --build build/sanitized --parallel 4`、`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure` 最终 24/24（89.31 秒）。日志在忽略目录 `.local/wake-failure-20261013/`。中间帧观察回归曾因驱动内部轮询消费提示帧而超时，补齐帧观察后恢复；没有延长超时或降低断言。
+- 上下文与资源：只在应用 owner 更新提示状态、固定一次唤醒目的地，并调用既有页脚绘制及局部显示路径；不扫描/解码、不新增文件提交、画布、worker 或栈。正文图片继续由既有 worker 处理，峰值结构及其取消/TF I/O 边界不变。本批没有同条件真机性能、内存或栈峰值数据。
+- 文档同步：R4、PW06、架构、UI 和官网说明改为原页面轻提示；ZIP 只同步 README，图集 PNG 与清单不变。Node.js 24.19.0 网站构建通过（5 页），486 项交接与 diff 检查通过。ESP-IDF 6.1 的独立 release 构建通过，版本 `0.2.0-beta.3+g4622223.dirty`，镜像 3,488,848 字节；开发记录完成后重新核对源码、实际配置与镜像摘要，证据在 `build/firmware-release/provenance.json` 及本批忽略日志目录。未提交、未推送、未部署、未连接或刷写设备。后续 PW06 仍需确认实体电源/K2/触摸取消、慢卡、面板残影、进度保存失败与可选提示同时发生，以及正文补图在真实低内存下的恢复。
+
+
+## 2026-10-13 · 锁屏轮播与唤醒恢复 PR 准备
+
+- 范围与授权：用户要求创建 PR，本轮锁屏冷准备、轮播提交、取消交接及失败唤醒恢复共用分支 `fix/lockscreen-rotation-wake`。此前记录中的「未提交、未推送」保留为当时状态；本次提交与推送已获授权，未合并、部署或刷写。
+- 主线整合：变更从 `4622223` 重放到 main `1f6c9ff`，保留 PR #87 的书库各屏继续阅读卡片与 PR #88 的键盘变化像素局刷。源码自动合并；仅开发状态与路线图发生文档冲突，双方摘要、计划进展和历史记录均保留。逐文件复核 PR 差异，图集 ZIP 与主线相比仅 README 内容变化，五张 PNG 和清单逐字节一致。
+- 整合后验证：Linux、GCC 14.2.0，`source /workspace/cloud-tools/activate-host.sh` 后分别执行 `cmake --build build/host --parallel 4`、`ctest --test-dir build/host --output-on-failure`，24/24（50.01 秒）；同一工具链构建 `build/sanitized`，沿用 host trace 与 ASan/UBSan 配置，`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure`，24/24（94.37 秒）。新主线的书库和键盘回归随全套检查通过，没有删测试、降断言或关闭组件。
+- 固件与网站：ESP-IDF 6.1、锁定 BSP 不变，`source /workspace/cloud-tools/activate-idf.sh`、`sh tools/build_firmware.sh release` 构建与来源检查通过，应用镜像 3,492,864 字节，4 MiB 槽剩余 17%。独立 release 配置保留，原 `firmware/sdkconfig` 未修改；本记录提交后再核对最终版本与源码来源。Node.js 24.19.0 网站构建通过（5 页）；486 项交接检查与差异检查通过。日志保留在忽略目录 `.local/lockscreen-pr-20261013/`。
+- 未测与下一步：没有连接设备，PW06 的慢卡耗时、实体取消、TF 交接、面板效果与资源峰值待验；本次不宣称真机成功率或耗时已验收。推送并创建 PR 后，以最终提交的远端 host、网站和 review 结果为准。

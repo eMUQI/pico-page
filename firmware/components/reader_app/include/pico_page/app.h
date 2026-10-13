@@ -235,9 +235,13 @@ class ReaderApp {
     /**
      * Saves progress and prepares a sleep frame. false with sleep_pending() means the cover
      * worker is still handing back resources; call again from the event loop. Other false
-     * results reject sleep. Present a successful frame before suspending storage or hardware.
+     * results reject sleep. Present a successful frame, then finish_sleep() before suspending
+     * storage or hardware.
      */
     bool prepare_sleep();
+    /** After presentation, commits the displayed rotation cursor on the content worker.
+     * false with sleep_pending() requires polling before hardware suspension or page restoration. */
+    bool finish_sleep();
     bool sleep_pending() const;
     /** Cancels sleep and restores its manual Wi-Fi intent without destroying a running cover worker. */
     void cancel_sleep();

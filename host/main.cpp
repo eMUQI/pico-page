@@ -3,6 +3,7 @@
 #include <curl/curl.h>
 #include <future>
 #include <chrono>
+#include <thread>
 #include <cstdio>
 #include <fstream>
 #include <filesystem>
@@ -162,6 +163,12 @@ struct Host {
             // The desktop preview has no input sampling to protect and commits at once.
             if (!app.pending_frame() && app.save_due())
                 app.save_progress();
+            if (app.view() == pico_page::View::Sleeping) {
+                while (!app.finish_sleep()) {
+                    app.poll_background();
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+            }
         }
         return true;
     }
@@ -250,6 +257,7 @@ struct Host {
         while (!app.prepare_sleep()) {
             if (!app.sleep_pending()) return false;
             app.poll_background();
+            if (app.pending_frame() && !flush()) return false;
             SDL_Delay(1);
         }
         return flush();

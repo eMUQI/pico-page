@@ -53,6 +53,7 @@ static bool sleep_frame(ReaderApp& app) {
     while (!app.prepare_sleep()) {
         if (!app.sleep_pending()) return false;
         app.poll_background();
+        if (app.pending_frame()) app.complete_frame(true);
         assert(std::chrono::steady_clock::now() < deadline);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
@@ -66,6 +67,7 @@ static bool sleep_frame(ReaderApp& app) {
 struct Driver {
     ReaderApp& app;
     std::uint64_t sequence = 0;
+    std::function<void(const Frame&)> frame_observer = {};
     void key(Input key) {
         ++sequence;
         app.input({{sequence, Phase::Begin, key}, false, 0, 0});
@@ -112,9 +114,20 @@ struct Driver {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
         // A finished background commit may queue a further frame, as in the firmware loop.
         while (app.pending_frame()) {
-            while (app.pending_frame()) app.complete_frame(true);
+            while (app.pending_frame()) {
+                if (frame_observer) frame_observer(*app.pending_frame());
+                app.complete_frame(true);
+            }
             if (app.save_due()) app.save_progress();
             while (app.save_busy()) {
+                app.poll_background();
+                assert(std::chrono::steady_clock::now() < deadline);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+        if (app.view() == View::Sleeping) {
+            while (!app.finish_sleep()) {
+                assert(app.sleep_pending());
                 app.poll_background();
                 assert(std::chrono::steady_clock::now() < deadline);
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -1020,25 +1033,29 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         return std::move(job.result);
     };
     auto cold = run(true);
-    assert(!cold.image && !cold.error.empty() && store.last_lock_screen().empty());
+    assert(cold.image && cold.cache_finished && cold.error.empty() && store.last_lock_screen().empty());
     auto first = run(false);
     assert(first.cache_finished && first.lock_screen == "01.png" && !first.image);
     assert(store.last_lock_screen().empty());
     auto ready = run(true);
     assert(ready.image && ready.image->width() == 684 && ready.image->height() == 1216);
-    assert(store.last_lock_screen() == "01.png");
+    assert(store.last_lock_screen().empty());
+    assert(store.save_lock_screen(ready.lock_screen) == StoreStatus::Ok);
     const auto cache_path = root / "PicoPage/cache/lockscreens/current";
     auto damaged_cache = read(cache_path);
     damaged_cache[damaged_cache.size() - 33] ^= 1;
     write(cache_path, damaged_cache);
-    assert(!run(true, "01.png").image);
+    const auto before_repair = graphics::image_decode_count();
+    assert(run(true, "01.png").image && graphics::image_decode_count() == before_repair + 1);
     assert(run(false, "01.png").cache_finished && run(true, "01.png").image);
     assert(run(false).lock_screen == "02.PNG");
-    assert(run(true).image && FileStore(root.string()).last_lock_screen() == "02.PNG");
+    auto second = run(true);
+    assert(second.image && second.lock_screen == "02.PNG" && store.last_lock_screen() == "01.png");
+    assert(store.save_lock_screen(second.lock_screen) == StoreStatus::Ok);
     assert(run(false).lock_screen == "01.png");
     assert(std::distance(fs::directory_iterator(cache_path.parent_path()), fs::directory_iterator{}) == 1);
     assert(store.clear_cache() == StoreStatus::Ok && store.last_lock_screen() == "02.PNG");
-    assert(!run(true, "01.png").image);
+    assert(run(true, "01.png").image);
     assert(run(false, "01.png").cache_finished);
     assert(run(true, "01.png").image && store.last_lock_screen() == "02.PNG");
     const auto original_time = fs::last_write_time(root / "LockScreens/01.png");
@@ -1062,6 +1079,131 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
     assert(store.apply_settings(snapshot, values, false, detail) == StoreStatus::Ok);
     assert(store.load_settings().settings.sleep_image == "02.PNG");
     assert(run(false, "02.PNG").cache_finished);
+    {
+        const auto rotating = root / "Rotation";
+        write(rotating / "LockScreens/00-broken.png", "broken PNG");
+        write(rotating / "LockScreens/01.png", png);
+        write(rotating / "LockScreens/02.png", png);
+        write(rotating / "PicoPage/settings.toml", "schema_version=1\n[power]\nsleep_screen='custom'\n");
+        FileStore rotating_store(rotating.string());
+        ReaderApp app(rotating.string(), "rotation", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        assert(!app.prepare_sleep() && app.sleep_pending());
+        app.cancel_sleep();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (std::string(app.background_state()) == "sleep-cover") {
+            app.poll_background();
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(rotating_store.last_lock_screen().empty());
+        assert(sleep_frame(app));
+        assert(rotating_store.last_lock_screen().empty() && !app.finish_sleep());
+        app.complete_frame(false);
+        assert(app.view() == View::Error && rotating_store.last_lock_screen().empty());
+        app.cancel_sleep(); driver.present(); driver.close(); driver.present();
+        for (const auto* name : {"01.png", "02.png", "01.png"}) {
+            assert(sleep_frame(app));
+            const auto previous = rotating_store.last_lock_screen();
+            assert(app.view() == View::Sleeping);
+            app.complete_frame(true);
+            assert(rotating_store.last_lock_screen() == previous);
+            assert(!app.finish_sleep() && app.sleep_pending());
+            while (!app.finish_sleep()) {
+                app.poll_background();
+                assert(std::chrono::steady_clock::now() < deadline);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            assert(rotating_store.last_lock_screen() == name);
+            app.wake(); driver.present();
+        }
+        assert(rotating_store.clear_cache() == StoreStatus::Ok);
+        const auto decoded = graphics::image_decode_count();
+        assert(sleep_frame(app)); driver.present();
+        assert(rotating_store.last_lock_screen() == "02.png" && graphics::image_decode_count() == decoded + 1);
+        app.wake(); driver.present();
+        fs::create_directory(rotating / "PicoPage/data/last-lock-screen.txt.tmp");
+        assert(sleep_frame(app)); driver.present();
+        assert(rotating_store.last_lock_screen() == "02.png");
+        app.wake(); driver.present(); app.poll_background();
+        assert(app.view() == View::Library && app.status().find("轮播记录未保存") != std::string::npos);
+        if (app.pending_frame()) driver.present();
+        fs::remove(rotating / "PicoPage/data/last-lock-screen.txt.tmp");
+        assert(sleep_frame(app)); app.complete_frame(true);
+        ContentJob::fail_starts_for_test(ContentJob::Kind::SaveLockScreen, 1, ContentJob::StartFailure::TaskCreate);
+        assert(app.finish_sleep() && !app.sleep_pending() && rotating_store.last_lock_screen() == "02.png");
+        app.wake(); driver.present(); app.poll_background();
+        assert(app.view() == View::Library && app.status().find("轮播记录未保存") != std::string::npos);
+    }
+    {
+        const auto rotating = root / "Rotation";
+        ReaderApp rebooted(rotating.string(), "rotation-reboot", true, true); Driver driver{rebooted};
+        assert(rebooted.initialize()); driver.present();
+        assert(FileStore(rotating.string()).last_lock_screen() == "02.png");
+        assert(sleep_frame(rebooted)); driver.present();
+        assert(FileStore(rotating.string()).last_lock_screen() == "01.png");
+    }
+    {
+        const auto blocked = root / "CacheFailure";
+        write(blocked / "LockScreens/01.png", png);
+        write(blocked / "PicoPage/cache/lockscreens", "blocked");
+        ContentJob::Request request;
+        request.kind = ContentJob::Kind::LockScreen; request.root = blocked.string(); request.preview = true;
+        ContentJob job(request); assert(job.start()); job.wait();
+        assert(job.result.image && !job.result.cache_finished && job.result.retryable_failure);
+        assert(job.result.error.find("缓存未保存") != std::string::npos);
+        request.lock_screen_deadline = std::chrono::steady_clock::now() - std::chrono::milliseconds(1);
+        const auto decoded = graphics::image_decode_count();
+        ContentJob expired(request); assert(expired.start()); expired.wait();
+        assert(!expired.result.image && !expired.result.cache_finished && expired.result.retryable_failure);
+        assert(graphics::image_decode_count() == decoded);
+    }
+    {
+        const auto resumed = root / "WakeFailure";
+        fs::create_directories(resumed / "Books");
+        fs::copy_file(fixtures / "image-cover.epub", resumed / "Books/cover.epub");
+        write(resumed / "LockScreens/broken.png", "broken PNG");
+        write(resumed / "PicoPage/settings.toml", "schema_version=1\n[power]\nsleep_screen='custom'\nsleep_image='broken.png'\n");
+        ReaderApp app(resumed.string(), "wake-failure", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/cover.epub"); driver.present(); driver.complete_content();
+        const auto saved = *app.saved_record();
+        const auto body = app.canvas().pixels();
+        assert(sleep_frame(app)); driver.present();
+        assert(FileStore(resumed.string()).clear_cache() == StoreStatus::Ok);
+        const auto decodes = graphics::image_decode_count();
+        bool notice_seen = false;
+        driver.frame_observer = [&](const Frame& frame) {
+            if (app.status().find("简洁屏保") != std::string::npos && frame.region && frame.region->y == 1128) {
+                assert(app.view() == View::Reading);
+                notice_seen = true;
+            }
+        };
+        app.wake(); driver.present();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (app.content_busy() || !notice_seen) {
+            app.poll_background();
+            if (app.pending_frame()) {
+                driver.present();
+            }
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(app.view() == View::Reading && !app.content_busy());
+        driver.frame_observer = {};
+        assert(graphics::image_decode_count() > decodes);
+        assert(*app.saved_record() == saved);
+        assert(std::equal(body.begin(), body.begin() + 1128 * app.canvas().stride(), app.canvas().pixels().begin()));
+        driver.tap(342, 500); driver.present(); driver.tap(50, 50); driver.present();
+        assert(app.view() == View::Library);
+        for (int i = 0; i < 2; ++i) {
+            assert(sleep_frame(app)); driver.present();
+            app.wake(); driver.present(); app.poll_background();
+            assert(app.view() == View::Library && !app.content_busy() && *app.saved_record() == saved);
+            assert(app.status().find("简洁屏保") != std::string::npos);
+            assert(app.pending_frame() && app.pending_frame()->region && app.pending_frame()->region->y == 1120);
+            driver.present();
+        }
+    }
     {
         ReaderApp app(root.string(), "locks", true, true); Driver driver{app};
         assert(app.initialize()); driver.present();
@@ -1154,9 +1296,8 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         assert(app.initialize()); driver.present();
         assert(sleep_frame(app) && app.view() == View::Sleeping); driver.present();
         app.wake(); driver.present(); app.poll_background();
-        assert(app.view() == View::Error && app.status().find("LockScreens") != std::string::npos);
+        assert(app.view() == View::Library && app.status().find("简洁屏保") != std::string::npos);
         if (app.pending_frame()) driver.present();
-        driver.close(); driver.present();
         for (const auto& point : {std::pair{150, 240}, std::pair{480, 240}, std::pair{150, 350}}) {
             driver.tap(600, 50); driver.present(); driver.tap(340, 640); driver.present();
             driver.tap(point.first, point.second); driver.present(); driver.tap(500, 1120); driver.present();
@@ -3457,6 +3598,19 @@ int main(int argc, char** argv) {
         assert(!app.can_long_press_at(50, 50));
         assert(sleep_frame(app)); driver.present(); app.wake(false); driver.present();
         SleepInput input;
+        input.begin(true);
+        input.accept({EventKind::None});
+        input.accept({EventKind::Power});
+        assert(!input.power() && !input.menu() && !input.tap());
+        input.accept({EventKind::Power});
+        assert(input.power());
+        input.begin(true);
+        input.accept({EventKind::PowerLong});
+        assert(input.menu() && !input.power());
+        input.begin(true);
+        input.accept({EventKind::K2, EventPhase::Begin, 2});
+        input.accept({EventKind::K2, EventPhase::End, 2});
+        assert(input.tap() && input.tap()->kind == EventKind::K2);
         input.begin();
         input.accept({EventKind::Touch, EventPhase::Begin, 2, 300, 220, 1000});
         const auto held = input.due(1000 + kLongPressUs);
