@@ -18,7 +18,7 @@ npm run preview --prefix web
 - `src/pages/docs.astro`：使用文档（`/docs/`），见「使用文档」。
 - `src/pages/changelog.astro`：更新日志（`/changelog/`），见「更新日志」。
 - `src/pages/`：路由。新增语言或文档页时在这里添加 Astro 或 Markdown 页面。
-- `public/assets/screens/`：界面图，来自 host 渲染，使用合成数据。
+- `public/assets/screens/`：界面图，来自 host 渲染，使用合成数据；无损 WebP（`cwebp -lossless -z 9`）。锁屏作品保持 PNG 原图。
 - `public/assets/fonts/`：首页字体示例用的霞鹜文楷子集，见「字体」。
 
 网站文案面向读者。验证状态、验收标准和开发注意事项写在根目录 README 和 `docs/` 中。
@@ -175,7 +175,7 @@ GitHub 对 Release 事件使用标签所在提交中的工作流文件。标签�
 - 锁屏使用步骤补回单张 PNG 的放法、固定或轮播，以及图片未准备好时显示简洁屏保。字体卡片里的锁屏提示改为事实陈述，不用「精选」。
 - `.picopage/` 的说明写为「原书旁同名的 `.picopage/` 目录」，与设备上的使用说明一致。
 
-网站没有 favicon，浏览器请求 `/favicon.ico` 会得到 404；设计稿没有提供图标。
+`public/favicon.ico` 是项目所有者的 GitHub 头像（64×64），浏览器按默认路径 `/favicon.ico` 取用，页面不另写 `<link rel="icon">`。
 
 ## 使用文档
 
