@@ -45,6 +45,9 @@ jobs:
         run: |
           gh release list --limit 100 --json tagName,isDraft > "$RUNNER_TEMP/releases.json"
           tag=$(python3 tools/ota_manifest.py --pick-release "$RUNNER_TEMP/releases.json")
+          # The changelog page lists the releases that are public, with their dates.
+          mkdir -p web/public/firmware
+          gh release list --limit 100 --exclude-drafts --json tagName,publishedAt > web/public/firmware/releases.json
           if [ -n "$tag" ]; then
             gh release download "$tag" --dir web/public/firmware \
               --pattern manifest.json --pattern 'pico-page-*-read_pico-release*.bin'

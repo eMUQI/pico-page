@@ -1,7 +1,7 @@
 ---
 import "../styles/site.css";
 
-// current names the page the header and footer must not link to: "home", "install" or "docs".
+// current names the page the header and footer must not link to: "home", "install", "docs" or "changelog".
 const { title, description, current, noindex = false } = Astro.props;
 ---
 <!doctype html>
@@ -43,6 +43,7 @@ const { title, description, current, noindex = false } = Astro.props;
         <nav aria-label="页脚导航">
           {current !== "docs" && <a href="/docs/">文档</a>}
           {current !== "install" && <a href="/install/">安装固件</a>}
+          {current !== "changelog" && <a href="/changelog/">更新日志</a>}
           {current === "install" && <a href="/assets/third-party-licenses.txt">第三方许可</a>}
           {current !== "home" && <a href="/">返回首页</a>}
           {current === "home" && <a class="muted" href="https://quotaframe.com">QuotaFrame</a>}
