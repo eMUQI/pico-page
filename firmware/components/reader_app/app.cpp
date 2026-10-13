@@ -39,8 +39,8 @@ constexpr int viewer_toolbar_height = 96, viewer_action_left = 456;
 constexpr int viewer_contrast_levels = 3;
 constexpr auto inline_image_delay = std::chrono::milliseconds(250);
 constexpr const char* kSleepFallbackNotice = "本次使用简洁屏保";
-constexpr const char* kSleepCacheNotice = "下次休眠需重新准备图片";
-constexpr const char* kSleepCursorNotice = "上次轮播记录未保存";
+constexpr const char* kSleepCacheNotice = "此前休眠图片缓存未保存";
+constexpr const char* kSleepCursorNotice = "此前轮播记录未保存";
 constexpr const char *content_revision = "epub-native-v1";
 constexpr const char *txt_revision = "txt-utf8-v1";
 struct Entry {
@@ -1279,7 +1279,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (request.generation != counting_generation) return;
         if (request.kind == ContentJob::Kind::SaveLockScreen) {
             if (!result.error.empty()) {
-                custom_cursor_notice = result.error; custom_cursor_notice_pending = true;
+                remember_sleep_result(result.error, kSleepCursorNotice);
             }
             return;
         }
@@ -4977,7 +4977,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::vector<std::string> lock_screens;
     std::size_t lock_screen_page = 0;
     std::string lock_screen_error, custom_notice, custom_notice_hint;
-    std::string custom_cursor_notice;
+    std::string custom_result_notice;
+    const char* custom_result_notice_hint = nullptr;
     std::string custom_rotation_name;
     std::chrono::steady_clock::time_point custom_retry_at{};
     std::optional<std::chrono::steady_clock::time_point> custom_sleep_deadline;
@@ -4985,8 +4986,13 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool custom_wait_restore_pending = false, custom_rotation_presented = false;
     bool clear_cache_pending = false;
     bool custom_prepare_finished = false, custom_sleep_attempted = false, custom_notice_pending = false;
-    bool custom_cursor_notice_pending = false;
+    bool custom_result_notice_pending = false;
     std::unique_ptr<graphics::Canvas> custom_sleep_image;
+    void remember_sleep_result(const std::string& detail, const char* hint) {
+        // Cursor persistence has priority over optional cache publication; retain only one result.
+        if (custom_result_notice_pending && custom_result_notice_hint == kSleepCursorNotice && hint != kSleepCursorNotice) return;
+        custom_result_notice = detail; custom_result_notice_hint = hint; custom_result_notice_pending = true;
+    }
     void list_lock_screens() {
         abandon_content();
         if (counting_job) counting_job->cancel();
@@ -5035,7 +5041,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!custom_wait_footer || display.busy()) return;
         std::memcpy(canvas.data() + 342 * footer_top, custom_wait_footer.get(), kCustomWaitFooterBytes);
         custom_wait_footer.reset();
-        custom_wait_restore_pending = false;
         present_custom_wait_footer();
     }
     void show_custom_wait() {
@@ -7416,6 +7421,9 @@ void ReaderApp::complete_frame(bool success) {
         impl_->custom_rotation_presented = success;
         if (!success) impl_->custom_rotation_name.clear();
     }
+    if (success && impl_->view == View::Sleeping && impl_->settings.sleep_screen == "custom" &&
+        impl_->custom_notice_hint == kSleepCacheNotice)
+        impl_->remember_sleep_result(impl_->custom_notice, kSleepCacheNotice);
     if (success) {
         if (impl_->view == View::Reading && !impl_->image_viewing && impl_->body_images_pending && !impl_->inline_image_pending)
             impl_->inline_image_after = std::chrono::steady_clock::now() + inline_image_delay;
@@ -7444,7 +7452,10 @@ void ReaderApp::complete_frame(bool success) {
         work();
     // A final-frame failure must not restart application work during shutdown.
     if (impl_->view == View::PowerOff) return;
-    if (success && impl_->custom_wait_restore_pending) impl_->restore_custom_wait();
+    if (success && impl_->custom_wait_restore_pending) {
+        if (impl_->custom_wait_footer) impl_->restore_custom_wait();
+        else impl_->custom_wait_restore_pending = false;
+    }
     if (!success) {
         impl_->abandon_content();
         if (impl_->usb_prepared) {
@@ -7693,10 +7704,15 @@ void ReaderApp::show_portal(const PortalStatus &status) {
     impl_->overlay(codes_appear);
 }
 bool ReaderApp::show_power_menu() {
-    if (impl_->network_worker_id || impl_->display.busy() || impl_->active_network || impl_->content_loading || impl_->foreground_job ||
+    if (impl_->network_worker_id || impl_->active_network || impl_->content_loading || impl_->foreground_job ||
         impl_->usb_prepared || impl_->view == View::Portal || impl_->view == View::PowerOff) return false;
+    if (impl_->display.busy()) {
+        if (!impl_->custom_wait_restore_pending || impl_->view == View::Error) return false;
+        impl_->power_menu_wait = impl_->view; return true;
+    }
     if (impl_->view == View::PowerMenu) return true;
     cancel_sleep();
+    if (impl_->display.busy()) { impl_->power_menu_wait = impl_->view; return true; }
     impl_->control(PowerMenu);
     return impl_->view == View::PowerMenu || impl_->power_menu_wait.has_value();
 }
@@ -7877,8 +7893,8 @@ bool ReaderApp::finish_sleep() {
     impl_->custom_rotation_presented = false;
     impl_->counting_job = std::make_unique<ContentJob>(std::move(request));
     if (!impl_->counting_job->start()) {
-        impl_->counting_job.reset(); impl_->custom_cursor_notice = "轮播位置未保存，下次可能重复此图";
-        impl_->custom_cursor_notice_pending = true;
+        impl_->counting_job.reset();
+        impl_->remember_sleep_result("轮播位置未保存，下次可能重复此图", kSleepCursorNotice);
         return true;
     }
     return false;
@@ -8009,18 +8025,18 @@ void ReaderApp::poll_background(bool cancel) {
     if (!cancel || !impl_->content_loading) impl_->poll_content(!cancel);
     // Waits for the queued taps of one burst, so they reach the panel in a single update.
     if (!cancel) impl_->flush_entry();
-    if (!cancel && (impl_->custom_notice_pending || impl_->custom_cursor_notice_pending) &&
+    if (!cancel && (impl_->custom_notice_pending || impl_->custom_result_notice_pending) &&
         !impl_->sleep_cover_deadline && !impl_->display.busy() && !impl_->content_loading &&
         !impl_->save_failed && !impl_->recent_save_failed &&
         (impl_->view == View::Library || impl_->view == View::Reading)) {
         impl_->custom_notice_pending = false;
-        const bool cursor_failed = std::exchange(impl_->custom_cursor_notice_pending, false);
+        const bool result_notice = std::exchange(impl_->custom_result_notice_pending, false);
 #ifdef ESP_PLATFORM
         ESP_LOGW("reader_app", "Sleep image notice: %s",
-                 (cursor_failed ? impl_->custom_cursor_notice : impl_->custom_notice).c_str());
+                 (result_notice ? impl_->custom_result_notice : impl_->custom_notice).c_str());
 #endif
-        impl_->message = cursor_failed ? kSleepCursorNotice : impl_->custom_notice_hint;
-        if (cursor_failed) impl_->custom_cursor_notice.clear();
+        impl_->message = result_notice ? impl_->custom_result_notice_hint : impl_->custom_notice_hint;
+        if (result_notice) { impl_->custom_result_notice.clear(); impl_->custom_result_notice_hint = nullptr; }
         // Optional sleep imagery must not cancel body image work or replace the wake destination.
         if (impl_->view == View::Reading) impl_->footer();
         else impl_->footer_bar(impl_->notice(), impl_->library_page, impl_->library_pages());

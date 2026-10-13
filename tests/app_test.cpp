@@ -1196,8 +1196,9 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         assert(app.view() == View::Error && !app.pending_frame() && app.canvas().pixels() == error_pixels);
         assert(app.status().find("TF 卡已移除") != std::string::npos);
     }
-    for (bool fail_frame : {false, true}) {
-        const auto waiting = root / (fail_frame ? "WaitFrameFailure" : "WaitCancel");
+    for (int action : {0, 1, 2}) {
+        const bool fail_frame = action == 1, open_menu = action == 2;
+        const auto waiting = root / (fail_frame ? "WaitFrameFailure" : open_menu ? "WaitPowerMenu" : "WaitCancel");
         write(waiting / "LockScreens/01.png", png);
         write(waiting / "PicoPage/settings.toml", "schema_version=1\n[power]\nsleep_screen='custom'\n");
         ReaderApp app(waiting.string(), "wait-footer", true, true); Driver driver{app};
@@ -1217,7 +1218,18 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         app.complete_frame(!fail_frame);
         app.cancel_sleep(); // The firmware cancels the request when presentation fails.
         assert(!app.sleep_pending());
-        if (fail_frame) {
+        if (open_menu) {
+            assert(app.show_power_menu());
+            driver.present();
+            while (app.view() != View::PowerMenu) {
+                app.poll_background();
+                if (app.pending_frame()) driver.present();
+                assert(std::chrono::steady_clock::now() < deadline);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            driver.tap(300, 1120); driver.present();
+            assert(app.view() == View::Library && app.canvas().pixels() == original);
+        } else if (fail_frame) {
             assert(app.view() == View::Error && app.status().find("屏幕局部更新失败") != std::string::npos);
             const auto error_pixels = app.canvas().pixels();
             driver.present(); app.wake(false);
@@ -1267,6 +1279,34 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         assert(FileStore(waiting.string()).last_lock_screen() == "01.png");
     }
 #endif
+    for (bool slept : {false, true}) {
+        const auto blocked = root / (slept ? "CacheFailureSlept" : "CacheFailureCancelled");
+        write(blocked / "LockScreens/01.png", png);
+        write(blocked / "PicoPage/cache/lockscreens", "blocked");
+        write(blocked / "PicoPage/settings.toml", "schema_version=1\n[power]\nsleep_screen='custom'\n");
+        ReaderApp app(blocked.string(), "cache-failure-result", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        assert(sleep_frame(app)); driver.present();
+        assert(FileStore(blocked.string()).last_lock_screen() == "01.png");
+        app.wake(slept); driver.present(); app.poll_background();
+        assert(app.view() == View::Library && app.pending_frame() && app.pending_frame()->region && app.pending_frame()->region->y == 1120);
+        assert(app.status().find("缓存") != std::string::npos);
+        driver.present(); app.poll_background(); assert(!app.pending_frame());
+    }
+    {
+        const auto unnoticed = root / "UnshownCacheNotice";
+        write(unnoticed / "LockScreens/01.png", png);
+        write(unnoticed / "PicoPage/cache/lockscreens", "blocked");
+        write(unnoticed / "PicoPage/settings.toml", "schema_version=1\n[power]\nsleep_screen='custom'\n");
+        ReaderApp app(unnoticed.string(), "unshown-cache-notice", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        assert(sleep_frame(app)); driver.present(); app.wake(false); driver.present();
+        fs::remove(unnoticed / "PicoPage/cache/lockscreens");
+        assert(sleep_frame(app)); driver.present(); app.wake(false); driver.present(); app.poll_background();
+        assert(app.view() == View::Library && app.pending_frame() && app.pending_frame()->region && app.pending_frame()->region->y == 1120);
+        assert(app.status().find("缓存") != std::string::npos);
+        driver.present(); app.poll_background(); assert(!app.pending_frame());
+    }
     {
         const auto blocked = root / "CacheFailure";
         write(blocked / "LockScreens/01.png", png);

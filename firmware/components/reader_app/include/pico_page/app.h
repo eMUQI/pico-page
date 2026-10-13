@@ -247,7 +247,8 @@ class ReaderApp {
     void cancel_sleep();
     /**
      * Requests a modal menu without changing the underlying page or draft. A canceled cover
-     * worker is polled before opening; true means opened or queued. Other busy tasks reject it.
+     * worker and a pending wait-footer restoration are polled before opening; true means opened
+     * or queued. Other busy tasks reject it.
      */
     bool show_power_menu();
     /** Displays why the menu is unavailable while preserving the current task and controls. */

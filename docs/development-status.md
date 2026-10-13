@@ -2,6 +2,8 @@
 
 ## 当前摘要（2026-10-13）
 
+PR #89 第四轮 review 的两个边界已修正（2026-10-13）：等待提示取消后的恢复帧未完成时，电源菜单意图会异步保留；已成功呈现图片的缓存提交失败与轮播记录失败共用有界历史结果槽，取消或再次休眠均保留，记录失败优先。新增回归在修复前复现菜单请求丢失；最新 host Debug 与 GCC ASan/UBSan/LSan 各 24/24，待最终固件来源与远端检查，未刷写。
+
 PR #89 第三轮 review 已逐项核对（2026-10-13）：三项成立，已将尚未显示的轮播失败提醒与下一次准备分开，等待页脚改为可返回空指针的 malloc 缓冲并安全省略提示，D43 的验收引用补齐 PW07；电源键预先取消后重启 worker 的描述与实际 PMU/触摸队列路径不符，未改输入机制。新增回归在修复前失败，最新 host Debug 与 GCC ASan/UBSan/LSan 各 24/24，486 项交接检查通过；最终提交继续核对固件来源与远端检查，未刷写。
 
 PR #89 第二轮 review 的提交失败提醒丢失意见成立，已修正（2026-10-13）：轮播记录写卡失败或提交任务无法启动时标记一次结果提示，取消恢复原页也保留该提示，不再仅依赖实际进入休眠。真正唤醒与取消恢复、两种失败均在回归中只呈现一次页脚提醒；修复前稳定失败。最新 host Debug 与 GCC ASan/UBSan/LSan 各 24/24，486 项交接检查通过；最终提交继续核对 release 来源和远端 CI/review，未刷写，真机待 PW07。
@@ -5567,3 +5569,12 @@ PR 首轮网站构建通过、artifact 上传成功；GitHub 提示 `checkout`�
 - 回归：未空闲轮询显示第一次保存失败提醒前，再次进入并成功完成锁屏，返回原页仍提交一次历史提醒，随后轮询不重复；新回归在修复前 0.53 秒稳定失败。Linux app 测试链接器只对 30,096 字节的 malloc 注入空返回，验证无提示帧、画布不变、取消后没有页脚缓存或轮播推进，解除注入后下一次锁屏成功。calloc 内部 PNG 失败回归保留。
 - 验证：Linux、GCC 14.2.0；`source /workspace/cloud-tools/activate-host.sh`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host --output-on-failure`，24/24（47.87 秒）。host trace 与既有 GCC ASan/UBSan/LSan 配置，`cmake --build build/sanitized --parallel 4`、`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure`，24/24（91.64 秒）；486 项交接与 diff 检查通过。日志保留在忽略目录 `.local/lockscreen-final-boundaries-20261013/`。
 - 固件与下一步：本记录提交后，以最终提交执行独立 release 构建，并核对源码、生效配置与产物摘要。`9028ade` 的六项 CI 均通过、第三轮 review 已结束；本修订确认最终远端检查后按用户授权合并，电源键意见按上述源码证据处理。没有连接或刷写设备，PW07 的实体输入、慢卡、面板效果、TF 交接和资源峰值仍待验收。
+
+
+## 2026-10-13 · PR #89 第四轮 review 的缓存结果与等待后长按菜单
+
+- 判断与修改：两条意见成立。缓存写入失败但画布有效且已呈现时，其结果不应因未进入硬件休眠而丢失；在呈现成功回调中只标记有界待显示结果，与轮播记录提交失败共用一个历史槽，记录失败优先。提示分别为「此前轮播记录未保存」「此前休眠图片缓存未保存」，取消、新的准备和随后成功提交不抹掉未显示的历史结果；原页可显示时只提交一次轻提示，不增加多条通知队列。
+- 菜单：页脚取消恢复的 pending 状态保持到其帧完成。show_power_menu 在该恢复刷新期间接受并保留菜单意图，沿用既有 power_menu_wait，等待刷新及 worker 交还资源后打开；其他忙任务仍按原规则拒绝，失败的显示/移卡错误不被菜单覆盖。取消菜单恢复原页像素。不在输入分发里同步等待内容 worker，不新增任务、栈或整屏快照。
+- 回归：等待一秒提示出现后取消并立即请求菜单，新回归在修复前 3.61 秒稳定失败，日志 `.local/lockscreen-menu-cache-20261013/pico-lockscreen-menu-cache-before-tests.log`。修复后验证菜单意图跨恢复帧保留、worker 退出后打开以及取消菜单恢复原画面；另覆盖缓存写入失败但轮播记录正常保存、真正唤醒和取消恢复均有一次区域结果帧，未显示缓存提醒前再次成功休眠仍有一次历史提醒。
+- 验证：Linux、GCC 14.2.0，source `/workspace/cloud-tools/activate-host.sh`，构建 `build/host` 与全套 CTest，24/24（49.68 秒）；host trace 与既有 GCC ASan/UBSan/LSan 配置，构建 `build/sanitized`，`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure`，24/24（91.87 秒）。交接与 diff 检查按本批最终资料执行，日志保存到忽略目录 `.local/lockscreen-menu-cache-20261013/`。相比上一候选仅历史结果槽增加一个指向固定文案的指针；页脚 30,096 字节、图片画布预算、队列/栈及 TF 不可抢断边界不变。
+- 下一步与未测：本记录提交后构建独立 release 并核对最终源码、配置与产物摘要；确认最终提交的远端检查，按用户授权合并。`6f26085` 的四项 CI 均通过，第四轮 review 已结束。未连接或刷写设备，PW07 真机项目仍待验收。
