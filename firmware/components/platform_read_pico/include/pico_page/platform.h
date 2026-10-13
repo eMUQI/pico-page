@@ -76,6 +76,13 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
              bool changed_pixels_only = false);
 
 /**
+ * True from the start of a present() call until it returns; callable from any task.
+ * Wi-Fi reception during the panel scan delays the driver's line producers past the depth
+ * of their queue, so a task that receives bulk data should stop reading while this is set.
+ */
+bool presenting();
+
+/**
  * Polls one event; EventKind::None means no new event. Touch coordinates use
  * portrait pixels; K1/K2/K3 retain their controller coordinates below the panel.
  * InputReset cancels all prior contacts after queue overflow; input resumes after release.
