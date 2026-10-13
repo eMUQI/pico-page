@@ -1144,6 +1144,61 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         assert(FileStore(rotating.string()).last_lock_screen() == "01.png");
     }
     {
+        const auto removed = root / "CursorCardRemoved";
+        write(removed / "LockScreens/01.png", png);
+        write(removed / "PicoPage/settings.toml", "schema_version=1\n[power]\nsleep_screen='custom'\n");
+        ReaderApp app(removed.string(), "cursor-card-removed", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        assert(sleep_frame(app)); app.complete_frame(true);
+        assert(!app.finish_sleep() && app.sleep_pending());
+        app.cancel_sleep(); app.card_removed(); driver.present();
+        const auto error_pixels = app.canvas().pixels();
+        assert(app.view() == View::Error && !app.sleep_pending());
+        app.wake(false);
+        assert(app.view() == View::Error && !app.pending_frame() && app.canvas().pixels() == error_pixels);
+        assert(app.status().find("TF 卡已移除") != std::string::npos);
+    }
+    for (bool fail_frame : {false, true}) {
+        const auto waiting = root / (fail_frame ? "WaitFrameFailure" : "WaitCancel");
+        write(waiting / "LockScreens/01.png", png);
+        write(waiting / "PicoPage/settings.toml", "schema_version=1\n[power]\nsleep_screen='custom'\n");
+        ReaderApp app(waiting.string(), "wait-footer", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        const auto original = app.canvas().pixels();
+        ContentJob::delay_starts_for_test(ContentJob::Kind::LockScreen, std::chrono::milliseconds(1500));
+        assert(!app.prepare_sleep() && app.sleep_pending());
+        ContentJob::delay_starts_for_test(ContentJob::Kind::LockScreen, std::chrono::milliseconds{});
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!app.pending_frame()) {
+            app.poll_background();
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(app.pending_frame()->region && app.pending_frame()->region->y == 1128 && app.pending_frame()->region->height == 88);
+        assert(std::equal(original.begin(), original.begin() + 1128 * app.canvas().stride(), app.canvas().pixels().begin()));
+        app.complete_frame(!fail_frame);
+        app.cancel_sleep(); // The firmware cancels the request when presentation fails.
+        assert(!app.sleep_pending());
+        if (fail_frame) {
+            assert(app.view() == View::Error && app.status().find("屏幕局部更新失败") != std::string::npos);
+            const auto error_pixels = app.canvas().pixels();
+            driver.present(); app.wake(false);
+            assert(app.view() == View::Error && !app.pending_frame() && app.canvas().pixels() == error_pixels);
+        } else {
+            assert(app.pending_frame() && app.pending_frame()->region && app.pending_frame()->region->y == 1128 &&
+                   app.pending_frame()->region->height == 88);
+            driver.present();
+            assert(app.view() == View::Library && app.canvas().pixels() == original);
+        }
+        while (std::string(app.background_state()) == "sleep-cover") {
+            app.poll_background();
+            if (app.pending_frame()) driver.present();
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(FileStore(waiting.string()).last_lock_screen().empty());
+    }
+    {
         const auto blocked = root / "CacheFailure";
         write(blocked / "LockScreens/01.png", png);
         write(blocked / "PicoPage/cache/lockscreens", "blocked");

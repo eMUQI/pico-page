@@ -664,8 +664,8 @@ extern "C" void app_main() {
         }
         const auto battery = pico_page::platform::battery();
         app->set_battery(battery.valid ? std::optional<int>(battery.percent) : std::nullopt, battery.valid && battery.charging);
-        if (app->pending_frame())
-            present(*app);
+        if (app->pending_frame() && !present(*app) && sleep_requested)
+            cancel_requested_sleep();
         const auto requested_power = app->take_power_request();
         if (requested_power.action != pico_page::PowerAction::None) { pending_power = requested_power; }
         const auto power_request = pending_power;

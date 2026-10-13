@@ -5016,12 +5016,21 @@ struct ReaderApp::Impl final : DisplayBackend {
         counting_job->cancel();
         return true;
     }
+    void present_custom_wait_footer() {
+        display.present({{"ui", 0, 0, ++ui_sequence}, {}, FramePurpose::Overlay,
+            RefreshIntent::Content, RefreshRegion{0, footer_top, 684, 1216 - footer_top}});
+    }
     void restore_custom_wait() {
+        if (view == View::Error) {
+            std::vector<std::uint8_t>().swap(custom_wait_footer);
+            custom_wait_restore_pending = false;
+            return;
+        }
         if (custom_wait_footer.empty() || display.busy()) return;
         std::memcpy(canvas.data() + 342 * footer_top, custom_wait_footer.data(), custom_wait_footer.size());
         std::vector<std::uint8_t>().swap(custom_wait_footer);
         custom_wait_restore_pending = false;
-        overlay();
+        present_custom_wait_footer();
     }
     void show_custom_wait() {
         if (!custom_sleep_deadline || !sleep_cover_deadline ||
@@ -5035,7 +5044,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         custom_wait_footer.assign(canvas.data() + 342 * footer_top, canvas.data() + 342 * footer_top + footer_bytes);
         canvas.fill_rect(0, footer_top, 684, 1216 - footer_top, 15);
         text("正在准备休眠图片，操作可取消", 36, footer_top + 28, 24, 612, 1);
-        overlay();
+        present_custom_wait_footer();
     }
     bool custom_prepare_due() const {
         return settings.sleep_screen == "custom" && !custom_prepare_finished &&
@@ -7868,7 +7877,8 @@ bool ReaderApp::finish_sleep() {
     return false;
 }
 void ReaderApp::wake(bool slept) {
-    if (impl_->display.busy())
+    // A cancelled sleep must preserve failures raised while storage or display was returning.
+    if (impl_->display.busy() || (!slept && impl_->view == View::Error))
         return;
     impl_->wifi_status.phase = WifiPhase::Offline;
     impl_->wifi_status.manual = false;

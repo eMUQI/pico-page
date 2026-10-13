@@ -38,11 +38,16 @@ void log_worker_memory(const char* phase, ContentJob::Kind kind) {
 thread_local ContentJob::Kind failed_kind = ContentJob::Kind::MapDownload;
 thread_local unsigned failed_starts = 0;
 thread_local ContentJob::StartFailure injected_failure = ContentJob::StartFailure::TaskCreate;
+thread_local ContentJob::Kind delayed_kind = ContentJob::Kind::LockScreen;
+thread_local std::chrono::milliseconds injected_delay{};
 #endif
 } // namespace
 #ifndef ESP_PLATFORM
 void ContentJob::fail_starts_for_test(Kind kind, unsigned count, StartFailure failure) {
     failed_kind = kind; failed_starts = count; injected_failure = failure;
+}
+void ContentJob::delay_starts_for_test(Kind kind, std::chrono::milliseconds delay) {
+    delayed_kind = kind; injected_delay = delay;
 }
 #endif
 std::size_t readable_offset(const Chapter& source, std::size_t start) {
@@ -186,7 +191,13 @@ bool ContentJob::start() {
         --failed_starts; start_failure_ = injected_failure; return false;
     }
     try {
-        thread_ = std::thread([this] { run(); done_.store(true, std::memory_order_release); });
+        const auto delay = request.kind == delayed_kind ? injected_delay : std::chrono::milliseconds{};
+        thread_ = std::thread([this, delay] {
+            const auto until = std::chrono::steady_clock::now() + delay;
+            while (!cancelled_.load(std::memory_order_relaxed) && std::chrono::steady_clock::now() < until)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            run(); done_.store(true, std::memory_order_release);
+        });
     } catch (const std::system_error&) {
         start_failure_ = StartFailure::TaskCreate; return false;
     }
@@ -503,7 +514,7 @@ void ContentJob::prepare_lock_screen() {
             const bool rendered = graphics::render_image(*image, encoded, 0, 0, 684, 1216, result.error, false, stop);
             if (stop()) { result.error = "休眠图片准备已取消或超时"; return; }
             if (!rendered) {
-                if (result.error.find("allocation failed") != std::string::npos) {
+                if (result.error.find("allocation failed") != std::string::npos || result.error.find("memory") != std::string::npos) {
                     result.retryable_failure = true; result.error = "图片准备内存不足"; return;
                 }
                 result.error = "图片损坏、不支持或像素超限"; continue;

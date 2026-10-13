@@ -260,7 +260,8 @@ class ReaderApp {
     bool close_power_files();
     /** Draws terminal hardware-off instructions using fallback fonts; never resumes reading. */
     void show_power_off_help();
-    /** Resumes reading or the library; slept=false also restores the cancelled manual Wi-Fi intent. */
+    /** Resumes reading or the library; slept=false preserves a current error page, otherwise
+     * also restores the cancelled manual Wi-Fi intent. */
     void wake(bool slept = true);
     void card_removed();
     /**

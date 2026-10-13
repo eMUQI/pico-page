@@ -149,6 +149,8 @@ public:
 #ifndef ESP_PLATFORM
     /** Fail the next count starts of kind on the calling host thread; count=0 clears injection. */
     static void fail_starts_for_test(Kind kind, unsigned count, StartFailure failure);
+    /** Delay jobs of kind started on the calling host thread; cancellation interrupts the delay. */
+    static void delay_starts_for_test(Kind kind, std::chrono::milliseconds delay);
 #endif
     bool started() const { return started_; }
     void cancel() { cancelled_.store(true, std::memory_order_relaxed); }
