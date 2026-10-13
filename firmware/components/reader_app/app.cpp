@@ -5607,6 +5607,8 @@ struct ReaderApp::Impl final : DisplayBackend {
                 wrapped("逐个结果见浏览器。结束后书库和字体列表会更新。", 36, y + title_size + 22, 612, 24, true, 3);
         }
     }
+    // Row of the rule above the upload summary on the page that shows the codes.
+    int portal_summary_line = 0;
     void draw_portal() {
         view = View::Portal;
         hits.clear();
@@ -5623,7 +5625,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             graphics::draw_qr(canvas, portal.url, 152, 256, 380);
             center("或在浏览器输入", 0, 660, 684, 24, 3);
             center(address, 0, 700, 684, 34);
-            canvas.line(0, 780, 683, 780, 1, 3);
+            canvas.line(0, portal_summary_line = 780, 683, 780, 1, 3);
             upload_summary(808, 30);
         } else {
             text("1  用手机连接设备热点", 36, 128, 26, 612, 1, true);
@@ -5638,7 +5640,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             text("或在浏览器输入", 324, 540, 22, 324, 3);
             text(address, 324, 574, 28, 324);
             text("书籍、字体、锁屏图片", 324, 660, 22, 324, 3);
-            canvas.line(0, 816, 683, 816, 1, 3);
+            canvas.line(0, portal_summary_line = 816, 683, 816, 1, 3);
             upload_summary(844, 28);
         }
         if (!portal_closing) button(PortalStop, "结束传书", 24, 1080, 636, 96);
@@ -7677,11 +7679,19 @@ void ReaderApp::show_portal(const PortalStatus &status) {
     if (view != View::Portal && view != View::WifiSettings) return;
     // The codes must be scannable under every refresh preset, so their first frame clears the panel.
     const bool codes_appear = impl_->portal.url.empty() && !status.url.empty();
+    // With the same codes on screen only the summary between its rule and the button changes.
+    const bool summary_only = view == View::Portal && !impl_->portal_closing && !status.url.empty() &&
+        status.url == impl_->portal.url && status.network == impl_->portal.network &&
+        status.access_ssid == impl_->portal.access_ssid && status.access_password == impl_->portal.access_password;
     impl_->portal_started = impl_->portal_started || status.phase == PortalPhase::Waiting;
     impl_->portal = status;
     if (view == View::WifiSettings) impl_->draw_wifi();
     else impl_->draw_portal();
-    impl_->overlay(codes_appear);
+    if (summary_only) {
+        const int top = impl_->portal_summary_line + 4;
+        impl_->display.present({{"ui", 0, 0, ++impl_->ui_sequence}, {}, FramePurpose::Overlay,
+            RefreshIntent::Content, RefreshRegion{0, top, 684, 1072 - top}});
+    } else impl_->overlay(codes_appear);
 }
 bool ReaderApp::show_power_menu() {
     if (impl_->network_worker_id || impl_->active_network || impl_->content_loading || impl_->foreground_job ||
