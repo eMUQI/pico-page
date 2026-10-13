@@ -1,6 +1,8 @@
 # 开发状态
 
-## 当前摘要（2026-10-12）
+## 当前摘要（2026-10-13）
+
+书库翻屏后保留继续阅读卡片已有修复候选（2026-10-13，分支 `fix/library-resume-pagination`，基于 main `4622223`）：书库首页各屏均显示卡片，列表有卡片时每屏 5 项，卡片视图每屏 6 项；分页起点和总屏数共用同一容量。Linux host Debug 与 ASan/UBSan（含 LSan）各 24/24，release 固件构建与来源核验通过。列表和卡片视图的首、中、末屏画布已检查；未烧录，实体输入与墨水屏显示待真机验证。详见本日记录。
 
 Wi-Fi 传书接收字体和锁屏图片已有候选（2026-10-13，分支 `feat/wifi-transfer-fonts-lockscreens`，基于 main `8622f04`，D42，PR #86）：传书页按扩展名把 TTF、OTF 存入 `Fonts/`，把 PNG、JPEG 存入 `LockScreens/`，会话结束后字体列表不重启即更新。host、sanitizer 和 release 固件构建通过；首轮提交的诊断版已装到第二台设备，只确认了启动和热点会话的开启与结束，实际上传未测，真机验收见 WIFI09。`firmware/version.txt` 已改为 `0.2.0-beta.3`。详见本日记录。
 
@@ -71,6 +73,18 @@ PR #52（分支 `feat/sync-map-images`，已整合 main `fd17171`）包含三项
 个人主目录、设备标识及私有样本名称已脱敏；占位路径不保证可直接执行。历史日期、验证数值和结果保留，历史授权不适用于新的设备操作。
 
 ## 历史摘要与开发记录
+
+### 2026-10-13 · 书库翻屏保留继续阅读卡片
+
+基于 main `4622223`，分支 `fix/library-resume-pagination`。用户要求修复书库翻页后「最近阅读」消失的问题；对应界面是顶部的「继续阅读」卡片，沿用原文案与布局。
+
+- 原因与变更：`draw_library()` 原先以 `library_page == 0` 限制卡片，只在首屏保留；列表首屏有卡片时 5 项，后续屏增至 7 项。现在书库首页各屏均保留卡片及其打开、长按详情热区；列表有卡片时每屏 5 项，没有卡片时 7 项，卡片视图每屏 6 项。分页起点和总屏数共用 `library_page_size()`，空列表仍为一屏。子文件夹、排序、最近记录和进度保存规则沿用现有行为；未修改原始设计文件。
+- 回归：在现有 `app_test` 中增加同步/异步 × 列表/卡片四组多屏用例，比较各屏卡片区域的像素，检查末屏、按键/轻扫/页脚往返、K2 不改变画面与状态、每屏末项打开的路径，以及末屏点击卡片仍打开原书。像素比较使用画布的 4 位灰阶行步长。最终回归用例对 main 的原始 `app.cpp` 编译副本失败，对本候选通过。
+- 执行上下文与资源：仍由应用任务绘制；后续屏复用首屏已有的卡片、缓存及封面准备路径。没有新增任务、缓存格式或随屏数增长的资源；有卡片时各屏可见条目上限与原首屏相同。没有新增解压、同步等待或不可取消区间；TF 读取和封面失败沿用现有文字回退。未测量真机耗时或内存峰值，不宣称性能改善。
+- 环境与命令：Linux，复用 `/workspace/cloud-tools/activate-host.sh`、`activate-idf.sh` 的 GCC、ESP-IDF v6.1 和既有 BSP。`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host -N` 与完整 CTest：注册 24 项，24/24 通过，含 Node 传书页检查。独立 `build/sanitized` 使用 `-fsanitize=address,undefined -fno-omit-frame-pointer`，以 `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1` 运行完整 CTest，24/24 通过。
+- 固件：`sh tools/build_firmware.sh release` 及来源核验通过，版本为 `0.2.0-beta.3+g4622223.dirty`，应用镜像 3,484,176 字节。本批首轮编译通过，但来源检查发现构建期间调整了测试文件，拒绝记录证据；文件稳定后重新构建并核验，未绕过检查。
+- 画布与资料：headless host 导出列表和卡片视图的首、中、末屏，位于 `artifacts/library-resume-pagination/`；已检查第二屏卡片保留、各屏条目与页脚无重叠。`ui-implementation.md` 第 23 节与 beta.3 路线图已更新。交接检查 486 项与 `git diff --check` 通过。
+- 未测与下一步：未连接或烧录设备，未提交或推送。真机核对书库多屏往返、继续阅读与长按详情、实体按键/触摸和墨水屏残影；本候选不计为真机验收通过。
 
 ### 2026-10-13 · Wi-Fi 传书接收字体和锁屏图片（候选，PR #86）
 

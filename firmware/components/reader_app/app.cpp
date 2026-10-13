@@ -2058,15 +2058,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         library_page = std::min(library_page, library_pages() - 1);
     }
     bool library_resume() const { return (folder.empty() || folder_root) && (has_book() || !last_book.empty()); }
-    std::size_t library_page_size() const { return library_grid ? 6 : library_page == 0 && library_resume() ? 5 : 7; }
-    std::size_t library_begin() const {
-        if (!library_page) return 0;
-        const std::size_t first = library_grid ? 6 : library_resume() ? 5 : 7;
-        return first + (library_page - 1) * (library_grid ? 6 : 7);
-    }
+    std::size_t library_page_size() const { return library_grid ? 6 : library_resume() ? 5 : 7; }
+    std::size_t library_begin() const { return library_page * library_page_size(); }
     std::size_t library_pages() const {
-        const std::size_t first = library_grid ? 6 : library_resume() ? 5 : 7, rest = library_grid ? 6 : 7;
-        return entries.size() <= first ? 1 : 1 + (entries.size() - first + rest - 1) / rest;
+        const auto size = library_page_size();
+        return entries.empty() ? 1 : 1 + (entries.size() - 1) / size;
     }
     std::string recent_date(std::int64_t utc) const {
         const auto now = static_cast<std::int64_t>(std::time(nullptr));
@@ -2343,7 +2339,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         hits.push_back({540, 0, 144, 104, Settings});
         // The card appears where reading normally starts and only when there is a book to resume.
         int top = 104;
-        if (!library_page && library_resume()) {
+        if (library_resume()) {
             std::string position;
             if (has_book() && page.end > page.start) position = chapter_label() + " · " + book_percent();
             else if (!has_book()) {
