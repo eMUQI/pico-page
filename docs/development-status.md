@@ -2,6 +2,8 @@
 
 ## 当前摘要（2026-10-13）
 
+PR #89 第三轮 review 已逐项核对（2026-10-13）：三项成立，已将尚未显示的轮播失败提醒与下一次准备分开，等待页脚改为可返回空指针的 malloc 缓冲并安全省略提示，D43 的验收引用补齐 PW07；电源键预先取消后重启 worker 的描述与实际 PMU/触摸队列路径不符，未改输入机制。新增回归在修复前失败，最新 host Debug 与 GCC ASan/UBSan/LSan 各 24/24，486 项交接检查通过；最终提交继续核对固件来源与远端检查，未刷写。
+
 PR #89 第二轮 review 的提交失败提醒丢失意见成立，已修正（2026-10-13）：轮播记录写卡失败或提交任务无法启动时标记一次结果提示，取消恢复原页也保留该提示，不再仅依赖实际进入休眠。真正唤醒与取消恢复、两种失败均在回归中只呈现一次页脚提醒；修复前稳定失败。最新 host Debug 与 GCC ASan/UBSan/LSan 各 24/24，486 项交接检查通过；最终提交继续核对 release 来源和远端 CI/review，未刷写，真机待 PW07。
 
 PR #89（`fix/lockscreen-rotation-wake`）的 review 四项意见经源码核对均成立，已补齐：取消后的恢复不覆盖 TF 卡移除错误，等待提示刷新失败取消当前休眠，等待及取消恢复仅更新页脚，锁屏专项编号改为 PW07。另修正 PNG 解码内部内存不足被误判为坏图的边界。host Debug 与 GCC ASan/UBSan/LSan 各 24/24，release 构建与 486 项交接检查通过；新回归在修复前复现失败，最终提交待远端 CI。未刷写，真机仍待 PW07。
@@ -5555,3 +5557,13 @@ PR 首轮网站构建通过、artifact 上传成功；GitHub 提示 `checkout`�
 - 验证：Linux、GCC 14.2.0；`source /workspace/cloud-tools/activate-host.sh` 后构建 `build/host` 并执行全套 CTest，24/24（46.17 秒）。沿用 host trace、ASan/UBSan/LSan 配置构建 `build/sanitized`，`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure`，24/24（91.47 秒）。486 项交接与 diff 检查通过；D43、R4、PW07、UI 和架构同步。本批只调整已有提示标记与消费时机，不新增画布、任务、队列、栈或文件访问，资源峰值和 TF 不可抢断边界不变。
 - 固件交接：本记录提交后，以最终提交执行 `source /workspace/cloud-tools/activate-idf.sh`、`sh tools/build_firmware.sh release`，用 `tools/firmware_provenance.py` 核对最终版本、源码、生效配置和产物摘要；构建证据及日志保存到忽略目录 `.local/lockscreen-cancel-notice-20261013/`。
 - 下一步与未测：`33ed581` 的四项远端 CI 已通过，第二轮 review 已结束。本修订推送后继续确认最终提交的 CI/review；用户授权在成立问题全部处理并通过检查后合并。没有连接或刷写设备，PW07 真机专项仍待验收。
+
+
+## 2026-10-13 · PR #89 第三轮 review 的提醒、分配与输入核对
+
+- 成立项：尚未显示的轮播记录失败提醒会被下一次准备重置；等待页脚的 vector 分配缺少可检测失败出口；D43 仍误引 USB 专项 PW06。已补齐 PW07，并将历史提交失败原因/待显示标记与当前准备结果分离，只保留一条有界结果，多次失败合并，不随次数增加；原页可显示时提示「上次轮播记录未保存」，避免后续成功提交后把旧失败描述为当前失败。
+- 分配与所有权：页脚仍固定 30,096 字节，使用 malloc/free 的 RAII 所有权，检查实际返回值后才复制与修改画布；申请失败省略可选提示，不进入 Error，不影响后续取消和休眠。原 PSRAM 连续块准入、两份图片画布和解码余量不变，不新增任务/队列/栈。独立待显示结果只增加一个固定错误文案字符串与布尔标记；输入或显示回调不增加 I/O。最终 release 的 HEAP_ABORT_WHEN_ALLOCATION_FAILS 未启用，普通 malloc 可返回 nullptr。
+- 不成立项：review 称单独电源事件会先在循环顶部调用取消 helper，再在正常分发重新开启准备。实际 `platform.cpp:829` 的 input_waiting_before 仅查看触摸采样队列；唯一生产者 sample_touch 的 hit_test 只生成 Touch、K1/K2/K3，另可生成 InputReset。电源短/长按由 PMU 在 `platform.cpp:803` 的 poll 路径直接返回，不进该队列；单独电源事件到正常处理器时 sleep_requested 仍为 true，直接取消原请求，不启动新请求。若同时有触摸/K 键，队列或 physical_source 在派发前仍阻止下一轮 sleep_now，亦不构成所述 worker 重启。未改变既有输入机制，实体时序仍待 PW07，以上是调用链证据。
+- 回归：未空闲轮询显示第一次保存失败提醒前，再次进入并成功完成锁屏，返回原页仍提交一次历史提醒，随后轮询不重复；新回归在修复前 0.53 秒稳定失败。Linux app 测试链接器只对 30,096 字节的 malloc 注入空返回，验证无提示帧、画布不变、取消后没有页脚缓存或轮播推进，解除注入后下一次锁屏成功。calloc 内部 PNG 失败回归保留。
+- 验证：Linux、GCC 14.2.0；`source /workspace/cloud-tools/activate-host.sh`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host --output-on-failure`，24/24（47.87 秒）。host trace 与既有 GCC ASan/UBSan/LSan 配置，`cmake --build build/sanitized --parallel 4`、`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure`，24/24（91.64 秒）；486 项交接与 diff 检查通过。日志保留在忽略目录 `.local/lockscreen-final-boundaries-20261013/`。
+- 固件与下一步：本记录提交后，以最终提交执行独立 release 构建，并核对源码、生效配置与产物摘要。`9028ade` 的六项 CI 均通过、第三轮 review 已结束；本修订确认最终远端检查后按用户授权合并，电源键意见按上述源码证据处理。没有连接或刷写设备，PW07 的实体输入、慢卡、面板效果、TF 交接和资源峰值仍待验收。

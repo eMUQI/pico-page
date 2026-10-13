@@ -93,6 +93,10 @@ add_executable(app_test tests/app_test.cpp)
 add_dependencies(app_test document_fixtures_target)
 target_link_libraries(app_test PRIVATE reader_app)
 target_compile_options(app_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(app_test PRIVATE "LINKER:--wrap=malloc")
+    target_compile_definitions(app_test PRIVATE PICO_PAGE_WRAP_MALLOC_TEST=1)
+endif()
 add_test(NAME app COMMAND app_test ${document_fixtures}
     ${CMAKE_CURRENT_SOURCE_DIR}/.local/card/Fonts/LXGWWenKai-Regular.ttf)
 

@@ -10,6 +10,7 @@
 #include "../firmware/components/platform_read_pico/include/pico_page/sleep_input.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <thread>
 #include <cassert>
@@ -25,6 +26,18 @@
 
 namespace fs = std::filesystem;
 using namespace pico_page;
+
+#ifdef PICO_PAGE_WRAP_MALLOC_TEST
+static std::atomic<bool> fail_wait_footer_malloc{false};
+static std::atomic<unsigned> failed_wait_footer_mallocs{0};
+extern "C" void* __real_malloc(std::size_t size);
+extern "C" void* __wrap_malloc(std::size_t size) {
+    if (size == 342U * 88U && fail_wait_footer_malloc.load()) {
+        ++failed_wait_footer_mallocs; return nullptr;
+    }
+    return __real_malloc(size);
+}
+#endif
 
 static std::string read(const fs::path& path) {
     std::ifstream input(path, std::ios::binary);
@@ -1151,6 +1164,24 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         assert(FileStore(rotating.string()).last_lock_screen() == "01.png");
     }
     {
+        const auto unnoticed = root / "UnshownCursorNotice";
+        write(unnoticed / "LockScreens/01.png", png);
+        write(unnoticed / "PicoPage/settings.toml", "schema_version=1\n[power]\nsleep_screen='custom'\n");
+        ReaderApp app(unnoticed.string(), "unshown-cursor-notice", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        fs::create_directories(unnoticed / "PicoPage/data/last-lock-screen.txt.tmp");
+        assert(sleep_frame(app)); driver.present();
+        app.wake(false); driver.present();
+        fs::remove(unnoticed / "PicoPage/data/last-lock-screen.txt.tmp");
+        // Request another sleep before any idle poll can show the first commit's warning.
+        assert(sleep_frame(app)); driver.present();
+        assert(FileStore(unnoticed.string()).last_lock_screen() == "01.png");
+        app.wake(false); driver.present(); app.poll_background();
+        assert(app.view() == View::Library && app.status().find("轮播记录未保存") != std::string::npos);
+        assert(app.pending_frame() && app.pending_frame()->region && app.pending_frame()->region->y == 1120);
+        driver.present(); app.poll_background(); assert(!app.pending_frame());
+    }
+    {
         const auto removed = root / "CursorCardRemoved";
         write(removed / "LockScreens/01.png", png);
         write(removed / "PicoPage/settings.toml", "schema_version=1\n[power]\nsleep_screen='custom'\n");
@@ -1205,6 +1236,37 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         }
         assert(FileStore(waiting.string()).last_lock_screen().empty());
     }
+#ifdef PICO_PAGE_WRAP_MALLOC_TEST
+    {
+        const auto waiting = root / "WaitAllocationFailure";
+        write(waiting / "LockScreens/01.png", png);
+        write(waiting / "PicoPage/settings.toml", "schema_version=1\n[power]\nsleep_screen='custom'\n");
+        ReaderApp app(waiting.string(), "wait-allocation-failure", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        const auto original = app.canvas().pixels();
+        ContentJob::delay_starts_for_test(ContentJob::Kind::LockScreen, std::chrono::milliseconds(1500));
+        fail_wait_footer_malloc = true;
+        assert(!app.prepare_sleep() && app.sleep_pending());
+        ContentJob::delay_starts_for_test(ContentJob::Kind::LockScreen, std::chrono::milliseconds{});
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!failed_wait_footer_mallocs.load()) {
+            app.poll_background();
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(app.view() == View::Library && !app.pending_frame() && app.canvas().pixels() == original);
+        app.cancel_sleep(); fail_wait_footer_malloc = false;
+        while (std::string(app.background_state()) == "sleep-cover") {
+            app.poll_background();
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(!app.pending_frame() && app.cache_usage().cover_pixels == 0);
+        assert(FileStore(waiting.string()).last_lock_screen().empty());
+        assert(sleep_frame(app)); driver.present();
+        assert(FileStore(waiting.string()).last_lock_screen() == "01.png");
+    }
+#endif
     {
         const auto blocked = root / "CacheFailure";
         write(blocked / "LockScreens/01.png", png);
