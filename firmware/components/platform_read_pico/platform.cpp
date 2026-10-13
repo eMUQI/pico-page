@@ -135,6 +135,37 @@ const EpdWaveformMode* text_turn_modes[] = {&text_turn_mode};
 EpdWaveform text_turn_table{1, 1, text_turn_modes, nullptr};
 static_assert(sizeof(text_turn_lut) == 2368);
 
+// Row/column damage masks cover unchanged pixels between keys. Hold their
+// diagonal transitions while retaining every changed pixel's source sequence.
+// Separate immutable tables keep the driver's phase cache valid for both modes.
+template<std::size_t Phases>
+struct ChangedPixelsTable {
+    std::uint8_t lut[Phases * waveform_phase_bytes]{};
+    EpdWaveformPhases phases{};
+    const EpdWaveformPhases* ranges[1]{&phases};
+    const EpdWaveformMode mode{MODE_GL16, 1, ranges};
+    const EpdWaveformMode* modes[1]{&mode};
+    EpdWaveform table{1, 1, modes, nullptr};
+    bool ready = false;
+
+    const EpdWaveform* prepare(const EpdWaveform& source) {
+        if (!ready) {
+            const auto* original = e0470_waveform_phases(&source, MODE_GL16);
+            if (source.num_temp_ranges != 1 || !original || !original->luts ||
+                original->phases != static_cast<int>(Phases) ||
+                !build_text_turn_waveform(original->luts, sizeof(lut), Phases,
+                                          {false, true, false}, lut, sizeof(lut))) return nullptr;
+            phases = *original;
+            phases.luts = lut;
+            table.temp_intervals = source.temp_intervals;
+            ready = true;
+        }
+        return &table;
+    }
+};
+DRAM_ATTR ChangedPixelsTable<E0470_GL16_FRAMES> changed_gray16;
+DRAM_ATTR ChangedPixelsTable<E0470_GRAY8_GL16_FRAMES> changed_gray8;
+
 bool failure(std::string& error, const char* operation, esp_err_t result) {
     error = std::string(operation) + ": " + esp_err_to_name(result);
     ESP_LOGE(tag, "%s", error.c_str());
@@ -636,12 +667,22 @@ bool release_card_for_usb(std::string& error) {
 }
 
 bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
-             std::string& error, std::optional<RefreshRegion> region) {
+             std::string& error, std::optional<RefreshRegion> region, bool changed_pixels_only) {
     error.clear();
     if (!on_owner(error)) return false;
     if (!display_ready || packed == nullptr || size != framebuffer_bytes ||
         (region && !region->fits(width, height))) {
         return failure(error, "Panel frame", ESP_ERR_INVALID_ARG);
+    }
+    const bool clear = full_clean || !baseline_valid;
+    const EpdWaveform* pixel_table = nullptr;
+    if (changed_pixels_only && !clear) {
+        pixel_table = page_waveform == PageWaveform::Gray8 ? changed_gray8.prepare(E0470_GRAY8_WAVEFORM)
+                                                         : changed_gray16.prepare(E0470_WAVEFORM);
+        if (!pixel_table) {
+            baseline_valid = false;
+            return failure(error, "Changed-pixel GL16 unavailable", ESP_ERR_INVALID_STATE);
+        }
     }
     set_performance(true);
     const auto started = esp_timer_get_time();
@@ -660,7 +701,6 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
         rails_deadline = 0;
         return false;
     }
-    const bool clear = full_clean || !baseline_valid;
     baseline_valid = false;
     // The driver caches first-active phases by table address; experimental tables
     // are rebuilt in place and must retain their complete phase sequence.
@@ -679,6 +719,10 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
         draw_result = epd_clear_checked();
         if (draw_result == EPD_DRAW_SUCCESS)
             draw_result = epd_hl_update_screen_from_white(&display, MODE_GC16, status.temperature_c);
+    } else if (pixel_table) {
+        epd_hl_waveform(&display, pixel_table);
+        draw_result = update();
+        epd_hl_waveform(&display, &E0470_WAVEFORM);
     } else if (page_waveform == PageWaveform::Ripple && selected_effect == PageWaveform::Ripple) {
         draw_result = present_ripple(display, status.temperature_c);
     } else if (page_waveform == selected_effect && selected_effect != PageWaveform::Gray16) {

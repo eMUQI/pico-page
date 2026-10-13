@@ -82,22 +82,26 @@ int main() {
         Recorder recorder;
         Display screen(recorder);
         Frame patch{{"image", 1, 1, 1}, {}, FramePurpose::Overlay, RefreshIntent::Content,
-                    RefreshRegion{36, 100, 612, 480}};
+                    RefreshRegion{36, 100, 612, 480}, true};
         CHECK(screen.present(patch));
         CHECK(recorder.frames.back().refresh == RefreshIntent::FullClean && !recorder.frames.back().region);
+        CHECK(!recorder.frames.back().changed_pixels_only);
         CHECK(screen.finish(patch.token, true));
         ++patch.token.request;
         CHECK(screen.present(patch));
         CHECK(recorder.frames.back().region && recorder.frames.back().refresh == RefreshIntent::Content);
+        CHECK(recorder.frames.back().changed_pixels_only);
         CHECK(screen.finish(patch.token, false));
         ++patch.token.request;
         CHECK(screen.present(patch));
         CHECK(recorder.frames.back().refresh == RefreshIntent::FullClean && !recorder.frames.back().region);
+        CHECK(!recorder.frames.back().changed_pixels_only);
         CHECK(screen.finish(patch.token, true));
         ++patch.token.request;
         patch.purpose = FramePurpose::ManualRefresh;
         CHECK(screen.present(patch));
         CHECK(recorder.frames.back().refresh == RefreshIntent::FullClean && !recorder.frames.back().region);
+        CHECK(!recorder.frames.back().changed_pixels_only);
     }
     CHECK(usb_block_range(8, 0, 0, 512));
     CHECK(usb_block_range(8, 1, 511, 2));
