@@ -2,6 +2,8 @@
 
 ## 当前摘要（2026-10-13）
 
+PR #89 第五轮 review 的同时失败提醒遗漏已修正（2026-10-13）：缓存与轮播记录失败按两个固定类别保留，重复同类合并，同时失败用一条「此前轮播记录和图片缓存未保存」提示表达两种结果。新增回归在修复前失败；最新 host Debug 与 GCC ASan/UBSan/LSan 各 24/24，最终资料、固件来源和远端检查完成后按用户授权合并，未刷写。
+
 PR #89 第四轮 review 的两个边界已修正（2026-10-13）：等待提示取消后的恢复帧未完成时，电源菜单意图会异步保留；已成功呈现图片的缓存提交失败与轮播记录失败共用有界历史结果槽，取消或再次休眠均保留，记录失败优先。新增回归在修复前复现菜单请求丢失；最新 host Debug 与 GCC ASan/UBSan/LSan 各 24/24，待最终固件来源与远端检查，未刷写。
 
 PR #89 第三轮 review 已逐项核对（2026-10-13）：三项成立，已将尚未显示的轮播失败提醒与下一次准备分开，等待页脚改为可返回空指针的 malloc 缓冲并安全省略提示，D43 的验收引用补齐 PW07；电源键预先取消后重启 worker 的描述与实际 PMU/触摸队列路径不符，未改输入机制。新增回归在修复前失败，最新 host Debug 与 GCC ASan/UBSan/LSan 各 24/24，486 项交接检查通过；最终提交继续核对固件来源与远端检查，未刷写。
@@ -5578,3 +5580,11 @@ PR 首轮网站构建通过、artifact 上传成功；GitHub 提示 `checkout`�
 - 回归：等待一秒提示出现后取消并立即请求菜单，新回归在修复前 3.61 秒稳定失败，日志 `.local/lockscreen-menu-cache-20261013/pico-lockscreen-menu-cache-before-tests.log`。修复后验证菜单意图跨恢复帧保留、worker 退出后打开以及取消菜单恢复原画面；另覆盖缓存写入失败但轮播记录正常保存、真正唤醒和取消恢复均有一次区域结果帧，未显示缓存提醒前再次成功休眠仍有一次历史提醒。
 - 验证：Linux、GCC 14.2.0，source `/workspace/cloud-tools/activate-host.sh`，构建 `build/host` 与全套 CTest，24/24（49.68 秒）；host trace 与既有 GCC ASan/UBSan/LSan 配置，构建 `build/sanitized`，`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure`，24/24（91.87 秒）。交接与 diff 检查按本批最终资料执行，日志保存到忽略目录 `.local/lockscreen-menu-cache-20261013/`。相比上一候选仅历史结果槽增加一个指向固定文案的指针；页脚 30,096 字节、图片画布预算、队列/栈及 TF 不可抢断边界不变。
 - 下一步与未测：本记录提交后构建独立 release 并核对最终源码、配置与产物摘要；确认最终提交的远端检查，按用户授权合并。`6f26085` 的四项 CI 均通过，第四轮 review 已结束。未连接或刷写设备，PW07 真机项目仍待验收。
+
+
+## 2026-10-13 · PR #89 第五轮 review 与同时失败的结果提示
+
+- 判断与修改：缓存和轮播记录都提交失败时，优先级覆盖会丢掉缓存结果，这条意见成立。采用两个固定类别的位标记保存，重复同类原因不追加；只保留最多两个固定错误原因，不增加通知队列。同时失败合并为一次「此前轮播记录和图片缓存未保存」页脚提示，单独失败沿用原文案；取消、未实际入睡和提醒显示前再次休眠均保留两类结果。
+- 回归证据：合成卡同时阻断转换缓存和轮播记录提交，锁屏画布有效呈现，轮播记录不推进，取消恢复后有一次 y=1120 的结果帧，其文字须同时包含「轮播记录」和「缓存」，后续轮询不重复提示。新回归在修复前于 4.68 秒失败，原始日志 `.local/lockscreen-combined-20261013/pico-lockscreen-combined-before-tests.log`。
+- 验证：Linux、GCC 14.2.0，source `/workspace/cloud-tools/activate-host.sh`，构建 `build/host` 与全套 CTest，24/24（48.50 秒）；host trace 与既有 GCC ASan/UBSan/LSan 配置，构建 `build/sanitized`，`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure`，24/24（92.23 秒）。本批没有新增任务、队列、画布或文件访问；固定类别标记与最多两个固定错误原因有界，页脚 30,096 字节、图片与 worker 预算、不可抢断 TF 交接保持。记录完成后执行 486 项交接与 diff 检查，以最终提交构建独立 release 并核对源码/配置/产物摘要；证据保存到忽略目录 `.local/lockscreen-combined-20261013/`。
+- 下一步与未测：`ee795ff` 的四项 CI 已通过，第五轮 review 已结束。已发布意见逐项核实并处理，电源键预取消的意见依据实际队列/PMU 调用链判为不成立，其余成立项有实现与回归证据；本修订最终检查通过后按用户授权合并。未连接或刷写设备，PW07 真机验收仍待安排。

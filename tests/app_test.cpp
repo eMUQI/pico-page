@@ -1279,6 +1279,21 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         assert(FileStore(waiting.string()).last_lock_screen() == "01.png");
     }
 #endif
+    {
+        const auto blocked = root / "CombinedSleepFailures";
+        write(blocked / "LockScreens/01.png", png);
+        write(blocked / "PicoPage/cache/lockscreens", "blocked");
+        write(blocked / "PicoPage/settings.toml", "schema_version=1\n[power]\nsleep_screen='custom'\n");
+        fs::create_directories(blocked / "PicoPage/data/last-lock-screen.txt.tmp");
+        ReaderApp app(blocked.string(), "combined-sleep-failures", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        assert(sleep_frame(app)); driver.present();
+        assert(FileStore(blocked.string()).last_lock_screen().empty());
+        app.wake(false); driver.present(); app.poll_background();
+        assert(app.pending_frame() && app.pending_frame()->region && app.pending_frame()->region->y == 1120);
+        assert(app.status().find("轮播记录") != std::string::npos && app.status().find("缓存") != std::string::npos);
+        driver.present(); app.poll_background(); assert(!app.pending_frame());
+    }
     for (bool slept : {false, true}) {
         const auto blocked = root / (slept ? "CacheFailureSlept" : "CacheFailureCancelled");
         write(blocked / "LockScreens/01.png", png);

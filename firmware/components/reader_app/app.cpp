@@ -41,6 +41,7 @@ constexpr auto inline_image_delay = std::chrono::milliseconds(250);
 constexpr const char* kSleepFallbackNotice = "本次使用简洁屏保";
 constexpr const char* kSleepCacheNotice = "此前休眠图片缓存未保存";
 constexpr const char* kSleepCursorNotice = "此前轮播记录未保存";
+constexpr const char* kSleepCombinedNotice = "此前轮播记录和图片缓存未保存";
 constexpr const char *content_revision = "epub-native-v1";
 constexpr const char *txt_revision = "txt-utf8-v1";
 struct Entry {
@@ -4978,7 +4979,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::size_t lock_screen_page = 0;
     std::string lock_screen_error, custom_notice, custom_notice_hint;
     std::string custom_result_notice;
-    const char* custom_result_notice_hint = nullptr;
     std::string custom_rotation_name;
     std::chrono::steady_clock::time_point custom_retry_at{};
     std::optional<std::chrono::steady_clock::time_point> custom_sleep_deadline;
@@ -4986,12 +4986,16 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool custom_wait_restore_pending = false, custom_rotation_presented = false;
     bool clear_cache_pending = false;
     bool custom_prepare_finished = false, custom_sleep_attempted = false, custom_notice_pending = false;
-    bool custom_result_notice_pending = false;
+    unsigned custom_result_notices = 0;
     std::unique_ptr<graphics::Canvas> custom_sleep_image;
     void remember_sleep_result(const std::string& detail, const char* hint) {
-        // Cursor persistence has priority over optional cache publication; retain only one result.
-        if (custom_result_notice_pending && custom_result_notice_hint == kSleepCursorNotice && hint != kSleepCursorNotice) return;
-        custom_result_notice = detail; custom_result_notice_hint = hint; custom_result_notice_pending = true;
+        // One bit per fixed failure category bounds both the stored reasons and the wake update.
+        const unsigned bit = hint == kSleepCursorNotice ? 2U : 1U;
+        if (!(custom_result_notices & bit)) {
+            if (!custom_result_notice.empty()) custom_result_notice += "；";
+            custom_result_notice += detail;
+        }
+        custom_result_notices |= bit;
     }
     void list_lock_screens() {
         abandon_content();
@@ -8025,18 +8029,20 @@ void ReaderApp::poll_background(bool cancel) {
     if (!cancel || !impl_->content_loading) impl_->poll_content(!cancel);
     // Waits for the queued taps of one burst, so they reach the panel in a single update.
     if (!cancel) impl_->flush_entry();
-    if (!cancel && (impl_->custom_notice_pending || impl_->custom_result_notice_pending) &&
+    if (!cancel && (impl_->custom_notice_pending || impl_->custom_result_notices) &&
         !impl_->sleep_cover_deadline && !impl_->display.busy() && !impl_->content_loading &&
         !impl_->save_failed && !impl_->recent_save_failed &&
         (impl_->view == View::Library || impl_->view == View::Reading)) {
         impl_->custom_notice_pending = false;
-        const bool result_notice = std::exchange(impl_->custom_result_notice_pending, false);
+        const auto result_notices = std::exchange(impl_->custom_result_notices, 0U);
 #ifdef ESP_PLATFORM
         ESP_LOGW("reader_app", "Sleep image notice: %s",
-                 (result_notice ? impl_->custom_result_notice : impl_->custom_notice).c_str());
+                 (result_notices ? impl_->custom_result_notice : impl_->custom_notice).c_str());
 #endif
-        impl_->message = result_notice ? impl_->custom_result_notice_hint : impl_->custom_notice_hint;
-        if (result_notice) { impl_->custom_result_notice.clear(); impl_->custom_result_notice_hint = nullptr; }
+        if (result_notices)
+            impl_->message = result_notices == 3U ? kSleepCombinedNotice : result_notices & 2U ? kSleepCursorNotice : kSleepCacheNotice;
+        else impl_->message = impl_->custom_notice_hint;
+        if (result_notices) impl_->custom_result_notice.clear();
         // Optional sleep imagery must not cancel body image work or replace the wake destination.
         if (impl_->view == View::Reading) impl_->footer();
         else impl_->footer_bar(impl_->notice(), impl_->library_page, impl_->library_pages());
