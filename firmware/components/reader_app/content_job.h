@@ -7,6 +7,7 @@
 #include "pico_page/sync.h"
 #include <sys/types.h>
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -18,6 +19,7 @@ namespace pico_page {
 inline constexpr char kTxtGb18030Revision[] = "txt-gb18030-v1";
 // Library card thumbnails are cropped to fill this frame; the size is part of the cache entry name.
 inline constexpr int kLibraryCoverWidth = 184, kLibraryCoverHeight = 250;
+inline constexpr auto kLockScreenPrepareBudget = std::chrono::seconds(20);
 std::size_t readable_offset(const Chapter& source, std::size_t start);
 const DocumentImage* image_at(const Chapter& source, std::size_t start);
 graphics::Page plan_content(graphics::Font& font, const Chapter& source, std::size_t start,
@@ -45,7 +47,7 @@ struct PaginationSession {
 /** A single job owns its parser and font, or borrows them from a PaginationSession. Only done() permits access to its result. */
 class ContentJob {
 public:
-    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks, LockScreenList, LockScreen };
+    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks, LockScreenList, LockScreen, SaveLockScreen };
     enum class Target { Start, End, Before, Anchor, Fragment };
     enum class StartFailure { None, InternalMemory, TaskCreate };
     /**
@@ -87,6 +89,8 @@ public:
         bool save_last_book = false, cover_crop = false, preview = false;
         /** LockScreen: prepare the disk cache without retaining a result canvas. */
         bool lock_screen_prepare = false;
+        /** LockScreen: an absolute deadline shared by all rotation candidates; zero uses the default budget. */
+        std::chrono::steady_clock::time_point lock_screen_deadline{};
         bool progressive = false;
         std::uint64_t generation = 0;
         PP_DIAGNOSTIC(std::uint64_t diagnostic_session = 0, diagnostic_layout = 0;)
@@ -145,6 +149,8 @@ public:
 #ifndef ESP_PLATFORM
     /** Fail the next count starts of kind on the calling host thread; count=0 clears injection. */
     static void fail_starts_for_test(Kind kind, unsigned count, StartFailure failure);
+    /** Delay jobs of kind started on the calling host thread; cancellation interrupts the delay. */
+    static void delay_starts_for_test(Kind kind, std::chrono::milliseconds delay);
 #endif
     bool started() const { return started_; }
     void cancel() { cancelled_.store(true, std::memory_order_relaxed); }

@@ -235,15 +235,20 @@ class ReaderApp {
     /**
      * Saves progress and prepares a sleep frame. false with sleep_pending() means the cover
      * worker is still handing back resources; call again from the event loop. Other false
-     * results reject sleep. Present a successful frame before suspending storage or hardware.
+     * results reject sleep. Present a successful frame, then finish_sleep() before suspending
+     * storage or hardware.
      */
     bool prepare_sleep();
+    /** After presentation, commits the displayed rotation cursor on the content worker.
+     * false with sleep_pending() requires polling before hardware suspension or page restoration. */
+    bool finish_sleep();
     bool sleep_pending() const;
     /** Cancels sleep and restores its manual Wi-Fi intent without destroying a running cover worker. */
     void cancel_sleep();
     /**
      * Requests a modal menu without changing the underlying page or draft. A canceled cover
-     * worker is polled before opening; true means opened or queued. Other busy tasks reject it.
+     * worker and a pending wait-footer restoration are polled before opening; true means opened
+     * or queued. Other busy tasks reject it.
      */
     bool show_power_menu();
     /** Displays why the menu is unavailable while preserving the current task and controls. */
@@ -256,7 +261,8 @@ class ReaderApp {
     bool close_power_files();
     /** Draws terminal hardware-off instructions using fallback fonts; never resumes reading. */
     void show_power_off_help();
-    /** Resumes reading or the library; slept=false also restores the cancelled manual Wi-Fi intent. */
+    /** Resumes reading or the library; slept=false preserves a current error page, otherwise
+     * also restores the cancelled manual Wi-Fi intent. */
     void wake(bool slept = true);
     void card_removed();
     /**

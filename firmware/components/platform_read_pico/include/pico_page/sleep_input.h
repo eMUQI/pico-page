@@ -7,12 +7,19 @@ namespace pico_page::platform {
 /** Retains one gesture or power intent while the application restores its reading view. */
 class SleepInput {
 public:
-    void begin() { *this = {}; active_ = true; }
+    /** discard_cancel_power consumes a first short press that already cancelled the displayed sleep frame. */
+    void begin(bool discard_cancel_power = false) {
+        *this = {}; active_ = true; discard_cancel_power_ = discard_cancel_power;
+    }
     bool active() const { return active_; }
     void clear() { *this = {}; }
     void accept(const Event& event) {
         if (!active_) return;
         if (event.kind == EventKind::InputReset) { clear(); return; }
+        if (discard_cancel_power_ && event.kind != EventKind::None) {
+            discard_cancel_power_ = false;
+            if (event.kind == EventKind::Power) return;
+        }
         if (event.kind == EventKind::PowerLong) { menu_ = true; power_ = false; return; }
         if (event.kind == EventKind::Power) {
             if (!menu_) power_ = !power_;
@@ -40,7 +47,7 @@ public:
     const std::optional<Event>& tap() const { return tap_; }
     const Event& end() const { return end_; }
 private:
-    bool active_ = false, menu_ = false, power_ = false;
+    bool active_ = false, menu_ = false, power_ = false, discard_cancel_power_ = false;
     ReleasedTap contact_;
     std::optional<Event> tap_;
     Event end_;

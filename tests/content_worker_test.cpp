@@ -25,6 +25,9 @@ Queue* queue = nullptr;
 std::thread worker;
 bool fail_queue = false, fail_task = false;
 unsigned allocations = 0, creations = 0;
+#ifdef PICO_PAGE_WRAP_CALLOC_TEST
+std::atomic<unsigned> fail_calloc_on{0}, failed_callocs{0};
+#endif
 std::size_t internal_free = 128 * 1024, internal_largest = 64 * 1024;
 std::size_t psram_free = 4 * 1024 * 1024, psram_largest = 3 * 1024 * 1024;
 void finish(pico_page::ContentJob& job) {
@@ -35,6 +38,15 @@ void finish(pico_page::ContentJob& job) {
     job.wait();
 }
 }
+#ifdef PICO_PAGE_WRAP_CALLOC_TEST
+extern "C" void* __real_calloc(std::size_t count, std::size_t size);
+extern "C" void* __wrap_calloc(std::size_t count, std::size_t size) {
+    auto remaining = fail_calloc_on.load();
+    while (remaining && !fail_calloc_on.compare_exchange_weak(remaining, remaining - 1)) {}
+    if (remaining == 1) { ++failed_callocs; return nullptr; }
+    return __real_calloc(count, size);
+}
+#endif
 QueueHandle_t xQueueCreate(unsigned capacity, unsigned item_size) {
     assert(capacity == 1 && item_size == sizeof(void*));
     if (fail_queue) return nullptr;
@@ -163,6 +175,54 @@ int main(int argc, char** argv) {
         assert(cancelled_custom.start()); finish(cancelled_custom);
         assert(!cancelled_custom.result.cache_finished && !cancelled_custom.result.image && cancelled_custom.result.retryable_failure);
         assert(!fs::exists(root / "PicoPage/data/last-lock-screen.txt"));
+
+        std::vector<std::uint8_t> png;
+        std::string error;
+        assert(pico_page::EpubDocument::read_cover(argv[1], png, error));
+        std::ofstream(root / "LockScreens/01-good.png", std::ios::binary).write(
+            reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
+        custom.preview = true; custom.lock_screen_prepare = false;
+#ifdef PICO_PAGE_WRAP_CALLOC_TEST
+        std::ofstream(root / "LockScreens/02-good.png", std::ios::binary).write(
+            reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
+        const auto before_failure = pico_page::graphics::image_decode_count();
+        fail_calloc_on = 2; // Decoder creation succeeds; its scanline allocation fails.
+        ContentJob exhausted_custom(custom); assert(exhausted_custom.start()); finish(exhausted_custom);
+        assert(fail_calloc_on == 0 && failed_callocs == 1);
+        assert(!exhausted_custom.result.image && !exhausted_custom.result.cache_finished && exhausted_custom.result.retryable_failure);
+        assert(exhausted_custom.result.error.find("内存不足") != std::string::npos);
+        assert(pico_page::graphics::image_decode_count() == before_failure + 1);
+        assert(!fs::exists(root / "PicoPage/cache/lockscreens/current"));
+        assert(!fs::exists(root / "PicoPage/data/last-lock-screen.txt"));
+#endif
+        const auto before_cold = pico_page::graphics::image_decode_count();
+        ContentJob cold_custom(custom); assert(cold_custom.start()); finish(cold_custom);
+        assert(cold_custom.result.image && cold_custom.result.cache_finished && cold_custom.result.lock_screen == "01-good.png");
+        assert(pico_page::graphics::image_decode_count() == before_cold + 1);
+        assert(!fs::exists(root / "PicoPage/data/last-lock-screen.txt"));
+        psram_free = 1024 * 1024;
+        ContentJob refused_warm_custom(custom); assert(refused_warm_custom.start()); finish(refused_warm_custom);
+        assert(!refused_warm_custom.result.image && refused_warm_custom.result.retryable_failure);
+        assert(pico_page::graphics::image_decode_count() == before_cold + 1);
+        psram_free = 4 * 1024 * 1024;
+        custom.lock_screen_deadline = std::chrono::steady_clock::now() - std::chrono::milliseconds(1);
+        ContentJob expired_custom(custom); assert(expired_custom.start()); finish(expired_custom);
+        assert(!expired_custom.result.image && expired_custom.result.retryable_failure);
+        assert(pico_page::graphics::image_decode_count() == before_cold + 1);
+        ContentJob::Request cursor;
+        cursor.kind = ContentJob::Kind::SaveLockScreen; cursor.root = root.string(); cursor.sleep_image = "01-good.png";
+        {
+            std::lock_guard<std::mutex> lock(queue->mutex);
+            queue->receive_enabled = false;
+        }
+        ContentJob cursor_commit(cursor); assert(cursor_commit.start()); cursor_commit.cancel();
+        assert(!cursor_commit.done() && !fs::exists(root / "PicoPage/data/last-lock-screen.txt"));
+        {
+            std::lock_guard<std::mutex> lock(queue->mutex);
+            queue->receive_enabled = true; queue->changed.notify_one();
+        }
+        finish(cursor_commit);
+        assert(cursor_commit.result.error.empty() && pico_page::FileStore(root.string()).last_lock_screen() == "01-good.png");
 
         for (const bool fragmented : {false, true}) {
             psram_free = fragmented ? 4 * 1024 * 1024 : 3 * 1024 * 1024 - 1;
