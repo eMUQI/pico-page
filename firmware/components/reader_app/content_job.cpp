@@ -228,12 +228,6 @@ void ContentJob::run() {
 #endif
     result.offset = request.offset;
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
-    if (request.kind == Kind::SaveLockScreen) {
-        // A displayed image's small cursor commit must finish before storage is suspended.
-        if (FileStore(request.root).save_lock_screen(request.sleep_image) != StoreStatus::Ok)
-            result.error = "轮播位置未保存，下次可能重复此图";
-        return;
-    }
     if (request.kind == Kind::SaveProgress) {
         const StageTimer timer{"progress_commit"};
         FileStore store(request.root);
@@ -441,6 +435,12 @@ void ContentJob::prepare_lock_screen() {
         return stopped;
     };
     FileStore store(request.root);
+    if (!request.lock_screen_shown.empty()) {
+        result.cursor_saved = store.save_lock_screen(request.lock_screen_shown) == StoreStatus::Ok;
+#ifdef ESP_PLATFORM
+        if (!result.cursor_saved) ESP_LOGW("content_worker", "Lock screen rotation cursor was not saved");
+#endif
+    }
     const auto status = store.lock_screen_files(result.lock_screens, stop);
     if (status != StoreStatus::Ok && status != StoreStatus::Missing) {
         result.error = "图片目录不可读或超过数量限制"; return;
@@ -453,7 +453,9 @@ void ContentJob::prepare_lock_screen() {
         if (it == result.lock_screens.end()) { result.error = "指定图片已不存在"; return; }
         index = static_cast<std::size_t>(it - result.lock_screens.begin());
     } else {
-        const auto it = std::upper_bound(result.lock_screens.begin(), result.lock_screens.end(), store.last_lock_screen());
+        // The presented image advances this rotation even when its cursor commit failed.
+        const auto last = request.lock_screen_shown.empty() ? store.last_lock_screen() : request.lock_screen_shown;
+        const auto it = std::upper_bound(result.lock_screens.begin(), result.lock_screens.end(), last);
         if (it != result.lock_screens.end()) index = static_cast<std::size_t>(it - result.lock_screens.begin());
     }
     const auto attempts = request.sleep_image.empty() ? result.lock_screens.size() : 1;
@@ -531,6 +533,9 @@ void ContentJob::prepare_lock_screen() {
             result.cache_finished = store.save_cache(cache, bytes) == StoreStatus::Ok;
             if (!result.cache_finished) {
                 result.retryable_failure = true; result.error = "休眠图片缓存未保存，下次将重新准备";
+#ifdef ESP_PLATFORM
+                ESP_LOGW("content_worker", "Lock screen cache was not saved");
+#endif
                 if (request.lock_screen_prepare) return;
             } else result.error.clear();
             if (!request.lock_screen_prepare) result.image = std::move(image);

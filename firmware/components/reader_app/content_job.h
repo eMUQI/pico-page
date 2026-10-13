@@ -47,7 +47,7 @@ struct PaginationSession {
 /** A single job owns its parser and font, or borrows them from a PaginationSession. Only done() permits access to its result. */
 class ContentJob {
 public:
-    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks, LockScreenList, LockScreen, SaveLockScreen };
+    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks, LockScreenList, LockScreen };
     enum class Target { Start, End, Before, Anchor, Fragment };
     enum class StartFailure { None, InternalMemory, TaskCreate };
     /**
@@ -64,6 +64,9 @@ public:
     struct Request {
         std::string path, font;
         std::string sleep_image;
+        /** LockScreen: the rotation image last presented but not yet recorded. The job records it
+         * before choosing the next image; a restart before any such job repeats that image once. */
+        std::string lock_screen_shown;
         Kind kind = Kind::Pagination;
         Target target = Target::Start;
         Anchor anchor;
@@ -126,6 +129,8 @@ public:
         bool cache_finished = false;
         /** LockScreen: cancellation, timeout or resource failure permits an idle retry. */
         bool retryable_failure = false;
+        /** LockScreen: Request::lock_screen_shown was committed as the rotation cursor. */
+        bool cursor_saved = false;
         std::optional<PageCache> page_cache;
         off_t file_size = 0;
         time_t file_modified = 0;

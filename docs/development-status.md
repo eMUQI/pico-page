@@ -2,6 +2,8 @@
 
 ## 当前摘要（2026-10-13）
 
+自定义锁屏在 PR #89 合并后做了一次精简（2026-10-13，分支 `refactor/lockscreen-simplify`，基于 main `69ac0e8`，用户要求）：已呈现的轮播图片名留在内存，由下一次锁屏任务先提交记录再选图，休眠路径在显示后不再另起存储任务；图片已显示时，缓存和轮播记录提交失败只写诊断日志，不再显示页脚提示。删除 `finish_sleep()`、`SaveLockScreen` 任务、主循环的两个休眠标志和 `SleepInput` 的丢弃参数；回退简洁屏保的页脚提示、等待页脚、20 秒预算、坏图跳过和唤醒目的地不变。macOS host Debug 与 ASan/UBSan 各 24/24；未刷写本分支，PW07 真机验收仍待进行。
+
 PR #89 第五轮 review 的同时失败提醒遗漏已修正（2026-10-13）：缓存与轮播记录失败按两个固定类别保留，重复同类合并，同时失败用一条「此前轮播记录和图片缓存未保存」提示表达两种结果。新增回归在修复前失败；最新 host Debug 与 GCC ASan/UBSan/LSan 各 24/24，最终资料、固件来源和远端检查完成后按用户授权合并，未刷写。
 
 PR #89 第四轮 review 的两个边界已修正（2026-10-13）：等待提示取消后的恢复帧未完成时，电源菜单意图会异步保留；已成功呈现图片的缓存提交失败与轮播记录失败共用有界历史结果槽，取消或再次休眠均保留，记录失败优先。新增回归在修复前复现菜单请求丢失；最新 host Debug 与 GCC ASan/UBSan/LSan 各 24/24，待最终固件来源与远端检查，未刷写。
@@ -5588,3 +5590,15 @@ PR 首轮网站构建通过、artifact 上传成功；GitHub 提示 `checkout`�
 - 回归证据：合成卡同时阻断转换缓存和轮播记录提交，锁屏画布有效呈现，轮播记录不推进，取消恢复后有一次 y=1120 的结果帧，其文字须同时包含「轮播记录」和「缓存」，后续轮询不重复提示。新回归在修复前于 4.68 秒失败，原始日志 `.local/lockscreen-combined-20261013/pico-lockscreen-combined-before-tests.log`。
 - 验证：Linux、GCC 14.2.0，source `/workspace/cloud-tools/activate-host.sh`，构建 `build/host` 与全套 CTest，24/24（48.50 秒）；host trace 与既有 GCC ASan/UBSan/LSan 配置，构建 `build/sanitized`，`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure`，24/24（92.23 秒）。本批没有新增任务、队列、画布或文件访问；固定类别标记与最多两个固定错误原因有界，页脚 30,096 字节、图片与 worker 预算、不可抢断 TF 交接保持。记录完成后执行 486 项交接与 diff 检查，以最终提交构建独立 release 并核对源码/配置/产物摘要；证据保存到忽略目录 `.local/lockscreen-combined-20261013/`。
 - 下一步与未测：`ee795ff` 的四项 CI 已通过，第五轮 review 已结束。已发布意见逐项核实并处理，电源键预取消的意见依据实际队列/PMU 调用链判为不成立，其余成立项有实现与回归证据；本修订最终检查通过后按用户授权合并。未连接或刷写设备，PW07 真机验收仍待安排。
+
+## 2026-10-13 · 自定义锁屏精简：轮播位置延后提交，提交失败只写日志
+
+- 起因：PR #89 五轮 review 的 12 条意见全部是 P2，其中 9 条针对三处附加机制（等待页脚 4 条、失败提示 4 条、显示后提交轮播位置 1 条），核心准备逻辑没有意见。用户审阅后要求精简后两处；等待页脚按 D43 的反馈要求保留。
+- 轮播位置：锁屏帧显示成功时，应用只在内存记下图片名（`custom_rotation_shown`）。下一次 `LockScreen` 任务——唤醒后的空闲预准备，或下一次休眠准备——在选图前调用 `save_lock_screen` 提交，并按该图片名选择下一张；提交失败时仍按内存位置前进，应用保留图片名，由后续任务重试。删除 `ReaderApp::finish_sleep()`、`ContentJob::Kind::SaveLockScreen`、`sleep-cursor` 后台状态、`app_main.cpp` 的 `sleep_frame_presented`/`sleep_restore_pending` 和 `SleepInput::begin` 的丢弃参数；`sleep_now` 恢复为「准备 → 显示 → 查输入 → 休眠」的同步流程，保留等待提示刷新失败时取消休眠。已知上限：提交前重启、断电或改用非自定义屏保，下次重复显示一张图；仍满足 D43「显示成功后才保存轮播位置」。
+- 失败提示：删除「此前休眠图片缓存未保存」「此前轮播记录未保存」及合并提示，连同两类失败的位标记、原因字符串和跨休眠保留逻辑。图片已显示时，缓存和记录提交失败由 worker 写 `ESP_LOGW`；回退简洁屏保仍在唤醒后的原页页脚提示一次「本次使用简洁屏保」。缓存不是数据权威，这两类失败没有需要用户处理的动作。
+- 资源与边界：不新增任务、队列、栈或画布；请求和应用各多一个不超过 255 字节的文件名字符串，少一次显示后的 worker 启动与 TF 提交。`LockScreen` 任务在首次取消检查前多一次小文件提交（读至多 256 字节加一次原子替换），不可抢断；任务在启动前已被取消时不提交，图片名继续保留。输入分发和显示完成回调不新增 I/O。
+- 回归：worker 级覆盖提交失败仍按内存位置选下一张、解除阻断后提交成功、超过期限的任务仍提交已呈现图片。应用级覆盖显示失败不推进、显示本身不写记录、唤醒后空闲任务提交、无空闲时由下一次休眠准备提交、提交失败不提示并在后续任务重试、未提交即重启重复一张后接续、缓存与记录同时失败时图片仍显示且唤醒后无提示。删除已移除机制的测试：`finish_sleep` 轮询、两类失败提示及其跨休眠保留、轮播记录提交期间移卡、`SleepInput` 丢弃首次短按。等待页脚的三组用例及分配失败用例保留。
+- 文档：PW07、R4、架构和 UI 实现说明同步；D43 文字不变。固件内置说明和官网文案不涉及这两类提示，未改。
+- 验证：macOS 27.0，Apple clang 21.0.0，CMake 4.4.3。`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 8`、`ctest --test-dir build/host --output-on-failure --parallel 4`，24/24（37.33 秒）。按 `docs/environment.md` 的 ASan/UBSan 配置构建 `build/sanitized`，`ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure --parallel 4`，24/24（71.62 秒）；macOS 不提供 LSan。Linux 专用的 `PICO_PAGE_WRAP_MALLOC_TEST`、`PICO_PAGE_WRAP_CALLOC_TEST` 分支在 macOS 只用相同编译参数做了 `-fsyntax-only` 检查，实际运行以 Linux CI 为准。`python3 tools/check_handoff.py` 与 `git diff --check` 通过。
+- 固件与未测：本记录提交后以该提交执行 release 固件构建，结果写在 PR 说明。没有刷写本分支；用户设备上已烧录的固件不含本改动。待 PW07 真机验证：连续休眠唤醒的轮播顺序、唤醒后空闲任务提交记录的时机、未空闲即再次休眠、重启接续、冷缓存准备耗时与等待页脚出现频率、提交失败日志。
+- 下一步：真机先测冷缓存准备耗时，再决定等待页脚是否需要继续简化。

@@ -612,27 +612,10 @@ extern "C" void app_main() {
     std::int64_t last_activity = esp_timer_get_time();
     pico_page::platform::Event sleep_input;
     pico_page::platform::SleepInput resume_input;
-    bool sleep_frame_presented = false, sleep_restore_pending = false;
-    const auto cancel_requested_sleep = [&] {
-        app->cancel_sleep();
-        sleep_requested = false;
-        if (sleep_frame_presented) {
-            sleep_restore_pending = true;
-            resume_input.begin(true);
-        }
-    };
     const auto sleep_now = [&] {
-        const bool ready = sleep_frame_presented || app->prepare_sleep();
+        const bool ready = app->prepare_sleep();
         if (!ready && app->sleep_pending()) return false;
-        if (ready && (sleep_frame_presented || present(*app))) {
-            sleep_frame_presented = true;
-            if (!app->finish_sleep()) {
-                if (app->sleep_pending()) return false;
-                cancel_requested_sleep(); sleep_frame_presented = false;
-                last_activity = esp_timer_get_time();
-                return true;
-            }
-            sleep_frame_presented = false;
+        if (ready && present(*app)) {
             // Presentation can outlast a new input; poll both the input queue and PMU before suspension.
             const bool polled = pico_page::platform::poll(sleep_input, error);
             if (!polled) ESP_LOGW(tag, "Sleep input check failed: %s", error.c_str());
@@ -646,7 +629,7 @@ extern "C" void app_main() {
             if (!slept) resume_input.begin();
             app->wake(slept);
             present(*app);
-        } else { app->cancel_sleep(); sleep_frame_presented = false; }
+        } else app->cancel_sleep();
         // The timer keeps counting during light sleep; a failed attempt also waits a full period.
         last_activity = esp_timer_get_time();
         return true;
@@ -654,18 +637,17 @@ extern "C" void app_main() {
     for (;;) {
         if (sleep_requested && (physical_source || pico_page::platform::input_waiting_before(
                 std::numeric_limits<std::int64_t>::max()))) {
-            cancel_requested_sleep();
+            app->cancel_sleep();
+            sleep_requested = false;
         }
         app->poll_background(!resume_input.active() && (physical_source || pico_page::platform::input_waiting_before(
             std::numeric_limits<std::int64_t>::max())));
-        if (sleep_restore_pending && !app->sleep_pending()) {
-            sleep_restore_pending = sleep_frame_presented = false;
-            app->wake(false);
-        }
         const auto battery = pico_page::platform::battery();
         app->set_battery(battery.valid ? std::optional<int>(battery.percent) : std::nullopt, battery.valid && battery.charging);
-        if (app->pending_frame() && !present(*app) && sleep_requested)
-            cancel_requested_sleep();
+        if (app->pending_frame() && !present(*app) && sleep_requested) {
+            app->cancel_sleep();
+            sleep_requested = false;
+        }
         const auto requested_power = app->take_power_request();
         if (requested_power.action != pico_page::PowerAction::None) { pending_power = requested_power; }
         const auto power_request = pending_power;
@@ -902,15 +884,13 @@ extern "C" void app_main() {
                      app->pending_frame().has_value());
 #endif
         };
-        if (sleep_requested && sleep_frame_presented && event.kind != EventKind::None)
-            cancel_requested_sleep();
         if (resume_input.active()) {
             if (event.kind == EventKind::SdRemoved || app->view() == pico_page::View::Error) {
                 resume_input.clear();
             } else {
                 resume_input.accept(event);
                 if (event.kind != EventKind::InputReset) event = {};
-                if (!sleep_restore_pending && !app->content_busy() && !app->pending_frame()) {
+                if (!app->content_busy() && !app->pending_frame()) {
                     const auto now = esp_timer_get_time();
                     const auto held = resume_input.due(now);
                     if (held && app->view() == pico_page::View::Reading && app->can_long_press_at(held->x, held->y) &&
