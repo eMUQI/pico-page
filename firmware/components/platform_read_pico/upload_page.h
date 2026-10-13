@@ -106,7 +106,9 @@ const send=async item=>{
   await transmit('/check',item,headers,null,15000);
   if(stopped)throw {stop:true};
   sending=true;item.state='upload';render();
-  await transmit('/upload',item,headers,item.file,300000);
+  // The limit covers the whole request, including the pauses while the device refreshes its
+  // screen and the read-back after the last byte: two minutes plus the time at 50 KB/s.
+  await transmit('/upload',item,headers,item.file,120000+item.file.size/50);
   item.state='saved';return true;
  }catch(e){
   if(e.stop){item.state='stopped';item.why='已停止，未上传。';return false;}

@@ -43,6 +43,7 @@ assert.equal(requests[0].headers['X-Pico-Size'],'9');
 assert.equal(requests[0].headers['X-Pico-CRC'],'cbf43926');
 assert.equal(requests[0].headers['X-Pico-Name'],encodeURIComponent('测试.epub'));
 assert.equal(requests[0].headers['X-Pico-Token'],'test');
+assert.equal(requests[0].timeout,15000);assert.equal(requests[1].timeout,120000+9/50);
 assert.equal(elements['result-title'].textContent,'已保存 1 个');
 assert.ok(list().includes('测试.epub')&&list().includes('class="tag">已保存'));
 assert.equal(elements.again.hidden,false);assert.equal(elements.stop.hidden,true);
@@ -91,6 +92,10 @@ assert.deepEqual(requests.map(r=>r.url),['/check','/upload','/check','/upload'])
 assert.ok(list().includes('已存入 Fonts')&&list().includes('已存入 LockScreens'));
 assert.ok(list().includes('字体大小必须为 1 字节至 32 MiB')&&list().includes('锁屏图片大小必须为 1 字节至 2 MiB'));
 assert.equal(elements['result-title'].textContent,'已保存 2 个，3 个没有完成');
+// The largest book gets more than the 247 s its bytes take at the measured 265 KiB/s.
+open();
+await choose(sized('max.epub',64*1048576));
+assert.equal(requests[1].timeout,120000+64*1048576/50);
 // An image beyond the device limits is refused before any request; an unreadable one is sent on.
 const shapes={'wide.png':[4097,10],'huge.jpg':[4096,2049],'edge.png':[4096,2048],'odd.png':null};
 open();
