@@ -2,7 +2,7 @@
 
 ## 当前摘要（2026-10-13）
 
-自定义锁屏在 PR #89 合并后做了一次精简（2026-10-13，分支 `refactor/lockscreen-simplify`，基于 main `69ac0e8`，用户要求）：已呈现的轮播图片名留在内存，由下一次锁屏任务先提交记录再选图，休眠路径在显示后不再另起存储任务；图片已显示时，缓存和轮播记录提交失败只写诊断日志，不再显示页脚提示。删除 `finish_sleep()`、`SaveLockScreen` 任务、主循环的两个休眠标志和 `SleepInput` 的丢弃参数；回退简洁屏保的页脚提示、等待页脚、20 秒预算、坏图跳过和唤醒目的地不变。macOS host Debug 与 ASan/UBSan 各 24/24；未刷写本分支，PW07 真机验收仍待进行。
+自定义锁屏在 PR #89 合并后做了一次精简（2026-10-13，分支 `refactor/lockscreen-simplify`，基于 main `69ac0e8`，用户要求）：已呈现的轮播图片名留在内存，由下一次锁屏任务先提交记录再选图，休眠路径在显示后不再另起存储任务；图片已显示时，缓存和轮播记录提交失败只写诊断日志，不再显示页脚提示。删除 `finish_sleep()`、`SaveLockScreen` 任务、主循环的两个休眠标志和 `SleepInput` 的丢弃参数；回退简洁屏保的页脚提示、等待页脚、20 秒预算、坏图跳过和唤醒目的地不变。macOS host Debug 与 ASan/UBSan 各 24/24。`18be17e` 的 diagnostic 构建已按用户授权写入第二台设备：三轮休眠唤醒的轮播记录依次推进，快按时出现等待页脚并正常出图；重启接续、提交失败和 PW07 其余项仍待验收。
 
 PR #89 第五轮 review 的同时失败提醒遗漏已修正（2026-10-13）：缓存与轮播记录失败按两个固定类别保留，重复同类合并，同时失败用一条「此前轮播记录和图片缓存未保存」提示表达两种结果。新增回归在修复前失败；最新 host Debug 与 GCC ASan/UBSan/LSan 各 24/24，最终资料、固件来源和远端检查完成后按用户授权合并，未刷写。
 
@@ -5602,3 +5602,14 @@ PR 首轮网站构建通过、artifact 上传成功；GitHub 提示 `checkout`�
 - 验证：macOS 27.0，Apple clang 21.0.0，CMake 4.4.3。`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 8`、`ctest --test-dir build/host --output-on-failure --parallel 4`，24/24（37.33 秒）。按 `docs/environment.md` 的 ASan/UBSan 配置构建 `build/sanitized`，`ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure --parallel 4`，24/24（71.62 秒）；macOS 不提供 LSan。Linux 专用的 `PICO_PAGE_WRAP_MALLOC_TEST`、`PICO_PAGE_WRAP_CALLOC_TEST` 分支在 macOS 只用相同编译参数做了 `-fsyntax-only` 检查，实际运行以 Linux CI 为准。`python3 tools/check_handoff.py` 与 `git diff --check` 通过。
 - 固件与未测：本记录提交后以该提交执行 release 固件构建，结果写在 PR 说明。没有刷写本分支；用户设备上已烧录的固件不含本改动。待 PW07 真机验证：连续休眠唤醒的轮播顺序、唤醒后空闲任务提交记录的时机、未空闲即再次休眠、重启接续、冷缓存准备耗时与等待页脚出现频率、提交失败日志。
 - 下一步：真机先测冷缓存准备耗时，再决定等待页脚是否需要继续简化。
+
+## 2026-10-13 · 自定义锁屏精简的真机检查
+
+- 授权与安装：用户要求把本分支刷到设备测试。`18be17e` 的 diagnostic 构建（EIM v6.1，`sh tools/build_firmware.sh diagnostic`，`pico_page.bin` 3,527,872 字节，SHA-256 `89687d83…`），esptool 经 `/dev/cu.TARGET_DEVICE` 写入。写入前读回 ESP32-S3 rev0.2、第二台设备的 MAC，分区表为 `nvs`、`phy_init` 和单个 4 MiB `factory`；仅向 `0x10000` 写应用，`Hash of data verified`，watchdog reset 后进入书库。未改 bootloader、分区表、NVS。
+- 测试准备：卡上原先没有 `LockScreens/`，经诊断控制台上传官网五张 684×1216 PNG；休眠画面由「书籍封面」改为「自定义图片 / 轮播」，自动休眠保持关闭。休眠和唤醒由用户按实体电源键，串口在每次唤醒后导出 `PicoPage/data` 目录、跟踪事件和状态。轮播记录的内容按文件字节数判断（五个文件名长度为 17、20、16、15、17 字节，第一张与第五张无法区分），屏幕画面以用户观察为准。
+- 轮播与提交时机：三轮休眠唤醒后，`last-lock-screen.txt` 依次为 17、20、16 字节，备份依次为上一张，对应 01 → 02 → 03；用户确认画面在轮换。三次记录都在唤醒后由空闲 `LockScreen` 任务写入，休眠帧之后没有存储任务。第二轮的空闲任务运行 1.60 秒时被输入取消，记录已在此前提交。
+- 耗时：热缓存的休眠准备 245 ms、254 ms，随后整屏刷新 1.68 秒，未出现等待页脚。冷准备三个样本 2.80 秒（书库空闲，单独准备）、3.09 秒（含记录提交）、3.81 秒（正文页，与其他后台任务相邻）；休眠路径上的冷准备一次 2.90 秒。样本数不足以给出分位数。
+- 快按：用户唤醒后数秒内再次休眠多次，报告表现正常。跟踪记到两次等待页脚：一次是按下电源键时空闲准备在途，页脚帧在任务开始后 1.46 秒提交（局部刷新 637 ms），任务完成后再经 256 ms 的热准备出图；一次是空闲准备被取消后由休眠准备补做，页脚帧在 1.02 秒提交。另有一次休眠帧显示后电源键取消了入睡（`Sleep cancelled by power key`），页面恢复到正文，没有错误页。快按期间跟踪队列溢出（289 条丢弃），各次显示的图片没有逐次对应到记录；末次导出为 15 字节、备份 16 字节，与正常推进一致但不能单独证明没有重复。
+- 资源：冷准备期间 PSRAM 最低余量由 4.67 MB 降到 3.65 MB；含图片正文与快按过程中的最低堆余量为 2,045,740 字节。未见分配失败或错误页。
+- 旁证：入睡被电源键取消时，日志出现 `E sleep: Incorrect wakeup source (7) to disable.`。来源是 `platform.cpp` 在未启用 GPIO 唤醒源的退出路径上仍调用 `esp_sleep_disable_wakeup_source`，与本批改动无关，未处理。
+- 未测：重启后轮播接续、记录或缓存提交失败的日志、坏图跳过、2048×3072 PNG、JPEG、2 MiB 边界、慢卡、取消等待页脚后的恢复与长按菜单、栈峰值、release 构建。设备上保留了五张示例图和「自定义图片 / 轮播」设置，是否恢复由用户决定。
