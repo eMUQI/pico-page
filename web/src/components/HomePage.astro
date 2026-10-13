@@ -28,8 +28,8 @@ const lockscreens = [
     </div>
     <figure>
       <div class="hero-screens">
-        <img src="/assets/screens/library.png" width="684" height="1216" alt="书库卡片视图，显示示例书籍" decoding="async">
-        <img src="/assets/screens/reading.png" width="684" height="1216" alt="示例书籍正文与阅读进度" fetchpriority="high">
+        <img src="/assets/screens/library.webp" width="684" height="1216" alt="书库卡片视图，显示示例书籍" decoding="async">
+        <img src="/assets/screens/reading.webp" width="684" height="1216" alt="示例书籍正文与阅读进度" fetchpriority="high">
       </div>
       <figcaption>固件界面预览 · 演示数据 · 非设备实拍</figcaption>
     </figure>
@@ -155,7 +155,7 @@ const lockscreens = [
     <ol class="screens">
       {screens.map((screen, index) => (
         <li>
-          <img src={`/assets/screens/${screen.id}.png`} width="684" height="1216" alt={screen.alt} loading="lazy" decoding="async">
+          <img src={`/assets/screens/${screen.id}.webp`} width="684" height="1216" alt={screen.alt} loading="lazy" decoding="async">
           <p class="screen-title"><span class="mono muted">0{index + 1}</span><strong>{screen.title}</strong></p>
           <p>{screen.description}</p>
         </li>
