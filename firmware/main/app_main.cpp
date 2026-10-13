@@ -749,13 +749,13 @@ extern "C" void app_main() {
         if (portal_stop && (portal_action == pico_page::PortalAction::Stop || sleep_requested ||
                             !app->portal_visible()))
             portal_stop->store(true);
-        pico_page::PortalStatus *portal_status = nullptr;
+        // A check and its upload report several states within one refresh; only the newest is drawn.
+        pico_page::PortalStatus *portal_status = nullptr, *latest_portal = nullptr;
         while (portal_stop && !app->pending_frame() &&
                xQueueReceive(portal_events, &portal_status, 0) == pdTRUE) {
-            app->show_portal(*portal_status);
-            delete portal_status;
-            present(*app);
+            delete latest_portal; latest_portal = portal_status;
         }
+        if (latest_portal) { app->show_portal(*latest_portal); delete latest_portal; present(*app); }
         NetworkJob *completed = nullptr;
         if (network_busy && !app->pending_frame() &&
             xQueueReceive(responses, &completed, 0) == pdTRUE) {

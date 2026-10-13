@@ -7683,7 +7683,9 @@ void ReaderApp::show_portal(const PortalStatus &status) {
     const bool summary_only = view == View::Portal && !impl_->portal_closing && !status.url.empty() &&
         status.url == impl_->portal.url && status.network == impl_->portal.network &&
         status.access_ssid == impl_->portal.access_ssid && status.access_password == impl_->portal.access_password;
-    impl_->portal_started = impl_->portal_started || status.phase == PortalPhase::Waiting;
+    // The first Waiting state may be superseded by Receiving before it is drawn.
+    impl_->portal_started = impl_->portal_started || status.phase == PortalPhase::Waiting ||
+        status.phase == PortalPhase::Receiving;
     impl_->portal = status;
     if (view == View::WifiSettings) impl_->draw_wifi();
     else impl_->draw_portal();
