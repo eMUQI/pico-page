@@ -39,7 +39,7 @@ assert.equal(requests[0].headers['X-Pico-Size'],'9');
 assert.equal(requests[0].headers['X-Pico-CRC'],'cbf43926');
 assert.equal(requests[0].headers['X-Pico-Name'],encodeURIComponent('测试.epub'));
 assert.equal(requests[0].headers['X-Pico-Token'],'test');
-assert.equal(elements['result-title'].textContent,'已保存 1 本');
+assert.equal(elements['result-title'].textContent,'已保存 1 个');
 assert.ok(list().includes('测试.epub')&&list().includes('class="tag">已保存'));
 assert.equal(elements.pick.hidden,true);assert.equal(elements.again.hidden,false);assert.equal(elements.stop.hidden,true);
 
@@ -48,8 +48,8 @@ requests=[];
 handler=r=>r.headers['X-Pico-Name']===encodeURIComponent('边城.epub')?409:200;
 await choose(book('呐喊.epub'),book('边城.epub'),book('bad.pdf'),book('empty.txt',''),book('骆驼祥子.txt'));
 assert.deepEqual(requests.map(r=>r.url),['/check','/upload','/check','/check','/upload']);
-assert.equal(elements['result-title'].textContent,'已保存 2 本，3 本没有完成');
-assert.ok(list().includes('拒绝 409')&&list().includes('仅支持 EPUB 或 TXT 文件。')&&list().includes('1 字节至 64 MiB'));
+assert.equal(elements['result-title'].textContent,'已保存 2 个，3 个没有完成');
+assert.ok(list().includes('拒绝 409')&&list().includes('仅支持 EPUB、TXT、TTF、OTF、PNG 和 JPEG 文件。')&&list().includes('书籍大小必须为 1 字节至 64 MiB'));
 assert.ok(list().includes('呐喊.epub')&&list().includes('骆驼祥子.txt')&&!list().includes('data-retry'));
 assert.equal((list().match(/class="tag">已保存/g)||[]).length,2);
 
@@ -58,9 +58,9 @@ requests=[];
 handler=r=>r.url==='/upload'&&r.headers['X-Pico-Name']===encodeURIComponent('b.epub')?'error':200;
 await choose(book('a.epub'),book('b.epub'),book('c.epub'));
 assert.deepEqual(requests.map(r=>r.url),['/check','/upload','/check','/upload']);
-assert.ok(list().includes('可能已经保存，请先在书库核对')&&list().includes('data-retry="1"'));
+assert.ok(list().includes('结果未确认。点“重试”核对')&&list().includes('data-retry="1"'));
 assert.ok(list().includes('整批已停止，未上传。')&&list().includes('data-retry="2"'));
-assert.equal(elements['result-title'].textContent,'已保存 1 本，2 本没有完成');
+assert.equal(elements['result-title'].textContent,'已保存 1 个，2 个没有完成');
 // Retrying runs that one book again; a copy that did arrive is reported as a same-name refusal.
 requests=[];handler=r=>r.url==='/check'?409:200;
 await elements.list.onclick({target:{dataset:{retry:'1'}}});
@@ -79,4 +79,22 @@ handler=r=>{if(r.url==='/upload'){elements.stop.onclick();return 'abort';}return
 await choose(book('p.epub'),book('q.epub'));
 assert.ok(list().includes('结果未确认')&&list().includes('已停止，未上传。'));
 assert.equal(requests.length,2);
+// Fonts and lock screen images go through the same requests; the row names the folder.
+requests=[];handler=()=>200;
+const sized=(name,bytes)=>{const file=book(name);Object.defineProperty(file,'size',{value:bytes});return file;};
+await choose(book('文楷.TTF'),book('01-夜.jpeg'),sized('big.otf',32*1048576+1),sized('big.png',2*1048576+1),book('OFL.md'));
+assert.deepEqual(requests.map(r=>r.url),['/check','/upload','/check','/upload']);
+assert.ok(list().includes('已存入 Fonts')&&list().includes('已存入 LockScreens'));
+assert.ok(list().includes('字体大小必须为 1 字节至 32 MiB')&&list().includes('锁屏图片大小必须为 1 字节至 2 MiB'));
+assert.equal(elements['result-title'].textContent,'已保存 2 个，3 个没有完成');
+// An image beyond the device limits is refused before any request; an unreadable one is sent on.
+const shapes={'wide.png':[4097,10],'huge.jpg':[4096,2049],'edge.png':[4096,2048],'odd.png':null};
+context.URL={createObjectURL:file=>file.name,revokeObjectURL(){}};
+context.Image=class{set src(name){const shape=shapes[name];
+ if(shape){[this.naturalWidth,this.naturalHeight]=shape;this.onload();}else this.onerror();}};
+requests=[];
+await choose(book('wide.png'),book('huge.jpg'),book('edge.png'),book('odd.png'));
+assert.deepEqual(requests.map(r=>r.headers['X-Pico-Name']),['edge.png','edge.png','odd.png','odd.png']);
+assert.ok(list().includes('图片为 4097 × 10 像素')&&list().includes('图片为 4096 × 2049 像素'));
+console.log('Wi-Fi page: file kinds and image limits passed');
 console.log('Wi-Fi page: per-book rows, refusals, unconfirmed retry, batch stop and escaping passed');

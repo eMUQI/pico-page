@@ -545,6 +545,16 @@ int main() {
     assert(importing && importing->append(0, "123456789", 9, error) == StoreStatus::Ok);
     assert(importing->finish(error) == StoreStatus::Ok);
     importing.reset();
+    importing = store.begin_import("LockScreens/01-night.JPG", 9, import_crc, error);
+    assert(importing && importing->append(0, "123456789", 9, error) == StoreStatus::Ok);
+    assert(importing->finish(error) == StoreStatus::Ok);
+    importing.reset();
+    assert(!store.begin_import("LockScreens/01-night.JPG", 9, import_crc, error));
+    assert(!store.begin_import("LockScreens/large.png", 2 * 1024 * 1024 + 1, 0, error));
+    assert(!store.begin_import("LockScreens/nested/a.png", 9, import_crc, error));
+    assert(!store.begin_import("LockScreens/.hidden.png", 9, import_crc, error));
+    assert(!store.begin_import("LockScreens/notes.txt", 9, import_crc, error));
+    assert(!store.begin_import("Fonts/cover.png", 9, import_crc, error));
     assert(!store.begin_import("Articles/old.epub", 9, import_crc, error));
     assert(!store.begin_import("PicoPage/fonts/reader.ttf", 9, import_crc, error));
     assert(!store.begin_import("PicoPage/images/cover.png", 9, import_crc, error));

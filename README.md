@@ -117,7 +117,7 @@ TF 卡上没有可用的正文字体时，正文使用内置字体。内置字�
 ### 传书
 
 - **USB 文件传输**：在设备上开启后，电脑将 TF 卡识别为可移动磁盘。退出前必须先在电脑上安全弹出。步骤见 [USB 文件传输](docs/usb-storage-runtime.md)。
-- **Wi-Fi 传书**：用手机或电脑的浏览器上传 EPUB、TXT，单个文件最大 64 MiB，同名文件不覆盖。步骤和失败处理见 [Wi-Fi 传书](docs/wifi-transfer.md)。
+- **Wi-Fi 传书**：用手机或电脑的浏览器上传书籍（EPUB、TXT，最大 64 MiB）、字体（TTF、OTF，最大 32 MiB）和锁屏图片（PNG、JPEG，最大 2 MiB），同名文件不覆盖。步骤和失败处理见 [Wi-Fi 传书](docs/wifi-transfer.md)。
 
 ### 与 KOReader 接续位置
 

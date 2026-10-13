@@ -1931,6 +1931,30 @@ struct ReaderApp::Impl final : DisplayBackend {
         effective_font = resolved;
         effective_weight = selected.font_weight;
     }
+    /**
+     * Lists the TTF and OTF files in Fonts/, reading at most 2048 directory entries and keeping
+     * at most 256 fonts; a larger folder yields a partial list. The selected font stays listed
+     * while its file is missing.
+     */
+    void scan_fonts() {
+        fonts.clear();
+        DIR *dir = opendir((root + "/Fonts").c_str());
+        if (dir) {
+            for (int visited = 0; visited < 2048 && fonts.size() < 256; ++visited) {
+                const auto *item = readdir(dir);
+                if (!item) break;
+                const std::string name = item->d_name;
+                if (name.size() <= 4 || name.front() == '.') continue;
+                auto extension = name.substr(name.size() - 4);
+                for (auto &c : extension) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+                if (extension == ".ttf" || extension == ".otf") fonts.push_back("Fonts/" + name);
+            }
+            closedir(dir);
+            std::sort(fonts.begin(), fonts.end());
+        }
+        if (std::find(fonts.begin(), fonts.end(), settings.font) == fonts.end())
+            fonts.push_back(settings.font);
+    }
     bool initialize() {
         refresh_badge_config();
         if (!ui.open(root + "/Fonts/NotoSansSC-Regular.otf") && !ui.open_fallback())
@@ -1944,19 +1968,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             last_book = *recent;
             last_recorded = *recent;
         }
-        DIR *dir = opendir((root + "/Fonts").c_str());
-        if (dir) {
-            while (const auto *item = readdir(dir)) {
-                const std::string name = item->d_name;
-                if (name.size() > 4 && (name.substr(name.size() - 4) == ".ttf" ||
-                                        name.substr(name.size() - 4) == ".otf"))
-                    fonts.push_back("Fonts/" + name);
-            }
-            closedir(dir);
-            std::sort(fonts.begin(), fonts.end());
-        }
-        if (std::find(fonts.begin(), fonts.end(), settings.font) == fonts.end())
-            fonts.push_back(settings.font);
+        scan_fonts();
         load_fonts();
         scan_library();
         draw_library();
@@ -5535,17 +5547,17 @@ struct ReaderApp::Impl final : DisplayBackend {
             wrapped(message, 36, 1044, 612, 24);
         }
     }
-    /** Saved-book summary of an upload session: the count and the latest title. */
+    /** Saved-file summary of an upload session: the count and the latest file name. */
     void upload_summary(int y, int title_size) {
         const bool any = portal.saved_books > 0;
-        text(portal_closing ? "正在结束…" : portal.phase == PortalPhase::Receiving ? "正在接收 / 保存…" : any ? "已保存 " + std::to_string(portal.saved_books) + " 本" : "等待手机上传",
+        text(portal_closing ? "正在结束…" : portal.phase == PortalPhase::Receiving ? "正在接收 / 保存…" : any ? "已保存 " + std::to_string(portal.saved_books) + " 个文件" : "等待手机上传",
              36, y, title_size, 612, 1, true);
         if (!portal_closing) {
             if (any) {
                 text("最近：" + portal.latest_book, 36, y + title_size + 22, 24, 612, 3);
-                text("逐本结果见浏览器。", 36, y + title_size + 56, 24, 612, 3);
+                text("逐个结果见浏览器。", 36, y + title_size + 56, 24, 612, 3);
             } else
-                wrapped("逐本结果见浏览器。结束后书库会重新扫描。", 36, y + title_size + 22, 612, 24, true, 3);
+                wrapped("逐个结果见浏览器。结束后书库和字体列表会更新。", 36, y + title_size + 22, 612, 24, true, 3);
         }
     }
     void draw_portal() {
@@ -5578,7 +5590,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             graphics::draw_qr(canvas, portal.url, 36, 520, 264);
             text("或在浏览器输入", 324, 540, 22, 324, 3);
             text(address, 324, 574, 28, 324);
-            text("EPUB/TXT · 最大 64 MiB", 324, 660, 22, 324, 3);
+            text("书籍、字体、锁屏图片", 324, 660, 22, 324, 3);
             canvas.line(0, 816, 683, 816, 1, 3);
             upload_summary(844, 28);
         }
@@ -7564,6 +7576,13 @@ void ReaderApp::show_portal(const PortalStatus &status) {
         const bool requested = impl_->portal_requested;
         impl_->portal_live = impl_->portal_requested = false;
         const bool open_wifi = std::exchange(impl_->portal_open_wifi, false) || view == View::WifiSettings;
+        if (impl_->portal_started && impl_->card_available) {
+            // The session may have added fonts and lock screen images. A selected font that was
+            // missing may now exist, so the next load opens it instead of keeping the fallback.
+            impl_->scan_fonts();
+            impl_->effective_font.clear();
+            impl_->custom_prepare_finished = false;
+        }
         if (view != View::Portal && view != View::WifiSettings && (!requested || view != impl_->portal_request_view)) return;
         if (open_wifi) {
             impl_->refresh_badge_config();

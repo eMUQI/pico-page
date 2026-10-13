@@ -62,7 +62,7 @@ struct PortalStatus {
     std::string detail;
     /** Upload over a saved network: its name; the access point fields are then empty. */
     std::string network;
-    /** Upload sessions: books saved so far and the title of the latest one. */
+    /** Upload sessions: files saved so far and the name of the latest one. */
     int saved_books = 0;
     std::string latest_book;
     /** Nonzero request/session generation; stale events are ignored. */

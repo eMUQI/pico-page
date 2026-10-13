@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <charconv>
 #include <cstdio>
+#include <iterator>
+#include <vector>
 
 #include <atomic>
 #include <cstring>
@@ -67,16 +69,34 @@ struct Refusal {
 constexpr Refusal session_ended{"403 Forbidden", "会话无效，请重新打开传书页。"};
 constexpr Refusal bad_name{"400 Bad Request", "文件名无效或过长。"};
 constexpr Refusal bad_characters{"400 Bad Request", "文件名包含不支持的字符。"};
-constexpr Refusal bad_type{"415 Unsupported Media Type", "仅支持 EPUB 或 TXT 文件。"};
+constexpr Refusal bad_type{"415 Unsupported Media Type", "仅支持 EPUB、TXT、TTF、OTF、PNG 和 JPEG 文件。"};
 constexpr Refusal bad_checksum{"400 Bad Request", "文件校验值无效。"};
-constexpr Refusal bad_size{"413 Payload Too Large", "文件大小必须为 1 字节至 64 MiB。"};
-constexpr Refusal exists{"409 Conflict", "书库里已有同名文件，未上传。已有书籍不会被覆盖。"};
+constexpr Refusal exists{"409 Conflict", "已有同名文件，未上传。已有文件不会被覆盖。"};
+constexpr Refusal images_full{"409 Conflict", "LockScreens 已有 256 张图片或目录项过多，未上传。请先整理该文件夹。"};
+constexpr Refusal images_unreadable{"500 Internal Server Error", "无法读取 LockScreens 文件夹，请检查存储卡后重试。"};
 constexpr Refusal not_prepared{"500 Internal Server Error", "无法准备上传或清理上次的临时文件，请检查存储卡后重试。"};
 constexpr Refusal cleanup_failed{"500 Internal Server Error", "临时文件清理失败，请检查存储卡后重试。"};
 constexpr Refusal closed{"503 Service Unavailable", "传输已结束。"};
 constexpr Refusal interrupted{"500 Internal Server Error", "接收中断或超时，未完成的文件未导入。"};
 constexpr Refusal write_failed{"507 Insufficient Storage", "写入失败，请检查存储卡空间。"};
-constexpr Refusal commit_failed{"500 Internal Server Error", "保存或校验失败，请在书库核对后重试。已有同名文件不会被覆盖。"};
+constexpr Refusal commit_failed{"500 Internal Server Error", "保存或校验失败，请在设备上核对后重试。已有同名文件不会被覆盖。"};
+
+/** Where an upload goes, chosen by its lower-case extension; the page lists the same kinds. */
+struct Kind {
+    const char* extension;
+    const char* directory;
+    std::uint64_t limit;
+    Refusal too_large;
+};
+constexpr Refusal book_size{"413 Payload Too Large", "书籍大小必须为 1 字节至 64 MiB。"};
+constexpr Refusal font_size{"413 Payload Too Large", "字体大小必须为 1 字节至 32 MiB。"};
+constexpr Refusal image_size{"413 Payload Too Large", "锁屏图片大小必须为 1 字节至 2 MiB。"};
+constexpr Kind kinds[] = {
+    {".epub", "Books/", 64U * 1024 * 1024, book_size},   {".txt", "Books/", 64U * 1024 * 1024, book_size},
+    {".ttf", "Fonts/", 32U * 1024 * 1024, font_size},    {".otf", "Fonts/", 32U * 1024 * 1024, font_size},
+    {".png", "LockScreens/", 2U * 1024 * 1024, image_size}, {".jpg", "LockScreens/", 2U * 1024 * 1024, image_size},
+    {".jpeg", "LockScreens/", 2U * 1024 * 1024, image_size},
+};
 
 esp_err_t upload(httpd_req_t* request) {
     struct Activity {
@@ -122,7 +142,8 @@ esp_err_t upload(httpd_req_t* request) {
     if (dot == std::string::npos) return fail(bad_type);
     auto extension = name.substr(dot);
     for (auto& c : extension) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
-    if (extension != ".epub" && extension != ".txt") return fail(bad_type);
+    const auto kind = std::find_if(std::begin(kinds), std::end(kinds), [&](const Kind& k) { return extension == k.extension; });
+    if (kind == std::end(kinds)) return fail(bad_type);
     const auto checksum = header(request, "X-Pico-CRC", 8);
     if (checksum.empty()) return fail(bad_checksum);
     std::uint32_t crc = 0;
@@ -136,11 +157,20 @@ esp_err_t upload(httpd_req_t* request) {
         const auto value = header(request, "X-Pico-Size", 10);
         const auto parsed = std::from_chars(value.data(), value.data() + value.size(), size);
         if (request->content_len || parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size())
-            return fail(bad_size);
+            return fail(kind->too_large);
     }
-    if (!size || size > 64U * 1024 * 1024) return fail(bad_size);
+    if (!size || size > kind->limit) return fail(kind->too_large);
     std::string error;
-    transaction = FileStore(upload_session.root).begin_import("Books/" + name, size, crc, error);
+    const FileStore store(upload_session.root);
+    if (std::strcmp(kind->directory, "LockScreens/") == 0) {
+        // One image over the listing limit would make the device refuse the whole folder.
+        std::vector<std::string> images;
+        const auto listed = store.lock_screen_files(images, [cancelled] { return cancelled && cancelled->load(); });
+        if (cancelled && cancelled->load()) return fail(closed);
+        if (listed == StoreStatus::Invalid || images.size() >= 256) return fail(images_full);
+        if (listed != StoreStatus::Ok && listed != StoreStatus::Missing) return fail(images_unreadable);
+    }
+    transaction = store.begin_import(kind->directory + name, size, crc, error);
     if (!transaction) {
         ESP_LOGW("pico_upload", "Prepare failed: %s", error.c_str());
         return fail(error == "destination_exists_or_unsafe" ? exists : not_prepared);

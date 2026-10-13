@@ -653,6 +653,31 @@ static void layout_review_test(const fs::path& root, const fs::path& fixtures, c
             assert(unavailable.initialize()); check.present(); opened(unavailable, "Books/weight.txt"); check.present();
             assert(unavailable.status() == "所选字重不可用，保留字体原有字重");
         }
+        // A font saved during a transfer session is listed when the session ends, without a restart.
+        fs::remove(library_root / "Fonts/Legacy-Bold.ttf");
+        fs::copy_file(font, library_root / "Fonts/Legacy-Regular.ttf");
+        fs::remove_all(library_root / "PicoPage/cache/pages");
+        write(library_root / "PicoPage/settings.toml", "schema_version=1\n[reader]\nfont='Fonts/Legacy-Regular.ttf'\nfont_weight='bold'\n");
+        ReaderApp receiver(library_root.string(), "font-upload", true, true); Driver r{receiver};
+        assert(receiver.initialize()); r.present();
+        assert(receiver.prepare_portal()); r.present();
+        r.portal({PortalPhase::Waiting, "PicoPage-0000", "12345678", "http://192.168.4.1", "", "", 0, ""}); r.present();
+        fs::copy_file(font, library_root / "Fonts/Legacy-Bold.ttf");
+        fs::copy_file(font, library_root / "Fonts/._Legacy-Bold.ttf");
+        r.portal({PortalPhase::Closed, "", "", "", "", "", 0, ""}); r.present();
+        assert(receiver.view() == View::Library);
+        opened(receiver, "Books/b.epub"); r.present();
+        const auto upload_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (receiver.background_due()) {
+            receiver.poll_background(); receiver.background_step();
+            if (receiver.pending_frame()) r.present();
+            assert(std::chrono::steady_clock::now() < upload_deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        bool uploaded_cache = false;
+        for (const auto& item : fs::directory_iterator(library_root / "PicoPage/cache/pages"))
+            uploaded_cache = uploaded_cache || read(item.path()).find("Fonts/Legacy-Bold.ttf") != std::string::npos;
+        assert(uploaded_cache);
     }
 }
 

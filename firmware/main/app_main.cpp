@@ -112,7 +112,7 @@ SemaphoreHandle_t portal_emit_lock = nullptr;
 struct PortalSession {
     SemaphoreHandle_t lock = xSemaphoreCreateMutex();
     pico_page::network::IdleTimer upload_idle;
-    // The state the device shows, updated as books are saved.
+    // The state the device shows, updated as files are saved.
     pico_page::PortalStatus status;
 };
 void emit(const pico_page::PortalStatus &status) {
@@ -132,7 +132,7 @@ void upload_saved(void *context, const std::string &name) {
     auto &session = *static_cast<PortalSession *>(context);
     xSemaphoreTake(session.lock, portMAX_DELAY);
     ++session.status.saved_books;
-    session.status.latest_book = name.substr(0, name.rfind('.'));
+    session.status.latest_book = name;
     const auto status = session.status;
     xSemaphoreGive(session.lock);
     emit(status);

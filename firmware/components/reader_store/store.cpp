@@ -28,6 +28,8 @@ namespace pico_page {
 namespace {
 constexpr std::size_t progress_limit = 16384;
 constexpr std::uint64_t import_limit = 64 * 1024 * 1024;
+// Larger sources are refused when the image is prepared, so they are not imported either.
+constexpr std::uint64_t lock_screen_limit = 2 * 1024 * 1024;
 using Json = std::unique_ptr<cJSON, decltype(&cJSON_Delete)>;
 
 int inspect(const char* path, struct stat* info) {
@@ -451,6 +453,8 @@ bool asset_path(const std::string& path) {
         return extension == ".epub" || extension == ".txt";
     if (path.compare(0, 6, "Fonts/") == 0)
         return extension == ".ttf" || extension == ".otf" || extension == ".txt";
+    // Lock screen images are listed from the directory root only.
+    if (path.compare(0, 12, "LockScreens/") == 0) return valid_lock_screen_name(path.substr(12));
     return false;
 }
 
@@ -715,7 +719,10 @@ StoreStatus FileImport::cancel(std::string& error) {
 std::unique_ptr<FileImport> FileStore::begin_import(const std::string& path, std::uint64_t size,
                                                   std::uint32_t crc32, std::string& error) const {
     error.clear();
-    if (!asset_path(path) || !size || size > import_limit) { error = "invalid_import_path_or_size"; return {}; }
+    if (!asset_path(path) || !size || size > import_limit ||
+        (path.compare(0, 12, "LockScreens/") == 0 && size > lock_screen_limit)) {
+        error = "invalid_import_path_or_size"; return {};
+    }
     if (store_internal::safe_path(root_, path) != StoreStatus::Missing) { error = "destination_exists_or_unsafe"; return {}; }
     if (!resource_parents(root_, path)) { error = "parent_creation_or_sync_failed"; return {}; }
     const auto temporary = path + ".import.tmp";
@@ -1244,7 +1251,7 @@ StoreStatus FileStore::read_lock_screen(const std::string& name, std::vector<std
     if (safe != StoreStatus::Ok) return safe;
     struct stat info{};
     if (inspect((root_ + "/" + path).c_str(), &info)) return StoreStatus::Missing;
-    if (!S_ISREG(info.st_mode) || info.st_size <= 0 || info.st_size > 2 * 1024 * 1024) return StoreStatus::Invalid;
+    if (!S_ISREG(info.st_mode) || info.st_size <= 0 || static_cast<std::uint64_t>(info.st_size) > lock_screen_limit) return StoreStatus::Invalid;
     const auto close_file = [](FILE* file) { fclose(file); };
     std::unique_ptr<FILE, decltype(close_file)> file(fopen((root_ + "/" + path).c_str(), "rb"), close_file);
     if (!file) return StoreStatus::IoError;

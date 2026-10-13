@@ -211,9 +211,12 @@ bool start_access_point(const std::string& ssid, const std::string& password,
 /** Stops Wi-Fi, including an access point, and releases the driver, interfaces and session. */
 void disconnect_network();
 
-/** Book upload over the transfer page; see start_upload_server(). */
+/** File upload over the transfer page; see start_upload_server(). */
 struct UploadServer {
-    /** Card root; uploads go to Books/ and never replace existing files. */
+    /**
+     * Card root. Books go to Books/, fonts to Fonts/ and lock screen images to LockScreens/,
+     * chosen by extension; existing files are never replaced.
+     */
     std::string root;
     /** Sampled while a file is received; must outlive stop_portal_server(). */
     const std::atomic_bool* cancelled = nullptr;
@@ -235,7 +238,7 @@ struct UploadServer {
 };
 
 /**
- * Serves the book transfer page on port 80 to at most three connections. Each upload carries
+ * Serves the transfer page on port 80 to at most three connections. Each upload carries
  * this session's random token, which only the transfer page receives. With an empty code, call
  * after start_access_point(); otherwise after connect_network(). The caller must suspend other
  * card writers until stop_portal_server() returns.
