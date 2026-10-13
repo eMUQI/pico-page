@@ -2,6 +2,8 @@
 
 ## 当前摘要（2026-10-13）
 
+PR #89 第二轮 review 的提交失败提醒丢失意见成立，已修正（2026-10-13）：轮播记录写卡失败或提交任务无法启动时标记一次结果提示，取消恢复原页也保留该提示，不再仅依赖实际进入休眠。真正唤醒与取消恢复、两种失败均在回归中只呈现一次页脚提醒；修复前稳定失败。最新 host Debug 与 GCC ASan/UBSan/LSan 各 24/24，486 项交接检查通过；最终提交继续核对 release 来源和远端 CI/review，未刷写，真机待 PW07。
+
 PR #89（`fix/lockscreen-rotation-wake`）的 review 四项意见经源码核对均成立，已补齐：取消后的恢复不覆盖 TF 卡移除错误，等待提示刷新失败取消当前休眠，等待及取消恢复仅更新页脚，锁屏专项编号改为 PW07。另修正 PNG 解码内部内存不足被误判为坏图的边界。host Debug 与 GCC ASan/UBSan/LSan 各 24/24，release 构建与 486 项交接检查通过；新回归在修复前复现失败，最终提交待远端 CI。未刷写，真机仍待 PW07。
 
 键盘切换的逐像素保持已有候选（2026-10-13，分支 `fix/keyboard-changed-pixels`，接入 main `22dee70`）：包含键盘区的局刷只驱动变化像素，未变化的标签、边框与间隙保持；K2、基准失效及欠载恢复仍全刷。host Debug 与 GCC ASan/UBSan 各 24/24，release 固件构建通过；未刷写，切换横带、连续切换残影和真机耗时待 IN08 验收。详见本日记录。
@@ -5544,3 +5546,12 @@ PR 首轮网站构建通过、artifact 上传成功；GitHub 提示 `checkout`�
 - 回归证据：新增 TF 移除后取消恢复测试，以及 Linux 链接器 calloc 故障注入，在 PNG decoder 创建成功后使内部扫描行申请失败；有后续有效图片时须只解码一次、无缓存或轮播记录提交。修复前两项分别于 0.57 秒和 0.14 秒稳定断言失败，日志 `.local/lockscreen-review-20261013/pico-lockscreen-review-before-tests.log`。host 限时延迟注入用于稳定触发 1 秒等待提示，取消可打断该延迟；验证提示与恢复帧区域、正文像素不变、刷新失败保留错误及不推进轮播。注入设施仅 host，固件任务、栈、内存预算和 TF 不可抢断边界不变。
 - 验证：Linux、GCC 14.2.0；`source /workspace/cloud-tools/activate-host.sh`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host --output-on-failure`，24/24（46.31 秒）。同一工具链、host trace 与既有 sanitizer 配置，`cmake --build build/sanitized --parallel 4`、`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure`，24/24（92.67 秒）。ESP-IDF 6.1 的独立 release 构建通过，镜像 3,493,104 字节；记录提交后再以最终提交核对版本、源码、实际配置和产物摘要。486 项交接检查与 diff 检查通过，PW06/PW07 各一项，没有新增重复编号。原始日志和 provenance 保留在忽略目录 `.local/lockscreen-review-20261013/`。
 - 下一步与未测：用户已授权在问题处理完且最终 CI 通过后合并。首轮 push/PR 两组 host 和网站 CI 四项均通过，review 已结束；修订推送后须检查最终提交。未连接或刷写设备；慢卡、实体取消、驱动实际区域与面板效果、TF 交接和资源峰值仍待 PW07 验收。
+
+
+## 2026-10-13 · PR #89 第二轮 review 与取消后的轮播提交提醒
+
+- 判断与修改：第二轮对 `33ed581` 的意见成立：已呈现图片后的轮播记录失败有实际后果，硬件没有入睡或用户取消也须说明。记录写卡失败与提交任务启动失败均立即标记一次待显示结果；`wake(false)` 保留该标记，恢复原页面后沿用局部页脚提示并消费标记。新的图片准备重置本次结果上下文，既有真实 Error 页仍保留，准备阶段主动取消不因此产生坏图提示。
+- 回归：写卡失败和任务启动失败分别覆盖 `wake(true)`、`wake(false)`，检查轮播记录未推进，结果提示有实际 y=1120 页脚帧，后续轮询不重复提交提示帧。新回归在修复前于 0.48 秒稳定失败；保存旧状态中的提示文字不能替代实际结果帧。原始输出 `.local/lockscreen-cancel-notice-20261013/pico-lockscreen-cancel-notice-before-tests.log`。
+- 验证：Linux、GCC 14.2.0；`source /workspace/cloud-tools/activate-host.sh` 后构建 `build/host` 并执行全套 CTest，24/24（46.17 秒）。沿用 host trace、ASan/UBSan/LSan 配置构建 `build/sanitized`，`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure`，24/24（91.47 秒）。486 项交接与 diff 检查通过；D43、R4、PW07、UI 和架构同步。本批只调整已有提示标记与消费时机，不新增画布、任务、队列、栈或文件访问，资源峰值和 TF 不可抢断边界不变。
+- 固件交接：本记录提交后，以最终提交执行 `source /workspace/cloud-tools/activate-idf.sh`、`sh tools/build_firmware.sh release`，用 `tools/firmware_provenance.py` 核对最终版本、源码、生效配置和产物摘要；构建证据及日志保存到忽略目录 `.local/lockscreen-cancel-notice-20261013/`。
+- 下一步与未测：`33ed581` 的四项远端 CI 已通过，第二轮 review 已结束。本修订推送后继续确认最终提交的 CI/review；用户授权在成立问题全部处理并通过检查后合并。没有连接或刷写设备，PW07 真机专项仍待验收。

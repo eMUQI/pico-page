@@ -1123,17 +1123,24 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         assert(rotating_store.last_lock_screen() == "02.png" && graphics::image_decode_count() == decoded + 1);
         app.wake(); driver.present();
         fs::create_directory(rotating / "PicoPage/data/last-lock-screen.txt.tmp");
-        assert(sleep_frame(app)); driver.present();
-        assert(rotating_store.last_lock_screen() == "02.png");
-        app.wake(); driver.present(); app.poll_background();
-        assert(app.view() == View::Library && app.status().find("轮播记录未保存") != std::string::npos);
-        if (app.pending_frame()) driver.present();
+        for (bool slept : {true, false}) {
+            assert(sleep_frame(app)); driver.present();
+            assert(rotating_store.last_lock_screen() == "02.png");
+            app.wake(slept); driver.present(); app.poll_background();
+            assert(app.view() == View::Library && app.status().find("轮播记录未保存") != std::string::npos);
+            assert(app.pending_frame() && app.pending_frame()->region && app.pending_frame()->region->y == 1120);
+            driver.present(); app.poll_background(); assert(!app.pending_frame());
+        }
         fs::remove(rotating / "PicoPage/data/last-lock-screen.txt.tmp");
-        assert(sleep_frame(app)); app.complete_frame(true);
-        ContentJob::fail_starts_for_test(ContentJob::Kind::SaveLockScreen, 1, ContentJob::StartFailure::TaskCreate);
-        assert(app.finish_sleep() && !app.sleep_pending() && rotating_store.last_lock_screen() == "02.png");
-        app.wake(); driver.present(); app.poll_background();
-        assert(app.view() == View::Library && app.status().find("轮播记录未保存") != std::string::npos);
+        for (bool slept : {true, false}) {
+            assert(sleep_frame(app)); app.complete_frame(true);
+            ContentJob::fail_starts_for_test(ContentJob::Kind::SaveLockScreen, 1, ContentJob::StartFailure::TaskCreate);
+            assert(app.finish_sleep() && !app.sleep_pending() && rotating_store.last_lock_screen() == "02.png");
+            app.wake(slept); driver.present(); app.poll_background();
+            assert(app.view() == View::Library && app.status().find("轮播记录未保存") != std::string::npos);
+            assert(app.pending_frame() && app.pending_frame()->region && app.pending_frame()->region->y == 1120);
+            driver.present(); app.poll_background(); assert(!app.pending_frame());
+        }
     }
     {
         const auto rotating = root / "Rotation";

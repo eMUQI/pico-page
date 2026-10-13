@@ -1276,7 +1276,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto& result = job->result;
         if (request.generation != counting_generation) return;
         if (request.kind == ContentJob::Kind::SaveLockScreen) {
-            if (!result.error.empty()) { custom_notice = result.error; custom_notice_hint = kSleepCursorNotice; }
+            if (!result.error.empty()) {
+                custom_notice = result.error; custom_notice_hint = kSleepCursorNotice; custom_notice_pending = true;
+            }
             return;
         }
         // The lock screen reads the cover cache itself; a failed or cancelled attempt falls back to the title.
@@ -5065,7 +5067,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (!custom_sleep_deadline) custom_sleep_deadline = std::chrono::steady_clock::now() + kLockScreenPrepareBudget;
             request.lock_screen_deadline = *custom_sleep_deadline;
             custom_sleep_attempted = true; custom_sleep_image.reset(); custom_notice.clear();
-            custom_notice_hint.clear();
+            custom_notice_hint.clear(); custom_notice_pending = false;
             custom_rotation_name.clear(); custom_rotation_presented = false;
             if (std::chrono::steady_clock::now() >= *custom_sleep_deadline) {
                 custom_notice = "休眠图片准备超时"; custom_notice_hint = kSleepFallbackNotice; return;
@@ -7871,7 +7873,7 @@ bool ReaderApp::finish_sleep() {
     impl_->counting_job = std::make_unique<ContentJob>(std::move(request));
     if (!impl_->counting_job->start()) {
         impl_->counting_job.reset(); impl_->custom_notice = "轮播位置未保存，下次可能重复此图";
-        impl_->custom_notice_hint = kSleepCursorNotice;
+        impl_->custom_notice_hint = kSleepCursorNotice; impl_->custom_notice_pending = true;
         return true;
     }
     return false;
@@ -7888,7 +7890,9 @@ void ReaderApp::wake(bool slept) {
     impl_->custom_prepare_finished = false;
     impl_->custom_sleep_deadline.reset();
     impl_->sleep_destination_captured = false;
-    impl_->custom_notice_pending = slept && impl_->settings.sleep_screen == "custom" && !impl_->custom_notice.empty();
+    // Cursor commit failures still matter when the displayed sleep frame is cancelled.
+    impl_->custom_notice_pending = impl_->settings.sleep_screen == "custom" &&
+        (impl_->custom_notice_pending || (slept && !impl_->custom_notice.empty()));
     if (slept) impl_->sleep_wifi_target.reset();
     else cancel_sleep();
     if (!impl_->resume_to_library && impl_->has_book()) {
