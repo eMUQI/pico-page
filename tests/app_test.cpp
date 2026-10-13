@@ -230,6 +230,7 @@ static void network_setup_test(const fs::path& root, const fs::path& fixtures, b
     // Once the enter key keeps its state, a character repaints the input field alone.
     driver.tap(174, 860); app.poll_background();
     assert(app.pending_frame() && app.pending_frame()->region->y == 104 && app.pending_frame()->region->height == 320);
+    assert(!app.pending_frame()->changed_pixels_only);
     driver.present();
     // Three characters do not make a password, and a contact that leaves its key enters nothing.
     driver.tap(579, 1160); assert(!app.pending_frame() && app.view() == View::TextEntry && !app.take_wifi_request());
@@ -237,12 +238,15 @@ static void network_setup_test(const fs::path& root, const fs::path& fixtures, b
     // A layer change redraws the keys at once; digits follow on the new layer.
     driver.tap(74, 1160);
     assert(app.pending_frame() && app.pending_frame()->region && app.pending_frame()->region->y == 796);
+    assert(app.pending_frame()->changed_pixels_only);
     driver.present();
     for (int digit = 0; digit < 5; ++digit) driver.tap(40 + 67 * digit, 860);
     app.poll_background(); driver.present();
     driver.tap(74, 1160); driver.present();
     // Shift applies to one letter; backspace removes the last character.
-    driver.tap(57, 1060); driver.present();
+    driver.tap(57, 1060);
+    assert(app.pending_frame() && app.pending_frame()->changed_pixels_only);
+    driver.present();
     driver.tap(40, 860); driver.present();
     letter('q'); letter('z'); driver.tap(627, 1060);
     app.poll_background(); driver.present();

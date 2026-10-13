@@ -4239,7 +4239,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         const bool field = entry.field_dirty, keys = entry.keys_dirty || entry.ready_drawn != entry_ready();
         draw_entry();
         display.present({{"ui", 0, 0, ++ui_sequence}, {}, FramePurpose::Overlay, RefreshIntent::Content,
-                         field && keys ? RefreshRegion{0, 104, 684, 1112} : field ? entry_field_region : entry_keys_region});
+                         field && keys ? RefreshRegion{0, 104, 684, 1112} : field ? entry_field_region : entry_keys_region,
+                         keys});
     }
     void entry_done() {
         const auto field = entry.field;

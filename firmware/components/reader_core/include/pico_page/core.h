@@ -56,6 +56,8 @@ struct Frame {
     FramePurpose purpose = FramePurpose::Body;
     RefreshIntent refresh = RefreshIntent::Content;
     std::optional<RefreshRegion> region = std::nullopt;
+    /** Keep equal old/new pixels electrically idle; ignored by full-clean recovery. */
+    bool changed_pixels_only = false;
 };
 struct FrameResult {
     Frame frame;

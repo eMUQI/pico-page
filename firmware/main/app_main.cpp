@@ -522,7 +522,8 @@ bool present(pico_page::ReaderApp &app) {
              static_cast<std::uint32_t>(app.pending_frame()->purpose)});)
         const bool okay = pico_page::platform::present(
             app.canvas().data(), app.canvas().pixels().size(),
-            app.pending_frame()->refresh == pico_page::RefreshIntent::FullClean, error, app.pending_frame()->region);
+            app.pending_frame()->refresh == pico_page::RefreshIntent::FullClean, error, app.pending_frame()->region,
+            app.pending_frame()->changed_pixels_only);
         if (flash_lock) xSemaphoreGive(flash_lock);
         PP_DIAGNOSTIC(diag::end(measurement, okay ? diag::Outcome::Success : diag::Outcome::Failure);)
         pico_page::console::frame_completed(*app.pending_frame(), okay);
