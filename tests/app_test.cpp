@@ -757,6 +757,54 @@ static void release_review_test(const fs::path& root, const fs::path& fixtures, 
     assert(trimmed == first_use("RootB", std::string(40, 'b') + "/Shelf/Books"));
     assert(trimmed != first_use("RootC", std::string(40, 'a') + "/Shelf/Texts"));
 }
+static void library_resume_pagination_test(const fs::path& root, const fs::path& fixtures, bool grid, bool async) {
+    fs::create_directories(root / "Books");
+    fs::create_directories(root / "Archive");
+    fs::copy_file(fixtures / "valid.epub", root / "Archive/resume.epub");
+    const int page_size = grid ? 6 : 5, books = page_size * 2 + 1;
+    const auto book_path = [](int index) {
+        return "Books/book" + std::string(index < 10 ? "0" : "") + std::to_string(index) + ".epub";
+    };
+    for (int i = 0; i < books; ++i) fs::copy_file(fixtures / "valid.epub", root / book_path(i));
+    write(root / "PicoPage/settings.toml", std::string("schema_version=1\n[library]\nsort='name'\nview='") +
+          (grid ? "grid" : "list") + "'\n");
+    FileStore store(root.string()); std::string detail;
+    for (int target = 0; target < 3; ++target) {
+        assert(store.save_last_book("Archive/resume.epub", detail, 0) == StoreStatus::Ok);
+        ReaderApp app(root.string(), "library-resume-pages", true, async); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        const auto first = app.canvas().pixels();
+        const auto stride = app.canvas().stride();
+        const auto card_begin = first.begin() + 128 * stride, card_end = first.begin() + 334 * stride;
+        for (int page = 0; page < target; ++page) {
+            if (page == 0) driver.key(Input::K3); else driver.swipe(true);
+            driver.present();
+            assert(std::equal(card_begin, card_end, app.canvas().pixels().begin() + 128 * stride));
+            assert(app.can_long_press_at(300, 220));
+        }
+        if (target == 2) {
+            driver.refresh();
+            const auto last = app.canvas().pixels();
+            driver.tap(600, 1160); assert(!app.pending_frame() && app.canvas().pixels() == last);
+            driver.key(Input::K1); driver.present();
+            driver.tap(600, 1160); driver.present(); assert(app.canvas().pixels() == last);
+            assert(!app.can_long_press_at(grid ? 300 : 100, grid ? 700 : 640));
+        }
+        const int slot = target == 2 ? 0 : page_size - 1;
+        const int x = grid ? 36 + (slot % 3) * 214 + 80 : 100;
+        const int y = grid ? 454 + (slot / 3) * 320 + 100 : 432 + slot * 126 + 60;
+        driver.tap(x, y); driver.present(); driver.complete_content();
+        assert(app.view() == View::Reading);
+        assert(store.load_last_book(detail) == std::optional<std::string>(book_path(target * page_size + slot)));
+    }
+    assert(store.save_last_book("Archive/resume.epub", detail, 0) == StoreStatus::Ok);
+    ReaderApp app(root.string(), "library-resume-open", true, async); Driver driver{app};
+    assert(app.initialize()); driver.present();
+    driver.key(Input::K3); driver.present(); driver.key(Input::K3); driver.present();
+    driver.tap(300, 220); driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && store.load_last_book(detail) == std::optional<std::string>("Archive/resume.epub"));
+}
+
 static void swipe_test(const fs::path& root, const fs::path& fixtures, bool grid) {
     fs::create_directories(root / "Books");
     for (int i = 0; i < 15; ++i)
@@ -1403,6 +1451,10 @@ int main(int argc, char** argv) {
 
     layout_review_test(card / "LayoutSync", fixtures, argv[2], false);
     layout_review_test(card / "LayoutAsync", fixtures, argv[2], true);
+    for (bool async : {false, true})
+        for (bool grid : {false, true})
+            library_resume_pagination_test(card / (std::string("ResumePages") + (grid ? "Grid" : "List") +
+                                           (async ? "Async" : "Sync")), fixtures, grid, async);
     swipe_test(card / "SwipeList", fixtures, false);
     swipe_test(card / "SwipeGrid", fixtures, true);
     help_test(card / "HelpNoCard", fixtures, false, false);
