@@ -209,20 +209,12 @@ int main(int argc, char** argv) {
         ContentJob expired_custom(custom); assert(expired_custom.start()); finish(expired_custom);
         assert(!expired_custom.result.image && expired_custom.result.retryable_failure);
         assert(pico_page::graphics::image_decode_count() == before_cold + 1);
-        ContentJob::Request cursor;
-        cursor.kind = ContentJob::Kind::SaveLockScreen; cursor.root = root.string(); cursor.sleep_image = "01-good.png";
-        {
-            std::lock_guard<std::mutex> lock(queue->mutex);
-            queue->receive_enabled = false;
-        }
-        ContentJob cursor_commit(cursor); assert(cursor_commit.start()); cursor_commit.cancel();
-        assert(!cursor_commit.done() && !fs::exists(root / "PicoPage/data/last-lock-screen.txt"));
-        {
-            std::lock_guard<std::mutex> lock(queue->mutex);
-            queue->receive_enabled = true; queue->changed.notify_one();
-        }
-        finish(cursor_commit);
-        assert(cursor_commit.result.error.empty() && pico_page::FileStore(root.string()).last_lock_screen() == "01-good.png");
+        // A job past its deadline still records the presented image before it returns.
+        custom.lock_screen_shown = "01-good.png";
+        ContentJob cursor_commit(custom); assert(cursor_commit.start()); finish(cursor_commit);
+        assert(cursor_commit.result.cursor_saved && !cursor_commit.result.image);
+        assert(pico_page::FileStore(root.string()).last_lock_screen() == "01-good.png");
+        custom.lock_screen_shown.clear();
 
         for (const bool fragmented : {false, true}) {
             psram_free = fragmented ? 4 * 1024 * 1024 : 3 * 1024 * 1024 - 1;
