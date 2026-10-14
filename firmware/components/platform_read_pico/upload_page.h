@@ -8,7 +8,7 @@ inline constexpr char upload_page[] = R"HTML(<!doctype html><html lang="zh-CN"><
 header{padding:18px 20px;border-bottom:3px solid #111}h1{font-size:22px;margin:0}.sub{font-size:13px;color:#333}.mono{font-family:ui-monospace,Menlo,Consolas,monospace}
 .pick{padding:16px 20px;display:flex;flex-direction:column;gap:12px;border-bottom:2px solid #111}
 .drop{height:64px;border:2px solid #111;display:flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer;text-align:center;padding:0 12px}
-.drop.over{border-style:solid;border-width:3px}.drop.off{color:#555;border-color:#999;cursor:default}
+.drop.over{border-width:3px}
 .hint{margin:0;font-size:13px;color:#333;line-height:1.6}.kinds{display:grid;grid-template-columns:auto 1fr;column-gap:12px}.kinds b{color:#111}.counts{padding:12px 20px 0;display:flex;justify-content:space-between;font-size:14px}
 .result{padding:20px;display:flex;flex-direction:column;gap:6px;border-bottom:2px solid #111}.result b{font-size:20px}.result span{font-size:14px;line-height:1.6}
 .list{padding:4px 20px 0;display:flex;flex-direction:column}
@@ -23,7 +23,7 @@ header{padding:18px 20px;border-bottom:3px solid #111}h1{font-size:22px;margin:0
 .btn{height:52px;border:2px solid #111;background:#fff;color:#111;font:inherit;font-size:17px;cursor:pointer;width:100%}.primary{background:#111;color:#fff}
 [hidden]{display:none!important}</style>
 <header><h1>Wi-Fi 传书</h1><div class="sub" id="route"></div></header>
-<div class="pick" id="pick"><label class="drop" id="drop"><input id="files" type="file" accept=".epub,.txt,.ttf,.otf,.png,.jpg,.jpeg" multiple hidden><span id="drop-label">选择书籍、字体或锁屏图片</span></label>
+<div class="pick"><label class="drop" id="drop"><input id="files" type="file" accept=".epub,.txt,.ttf,.otf,.png,.jpg,.jpeg" multiple hidden><span id="drop-label">选择书籍、字体或锁屏图片</span></label>
 <div class="hint kinds"><b>书籍</b><span>EPUB、TXT · 最大 64 MiB</span><b>字体</b><span>TTF、OTF · 最大 32 MiB</span><b>锁屏图片</b><span>PNG、JPEG · 最大 2 MiB</span></div>
 <p class="hint">存入 Books、Fonts、LockScreens，同名不覆盖。</p></div>
 <div class="result" id="result" role="status" hidden><b id="result-title"></b><span>在设备上点“结束传书”，书库和字体列表随即更新。</span></div>
@@ -68,8 +68,7 @@ const row=(item,i)=>{
 const render=()=>{
  const saved=items.filter(i=>i.state==='saved'),rejected=items.filter(i=>i.state==='rejected').length;
  const done=!running&&items.length>0,missing=items.length-saved.length;
- $('pick').hidden=done;$('result').hidden=!done;$('counts').hidden=done||!items.length;
- $('drop').className='drop'+(running?' off':'');files.disabled=running;
+ $('result').hidden=!done;$('counts').hidden=done||!items.length;
  $('count').textContent=items.length+' 个文件';
  $('tally').textContent='已保存 '+saved.length+(rejected?' · 未上传 '+rejected:'');
  $('result-title').textContent=missing?'已保存 '+saved.length+' 个，'+missing+' 个没有完成':'已保存 '+saved.length+' 个';
@@ -107,7 +106,9 @@ const send=async item=>{
   await transmit('/check',item,headers,null,15000);
   if(stopped)throw {stop:true};
   sending=true;item.state='upload';render();
-  await transmit('/upload',item,headers,item.file,300000);
+  // The limit covers the whole request, including the pauses while the device refreshes its
+  // screen and the read-back after the last byte: two minutes plus the time at 50 KB/s.
+  await transmit('/upload',item,headers,item.file,120000+item.file.size/50);
   item.state='saved';return true;
  }catch(e){
   if(e.stop){item.state='stopped';item.why='已停止，未上传。';return false;}
@@ -118,26 +119,29 @@ const send=async item=>{
   return false;
  }finally{xhr=null;}
 };
-const run=async queue=>{
+// Sends the waiting files one at a time; the device holds a single upload.
+const pump=async()=>{
+ if(running)return;
  running=true;stopped=false;render();
- for(const item of queue){
+ for(let item;(item=items.find(i=>i.state==='wait'));){
   if(stopped||!await send(item)){
-   for(const rest of queue)if(rest.state==='wait'){rest.state='stopped';rest.why=stopped?'已停止，未上传。':'整批已停止，未上传。';}
+   for(const rest of items)if(rest.state==='wait'){rest.state='stopped';rest.why=stopped?'已停止，未上传。':'整批已停止，未上传。';}
    break;
   }
   render();
  }
  running=false;render();
 };
-const start=chosen=>{if(running||!chosen.length)return;items=Array.from(chosen,file=>({file,state:'wait',percent:0}));return run(items);};
-files.onchange=()=>{const done=start(files.files);files.value='';return done;};
+// Files chosen or dropped at any time join the list; a running transfer takes them in turn.
+const add=chosen=>{if(!chosen.length)return;for(const file of chosen)items.push({file,state:'wait',percent:0});render();return pump();};
+files.onchange=()=>{const done=add(files.files);files.value='';return done;};
 stop.onclick=()=>{stopped=true;if(xhr)xhr.abort();};
 again.onclick=()=>files.click();
-list.onclick=e=>{const i=e.target&&e.target.dataset&&e.target.dataset.retry;if(running||i===undefined)return;const item=items[Number(i)];item.state='wait';return run([item]);};
+list.onclick=e=>{const i=e.target&&e.target.dataset&&e.target.dataset.retry;if(i===undefined)return;items[Number(i)].state='wait';render();return pump();};
 const drop=$('drop');
-drop.ondragover=e=>{e.preventDefault();if(!running)drop.className='drop over';};
-drop.ondragleave=()=>render();
-drop.ondrop=e=>{e.preventDefault();render();start(e.dataTransfer.files);};
+document.ondragover=e=>{e.preventDefault();drop.className='drop over';};
+document.ondragleave=()=>{drop.className='drop';};
+document.ondrop=e=>{e.preventDefault();drop.className='drop';return add(e.dataTransfer.files);};
 render();
 </script></html>)HTML";
 }

@@ -185,6 +185,8 @@ esp_err_t upload(httpd_req_t* request) {
              static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
     char block[2048];
     while (transaction->received() < request->content_len) {
+        // Not reading lets TCP flow control hold the sender for the duration of a panel update.
+        while (presenting() && !(cancelled && cancelled->load())) vTaskDelay(pdMS_TO_TICKS(10));
         if (cancelled && cancelled->load()) return fail(closed);
         const auto count = httpd_req_recv(request, block, std::min<std::size_t>(sizeof(block), request->content_len - transaction->received()));
         if (count <= 0) return fail(interrupted);

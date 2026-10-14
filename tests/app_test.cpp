@@ -4065,10 +4065,18 @@ int main(int argc, char** argv) {
         driver.key(Input::K1); driver.key(Input::K3); driver.tap(60, 50); driver.tap(342, 500);
         assert(!app.pending_frame() && app.view() == View::Portal);
         assert(app.take_portal_action() == PortalAction::None && !app.prepare_sleep());
+        // A status change under the same codes updates only the summary band.
+        const auto idle = app.canvas().pixels();
         status.phase = PortalPhase::Receiving;
         driver.portal(status);
         assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::Content);
+        assert(app.pending_frame()->region && app.pending_frame()->region->y == 820 &&
+               app.pending_frame()->region->height == 252 && app.pending_frame()->region->width == 684);
         driver.present();
+        const auto stride = app.canvas().stride();
+        assert(std::equal(idle.begin(), idle.begin() + 820 * stride, app.canvas().pixels().begin()));
+        assert(std::equal(idle.begin() + 1072 * stride, idle.end(), app.canvas().pixels().begin() + 1072 * stride));
+        assert(!std::equal(idle.begin() + 820 * stride, idle.begin() + 1072 * stride, app.canvas().pixels().begin() + 820 * stride));
         driver.tap(342, 1120);
         assert(app.take_portal_action() == PortalAction::Stop); driver.present();
         driver.tap(342, 1120);
@@ -4129,6 +4137,7 @@ int main(int argc, char** argv) {
         station.saved_books = 2; station.latest_book = "呼兰河传";
         driver.portal(station);
         assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::Content);
+        assert(app.pending_frame()->region && app.pending_frame()->region->y == 784 && app.pending_frame()->region->height == 288);
         driver.present();
         assert(app.canvas().pixels() != waiting && app.view() == View::Portal);
         driver.refresh();

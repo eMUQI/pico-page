@@ -53,6 +53,7 @@ bool attempted = false;
 bool ready = false;
 bool display_ready = false;
 bool baseline_valid = false;
+std::atomic<bool> present_active{false};
 bool mounted = false;
 bool usb_owns_card = false;
 bool suppress_power = true;
@@ -674,6 +675,11 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
         (region && !region->fits(width, height))) {
         return failure(error, "Panel frame", ESP_ERR_INVALID_ARG);
     }
+    // Raised before the frame copy, which leaves receivers time to stop before the first scan.
+    struct Presenting {
+        Presenting() { present_active.store(true, std::memory_order_release); }
+        ~Presenting() { present_active.store(false, std::memory_order_release); }
+    } presenting_scope;
     const bool clear = full_clean || !baseline_valid;
     const EpdWaveform* pixel_table = nullptr;
     if (changed_pixels_only && !clear) {
@@ -763,6 +769,8 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
     rails_deadline = esp_timer_get_time() + rails_idle_us;
     return true;
 }
+
+bool presenting() { return present_active.load(std::memory_order_acquire); }
 
 InputDiagnostics input_diagnostics() {
     return {input_overflows.load(std::memory_order_relaxed),
