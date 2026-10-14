@@ -31,6 +31,16 @@ npm run preview --prefix web
 
 构建成功后保存 `web/dist/` 为 `pico-page-web` artifact，缺少产物时报错。下载并解压后得到静态站内容，可用于核对或手动部署；artifact 遵循仓库的保留期限和访问权限，不作为设备 OTA 下载地址。
 
+## 网站统计
+
+网站使用 Google Analytics 4，衡量 ID 为 `G-S9XSC6V1KV`。网站构建工作流通过 `PUBLIC_GA_MEASUREMENT_ID` 传入 ID；GitHub 仓库同名 Variable 可覆盖此值。该 ID 是公开标识，不是密钥。本地构建默认不启用统计；需要检查统计产物时执行 `PUBLIC_GA_MEASUREMENT_ID=G-S9XSC6V1KV npm run build --prefix web`。
+
+统计仅在正式主机名 `picopage.wulu.zone` 下启用，打开页面后直接加载 Google tag，使用 Cookie 统计访问；不显示访客同意提示或统计设置入口，不读写同意选择。localhost、Cloudflare 默认域名和预览域名不加载 Google tag。网站不启用广告存储、广告个性化或 Google signals。
+
+GA 数据流需开启增强型衡量，统计页面访问、滚动、外链和字体及锁屏 ZIP 下载点击。下载点击不代表下载完成。安装页另外发送四种不带自定义参数的事件：`device_connect`（点击连接设备，包括随后取消选择）、`install_start`（开始下载与安装）、`install_success`（网页写入和校验完成，仍可能需要手动重启）、`install_failure`（下载或安装失败）。这些事件不上传设备标识、书籍或串口日志，也不证明固件已经正常启动。统计失败不影响安装。
+
+部署后需使用允许 GA 的浏览器核对正式域名自动加载 Google tag、实时报告有页面访问、安装事件正常接收，以及预览域名不加载统计。Google tag 被网络或扩展阻止时，访问和事件可能不计入；普通报表也不保证立即出现。Google Analytics 管理后台的增强型衡量及实际数据接收需要另行核对。
+
 ## 部署
 
 网站地址为 https://picopage.wulu.zone，使用 Cloudflare Pages 的 `picopage` 项目，默认域名为 `picopage-91c.pages.dev`。Pages 项目没有连接 Git 仓库，由网站构建工作流用 wrangler 直接上传；GitHub 仓库保持私有。

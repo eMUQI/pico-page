@@ -204,6 +204,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
         }
 
         async function connect() {
+          window.dispatchEvent(new CustomEvent("pico-page:analytics", { detail: "device_connect" }));
           let port;
           try {
             port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] });
@@ -254,6 +255,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
         }
 
         async function install() {
+          window.dispatchEvent(new CustomEvent("pico-page:analytics", { detail: "install_start" }));
           show("writing");
           progress(0, "正在下载固件");
           let erasing = false;
@@ -279,7 +281,9 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
                 progress(Math.floor((written / total) * 100), written < total ? "正在写入" : "正在校验"),
             });
             show("done", (await release()) ? "" : "固件已写入并通过校验，但设备可能没有自动重启。请按住电源键约 10 秒强制关机，松开后再按住 1 秒以上开机。");
+            window.dispatchEvent(new CustomEvent("pico-page:analytics", { detail: "install_success" }));
           } catch (error) {
+            window.dispatchEvent(new CustomEvent("pico-page:analytics", { detail: "install_failure" }));
             console.error(error);
             await release();
             show("idle", erasing ? "安装没有完成。保持供电，重新连接后再安装一次。" : "固件下载失败，设备没有改动。检查网络后重新连接再试。");

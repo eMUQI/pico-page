@@ -2,6 +2,8 @@
 
 ## 当前摘要（2026-10-14）
 
+官网 GA4 接入已完成本地候选（衡量 ID `G-S9XSC6V1KV`）：按用户最新要求，正式域名打开页面后直接加载统计，不显示同意提示或统计设置入口；覆盖基础访问及四个安装流程事件。带 ID 和不带 ID 的网站构建、脚本隔离自检通过；尚未提交或部署，Google Analytics 实时接收待验证。详见本日「网站 GA4 移除同意流程」记录。
+
 `0.2.0-beta.4` 已于 2026-10-14 作为预发布发布（标签 `v0.2.0-beta.4`，main `4546350`，PR #98），包含 PR #95、#96、#97：准备休眠只由电源键取消、错误和唤醒按来源返回、非正文刷新只驱动变化像素。三项只有 host 测试和固件构建，release 构建未在真机运行；用户将经联网更新自测。详见本日「发布 0.2.0-beta.4」记录。
 
 `0.2.0-beta.4` 第 3 项「非正文刷新只驱动变化像素」经 PR #97 合并为 main `3498ac3` 并随该版发布（分支 `fix/overlay-changed-pixels`，基于最新 main `6989b0e`）：Display 统一为有效基准的 Overlay+Content 开启逐像素保持，覆盖整屏 UI 和既有局部更新；Body、K2、显式 FullClean、基准失效和失败恢复保留原规则。Debug 与 GCC ASan/UBSan/LSan CTest 各 24/24，标准与 release 固件构建及来源核验通过，静态 DRAM 未增加；首轮既有异步回归的时序失败及复跑结果见末尾记录。首轮 push/PR 的 host 与网站 CI 四项通过，Codex review 未提出意见；未刷写；默认与快速档的闪烁、灰阶、累积残影、K2 和同条件面板耗时待 DP08/IN08 真机验收。
@@ -5885,3 +5887,25 @@ PR [非正文普通刷新只驱动变化像素](https://github.com/eMUQI/pico-pa
 - 未测：PR #95–#97 的真机行为（PW05、PW07、DP02、IN08、第 3 项目视效果）；release 构建未在真机运行。
 - PR #99 首轮 Codex review：README 项目状态行、锁屏图集 `README.txt`（及 ZIP 内同名文件）仍写 beta.3 的「操作可取消」，路线图计划标题仍为 beta.4，三条成立已修正，锁屏图集随 main 部署更新。第二轮两条（路线图第 8 项仍写线上为 beta.3、当前摘要中前三项仍写作候选）也成立，已改为已合并并随 beta.4 发布，保留真机未测说明。许可一条（P1）属实但不是本次引入：公开镜像静态链接 LGPL-3.0-or-later 的 epdiy，Release 和网站仍未附许可文件与重新链接材料，与 beta.1 起各版相同，待用户决定处理方式。
 - 下一步：用户从 beta.3 联网更新到 beta.4 自测，可同时完成 OTA03–OTA06；下一轮改动前把 `firmware/version.txt` 改为 `0.2.0-beta.5`；路线图第 4–9 项顺延。
+
+## 2026-10-14 · 网站 GA4 本地接入
+
+用户提供 Google tag 及衡量 ID `G-S9XSC6V1KV`，按前述方案完成本地接入。开始时当前分支为 `perf/chapter-cache`，已有固件、存储及配套文档的未提交改动；本批不切换分支，不修改这些改动，只补充网站与网站构建工作流，并在本文件记录候选状态。
+
+- 实现：共用 `Site.astro` 接入 `Analytics.astro`；仅正式主机名 `picopage.wulu.zone` 显示统计选择，访客同意后才加载 Google tag。拒绝不加载，撤回设置 `ga-disable-G-S9XSC6V1KV` 并删除与该主机名一致的 GA Cookie，避免刷新页面中断安装；localStorage 不可用时仅保留本页选择。广告存储、广告用户数据、广告个性化与 Google signals 关闭。Google tag 使用异步脚本，失败不阻塞安装。
+- 事件：连接按钮、安装开始、写入校验完成、下载或安装失败分别发送 `device_connect`、`install_start`、`install_success`、`install_failure`，仅传事件名。连接事件含取消串口选择，成功不证明固件启动；没有上报设备标识、书籍、错误文本或串口日志。增强型衡量由 Google Analytics 数据流配置，ZIP 下载只衡量点击。`web/README.md` 记录配置、含义和验收边界。
+- 配置：GitHub 网站构建步骤传入公开变量 `PUBLIC_GA_MEASUREMENT_ID`，仓库 Variable 可覆盖，缺省为用户提供的 ID；本地未配置时不显示选择或加载 tag，不需要新增依赖。
+- 验证环境与命令：现有 Node.js v26.7.0、Astro 7.3.4 和已安装网站依赖。`PUBLIC_GA_MEASUREMENT_ID=G-S9XSC6V1KV npm run build --prefix web`、`npm run build --prefix web` 各构建 5 页成功；Node VM 隔离执行实际组件脚本，覆盖域名排除、初次及已保存的同意/拒绝、撤回与重新同意、存储不可用、安装事件白名单和无自定义参数。构建产物检查覆盖全部 5 页。首次自检把两次拒绝的累计 Cookie 清理数当作单次而断言失败，改为检查本次增量后全部通过，产品代码未因此修改。未新增永久测试文件。交接检查及 diff 检查结果见本批交接。
+- 未测与下一步：未提交、推送或部署；未运行固件/host 测试，因为本批不修改固件。VM 自检不等于真实 Google tag 网络行为；浏览器布局、Cookie 实际作用域、同意/撤回后的请求、GA 实时报告、Google Analytics 后台增强型衡量及真实安装事件接收仍待部署验收。脚本被扩展或网络阻止、访客拒绝时不计入统计，撤回不会删除已发送的数据。
+
+## 2026-10-14 · 网站 GA4 移除同意流程
+
+用户明确要求无需访客同意。本批将前一条的 GA4 候选简化为正式域名自动加载，保留 ID、基础统计和四个安装事件；前一条记录只反映当时方案。
+
+- 变更：删除同意提示、统计设置控件、localStorage 选择和撤回逻辑；`Analytics.astro` 仅输出脚本，正式主机名打开页面后直接异步加载 Google tag。预览及本地仍不加载。保留广告存储、广告用户数据、广告个性化禁用及 Google signals 关闭设置。更新 `web/README.md` 与当前摘要，无固件改动，不切换分支。
+- 验证：Node.js v26.7.0、Astro 7.3.4；`PUBLIC_GA_MEASUREMENT_ID=G-S9XSC6V1KV npm run build --prefix web` 和 `npm run build --prefix web` 均成功。Node VM 对全部 5 页实际构建脚本检查正式域名自动加载、三个非正式域名不加载、无同意控件或选择存储、四个白名单事件不带参数和未知事件不发送；未配置构建全部 5 页均无 Google tag 脚本。自检通过，未新增永久测试。`python3 tools/check_handoff.py` 与 `git diff --check` 通过。
+- 未测：未提交、推送或部署；实际 Google tag 请求、Cookie 与 GA 实时报告接收仍需上线后验证。本批仅网站改动，未运行固件、host 或设备测试，原有固件改动保持原样。
+
+## 2026-10-14 · 网站 GA4 提交与部署准备
+
+用户授权提交并部署。远端核对时当前 `perf/chapter-cache` 的 HEAD 与 `origin/main` 均为 `705907d`，无分歧，main 未设置分支保护；没有仓库 Variable 覆盖 GA 衡量 ID。仅提交 GA4 组件、布局引用、安装事件、网站工作流与说明，以及本文件中的网站记录；不包含并行中的章节缓存固件改动，不切换当前分支。将该网站提交推送到 main，由现有 Website build 工作流构建并部署正式站点。带 ID 与不带 ID 的构建及实际产物脚本自检已通过，交接检查 488 项与 diff 检查通过。部署和线上结果在后续记录中补充；本条不代表部署已完成。
