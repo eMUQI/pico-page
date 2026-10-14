@@ -56,7 +56,7 @@ struct Frame {
     FramePurpose purpose = FramePurpose::Body;
     RefreshIntent refresh = RefreshIntent::Content;
     std::optional<RefreshRegion> region = std::nullopt;
-    /** Keep equal old/new pixels electrically idle; ignored by full-clean recovery. */
+    /** Display sets this for Overlay+Content only; equal old/new pixels stay electrically idle. */
     bool changed_pixels_only = false;
 };
 struct FrameResult {
@@ -84,6 +84,7 @@ public:
 class Display {
 public:
     explicit Display(DisplayBackend& backend) : backend_(backend) {}
+    /** Applies baseline recovery and changed-pixel policy before submitting to the backend. */
     bool present(Frame frame);
     std::optional<FrameResult> finish(const OperationContext& token, bool success);
     bool busy() const { return in_flight_.has_value(); }
