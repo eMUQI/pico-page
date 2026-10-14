@@ -2,6 +2,8 @@
 
 ## 当前摘要（2026-10-14）
 
+`0.2.0-beta.4` 计划第 2 项「错误和状态页按来源返回」已实现为本地候选（分支 `fix/return-to-origin`，基于最新 main `33b7e97`）：正文、书库、设置共用来源判定，覆盖错误、保存重试、网络收尾和休眠唤醒；从设置进入的排版及自定义锁屏回退提示已覆盖。Debug 与 ASan/UBSan/LSan CTest 各 24/24，标准固件构建通过；未推送、未开 PR、未刷写，待 DP02、PW07 真机验收。完整 View 归类见 [UI 实现说明](ui-implementation.md#错误和状态页的返回来源020-beta4待真机验收)，本日记录列出命令和边界。
+
 `0.2.0-beta.3` 已于 2026-10-14 作为预发布发布（标签 `v0.2.0-beta.3`，main `2937ca7`，PR #93）。这一版包含 PR #86 至 #92：Wi-Fi 传书接收字体和锁屏图片、传书接收期间刷新失败的修复、传书页随时加文件、锁屏轮播的冷缓存准备与精简、书库「继续阅读」卡片、键盘局刷和缺字方框。线上已有高于 beta.2 的版本，联网更新的真机验收（OTA03–OTA06）可以开始，需用保留双槽分区的第一台设备。详见本日「发布 0.2.0-beta.3」记录。
 
 缺字的显示已统一（2026-10-14，分支 `fix/missing-glyph-box`，基于 main `33f8ba9`，PR #91 已合并）：用户上传的两个字体缺繁体字，一个把缺字画成空白，一个画成花纹方块。现在任何字体缺少的字符都画同一种空心方框，汉字等宽字符占一个字宽，其余占半个字宽；分页缓存版本改为 `pagination-v4`，总页数会重新统计一次，阅读进度不受影响。逐字回退到其他字体没有做。host、sanitizer、固件构建通过，已在设备上用同一本繁体书确认。详见本日记录。
@@ -5715,3 +5717,20 @@ PR 首轮网站构建通过、artifact 上传成功；GitHub 提示 `checkout`�
 - 补充（同日）：用户确认保留全部 9 项。用户反馈 iPhone 热点认证页也能上传，第 9 项改为删去 `web/src/pages/docs.astro` 中对应的常见问题和第 3 步括注。
 - 检查：交接检查、diff 检查。
 - 下一步：先改 `firmware/version.txt`，从第 1–3 项开始实现。
+
+
+## 2026-10-14 · 0.2.0-beta.4 第 2 项：错误和状态页按来源返回
+
+- 起点与范围：先读取 AGENTS、路线图第 2 项及本日计划记录；获取 `origin/main` 后从 `33b7e97` 新建分支 `fix/return-to-origin`，独立 worktree 为 `/workspace/pico-page-return-to-origin`。原工作目录保持干净。按版本规则先将 `firmware/version.txt` 从 `0.2.0-beta.3` 更新为 `0.2.0-beta.4`，尚未发布。
+- 变更：`origin_for()` 统一判定正文、书库、设置类别；`error()` 弹出时捕获，`prepare_sleep()` 在等待背景工作前固定。错误返回、保存重试成功和继续离线共用返回入口；正文沿用 `recover_body()`，书库保留文件夹和分页，设置回首页并清除草稿。错误页再次失败保留首次来源；按钮改为「恢复阅读」「返回书库」「返回设置」，保存未完成仍优先提供「重试保存」。整屏和局刷失败只在正文来源提示恢复已确认位置，其他来源说明回书库或设置首页。保存、书签、外部 `show_error()` 和移卡的错误均在实际弹出时捕获当前页面来源。
+- 页面核对：33 个 View 的分类和依据完整列于 `docs/ui-implementation.md` 的「错误和状态页的返回来源」。Typography 确实可从 InputSettings 进入，新增入口布尔标记；刷新子页、帮助、传输沿用各自已有入口标记。Loading 在所有进入路径捕获来源；NetworkClosing 直接复用 `network_return_view`；Error、Sleeping 和 PowerMenu 分别保留错误、休眠及菜单前来源。PowerOff 是不接受返回或休眠的终态，正常路径不会走通用错误返回；未新增终态退出路径。没有待定的 View 归类。
+- 关联修正：自定义锁屏失败的唤醒提示原先只允许正文和书库显示；设置类现在能回设置，故增加设置首页的一次性页脚局刷，避免提示拖到进入书库才出现，不带书库分页控件。对应回归先在已修正返回来源、尚未补齐提示的代码上确认失败。
+- 修复前验证：`tests/app_test.cpp` 沿用 Driver，支持可选的第 4 个场景参数便于单独复现。对原 main 实现运行 `build/host/app_test build/host/document-fixtures .local/card/Fonts/LXGWWenKai-Regular.ttf <场景>`；management、details、settings、invalid-settings、screen、typography-settings、sleep-settings、sleep-power、retry-save 共 9 个场景失败，分别落在来源去向或屏幕失败文案断言。正文错误、正文休眠和书库休眠的 3 个保护场景通过，确认原位置恢复与 PW07 已有书库去向成立。
+- 修复后回归：新增 19 个场景，除两项异步保存场景仅运行 worker 模式外，其余均以同步和异步两种模式运行，共 36 组。覆盖书籍管理外部修改、详情错误、设置保存/配置无效、设置入口排版、整屏和设置键盘局刷失败、正文位置不变、书库/设置中的异步保存失败及再次重试、设置页脚保存重试、同步/账户收尾后继续离线及迟到结果、书库/设置移卡、三类休眠和设置自定义锁屏回退提示只出现一次。同步/异步旧用例中「未保存错误返回设置」「从设置休眠回书库/正文」的预期按新规则更新；保存内容、修订和重试断言保留，设置页脚重试另有新增回归。
+- 环境与命令：Debian 13、GCC 14.2、Python 3.12，复用 `/workspace/cloud-tools/activate-host.sh` 与 `activate-idf.sh`；ESP-IDF 为既有 v6.1（`fff9895c82d744c7237be8847347bdd1b07c6643`，源码干净），BSP 为锁定的 `5f3406deec33304de8801046db583dec7c49e55b`。未替换全局工具链；测试字体和固定 FreeType 源码沿用已准备资源，未提交到仓库。
+- host 验证：仓库根目录执行 `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug && cmake --build build/host --parallel 4`、`ctest --test-dir build/host --output-on-failure`，24/24 通过。按 `docs/environment.md` 的三个 sanitizer 标志配置并构建 `build/sanitized`，再执行 `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure`，24/24 通过，未报告内存、未定义行为或泄漏错误。
+- 固件验证：`sh tools/build_firmware.sh` 标准入口通过，版本核对为 `0.2.0-beta.4+g33b7e97.dirty`，对应提交前的本批代码候选；应用镜像为 `0x355990` 字节，4 MiB 槽剩余 17%。实际 sdkconfig 为 ESP32-S3，回滚和交叉签名 CA 验证仍启用。首轮构建期间继续补回归，来源校验如实拒绝了变化中的源码；冻结代码后重新执行标准入口，构建及来源核对通过。构建记录、host 与 sanitizer 日志保存在忽略目录 `.local/return-to-origin/`；本次不是发布构建或刷写记录。
+- 配套检查：`python3 tools/check_handoff.py` 487 项通过；`git diff --check` 通过。UI 规则、DP02/PW07 真机核对点和版本说明已同步，路线图第 2 项标为「已实现，待真机验收」。
+- 资源与边界：所有来源状态由既有应用执行者持有，三个字节级来源字段和一个入口布尔标记替代原单个布尔目的地；不增加任务、队列、画布或缓存。来源判定仅做有界分支，清理草稿和重绘沿用现有流程，没有新增扫描、解码或等待工作退出。未改变 `has_book()`、阅读位置与进度修订协议、保存时机、K2 全刷或页面布局；未测量真机时延及堆/栈峰值，不以 host 耗时替代设备性能证据。
+- 未测项：未连接设备，未推送、未开 PR、未刷写；DP02 的真实 TF 故障、异步书签/保存失败、面板整屏及局刷失败后的文字和按钮、返回热区与残影待真机核对。PW07 须核对读过书后的书库/详情/管理页保留文件夹和分页，设置及 Wi-Fi/帮助/排版/刷新子页回首页且丢弃草稿，正文恢复最后确认位置；同时验证设置的简洁屏保回退提示与已有轮播、冷缓存和连续失败场景。网络实际收尾及实体操作也待验收。
+- 下一步：本地提交后由用户审阅；按 DP02、PW07 做真机核对，再决定是否合入。没有改变其他 beta.4 计划项的实现状态。

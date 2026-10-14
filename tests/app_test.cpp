@@ -733,7 +733,7 @@ static void release_review_test(const fs::path& root, const fs::path& fixtures, 
     assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::ManualRefresh);
     driver.present(); driver.close(); driver.present(); driver.complete_content();
 
-    // Unsaved progress turns the settings footer into the retry control.
+    // Returning from a failed commit preserves the presented body and its unsaved position.
     const auto save = [&] {
         app.save_progress();
         while (app.save_busy()) { app.poll_background(); std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
@@ -744,11 +744,11 @@ static void release_review_test(const fs::path& root, const fs::path& fixtures, 
     fs::remove_all(sidecar); write(sidecar, "not a directory");
     driver.key(Input::K3); driver.present(); driver.complete_content(); save();
     assert(app.view() == View::Error && app.saved_record() == saved);
-    driver.tap(100, 1100); driver.present(); assert(app.view() == View::Settings);
-    driver.tap(342, 1160); driver.present(); assert(app.view() == View::Error && app.saved_record() == saved);
-    driver.tap(100, 1100); driver.present(); assert(app.view() == View::Settings);
+    driver.tap(100, 1100); assert(app.view() == View::Reading); app.complete_frame(true);
+    app.show_error("进度未保存。请重试。"); driver.present();
+    driver.tap(500, 1120); driver.present(); assert(app.view() == View::Error && app.saved_record() == saved);
     fs::remove(sidecar);
-    driver.tap(342, 1160); driver.present(); driver.complete_content();
+    driver.tap(500, 1120); driver.present(); driver.complete_content();
     assert(app.view() == View::Reading && !(app.saved_record() == saved));
 
     // With Wi-Fi off, the upload row opens the network page, which returns to the library.
@@ -1429,7 +1429,8 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
             driver.tap(600, 50); driver.present(); driver.tap(340, 640); driver.present();
             driver.tap(point.first, point.second); driver.present(); driver.tap(500, 1120); driver.present();
             assert(sleep_frame(app)); driver.present(); app.wake(); driver.present(); app.poll_background();
-            assert(app.view() == View::Library);
+            assert(app.view() == View::Settings);
+            driver.close(); driver.present(); assert(app.view() == View::Library);
         }
     }
 }
@@ -1677,11 +1678,161 @@ static void update_test(const fs::path& root) {
         step(app, driver, 300, 1040); assert(!app.update_busy());
     }
 }
+static void return_origin_test(const fs::path& root, const fs::path& fixtures, bool async,
+                               const std::string& scenario) {
+    fs::create_directories(root / "Books/Sub");
+    fs::copy_file(fixtures / "long-chapter.epub", root / "Books/book.epub");
+    for (int i = 0; i < 10; ++i)
+        fs::copy_file(fixtures / "valid.epub", root / ("Books/Sub/a" + std::to_string(i) + ".epub"));
+    const auto config = root / "PicoPage/settings.toml";
+    write(config, "schema_version=1\n[library]\nsort='name'\n[power]\nsleep_screen='" +
+                  std::string(scenario == "sleep-settings-custom" ? "custom" : "simple") + "'\n");
+    ReaderApp app(root.string(), "return-test", true, async); Driver driver{app};
+    assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+    driver.key(Input::K3); driver.present(); driver.complete_content();
+    const auto saved = *app.saved_record();
+    const auto body = app.canvas().pixels();
+    const auto library = [&] {
+        driver.tap(342, 500); driver.present(); driver.tap(60, 50); driver.present();
+        assert(app.view() == View::Library);
+    };
+    const auto settings = [&] {
+        library(); driver.tap(600, 50); driver.present();
+        assert(app.view() == View::Settings);
+    };
+    View expected = View::Library;
+    std::vector<std::uint8_t> library_pixels;
+    if (scenario == "reading" || scenario == "sleep-reading" || scenario == "offline-reading") expected = View::Reading;
+    else if (scenario == "settings" || scenario == "invalid-settings" || scenario == "typography-settings" ||
+             scenario == "sleep-settings" || scenario == "sleep-settings-custom" || scenario == "sleep-power" || scenario == "offline-settings" || scenario == "card-settings" || scenario == "local-settings") {
+        settings(); expected = View::Settings;
+        if (scenario == "settings" || scenario == "sleep-power") {
+            driver.tap(340, 640); driver.present(); assert(app.view() == View::PowerSettings);
+            driver.tap(600, 750); driver.present();
+        } else if (scenario == "typography-settings") {
+            driver.tap(300, 580); driver.present();
+            driver.tap(300, 250); driver.present(); driver.complete_content();
+            assert(app.view() == View::Typography);
+        }
+    } else {
+        library();
+        if (scenario == "retry-save" || scenario == "retry-settings") {
+            // Cancelling an open leaves the library usable while the old position is being saved.
+            opened(app, "Books/book.epub"); driver.present();
+            driver.key(Input::K3); app.complete_frame(true);
+            const auto sidecar = root / "Books/book.epub.picopage";
+            fs::rename(sidecar, sidecar.string() + ".held"); write(sidecar, "blocked");
+            assert(app.open_book("Books/Sub/a0.epub"));
+            app.complete_frame(true);
+            driver.tap(580, 1170); assert(app.view() == View::Library);
+            app.complete_frame(true);
+            if (scenario == "retry-settings") { driver.tap(600, 50); app.complete_frame(true); }
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+            while (app.save_busy()) {
+                app.poll_background(); assert(std::chrono::steady_clock::now() < deadline);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            assert(app.view() == View::Error && *app.saved_record() == saved);
+            driver.present();
+            if (scenario == "retry-settings") {
+                driver.close(); driver.present(); assert(app.view() == View::Settings);
+                driver.tap(342, 1160); driver.present(); assert(app.view() == View::Error);
+            } else {
+                driver.tap(500, 1120); driver.present(); assert(app.view() == View::Error);
+            }
+            fs::remove(sidecar); fs::rename(sidecar.string() + ".held", sidecar);
+            driver.tap(500, 1120); driver.present(); driver.complete_content();
+            assert(app.view() == (scenario == "retry-settings" ? View::Settings : View::Library) &&
+                   app.saved_record()->local_revision == saved.local_revision + 1);
+            return;
+        }
+        driver.tap(300, 480); driver.present(); assert(app.view() == View::Library);
+        driver.key(Input::K3); driver.present();
+        library_pixels = app.canvas().pixels();
+        if (scenario == "details" || scenario == "management") {
+            driver.hold(300, 220); driver.present(); driver.complete_content();
+            assert(app.view() == View::BookDetails);
+            if (scenario == "management") {
+                driver.tap(342, 918); driver.present(); assert(app.view() == View::BookManagement);
+                for (int i = 0; i < 10; ++i)
+                    write(root / ("Books/Sub/a" + std::to_string(i) + ".epub"), "changed");
+                driver.tap(500, 1120);
+                assert(app.view() == View::Error);
+            }
+        }
+    }
+    if (scenario.rfind("offline-", 0) == 0) {
+        write(root / "PicoPage/sync.toml", "schema_version=1\ndom_version=20260812\nendpoint='https://example.invalid'\n"
+                    "username='reader'\nuserkey='test-only-placeholder'\ndevice_id='return-test'\n");
+        write(root / "PicoPage/network.toml", "schema_version=2\n[[wifi]]\nssid='home'\npassword='password'\n");
+        std::optional<NetworkOperation> request;
+        if (scenario == "offline-settings") {
+            driver.tap(300, 310); driver.present(); assert(app.view() == View::SyncSettings);
+            driver.tap(300, 620); driver.present(); request = app.take_network_request();
+            driver.tap(300, 1040);
+        } else {
+            driver.sync_view(); request = driver.check_remote(); driver.close();
+        }
+        assert(request && request->cancelled->load() && app.view() == View::NetworkClosing);
+        driver.present(); driver.tap(300, 1120); driver.present();
+        const auto returned = app.canvas().pixels();
+        app.complete_network(request->id, 200, "{}", "");
+        assert(!app.pending_frame() && app.canvas().pixels() == returned && app.view() == expected && *app.saved_record() == saved);
+        return;
+    }
+    if (scenario.rfind("sleep-", 0) == 0) {
+        assert(sleep_frame(app)); driver.present(); app.wake();
+    } else {
+        if (scenario == "settings") {
+            fs::create_directory(config.string() + ".tmp");
+            driver.tap(500, 1120); assert(app.view() == View::Error);
+        } else if (scenario == "invalid-settings") {
+            write(config, "schema_version=9\n");
+            driver.tap(300, 400); assert(app.view() == View::Error);
+        } else if (scenario == "local-settings") {
+            driver.tap(300, 310); driver.present();
+            driver.tap(300, 210); driver.present(); assert(app.view() == View::TextEntry);
+            driver.tap(40, 860); app.poll_background();
+            assert(app.pending_frame() && app.pending_frame()->region);
+            app.complete_frame(false);
+            assert(app.status() == "屏幕局部更新失败。返回将回到设置首页。");
+        } else if (scenario == "screen") {
+            driver.key(Input::K2); app.complete_frame(false);
+            assert(app.status() == "屏幕更新失败。返回将回到书库。");
+        } else if (scenario.rfind("card-", 0) == 0) app.card_removed();
+        else if (scenario != "management") app.show_error("测试错误。请返回。");
+        driver.present(); assert(app.view() == View::Error); driver.refresh();
+        driver.close();
+    }
+    driver.present(); driver.complete_content();
+    if (scenario == "sleep-settings-custom") {
+        app.poll_background();
+        assert(app.view() == View::Settings && app.status().find("简洁屏保") != std::string::npos &&
+               app.pending_frame() && app.pending_frame()->region);
+        driver.present(); app.poll_background(); assert(!app.pending_frame());
+    }
+    assert(app.view() == expected && *app.saved_record() == saved);
+    if (expected == View::Reading) assert(std::equal(body.begin(), body.begin() + 1128 * app.canvas().stride(), app.canvas().pixels().begin()));
+    if (expected == View::Library && scenario != "card-library")
+        assert(std::equal(library_pixels.begin(), library_pixels.begin() + 1120 * app.canvas().stride(), app.canvas().pixels().begin()));
+}
+
 int main(int argc, char** argv) {
-    assert(argc == 3);
+    assert(argc == 3 || argc == 4);
     char temporary[] = "/tmp/pico-app-XXXXXX";
     const char* directory = mkdtemp(temporary); assert(directory);
     const fs::path card(directory), fixtures(argv[1]);
+    bool tested_origin = false;
+    for (bool async : {false, true})
+        for (const std::string scenario : {"management", "details", "settings", "invalid-settings", "screen", "reading",
+                                            "typography-settings", "sleep-settings", "sleep-settings-custom", "sleep-power", "sleep-library", "sleep-reading", "retry-save", "retry-settings", "offline-settings", "offline-reading", "card-library", "card-settings", "local-settings"}) {
+            if (scenario.rfind("retry-", 0) == 0 && !async) continue;
+            if (argc == 4 && scenario != argv[3]) continue;
+            tested_origin = true;
+            return_origin_test(card / (scenario + (async ? "Async" : "Sync")), fixtures, async, scenario);
+        }
+    assert(tested_origin);
+    if (argc == 4) { fs::remove_all(card); return 0; }
     update_test(card / "Update");
     lock_screen_test(card / "CustomLocks", fixtures);
     assert(reading_footer::percent(0) == "0.00%");
@@ -3256,9 +3407,8 @@ int main(int argc, char** argv) {
         assert(app.view() == View::Sleeping && app.pending_frame()->refresh == RefreshIntent::FullClean);
         driver.present(); assert(*app.saved_record() == saved);
         driver.key(Input::K3); assert(!app.pending_frame());
-        app.wake(); driver.present(); assert(*app.saved_record() == saved);
-        driver.tap(340, 500); driver.present(); driver.tap(50, 50); driver.present();
-        driver.tap(600, 50); driver.present(); driver.tap(340, 760); driver.present();
+        app.wake(); driver.present(); assert(app.view() == View::Settings && *app.saved_record() == saved);
+        driver.tap(340, 760); driver.present();
         assert(app.view() == View::StorageSettings); driver.refresh();
         write(card / "PicoPage/cache/layout", "cache");
         const auto book_before = read(card / "Books/book.epub");
