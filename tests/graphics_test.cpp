@@ -36,6 +36,10 @@ int main(int argc, char** argv) {
         assert(font.cached_glyphs() == cached + 1);
         // A zero-width character the face lacks takes no room and leaves the canvas untouched.
         assert(!font.contains(U'\u200b') && font.advance(U'\u200b') == 0);
+        assert(font.missing(U'龘') && font.missing(U'Ж') && !font.missing(U'\u200b') && !font.missing(U'我'));
+        // Default-ignorable format characters outside the common ranges are blank as well.
+        for (const char32_t ignorable : {U'\u034f', U'\u2066', U'\u2069', U'\U000e0001'})
+            assert(!font.missing(ignorable) && font.advance(ignorable) == 0);
         assert(font.draw(space, U'\u200b', 40, 60) && space.pixels() == Canvas().pixels());
     }
     {

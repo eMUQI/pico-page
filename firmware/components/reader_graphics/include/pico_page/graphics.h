@@ -65,6 +65,8 @@ public:
     /** Evicts at most max_entries least-recent glyphs toward target_bytes; existing canvas pixels are unchanged. */
     void trim_glyph_cache(std::size_t target_bytes, std::size_t max_entries = 32);
     bool contains(char32_t scalar) const;
+    /** True for a character the face lacks that draws as the placeholder box. */
+    bool missing(char32_t scalar) const;
     /** A character the face lacks draws as a hollow box: one em wide for CJK and other wide
      * characters, half an em otherwise. Missing spaces and zero-width characters draw nothing. */
     int advance(char32_t scalar);

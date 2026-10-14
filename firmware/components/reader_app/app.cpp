@@ -3132,7 +3132,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         // No face covers every character; the page stays readable and the missing ones draw
         // as the placeholder box. The notice applies to this page alone.
         const bool missing = std::any_of(candidate.glyphs.begin(), candidate.glyphs.end(),
-            [this](const auto &glyph) { return !body.contains(glyph.scalar); });
+            [this](const auto &glyph) { return body.missing(glyph.scalar); });
         if (missing) message = kMissingNotice;
         else if (message == kMissingNotice) message.clear();
         canvas.clear();

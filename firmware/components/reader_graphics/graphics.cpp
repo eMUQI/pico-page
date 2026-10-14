@@ -178,11 +178,15 @@ void Font::trim_glyph_cache(std::size_t target_bytes, std::size_t max_entries) {
 }
 
 namespace {
-// Code points that draw nothing, so a face without them needs no placeholder.
+// Code points that draw nothing, so a face without them needs no placeholder: controls, spaces
+// and the Unicode Default_Ignorable_Code_Point set.
 bool blank(char32_t c) {
-    return c <= 0x20 || (c >= 0x7f && c <= 0xa0) || c == 0xad || c == 0x1680 || (c >= 0x2000 && c <= 0x200f) ||
-           (c >= 0x2028 && c <= 0x202f) || (c >= 0x205f && c <= 0x2064) || c == 0x3000 ||
-           (c >= 0xfe00 && c <= 0xfe0f) || c == 0xfeff || (c >= 0xe0100 && c <= 0xe01ef);
+    return c <= 0x20 || (c >= 0x7f && c <= 0xa0) || c == 0xad || c == 0x34f || c == 0x61c || c == 0x115f ||
+           c == 0x1160 || c == 0x1680 || c == 0x17b4 || c == 0x17b5 || (c >= 0x180b && c <= 0x180f) ||
+           (c >= 0x2000 && c <= 0x200f) || (c >= 0x2028 && c <= 0x202f) || (c >= 0x205f && c <= 0x206f) ||
+           c == 0x3000 || c == 0x3164 || (c >= 0xfe00 && c <= 0xfe0f) || c == 0xfeff || c == 0xffa0 ||
+           (c >= 0xfff0 && c <= 0xfff8) || (c >= 0x1bca0 && c <= 0x1bca3) || (c >= 0x1d173 && c <= 0x1d17a) ||
+           (c >= 0xe0000 && c <= 0xe0fff);
 }
 // Blank code points that still separate words.
 bool spacing(char32_t c) {
@@ -199,6 +203,8 @@ bool wide(char32_t c) {
 bool Font::contains(char32_t scalar) const {
     return face_ && FT_Get_Char_Index(static_cast<FT_Face>(face_), scalar) != 0;
 }
+
+bool Font::missing(char32_t scalar) const { return !contains(scalar) && !blank(scalar); }
 
 int Font::advance(char32_t scalar) {
     if (scalar == U'\n' || scalar == U'\r') return 0;
