@@ -5863,3 +5863,11 @@ PR [非正文普通刷新只驱动变化像素](https://github.com/eMUQI/pico-pa
 - 固件来源：复用既有 ESP-IDF 6.1 与锁定 BSP，在 `5680b7e` 干净检出执行 `sh tools/build_firmware.sh`、`sh tools/build_firmware.sh release`，构建与来源校验都通过。版本为 `0.2.0-beta.4+g5680b7e`，标准 BIN 3,494,704 字节、SHA-256 `01583e3a3ad43a955ac2790a89aef273e0be3fcb2722c65d94e782fb7836a09f`；release BIN 3,495,184 字节、SHA-256 `92e0e5d570960272de8179f2e4cd66b18da2b9b1ba9d7e23352000ecb17a894e`。与上一条代码候选的大小一致，静态 DRAM 比较及两张保持表检查仍适用。这些来源记录对应 `5680b7e`，之后补充本条验证文档，不将镜像称为后续文档提交的重新构建产物。
 - 本地资料：`python3 tools/check_handoff.py` 487 项与 `git diff --check` 通过。构建日志位于 `.local/pr-standard.log`、`pr-release.log`；来源记录位于各自构建目录的 `provenance.json`，首轮远端快照为 `.local/pr-first-round.json`。GitHub CLI 下载完整 run log 的接口返回 Forbidden；四项 CI 结果与步骤状态由 GitHub API 已核对，不把缺少下载日志描述为测试失败。
 - 未测与下一步：DP08/IN08 的两档闪烁、变化区域灰阶、累积残影、K2 清除效果和真实面板耗时仍未真机验收。推送本条验证文档后，重新核对最终提交的 CI/review 和未解决讨论，再按用户授权合并；没有新增版本发布或设备操作。
+
+## 2026-10-14 · 0.2.0-beta.4 发布准备
+
+基于 main `3498ac3`，分支 `docs/release-0.2.0-beta.4`。用户放弃本地冒烟测试，要求发布新版本，之后自己经联网更新测试。
+
+- 发布说明：`docs/releases/0.2.0-beta.4.md`，包含 PR #95（准备休眠只由电源键取消）、#96（错误和唤醒按来源返回）、#97（非正文刷新只驱动变化像素）。闪烁一条写「减少」，因为面板效果没有在真机上看过。进度、配置格式和分页缓存版本均未变化，没有迁移须知。
+- 网站：使用文档删去 iPhone 认证页「点选择文件没有反应」一条及第 3 步括注（用户反馈认证页可以上传，路线图第 9 项）；首页和使用文档的休眠等待说明补上 0.2.0-beta.4 起只有电源键可取消。
+- 未测：三项改动只有 host 测试与固件构建（见各 PR 记录），release 构建未在真机运行，PW05、PW07、DP02、IN08 及第 3 项的目视效果待用户联网更新后验收。
