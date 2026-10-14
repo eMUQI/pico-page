@@ -43,6 +43,8 @@ bool Display::present(Frame frame) {
     if (!baseline_valid_ || frame.purpose == FramePurpose::ManualRefresh) {
         frame.refresh = RefreshIntent::FullClean;
     }
+    frame.changed_pixels_only = frame.purpose == FramePurpose::Overlay &&
+                                frame.refresh == RefreshIntent::Content;
     if (frame.refresh == RefreshIntent::FullClean) {
         frame.region.reset();
         frame.changed_pixels_only = false;

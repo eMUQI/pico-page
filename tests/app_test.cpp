@@ -169,6 +169,7 @@ struct Driver {
         key(Input::K2);
         assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::ManualRefresh);
         assert(app.pending_frame()->refresh == RefreshIntent::FullClean);
+        assert(!app.pending_frame()->changed_pixels_only);
         const auto token = app.pending_frame()->token;
         key(Input::K2);
         assert(app.pending_frame()->token == token);
@@ -245,11 +246,12 @@ static void network_setup_test(const fs::path& root, const fs::path& fixtures, b
     assert(!app.pending_frame() && app.view() == View::TextEntry);
     app.poll_background();
     assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::Content && app.pending_frame()->region);
+    assert(app.pending_frame()->changed_pixels_only);
     driver.present(); assert(app.canvas().pixels() != empty);
     // Once the enter key keeps its state, a character repaints the input field alone.
     driver.tap(174, 860); app.poll_background();
     assert(app.pending_frame() && app.pending_frame()->region->y == 104 && app.pending_frame()->region->height == 320);
-    assert(!app.pending_frame()->changed_pixels_only);
+    assert(app.pending_frame()->changed_pixels_only);
     driver.present();
     // Three characters do not make a password, and a contact that leaves its key enters nothing.
     driver.tap(579, 1160); assert(!app.pending_frame() && app.view() == View::TextEntry && !app.take_wifi_request());
@@ -801,6 +803,9 @@ static void library_resume_pagination_test(const fs::path& root, const fs::path&
         const auto card_begin = first.begin() + 128 * stride, card_end = first.begin() + 334 * stride;
         for (int page = 0; page < target; ++page) {
             if (page == 0) driver.key(Input::K3); else driver.swipe(true);
+            assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Overlay);
+            assert(app.pending_frame()->refresh == RefreshIntent::Content && !app.pending_frame()->region);
+            assert(app.pending_frame()->changed_pixels_only);
             driver.present();
             assert(std::equal(card_begin, card_end, app.canvas().pixels().begin() + 128 * stride));
             assert(app.can_long_press_at(300, 220));
@@ -850,6 +855,7 @@ static void swipe_test(const fs::path& root, const fs::path& fixtures, bool grid
     const auto progress = read(root / "Books/book0.epub.picopage/progress.json");
     driver.swipe(true);
     assert(app.pending_frame() && app.saved_record() == saved);
+    assert(app.pending_frame()->purpose == FramePurpose::Body && !app.pending_frame()->changed_pixels_only);
     app.complete_frame(true);
     assert(app.save_due() && app.saved_record() == saved);
     assert(read(root / "Books/book0.epub.picopage/progress.json") == progress);
@@ -868,8 +874,13 @@ static void swipe_test(const fs::path& root, const fs::path& fixtures, bool grid
     if (app.view() == View::Reading) { driver.tap(342, 500); driver.present(); }
     driver.tap(68, 1140); driver.present(); assert(app.view() == View::Contents);
     const auto contents = app.canvas().pixels();
-    driver.swipe(true); driver.present(); assert(app.view() == View::Contents && app.canvas().pixels() != contents);
-    driver.swipe(false); driver.present(); assert(app.view() == View::Contents && app.canvas().pixels() == contents);
+    driver.swipe(true);
+    assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Overlay);
+    assert(app.pending_frame()->refresh == RefreshIntent::Content && app.pending_frame()->changed_pixels_only);
+    driver.present(); assert(app.view() == View::Contents && app.canvas().pixels() != contents);
+    driver.swipe(false);
+    assert(app.pending_frame() && app.pending_frame()->changed_pixels_only);
+    driver.present(); assert(app.view() == View::Contents && app.canvas().pixels() == contents);
     assert(app.saved_record() == after_turn);
 }
 
@@ -939,6 +950,7 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
         driver.tap(x, 1160);
         assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Overlay);
         assert(app.pending_frame()->refresh == RefreshIntent::Content && app.pending_frame()->region);
+        assert(app.pending_frame()->changed_pixels_only);
         const auto region = *app.pending_frame()->region;
         assert(region.x == 0 && region.y == 1128 && region.width == 684 && region.height == 88);
         const auto frame = app.pending_frame()->token;
@@ -972,6 +984,7 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     assert(!app.pending_frame() && app.canvas().pixels() == pixels);
     driver.key(Input::K2);
     assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean && !app.pending_frame()->region);
+    assert(!app.pending_frame()->changed_pixels_only);
     driver.present(); unchanged();
 
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
@@ -2180,10 +2193,13 @@ int main(int argc, char** argv) {
         opened(app, "Books/book.epub"); assert(!app.saved_record()); driver.present();
         assert(app.saved_record()); const auto first = *app.saved_record();
         driver.key(Input::K3); assert(app.pending_frame());
+        assert(app.pending_frame()->purpose == FramePurpose::Body && !app.pending_frame()->changed_pixels_only);
         const auto failed_anchor = app.pending_frame()->anchor;
         assert(failed_anchor != first.anchor);
         app.complete_frame(false);
         assert(app.saved_record() && *app.saved_record() == first && app.view() == View::Error);
+        assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean);
+        assert(!app.pending_frame()->changed_pixels_only);
         driver.present();
         driver.key(Input::K3); assert(!app.pending_frame() && *app.saved_record() == first);
         driver.close(); assert(app.pending_frame() && app.pending_frame()->anchor == first.anchor); driver.present();
@@ -2475,6 +2491,7 @@ int main(int argc, char** argv) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
             assert(app.pending_frame()->purpose == FramePurpose::Overlay && app.pending_frame()->region);
+            assert(app.pending_frame()->changed_pixels_only);
             assert(app.pending_frame()->region->fits(684, 1216));
         };
         // The second page has a missing image: failure is confined to its image box.
@@ -3586,7 +3603,10 @@ int main(int argc, char** argv) {
         driver.tap(60, 50); driver.present(); assert(app.view() == View::Settings);
         driver.tap(300, 580); driver.present(); assert(app.view() == View::InputSettings);
         assert(FileStore(card.string()).load_settings().settings.library_view == "list");
-        driver.tap(300, 150); driver.present();
+        driver.tap(300, 150);
+        assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Overlay);
+        assert(app.pending_frame()->refresh == RefreshIntent::Content && app.pending_frame()->changed_pixels_only);
+        driver.present();
         assert(app.view() == View::InputSettings && app.status().empty());
         assert(FileStore(card.string()).load_settings().settings.library_view == "grid");
         assert(read(card / "PicoPage/settings.toml").find("roots=['Manage']") != std::string::npos);

@@ -2,6 +2,8 @@
 
 ## 当前摘要（2026-10-14）
 
+`0.2.0-beta.4` 计划第 3 项「非正文刷新只驱动变化像素」已完成本地候选（分支 `fix/overlay-changed-pixels`，基于最新 main `6989b0e`）：Display 统一为有效基准的 Overlay+Content 开启逐像素保持，覆盖整屏 UI 和既有局部更新；Body、K2、显式 FullClean、基准失效和失败恢复保留原规则。Debug 与 GCC ASan/UBSan/LSan CTest 各 24/24，标准与 release 固件构建及来源核验通过，静态 DRAM 未增加；首轮既有异步回归的时序失败及复跑结果见末尾记录。未推送、未开 PR、未刷写；默认与快速档的闪烁、灰阶、累积残影、K2 和同条件面板耗时待 DP08/IN08 真机验收。
+
 `0.2.0-beta.4` 计划第 2 项「错误和状态页按来源返回」已通过 PR #96 提交候选（分支 `fix/return-to-origin`，始于 main `33b7e97`，已整合包含 PR #95 的 main `1353c5b`）：正文、书库、设置共用来源判定，覆盖错误、保存重试、网络收尾和休眠唤醒；从设置进入的排版及自定义锁屏回退提示已覆盖；新书首帧失败且没有确认位置时回书库，提示与按钮一致。首轮 review 的来源回退及摘要问题已修正。Debug 与 ASan/UBSan/LSan CTest 各 24/24，标准固件构建通过；已推送并进入 CI/review，未刷写，待 DP02、PW07 真机验收。完整 View 归类见 [UI 实现说明](ui-implementation.md#错误和状态页的返回来源020-beta4待真机验收)，本日记录列出命令和边界。
 
 `0.2.0-beta.4` 第 1 项已有本地候选（2026-10-14，基于 main `33b7e97`）：立即休眠、等待封面/自定义图片和自动休眠共用电源键取消规则；准备期间触摸和 K1/K2/K3 均忽略，K2 不全刷，不重放到原页。再短按电源键取消，长按仍请求电源菜单；PR #95 首轮 review 指出的菜单交接期间输入穿透已修正，屏蔽持续至菜单显示且旧队列排空；网络退出期间的长按意图也保留至工作任务和无线电交还。等待页脚改为「正在准备休眠图片，按电源键取消」。host Debug 与 GCC ASan/UBSan/LSan 各 24/24，独立 release 固件构建与来源核验通过。未连接或刷写设备，PW05/PW07 真机待测。
@@ -5794,3 +5796,41 @@ PR 首轮网站构建通过、artifact 上传成功；GitHub 提示 `checkout`�
 - 验证：沿用前批的既有 Linux 工具链及命令，Debug CTest 24/24，GCC ASan/UBSan/LSan（显式 detect_leaks 与 halt_on_error）CTest 24/24，标准 `sh tools/build_firmware.sh` 及来源核验通过。本轮固件为 `0.2.0-beta.4+gb8067aa.dirty`，包含本次修正代码，BIN 为 `0x355340` 字节，4 MiB 槽剩余 17%。`python3 tools/check_handoff.py` 487 项及 `git diff --check` 通过；日志位于 `.local/return-to-origin/review1-*.log`。
 - 资源与未测：新增的是统一判定中的一个局部字节级类别值和可恢复性分支，不增加持久字段、任务、队列、分配或阻塞；既有呈现/保存边界不变。UI 与 DP02 补充无确认位置的书库回退规则；真实首帧面板错误、DP02/PW07 其余真机项仍未验收。
 - 下一步：推送修正，按新提交重新核对远端 CI 和 Codex review，处理首轮两条讨论；检查与评审无遗留问题后按用户授权合并。
+
+
+## 2026-10-14 · 非正文刷新只驱动变化像素（本地候选，待真机验收）
+
+基于最新 main `6989b0e`，新建独立 worktree 与分支 `fix/overlay-changed-pixels`。开工时原工作区与候选工作区均无未提交改动；已先读 AGENTS、beta.4 计划第 3 项及 PR #88 的键盘逐像素保持记录。`firmware/version.txt` 已是 `0.2.0-beta.4`，没有修改版本文件。
+
+- 变更：规则集中在 `reader_core::Display::present()`，先处理基准失效和 ManualRefresh，再为 Overlay+Content 设置 `changed_pixels_only`；FullClean 仍清除区域和保持标记。`flush_entry()` 删除单独的布尔参数，输入框与键盘共用规则。Frame、overlay 和 flush_entry 注释已同步；没有修改平台波形处理、波形表、扫描时序、pclk、刷新档位、K2 或正文效果。
+- 回归：core 覆盖默认标记为 false 的整屏与局部 Overlay、Body（包含调用者误带标记）、显式 FullClean、ManualRefresh、首帧基准失效、完成失败及 backend 拒绝提交后的全刷。新增 core 回归对原 main 实现在局部 Overlay 的标记断言失败。应用扩展现有同步/异步、列表/卡片书库翻屏、目录翻屏、设置选项、正文页脚、内联补图、输入框和键盘断言；正文翻页、K2 和失败后的下一帧不带标记。
+- 保持表核对：使用锁定 BSP `5f3406d` 的实际 Gray16/Gray8 表与生产 `build_text_turn_waveform` 运行独立 host LUT 检查，默认 37 相的 592 个对角动作与快速 30 相的 480 个对角动作全部保持；8,880 / 7,200 个非对角动作逐项与源表相同。辅助程序在 `.local/overlay-waveform-check.cpp`，host 裁剪器副本仅省略未使用的硬件声明头，表数据与裁剪计算未改；不作为面板驱动的真机证据。
+
+- 环境与命令：Linux，复用 `/workspace/cloud-tools/activate-host.sh`、`activate-idf.sh`，GCC host、ESP-IDF v6.1（`fff9895c82d744c7237be8847347bdd1b07c6643`）、Xtensa GCC 15.2.0 与既有锁定 BSP；没有替换工具链或依赖。执行 `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug && cmake --build build/host --parallel 4`、`ctest --test-dir build/host -N`（24 项）与完整 CTest，最终 24/24 通过（81.10 秒）。独立 `build/sanitized` 按 environment.md 以 C/C++ `-fsanitize=address,undefined -fno-omit-frame-pointer` 和链接 `-fsanitize=address,undefined` 构建，`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure`：24/24 通过（328.91 秒）。两种检查覆盖原有 patch 与键盘用例，没有降低断言或跳过测试。
+- 首轮测试边界：Debug 首轮 23/24，原有 PowerCoverResume 的后台任务断言失败；单独复跑又在书签提交与 USB 交接的原有故障断言失败。源码中两处分别假定封面缓存尚未完成、书签提交尚未写入，存在 worker 抢先完成的时机竞争，均不涉及新增保持标记断言。同工具链未改动 main 的 app 对照 1/1 通过（106.79 秒）；构建负载下降后的候选完整 Debug 及完整 sanitizer 均通过。没有改掉这些既有断言；这两个用例仍有时序敏感性，不把单次通过当成已消除竞争。日志保留于 `.local/host-ctest.log`、`host-app-retry.log`、`host-ctest-final.log`、`sanitized-ctest.log`，main 对照在 `/workspace/pico-page-overlay-baseline/.local/baseline-app-ctest.log`。
+- 固件：在独立 main `6989b0e` 基线 worktree 与候选 worktree 中均执行 `sh tools/build_firmware.sh` 和 `sh tools/build_firmware.sh release`，构建入口的来源、版本与 defaults 核对全部通过。对应两种生成 sdkconfig 的 CONFIG 值逐项一致；标准 BIN 从 3,494,720 变为 3,494,704 字节（−16），release 从 3,495,152 变为 3,495,184 字节（+32），均可放入 4 MiB 槽。两种 ELF 的 `.dram0.data` 都为 34,296 字节、`.dram0.bss` 都为 50,736 字节，与各自基线一致，保持表符号大小及位置也不变。尺寸对比包含开发版本字符串与链接布局，不能视为纯代码大小差异；运行时峰值仍未实测。
+- 构建证据：本次已核验的代码候选版本为 `0.2.0-beta.4+g6989b0e.dirty`；标准 BIN SHA-256 为 `00d28c1bab1cb0a61d997533eb8cb526e377394f58aa62a1f01f48c8fc59af0a`，release 为 `ce5ec6006ca2db32b1d10b0e6fed448f224144ded6a7c302a412f9f923977b85`。日志为 `.local/firmware-standard.log`、`firmware-release.log`，两种来源记录位于 `firmware/build/provenance.json` 与 `build/firmware-release/provenance.json`。构建后只补齐本条验证文档及 UI/验收文档说明，再做本地提交；这些镜像对应上述代码候选，不宣称是提交后新版本字符串的重建产物。
+- 交接检查：`python3 tools/check_handoff.py` 与 `git diff --check` 通过；最终检查结果随本条文档一起核对。
+
+所有 `Display::present()` 调用点已核对（下表组件路径以 `firmware/components/` 为起点）；除表内显式全刷外，Overlay+Content 均使用保持表，任何基准失效或失败恢复都先完整清屏，取消区域限制与保持。正文从 Session 出口提交，没有旁路。
+
+| 调用点 | 改动后的刷新方式 |
+|---|---|
+| `reader_core/core.cpp` · `Session::layout_ready()` | Body，按既有刷新意图、档位和正文效果；不带保持标记 |
+| `reader_core/core.cpp` · `Session::force_refresh()` | ManualRefresh，FullClean；不带标记 |
+| `reader_app/app.cpp` · `complete_inline_image()` | Overlay+Content，仅图片矩形，驱动变化像素 |
+| `reader_app/app.cpp` · `force_refresh()` | K2/立即全刷的 ManualRefresh+FullClean；不带标记 |
+| `reader_app/app.cpp` · `overlay()` | 无区域的 Overlay+Content 整屏扫描并保持相同像素；full=true 时 FullClean |
+| `reader_app/app.cpp` · `flush_entry()` | 输入区、键盘区或两者并集的 Overlay+Content，驱动变化像素 |
+| `reader_app/app.cpp` · `update_progress()` | 下载进度局部 Overlay+Content；进入校验为无区域 Content；两者均保持相同像素 |
+| `reader_app/app.cpp` · `present_custom_wait_footer()` | 等待提示及取消恢复的页脚 Overlay+Content，驱动变化像素 |
+| `reader_app/app.cpp` · `input()` 的正文页脚切换 | 页脚区域 Overlay+Content，驱动变化像素；正文翻页仍经 Session |
+| `reader_app/app.cpp` · `ReaderApp::show_portal()` 的 summary_only | 传书状态区 Overlay+Content，驱动变化像素；其他状态经 overlay，二维码首次出现显式全刷 |
+| `reader_app/app.cpp` · `ReaderApp::poll_background()` 的锁屏失败提示 | 原页面页脚区域 Overlay+Content，驱动变化像素 |
+
+未发现需要靠重驱动相同像素的 Overlay+Content 帧，没有自行新增例外。既有 FullClean 请求另包括开机首帧、工具返回书库、实际锁屏、真正唤醒回书库/设置、关机/安装最终画面、手动关机帮助及图片查看的对比度切换；这些都保留。BSP 源 GL16 包含相同灰度及白底的清理动作，普通 Overlay 改用保持表后不会再顺带清理，累积残影交由 K2，须真机验证。
+
+- 资源与上下文：只在既有应用所有者任务提交帧时做常数时间的 purpose/refresh 判定，复用 PR #88 的静态 DRAM 保持表。没有新增持久字段、任务、队列、画布、缓存或动态分配；两份 LUT 仍为 4,288 字节、两份表对象合计 4,376 字节。首次生成仍是既有 37×256 / 30×256 有界遍历，只是首次使用可能提前到普通 UI 更新。没有新增 I/O 或等待，最长不可取消区间仍为既有同步面板事务；保持表准备失败及驱动失败沿用基准失效/全刷恢复。未测量真机首次准备时间、峰值堆/栈或输入等待，不宣称面板加速。
+- 配套资料：UI 写明统一规则、全刷例外及 K2 清残影；acceptance 新增 DP08，IN08 覆盖输入区保持；路线图第 3 项标为「已实现，待真机验收」。
+- 未测项：未连接或刷写设备。DP08 须在默认和快速档分别核对书库连续翻屏的继续阅读封面、卡片、标题栏和边框不闪，目录及书签翻屏、设置选项、变化区域灰阶及旧内容清除、多次翻屏的累积残影、K2 清除能力、二维码首帧和失败恢复；已有页脚、传书/更新状态、休眠等待/取消及失败提示、内联补图、键盘/输入框一并检查。以 main `6989b0e` 为同设备、同档位、同操作及冷/热条件的基线，记录面板耗时样本数、P95/P99/最大值及完整日志/录像。本次无设备，改动前后真实面板耗时尚无数据。
+- 下一步：完成本地提交后交用户审阅，再安排 DP08/IN08 与显示相关真机验收。本批不推送、不开 PR、不发布、不刷写。

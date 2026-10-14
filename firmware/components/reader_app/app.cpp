@@ -1920,6 +1920,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         display.present({{"ui", 0, 0, ++ui_sequence}, visible ? visible->anchor : Anchor{},
                          FramePurpose::ManualRefresh, RefreshIntent::FullClean});
     }
+    /** Submits a whole-screen UI update; Display holds equal pixels unless a full clean is required. */
     void overlay(bool full = false) {
         display.present({{"ui", 0, 0, ++ui_sequence},
                          {},
@@ -4288,15 +4289,14 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (entry.keys_dirty && !display.busy()) flush_entry();
         return true;
     }
-    /** Draws every key tap since the last frame in one update of the changed area. */
+    /** Batches key taps into one regional Overlay; Display holds equal field and key pixels. */
     void flush_entry() {
         if (view != View::TextEntry || display.busy() || (!entry.field_dirty && !entry.keys_dirty)) return;
         // The enter key follows the text length, so a text change can also repaint the keys.
         const bool field = entry.field_dirty, keys = entry.keys_dirty || entry.ready_drawn != entry_ready();
         draw_entry();
         display.present({{"ui", 0, 0, ++ui_sequence}, {}, FramePurpose::Overlay, RefreshIntent::Content,
-                         field && keys ? RefreshRegion{0, 104, 684, 1112} : field ? entry_field_region : entry_keys_region,
-                         keys});
+                         field && keys ? RefreshRegion{0, 104, 684, 1112} : field ? entry_field_region : entry_keys_region});
     }
     void entry_done() {
         const auto field = entry.field;
