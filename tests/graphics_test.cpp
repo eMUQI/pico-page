@@ -37,9 +37,8 @@ int main(int argc, char** argv) {
         // A zero-width character the face lacks takes no room and leaves the canvas untouched.
         assert(!font.contains(U'\u200b') && font.advance(U'\u200b') == 0);
         assert(font.missing(U'龘') && font.missing(U'Ж') && !font.missing(U'\u200b') && !font.missing(U'我'));
-        // A missing line separator keeps the words on either side apart; wide scripts beyond the BMP take a full em.
-        assert(!font.missing(U'\u2028') && font.advance(U'\u2028') == 7 && font.advance(U'\u2029') == 7);
-        assert(font.missing(U'\U0001b000') && font.advance(U'\U0001b000') == 28 && font.advance(U'\U00017000') == 28);
+        // A missing separator or space is not known to be invisible, so it draws the box and cannot join its neighbours.
+        assert(font.missing(U'\u2028') && font.advance(U'\u2028') == 14 && font.missing(U'\u0085'));
         // Default-ignorable format characters outside the common ranges are blank as well.
         for (const char32_t ignorable : {U'\u034f', U'\u2066', U'\u2069', U'\U000e0001'})
             assert(!font.missing(ignorable) && font.advance(ignorable) == 0);

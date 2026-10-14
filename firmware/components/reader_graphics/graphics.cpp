@@ -178,29 +178,17 @@ void Font::trim_glyph_cache(std::size_t target_bytes, std::size_t max_entries) {
 }
 
 namespace {
-// Code points that draw nothing, so a face without them needs no placeholder: controls, spaces
-// and the Unicode Default_Ignorable_Code_Point set.
+// Unicode Default_Ignorable_Code_Point and the C0 controls: characters with no visible form.
+// A face without them draws nothing; any other missing character draws the placeholder.
 bool blank(char32_t c) {
-    return c <= 0x20 || (c >= 0x7f && c <= 0xa0) || c == 0xad || c == 0x34f || c == 0x61c || c == 0x115f ||
-           c == 0x1160 || c == 0x1680 || c == 0x17b4 || c == 0x17b5 || (c >= 0x180b && c <= 0x180f) ||
-           (c >= 0x2000 && c <= 0x200f) || (c >= 0x2028 && c <= 0x202f) || (c >= 0x205f && c <= 0x206f) ||
-           c == 0x3000 || c == 0x3164 || (c >= 0xfe00 && c <= 0xfe0f) || c == 0xfeff || c == 0xffa0 ||
-           (c >= 0xfff0 && c <= 0xfff8) || (c >= 0x1bca0 && c <= 0x1bca3) || (c >= 0x1d173 && c <= 0x1d17a) ||
-           (c >= 0xe0000 && c <= 0xe0fff);
+    return c < 0x20 || c == 0xad || c == 0x34f || c == 0x61c || c == 0x115f || c == 0x1160 || c == 0x17b4 ||
+           c == 0x17b5 || (c >= 0x180b && c <= 0x180f) || (c >= 0x200b && c <= 0x200f) ||
+           (c >= 0x202a && c <= 0x202e) || (c >= 0x2060 && c <= 0x206f) || c == 0x3164 ||
+           (c >= 0xfe00 && c <= 0xfe0f) || c == 0xfeff || c == 0xffa0 || (c >= 0xfff0 && c <= 0xfff8) ||
+           (c >= 0x1bca0 && c <= 0x1bca3) || (c >= 0x1d173 && c <= 0x1d17a) || (c >= 0xe0000 && c <= 0xe0fff);
 }
-// Blank code points that still separate words. Layout breaks lines at CR and LF only, so the
-// line and paragraph separators keep the text on either side apart as spaces do.
-bool spacing(char32_t c) {
-    return c == 0x20 || c == 0xa0 || c == 0x1680 || (c >= 0x2000 && c <= 0x200a) || c == 0x2028 || c == 0x2029 ||
-           c == 0x202f || c == 0x205f;
-}
-// Characters set on the full-width grid, by block: CJK, Hangul, full-width forms, the Tangut to
-// Nushu range and the pictograph planes. Symbols in the Basic Multilingual Plane whose width
-// depends on their presentation take the narrow cell.
-bool wide(char32_t c) {
-    return (c >= 0x1100 && c <= 0x115f) || (c >= 0x2e80 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3) ||
-           (c >= 0xf900 && c <= 0xfaff) || (c >= 0xfe30 && c <= 0xfe6f) || (c >= 0xff00 && c <= 0xff60) ||
-           (c >= 0xffe0 && c <= 0xffe6) || (c >= 0x16fe0 && c <= 0x1b2ff) || (c >= 0x1f000 && c <= 0x1faff) ||
+bool cjk(char32_t c) {
+    return (c >= 0x2e80 && c <= 0x9fff) || (c >= 0xf900 && c <= 0xfaff) ||
            (c >= 0x20000 && c <= 0x323af);
 }
 }  // namespace
@@ -223,9 +211,8 @@ int Font::advance(char32_t scalar) {
     FT_Fixed design = 0;
     if (!FT_Get_Char_Index(face, scalar)) {
         // A missing character takes the cell of a present one, whatever the face's own .notdef
-        // advance is: a full em for wide characters, half an em for narrow ones.
-        width = !blank(scalar) ? (wide(scalar) ? pixel_size_ : (pixel_size_ + 1) / 2)
-              : scalar == 0x3000 ? pixel_size_ : spacing(scalar) ? pixel_size_ / 4 : 0;
+        // advance is: a full em where line breaking treats it as CJK, half an em otherwise.
+        width = blank(scalar) ? 0 : cjk(scalar) ? pixel_size_ : (pixel_size_ + 1) / 2;
     } else
     // For static SFNT faces the hinted loader yields the scaled design advance rounded to a whole
     // pixel. Reading that advance alone avoids fetching and scaling the outline from storage.
@@ -258,7 +245,7 @@ FontMetrics Font::metrics() const {
 std::uint64_t Font::glyph_key(char32_t scalar, bool bold) const {
     // The characters a face lacks share one wide and one narrow placeholder per size.
     if (!contains(scalar))
-        return (std::uint64_t(pixel_size_) << 32) | (blank(scalar) ? 0xfffffffdU : wide(scalar) ? 0xffffffffU : 0xfffffffeU);
+        return (std::uint64_t(pixel_size_) << 32) | (blank(scalar) ? 0xfffffffdU : cjk(scalar) ? 0xffffffffU : 0xfffffffeU);
     return (std::uint64_t(bold) << 63) | (std::uint64_t(weight_) << 60) | (std::uint64_t(pixel_size_) << 32) | std::uint32_t(scalar);
 }
 
@@ -354,10 +341,6 @@ bool Font::draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8
 }
 
 namespace {
-bool cjk(char32_t c) {
-    return (c >= 0x2e80 && c <= 0x9fff) || (c >= 0xf900 && c <= 0xfaff) ||
-           (c >= 0x20000 && c <= 0x323af);
-}
 bool closing(char32_t c) { return std::u32string_view(U"，。！？、：；）】》」』〉…’”﹐﹑﹒﹔﹕﹖﹗﹚﹜﹞｡､｣,.!?;:)]}").find(c) != std::u32string_view::npos; }
 bool opening(char32_t c) { return std::u32string_view(U"（【《「『〈‘“﹙﹛﹝｢([{").find(c) != std::u32string_view::npos; }
 bool break_after(char32_t previous, char32_t next) {

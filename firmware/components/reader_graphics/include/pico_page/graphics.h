@@ -67,8 +67,8 @@ public:
     bool contains(char32_t scalar) const;
     /** True for a character the face lacks that draws as the placeholder box. */
     bool missing(char32_t scalar) const;
-    /** A character the face lacks draws as a hollow box: one em wide for CJK and other wide
-     * characters, half an em otherwise. Missing spaces and zero-width characters draw nothing. */
+    /** A character the face lacks draws as a hollow box: one em wide for CJK characters, half
+     * an em otherwise. Missing characters that have no visible form take no room. */
     int advance(char32_t scalar);
     FontMetrics metrics() const;
     /** Rasterizes into the existing bounded glyph cache without modifying a canvas. */
