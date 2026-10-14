@@ -867,12 +867,9 @@ bool sleep(std::string& error, bool& entered_sleep) {
     sleep_report = {};
     // The sampler must not address the controller between standby and its reset on wake.
     xSemaphoreTake(touch_lock, portMAX_DELAY);
-    if (input_waiting_before(std::numeric_limits<std::int64_t>::max()) ||
-        has_pending_touch() || cst836u_int_asserted(touch)) {
-        xSemaphoreGive(touch_lock);
-        error = "Sleep cancelled by pending touch input";
-        return false;
-    }
+    // Contacts during preparation do not veto sleep and must not survive a cancelled handoff.
+    suppress_touch = true;
+    xQueueReset(touch_events);
     auto result = cst836u_set_mode(touch, CST836U_MODE_DEEPSLEEP);
     if (result != ESP_OK) {
         xSemaphoreGive(touch_lock);
@@ -888,11 +885,6 @@ bool sleep(std::string& error, bool& entered_sleep) {
     bool slept = false;
     const auto idle_deadline = esp_timer_get_time() + 2'000'000;
     while (result == ESP_OK && esp_timer_get_time() < idle_deadline) {
-        // An interrupt during the standby command still cancels the handoff.
-        if (has_pending_touch()) {
-            error = "Sleep cancelled by touch interrupt";
-            break;
-        }
         bool short_press = false;
         bool wake_press = false;
         bool long_press = false;
@@ -910,19 +902,12 @@ bool sleep(std::string& error, bool& entered_sleep) {
             if (result == ESP_OK) result = esp_sleep_enable_gpio_wakeup();
             if (result != ESP_OK) break;
             while (result == ESP_OK) {
-                // Wake-source setup may deliver a pending IRQ before the first entry. After
-                // it the controller ignores contacts until its reset on wake, so activity
-                // on its line is counted but does not end the sleep.
-                if (entered_sleep) {
-                    if (has_pending_touch()) {
-                        set_touch_pending(false);
-                        ++sleep_report.touch_edges;
-                    }
-                    if (cst836u_int_asserted(touch)) ++sleep_report.touch_low;
-                } else if (has_pending_touch() || cst836u_int_asserted(touch)) {
-                    error = "Sleep cancelled by touch interrupt";
-                    break;
+                // The controller is in standby; only the PMU line is a wake source.
+                if (has_pending_touch()) {
+                    set_touch_pending(false);
+                    ++sleep_report.touch_edges;
                 }
+                if (cst836u_int_asserted(touch)) ++sleep_report.touch_low;
                 result = esp_light_sleep_start();
                 // The request is rejected when the wake line is already low. The pending
                 // event is then handled as a wake; the delay bounds the rate of repeats.

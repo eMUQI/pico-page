@@ -7,6 +7,7 @@
 #include "pico_page/store.h"
 #include "pico_page/provision.h"
 #include "pico_page/update.h"
+#include "../firmware/components/platform_read_pico/include/pico_page/released_tap.h"
 #include "../firmware/components/platform_read_pico/include/pico_page/sleep_input.h"
 
 #include <algorithm>
@@ -1186,6 +1187,17 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         assert(!app.sleep_pending());
         if (open_menu) {
             assert(app.show_power_menu());
+            assert(app.power_menu_pending());
+            pico_page::platform::SleepInput suppressed;
+            suppressed.begin();
+            const auto before_menu = app.canvas().pixels();
+            for (const auto kind : {pico_page::platform::EventKind::Touch, pico_page::platform::EventKind::K1,
+                                    pico_page::platform::EventKind::K2, pico_page::platform::EventKind::K3}) {
+                suppressed.accept({kind, pico_page::platform::EventPhase::Begin, 1, 600, 50});
+                suppressed.accept({kind, pico_page::platform::EventPhase::End, 1, 600, 50});
+                assert(suppressed.active() && !suppressed.power() && !suppressed.menu());
+                assert(app.power_menu_pending() && app.canvas().pixels() == before_menu);
+            }
             driver.present();
             while (app.view() != View::PowerMenu) {
                 app.poll_background();
@@ -1193,6 +1205,8 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
                 assert(std::chrono::steady_clock::now() < deadline);
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
+            assert(!app.power_menu_pending());
+            suppressed.clear();
             driver.tap(300, 1120); driver.present();
             assert(app.view() == View::Library && app.canvas().pixels() == original);
         } else if (fail_frame) {
@@ -3846,7 +3860,8 @@ int main(int argc, char** argv) {
         ReaderApp app(root.string(), "sleep-input", true, true); Driver driver{app};
         assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
         driver.complete_content();
-        for (const auto kind : {EventKind::K3, EventKind::K2, EventKind::Touch}) {
+        driver.key(Input::K3); driver.present(); driver.complete_content();
+        for (const auto kind : {EventKind::K1, EventKind::K3, EventKind::K2, EventKind::Touch}) {
             const auto saved = *app.saved_record();
             const auto pixels = app.canvas().pixels();
             assert(sleep_frame(app)); driver.present();
@@ -3854,21 +3869,29 @@ int main(int argc, char** argv) {
             assert(app.view() == View::Loading);
             SleepInput input;
             input.begin();
-            input.accept({kind, EventPhase::Begin, 1, 342, 500});
-            input.accept({kind, EventPhase::End, 1, 342, 500});
+            // Contacts during lock-screen presentation or restoration are never replayed.
+            for (const auto phase : {EventPhase::Begin, EventPhase::End, EventPhase::Cancel}) {
+                assert(SleepInput::ignores(kind));
+                input.accept({kind, phase, 1, 342, 500});
+                assert(input.active() && !input.menu() && !input.power());
+            }
             driver.present(); driver.complete_content();
-            assert(input.tap() && app.view() == View::Reading && *app.saved_record() == saved);
+            assert(app.view() == View::Reading && *app.saved_record() == saved);
             // Reopening may update footer counts; the confirmed body must remain identical.
             assert(std::equal(pixels.begin(), pixels.begin() + 1128 * app.canvas().stride(), app.canvas().pixels().begin()));
+            input.clear();
+            // A fresh contact after restoration still performs its ordinary action.
             const auto restored_pixels = app.canvas().pixels();
-            if (kind == EventKind::Touch) driver.tap(input.tap()->x, input.tap()->y);
-            else driver.key(kind == EventKind::K3 ? Input::K3 : Input::K2);
+            if (kind == EventKind::Touch) driver.tap(342, 500);
+            else driver.key(kind == EventKind::K1 ? Input::K1 : kind == EventKind::K3 ? Input::K3 : Input::K2);
             if (kind == EventKind::K2)
                 assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean);
             driver.present(); driver.complete_content();
-            if (kind == EventKind::K3) assert(app.saved_record()->anchor != saved.anchor);
-            else if (kind == EventKind::Touch) assert(app.view() == View::Tools);
-            else assert(*app.saved_record() == saved && app.canvas().pixels() == restored_pixels);
+            if (kind == EventKind::K1 || kind == EventKind::K3) {
+                assert(app.saved_record()->anchor != saved.anchor);
+            } else if (kind == EventKind::Touch) {
+                assert(app.view() == View::Tools);
+            } else assert(*app.saved_record() == saved && app.canvas().pixels() == restored_pixels);
         }
         driver.tap(50, 50); driver.present();
         assert(app.view() == View::Library && app.can_long_press_at(300, 220));
@@ -3877,14 +3900,14 @@ int main(int argc, char** argv) {
         SleepInput input;
         input.begin();
         input.accept({EventKind::Touch, EventPhase::Begin, 2, 300, 220, 1000});
-        const auto held = input.due(1000 + kLongPressUs);
-        assert(held && app.can_long_press_at(held->x, held->y));
-        input.accept({EventKind::Touch, EventPhase::End, 2, held->x, held->y, 1000 + kLongPressUs});
-        driver.hold(input.tap()->x, input.tap()->y); driver.present(); driver.complete_content();
-        assert(app.view() == View::BookDetails);
+        input.accept({EventKind::Touch, EventPhase::End, 2, 300, 220, 1000 + kLongPressUs});
+        assert(app.view() == View::Library && !input.menu() && !input.power());
+        input.accept({EventKind::PowerLong});
+        input.accept({EventKind::InputReset});
+        assert(input.menu());
+        assert(app.show_power_menu()); driver.present();
+        assert(app.view() == View::PowerMenu);
         input.clear();
-        input.accept({EventKind::Touch, EventPhase::End, 2, 300, 220, 2000 + kLongPressUs});
-        assert(!input.tap());
     }
     {
         const auto root = card / "SleepWorker";
@@ -4471,6 +4494,39 @@ int main(int argc, char** argv) {
         }
     }
     write(card / "PicoPage/network.toml", "schema_version=2\n[[wifi]]\nssid=\"home\"\npassword=\"password\"\n");
+    {
+        const auto home = card / "PowerNetworkShutdown";
+        fs::create_directories(home / "Books");
+        fs::copy_file(fixtures / "valid.epub", home / "Books/book.epub");
+        write(home / "PicoPage/sync.toml", sync_config);
+        write(home / "PicoPage/network.toml", read(card / "PicoPage/network.toml"));
+        ReaderApp app(home.string()); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+        const auto saved = app.saved_record();
+        driver.sync_view(); const auto request = driver.check_remote();
+        app.stop_wifi(true); driver.present(); app.cancel_sleep();
+        assert(app.view() == View::NetworkClosing && request.cancelled->load() && !app.show_power_menu());
+        pico_page::platform::SleepInput deferred;
+        deferred.begin(); deferred.accept({pico_page::platform::EventKind::PowerLong});
+        const auto closing_pixels = app.canvas().pixels();
+        for (const auto kind : {pico_page::platform::EventKind::Touch, pico_page::platform::EventKind::K1,
+                               pico_page::platform::EventKind::K2, pico_page::platform::EventKind::K3,
+                               pico_page::platform::EventKind::InputReset}) {
+            deferred.accept({kind});
+            assert(!deferred.ready(true, false) && deferred.menu());
+            assert(app.view() == View::NetworkClosing && app.canvas().pixels() == closing_pixels && app.saved_record() == saved);
+        }
+        // The reply confirms worker teardown; a late success must not adopt a cancelled candidate.
+        app.complete_network(request.id, 200,
+            R"({"progress":"/body[1]/DocFragment[1]/body[1]/h1[1]/text()[1].0","percentage":0.1})", "");
+        driver.present();
+        assert(!deferred.ready(true, false)); // The radio may outlive the response queue entry.
+        assert(deferred.ready(!app.content_busy() && !app.pending_frame(), true) && deferred.menu());
+        assert(app.show_power_menu()); deferred.clear(); driver.present();
+        assert(app.view() == View::PowerMenu && app.saved_record() == saved && !app.take_network_request());
+        driver.tap(300, 1120); driver.present();
+        assert(app.view() == View::Sync && app.saved_record() == saved);
+    }
     // Save failure is before sync teardown: returning preserves both candidate and upload actions.
     for (const bool upload : {false, true}) {
         const auto home = card / (upload ? "PowerSyncUpload" : "PowerSyncCandidate");

@@ -4,6 +4,8 @@
 
 `0.2.0-beta.4` 计划第 2 项「错误和状态页按来源返回」已实现为本地候选（分支 `fix/return-to-origin`，基于最新 main `33b7e97`）：正文、书库、设置共用来源判定，覆盖错误、保存重试、网络收尾和休眠唤醒；从设置进入的排版及自定义锁屏回退提示已覆盖。Debug 与 ASan/UBSan/LSan CTest 各 24/24，标准固件构建通过；未推送、未开 PR、未刷写，待 DP02、PW07 真机验收。完整 View 归类见 [UI 实现说明](ui-implementation.md#错误和状态页的返回来源020-beta4待真机验收)，本日记录列出命令和边界。
 
+`0.2.0-beta.4` 第 1 项已有本地候选（2026-10-14，基于 main `33b7e97`）：立即休眠、等待封面/自定义图片和自动休眠共用电源键取消规则；准备期间触摸和 K1/K2/K3 均忽略，K2 不全刷，不重放到原页。再短按电源键取消，长按仍请求电源菜单；PR #95 首轮 review 指出的菜单交接期间输入穿透已修正，屏蔽持续至菜单显示且旧队列排空；网络退出期间的长按意图也保留至工作任务和无线电交还。等待页脚改为「正在准备休眠图片，按电源键取消」。host Debug 与 GCC ASan/UBSan/LSan 各 24/24，独立 release 固件构建与来源核验通过。未连接或刷写设备，PW05/PW07 真机待测。
+
 `0.2.0-beta.3` 已于 2026-10-14 作为预发布发布（标签 `v0.2.0-beta.3`，main `2937ca7`，PR #93）。这一版包含 PR #86 至 #92：Wi-Fi 传书接收字体和锁屏图片、传书接收期间刷新失败的修复、传书页随时加文件、锁屏轮播的冷缓存准备与精简、书库「继续阅读」卡片、键盘局刷和缺字方框。线上已有高于 beta.2 的版本，联网更新的真机验收（OTA03–OTA06）可以开始，需用保留双槽分区的第一台设备。详见本日「发布 0.2.0-beta.3」记录。
 
 缺字的显示已统一（2026-10-14，分支 `fix/missing-glyph-box`，基于 main `33f8ba9`，PR #91 已合并）：用户上传的两个字体缺繁体字，一个把缺字画成空白，一个画成花纹方块。现在任何字体缺少的字符都画同一种空心方框，汉字等宽字符占一个字宽，其余占半个字宽；分页缓存版本改为 `pagination-v4`，总页数会重新统计一次，阅读进度不受影响。逐字回退到其他字体没有做。host、sanitizer、固件构建通过，已在设备上用同一本繁体书确认。详见本日记录。
@@ -5717,6 +5719,42 @@ PR 首轮网站构建通过、artifact 上传成功；GitHub 提示 `checkout`�
 - 补充（同日）：用户确认保留全部 9 项。用户反馈 iPhone 热点认证页也能上传，第 9 项改为删去 `web/src/pages/docs.astro` 中对应的常见问题和第 3 步括注。
 - 检查：交接检查、diff 检查。
 - 下一步：先改 `firmware/version.txt`，从第 1–3 项开始实现。
+
+## 2026-10-14 · beta.4 第 1 项：休眠准备仅由电源键取消
+
+基于 main `33b7e97`，按用户要求实现路线图第 1 项。`firmware/version.txt` 改为 `0.2.0-beta.4`；本批是开发候选，不是发布版，未连接或刷写设备。
+
+- 变更：主循环不再因待处理触摸或电容键取消休眠，也不因这些输入取消锁屏 worker。请求休眠时重置已有接触；准备期间和取消恢复期间丢弃触摸、K1/K2/K3 与接触队列重置，不保留点按、轻扫或长按到原页面。再短按电源键取消，长按仍打开电源菜单；取消后恢复期间只保留电源键意图，触摸队列溢出不清掉菜单请求。立即休眠、等待图片和自动休眠共用规则。
+- 板级交接：在已有 `touch_lock` 内清空触摸队列，抑制当前接触直至释放，再将控制器置入待机。触摸队列、待处理触摸中断和触摸 IRQ 电平不再取消入睡；PMU 按键、事件确认、扩展器 IRQ 检查、周期唤醒重入和 USB 恢复保持原路径。核对了固定 BSP 的 `cst836u_set_mode()`/`cst836u_wake()`、本地 ESP-IDF v6.1 `esp_sleep.h`；乐鑫 MCP 返回 ESP32-S3 的 GPIO 低电平唤醒说明，与本项目只使用 PMU 扩展器唤醒线的实现一致。
+- 界面与资料：等待页脚为「正在准备休眠图片，按电源键取消」。D43、R4、架构、UI 实现说明、PW05/PW07、使用说明与根开发规则同步该例外；不改原始设计文件，不处理 beta.4 第 2–9 项。
+- 执行上下文与资源：仍由应用任务分发输入，板级交接仍持有采样器锁，没有新增任务、分配或等待。`SleepInput` 只保留三个布尔字段（编译期检查不超过 3 字节），删除接触与重放记录。现有显示、TF I/O、worker 取消和 PMU 的不可抢断区间没有扩大；准备失败沿用原错误/取消恢复，保存失败不进入休眠。
+- 回归证据：修改实现前，`core_test` 在「接触不应被保留」的断言失败（`/tmp/picopage-core-before.log` 为构建日志，失败断言见本次终端输出）。更新现有 core/app 测试覆盖各类接触的 Begin/End/Cancel、队列重置保留电源意图、取消恢复后正文位置和像素不变、恢复后的新按键与触摸正常，以及长按菜单；保留既有冷缓存等待、页脚恢复失败与菜单异步交接回归。
+- 环境与命令：Linux，GCC 14.2.0、CMake 3.31.6、Node.js 24.19.0，ESP-IDF v6.1（`fff9895c82d744c7237be8847347bdd1b07c6643`，工作区干净），BSP `5f3406deec33304de8801046db583dec7c49e55b`。通过 `/workspace/cloud-tools/activate-host.sh` 和 `activate-idf.sh` 使用已有工具链。运行 `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host -N` 和 `ctest --test-dir build/host --output-on-failure`，实际注册及通过 24/24；日志 `/tmp/picopage-host-configure.log`、`/tmp/picopage-host-build.log`、`/tmp/picopage-host-tests.log`。
+- 内存检查：按环境文档的三个 sanitizer CMake flags 配置 `build/sanitized`，构建后用 `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure`，24/24 通过，含 LSan，耗时 97.05 秒。普通 Debug 最终一轮耗时 45.59 秒。首次测试编译暴露原测试依赖 `sleep_input.h` 间接包含手势声明，已加显式 include；扩展 K1 用例原先从第一页尝试回翻，测试错误要求新帧，已改为先到第二页再测回翻，没有降低产品断言。
+- 固件：标准入口因已有 `firmware/sdkconfig` 缺少 rollback、交叉签名验证和 TLS 外部内存三项主线 defaults 被来源检查拒绝，保留该旧配置。改用已有 `sh tools/build_firmware.sh release` 的独立配置；首次编译完成，但测试修正期间源码变化，来源检查正确拒绝记录，资料补齐后重跑 release 入口与来源核验通过，版本为 `0.2.0-beta.4+g33b7e97.dirty`；BIN 为 3,492,864 字节，4 MiB 槽余 701,440 字节。生效配置包含 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`、`CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y`、`CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y`；新主循环和平台休眠路径均参与目标构建。首次完整编译有一处既有 FreeType 未使用变量警告。BIN SHA-256 为 `4c53953136a4df135d0683494887b7529d6f009665d47186d17df8332d0eb901`，来源记录为 `build/firmware-release/provenance.json`。日志 `/tmp/picopage-firmware-build.log`、`/tmp/picopage-firmware-release.log`。
+- 资料检查：`python3 tools/check_handoff.py` 486 项通过，`git diff --check` 通过。构建与测试日志另保存在忽略目录 `.local/validation/sleep-power-only-20261014/`；本批代码及文档留在工作区，未提交或推送。
+- 未测与下一步：PW05/PW07 真机验证立即/冷缓存/热缓存/自动休眠，在请求后持续点按、轻扫、长按正文及 K1/K2/K3 均能继续入睡且不全刷；等待提示与最终锁屏刷屏期间短按取消、长按菜单（含仍在退出的 worker），取消及真实唤醒后无旧接触穿透、下一次新接触正常。另测采样队列溢出、较长休眠的 PMU 周期唤醒、实体输入时延、功耗与内存/栈峰值；host 与构建不替代这些证据。
+
+## 2026-10-14 · PR #95 首轮 review：菜单交接期间保持输入屏蔽
+
+用户授权创建 PR、跟进 CI/review 并在问题处理后合并。PR #95 的 `d140728` 四项远端 CI 全部通过；Codex review 提出一项 P2，源码核对成立：长按电源取消休眠后，`sleep_requested` 已清除，但 `power_menu_wait` 仍可能等待 footer 刷新或锁屏 worker 退出，此时原页触摸和电容键提前恢复。
+
+- 修正：`ReaderApp::power_menu_pending()` 只读既有菜单交接状态。主循环保留本轮是否处于休眠/取消恢复的上下文，长按请求了待打开菜单时重新进入 `SleepInput` 输入屏蔽；只有菜单交接完成、必要内容和帧完成、旧输入队列排空后才能释放屏蔽。普通页面直接长按电源的既有输入行为不变。
+- 回归：扩展现有异步 `WaitPowerMenu` 用例，核对页脚恢复在途时菜单待打开，期间触摸与 K1/K2/K3 不保留电源意图、不改原画布；交接后菜单待打开标志清除，新的取消点按正常返回原页。host 测试不替代实体输入与面板时序。
+- 资源：仍由应用任务分发；未增加状态字段、任务、分配或阻塞。输入屏蔽复用三个布尔字段，内容 worker 仍协作退出。
+- 验证：Linux 环境及命令沿用上一批。`cmake --build build/host --parallel 4` 后 CTest 24/24；`cmake --build build/sanitized --parallel 4` 后以 `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1` 运行 CTest 24/24；`sh tools/build_firmware.sh release` 与来源核验通过，新增菜单查询和主循环路径参与固件编译。交接检查 486 项及 diff 检查通过。提交后再次构建该提交的固件并核对来源，远端 CI 和 review 按新提交重新检查。日志归档于 `.local/validation/sleep-power-only-20261014/pr95-review1/`。
+- 未测：没有连接或刷写设备，PW05/PW07 的持续误触、短按取消、长按菜单与睡眠交接仍待真机验证。
+
+## 2026-10-14 · PR #95 第二轮 review：网络退出期间保留菜单意图与文档一致性
+
+`24321f1` 四项远端 CI 全部通过，第二轮 Codex review 三项 P2 经核对均成立。
+
+- 网络交接：休眠请求已释放 Wi-Fi 会话，但网络任务或无线电尚在退出时，长按电源不再只显示不可用提示并丢弃意图。主循环把长按保留到既有 `SleepInput`，继续丢弃触摸和电容键，等待网络响应确认与 `radio_active` 清除后才重试菜单；不强制退出持有文件或无线电的任务。取消恢复和菜单交接完成之前继续阻止 Wi-Fi 重连请求派发。
+- 回归：`SleepInput::ready()` 同时要求页面恢复完成与网络空闲；core 覆盖页面/网络分别未就绪时保留长按，app 增加同步 GET 请求的取消交接状态回归（网络完成由 host 测试注入）、迟到成功不采用远端候选、无线电尚未退出时不执行菜单，以及退出后菜单和取消正常、已保存位置不变。
+- 文档：PW04 移除由休眠准备进入菜单时 K2 全刷的旧期待，写清网络和内容 worker 退出期间仍屏蔽输入。`platform-runtime.md` 修正第一次入睡前触摸 IRQ 取消的旧描述，并移除取消恢复时重放触摸及长按的旧说明。
+- 资源：复用既有三个布尔字段与任务退出/无线电状态，没有新增状态字段、任务、分配或阻塞；新增 readiness 查询为纯逻辑。最长不可取消区间仍来自已有网络 I/O、显示和 TF 提交，不扩大预算、不强删任务。
+- 验证：Linux 环境及命令沿用前两批。host Debug CTest 24/24；以 `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1` 运行 GCC ASan/UBSan/LSan CTest 24/24；`sh tools/build_firmware.sh release` 和来源核验通过，新增网络退出等待路径参与目标编译。交接检查 486 项及 diff 检查通过。提交后再次核对该提交的固件来源，远端 CI/review 按新提交重新检查。日志归档于 `.local/validation/sleep-power-only-20261014/pr95-review2/`。
+- 未测：仍未连接或刷写设备；网络退出时长按、网络/无线电退出时序、实体误触和浅睡交接待 PW04/PW05/PW07 真机核对。
 
 
 ## 2026-10-14 · 0.2.0-beta.4 第 2 项：错误和状态页按来源返回
