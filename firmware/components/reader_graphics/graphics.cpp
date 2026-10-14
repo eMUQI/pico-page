@@ -188,15 +188,20 @@ bool blank(char32_t c) {
            (c >= 0xfff0 && c <= 0xfff8) || (c >= 0x1bca0 && c <= 0x1bca3) || (c >= 0x1d173 && c <= 0x1d17a) ||
            (c >= 0xe0000 && c <= 0xe0fff);
 }
-// Blank code points that still separate words.
+// Blank code points that still separate words. Layout breaks lines at CR and LF only, so the
+// line and paragraph separators keep the text on either side apart as spaces do.
 bool spacing(char32_t c) {
-    return c == 0x20 || c == 0xa0 || c == 0x1680 || (c >= 0x2000 && c <= 0x200a) || c == 0x202f || c == 0x205f;
+    return c == 0x20 || c == 0xa0 || c == 0x1680 || (c >= 0x2000 && c <= 0x200a) || c == 0x2028 || c == 0x2029 ||
+           c == 0x202f || c == 0x205f;
 }
-// Characters set on the full-width grid: CJK, Hangul, full-width forms and pictographs.
+// Characters set on the full-width grid, by block: CJK, Hangul, full-width forms, the Tangut to
+// Nushu range and the pictograph planes. Symbols in the Basic Multilingual Plane whose width
+// depends on their presentation take the narrow cell.
 bool wide(char32_t c) {
     return (c >= 0x1100 && c <= 0x115f) || (c >= 0x2e80 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3) ||
            (c >= 0xf900 && c <= 0xfaff) || (c >= 0xfe30 && c <= 0xfe6f) || (c >= 0xff00 && c <= 0xff60) ||
-           (c >= 0xffe0 && c <= 0xffe6) || (c >= 0x1f000 && c <= 0x1faff) || (c >= 0x20000 && c <= 0x323af);
+           (c >= 0xffe0 && c <= 0xffe6) || (c >= 0x16fe0 && c <= 0x1b2ff) || (c >= 0x1f000 && c <= 0x1faff) ||
+           (c >= 0x20000 && c <= 0x323af);
 }
 }  // namespace
 
