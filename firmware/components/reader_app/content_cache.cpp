@@ -3,33 +3,39 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
-#ifdef ESP_PLATFORM
+#if defined(ESP_PLATFORM) && defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 #endif
 
 namespace pico_page {
 namespace {
 constexpr std::size_t limit = 2U * 1024 * 1024;
 constexpr char version[] = "content-reading-v3";
-bool room() {
-    if (!chapter_memory_available(limit)) return false;
-#ifdef ESP_PLATFORM
-    return heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= 4U * 1024 * 1024 &&
-           heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >= limit;
-#else
-    return true;
+bool room(std::size_t bytes) {
+    // The document allocator keeps its existing reserve in addition to this allocation.
+    const bool admitted = bytes <= limit && chapter_memory_available(bytes + 64);
+#if defined(ESP_PLATFORM) && defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
+    if (!admitted) ESP_LOGI("chapter_cache", "budget_rejected bytes=%u free=%u largest=%u",
+        static_cast<unsigned>(bytes), static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+        static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
 #endif
+    return admitted;
 }
 struct Writer {
     std::string bytes;
-    bool okay = true;
+    std::size_t size = 0;
+    bool measuring = true, okay = true;
     void word(std::uint32_t n) {
-        if (bytes.size() > limit - 4) { okay = false; return; }
-        for (unsigned i = 0; i < 4; ++i) bytes.push_back(static_cast<char>(n >> (8 * i)));
+        if (!okay || size > limit - 4) { okay = false; return; }
+        size += 4;
+        if (!measuring)
+            for (unsigned i = 0; i < 4; ++i) bytes.push_back(static_cast<char>(n >> (8 * i)));
     }
     void str(const std::string& s) {
-        if (s.size() > limit - bytes.size() || limit - bytes.size() - s.size() < 4) { okay = false; return; }
-        word(static_cast<std::uint32_t>(s.size())); bytes += s;
+        if (!okay || s.size() > limit - size || limit - size - s.size() < 4) { okay = false; return; }
+        word(static_cast<std::uint32_t>(s.size())); size += s.size();
+        if (!measuring) bytes += s;
     }
     void anchor(const Anchor& a) { str(a.resource); str(a.node); word(a.offset); }
 };
@@ -49,7 +55,9 @@ struct Reader {
         return n;
     }
     std::string str(std::size_t max = 8192) {
-        const auto n = count(max); std::string s = bytes.substr(at, n); at += n; return s;
+        const auto n = count(max);
+        if (!okay || !room(n + 1)) { okay = false; return {}; }
+        std::string s = bytes.substr(at, n); at += n; return s;
     }
     bool flag() { const auto n = word(); if (n > 1) okay = false; return n != 0; }
     Anchor anchor() { Anchor a; a.resource = str(); a.node = str(); a.offset = word(); return a; }
@@ -62,10 +70,7 @@ std::string key(const EpubDocument& doc, std::size_t index, std::uint32_t part) 
     return std::string("content/") + version + "/" + doc.metadata().book_id + "/" +
            std::to_string(index) + "/" + std::to_string(part);
 }
-void save(const FileStore& store, const EpubDocument& doc, std::size_t index, const Chapter& c, const std::function<bool()>& stop) {
-    if (!room() || (stop && stop())) return;
-    const StageTimer timer{"content_cache_write"};
-    Writer w;
+void encode(Writer& w, const EpubDocument& doc, const Chapter& c, const std::function<bool()>& stop) {
     w.str(version); w.str(doc.metadata().book_id); w.str(c.resource);
     w.word(c.part); w.word(c.last_part); w.word(c.split_node); w.word(c.plain_dom);
     w.word(static_cast<std::uint32_t>(c.text.size()));
@@ -82,18 +87,30 @@ void save(const FileStore& store, const EpubDocument& doc, std::size_t index, co
     for (const auto& i : c.images) { if (stop && stop()) return; w.word(i.begin); w.word(i.end); w.str(i.resource); w.str(i.alt); w.anchor(i.source); }
     w.word(static_cast<std::uint32_t>(c.warnings.size()));
     for (const auto& warning : c.warnings) { if (stop && stop()) return; w.str(warning); }
-    if (stop && stop()) return;
-    if (!w.okay || w.bytes.size() > limit - 32) return;
-    w.bytes += md5_hex(w.bytes);
-    if (stop && stop()) return;
-    if (store.save_cache(key(doc, index, c.part), w.bytes) != StoreStatus::Ok) return;
-    if (c.last_part && !(stop && stop())) store.save_cache(key(doc, index, kLastChapterPart), w.bytes);
 }
-bool load(const FileStore& store, const EpubDocument& doc, std::size_t index, std::uint32_t part, Chapter& c) {
-    if (!room() || index >= doc.spine().size()) return false;
+ContentCacheEntry prepare(const EpubDocument& doc, std::size_t index, const Chapter& c,
+                          const std::function<bool()>& stop) {
+    Writer w;
+    encode(w, doc, c, stop);
+    if ((stop && stop()) || !w.okay || w.size > limit - 32 || !room(w.size + 33)) return {};
+    w.bytes.reserve(w.size + 32);
+    w.size = 0; w.measuring = false;
+    encode(w, doc, c, stop);
+    if ((stop && stop()) || !w.okay) return {};
+    w.bytes += md5_hex(w.bytes);
+    if (stop && stop()) return {};
+    return {key(doc, index, c.part), c.last_part ? key(doc, index, kLastChapterPart) : "", std::move(w.bytes)};
+}
+void save(const FileStore& store, const EpubDocument& doc, std::size_t index, const Chapter& c,
+          const std::function<bool()>& stop) {
+    const auto entry = prepare(doc, index, c, stop);
+    save_content_cache(store, entry, stop);
+}
+bool decode(const FileStore& store, const EpubDocument& doc, std::size_t index, std::uint32_t part, Chapter& c) {
+    if (index >= doc.spine().size()) return false;
     const StageTimer timer{"content_cache_read"};
     std::string bytes;
-    if (store.load_cache(key(doc, index, part), limit, bytes) != StoreStatus::Ok || bytes.size() < 32) return false;
+    if (store.load_cache(key(doc, index, part), limit, bytes, [](std::size_t size) { return room(size + 1); }) != StoreStatus::Ok || bytes.size() < 32) return false;
     const auto digest = bytes.substr(bytes.size() - 32); bytes.resize(bytes.size() - 32);
     if (md5_hex(bytes) != digest) return false;
     Reader r{bytes};
@@ -103,6 +120,7 @@ bool load(const FileStore& store, const EpubDocument& doc, std::size_t index, st
     if (v.resource != doc.spine()[index].resource ||
         (part == kLastChapterPart ? !v.last_part : v.part != part)) return false;
     auto n = r.count(2U * kChapterPartScalars + 1);
+    if (!r.okay || !room(n * sizeof(char32_t))) return false;
     v.text.reserve(n);
     for (std::uint32_t j = 0; j < n; ++j) {
         const auto cp = r.word();
@@ -110,12 +128,16 @@ bool load(const FileStore& store, const EpubDocument& doc, std::size_t index, st
         v.text.push_back(cp);
     }
     n = r.count(8192);
+    if (!r.okay || !room(n * sizeof(TextBlock))) return false;
+    v.blocks.reserve(n);
     for (std::uint32_t j = 0; j < n; ++j) {
         TextBlock b; b.begin = r.word(); b.end = r.word(); const auto kind = r.word();
         if (!r.range(b.begin, b.end, v.text.size()) || kind > static_cast<unsigned>(BlockKind::Image)) return false;
         b.kind = static_cast<BlockKind>(kind); v.blocks.push_back(b);
     }
     n = r.count(8192);
+    if (!r.okay || !room(n * sizeof(TextRun))) return false;
+    v.runs.reserve(n);
     for (std::uint32_t j = 0; j < n; ++j) {
         TextRun t; t.begin = r.word(); t.end = r.word(); t.source = r.anchor(); t.element_reference = r.flag();
         if (!r.range(t.begin, t.end, v.text.size()) || t.source.resource != v.resource || t.source.node.empty() ||
@@ -123,32 +145,59 @@ bool load(const FileStore& store, const EpubDocument& doc, std::size_t index, st
         v.runs.push_back(std::move(t));
     }
     n = r.count(8192);
+    if (!r.okay || !room(n * sizeof(FragmentTarget))) return false;
+    v.fragments.reserve(n);
     for (std::uint32_t j = 0; j < n; ++j) {
         FragmentTarget f; f.id = r.str(); f.offset = r.word();
         if (f.offset > v.text.size() + 1) return false;
         v.fragments.push_back(std::move(f));
     }
     n = r.count(8192);
+    if (!r.okay || !room(n * sizeof(DocumentLink))) return false;
+    v.links.reserve(n);
     for (std::uint32_t j = 0; j < n; ++j) {
         DocumentLink l; l.begin = r.word(); l.end = r.word(); l.resource = r.str(); l.fragment = r.str(); l.external = r.flag();
         if (!r.range(l.begin, l.end, v.text.size())) return false;
         v.links.push_back(std::move(l));
     }
     n = r.count(256);
+    if (!r.okay || !room(n * sizeof(DocumentImage))) return false;
+    v.images.reserve(n);
     for (std::uint32_t j = 0; j < n; ++j) {
         DocumentImage i; i.begin = r.word(); i.end = r.word(); i.resource = r.str(); i.alt = r.str(); i.source = r.anchor();
         if (!r.range(i.begin, i.end, v.text.size()) || i.source.resource != v.resource) return false;
         v.images.push_back(std::move(i));
     }
     n = r.count(256);
+    if (!r.okay || !room(n * sizeof(std::string))) return false;
+    v.warnings.reserve(n);
     for (std::uint32_t j = 0; j < n; ++j) v.warnings.push_back(r.str());
     if (!r.okay || r.at != bytes.size() || v.text.empty()) return false;
     c = std::move(v);
     return true;
 }
+bool load(const FileStore& store, const EpubDocument& doc, std::size_t index, std::uint32_t part, Chapter& c) {
+    const bool hit = decode(store, doc, index, part, c);
+#if defined(ESP_PLATFORM) && defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
+    ESP_LOGI("chapter_cache", "read=%s chapter=%u part=%u", hit ? "hit" : "miss",
+        static_cast<unsigned>(index), static_cast<unsigned>(part));
+#endif
+    return hit;
+}
+}
+bool save_content_cache(const FileStore& store, const ContentCacheEntry& entry, const std::function<bool()>& stop) {
+    if (entry.bytes.empty() || (stop && stop())) return false;
+    const StageTimer timer{"content_cache_write"};
+    const bool saved = store.save_cache(entry.name, entry.bytes) == StoreStatus::Ok &&
+        (entry.last_name.empty() || (!(stop && stop()) && store.save_cache(entry.last_name, entry.bytes) == StoreStatus::Ok));
+#if defined(ESP_PLATFORM) && defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
+    ESP_LOGI("chapter_cache", "write=%s bytes=%u", saved ? "saved" : "failed", static_cast<unsigned>(entry.bytes.size()));
+#endif
+    return saved;
 }
 bool load_content(const FileStore& store, EpubDocument& doc, std::size_t index, Chapter& chapter,
-                  std::string& error, ChapterLoad detail, std::uint32_t part, const std::function<bool()>& stop) {
+                  std::string& error, ChapterLoad detail, std::uint32_t part, const std::function<bool()>& stop, ContentCacheEntry* deferred) {
+    if (deferred) *deferred = {};
     release(chapter); error.clear();
     if (stop && stop()) { error = kChapterCancelled; return false; }
     if (detail != ChapterLoad::Mapping && load(store, doc, index, part, chapter)) {
@@ -156,12 +205,16 @@ bool load_content(const FileStore& store, EpubDocument& doc, std::size_t index, 
         if (detail == ChapterLoad::Layout) for (auto& run : chapter.runs) { run.source.resource.clear(); run.source.node.clear(); }
         return true;
     }
-    return doc.load_chapter(index, chapter, error, detail, part, stop, [&](const Chapter& completed) {
-        if (!(stop && stop())) save(store, doc, index, completed, stop);
+    const bool loaded = doc.load_chapter(index, chapter, error, detail, part, stop, [&](const Chapter& completed) {
+        const bool target = part == kLastChapterPart ? completed.last_part : completed.part == part;
+        if ((!deferred || !target) && !(stop && stop())) save(store, doc, index, completed, stop);
     });
+    if (loaded && deferred && detail == ChapterLoad::Reading) *deferred = prepare(doc, index, chapter, stop);
+    return loaded;
 }
 bool find_content(const FileStore& store, EpubDocument& doc, std::size_t index, Chapter& chapter,
-                  std::string& error, ChapterLoad detail, const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop) {
+                  std::string& error, ChapterLoad detail, const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop, ContentCacheEntry* deferred) {
+    if (deferred) *deferred = {};
     if (detail == ChapterLoad::Reading) {
         release(chapter); error.clear();
         for (std::uint32_t part = 0; part < 4096; ++part) {
@@ -172,8 +225,17 @@ bool find_content(const FileStore& store, EpubDocument& doc, std::size_t index, 
             release(chapter);
         }
     }
-    return doc.find_chapter_part(index, chapter, error, detail, match, stop, [&](const Chapter& completed) {
-        if (!(stop && stop())) save(store, doc, index, completed, stop);
+    const auto select = [&](const Chapter& completed) {
+        const bool selected = match(completed);
+        // Restore searches need the prefix parts to reach a cached target without reparsing.
+        if (deferred && !selected && detail == ChapterLoad::Reading && !(stop && stop()))
+            save(store, doc, index, completed, stop);
+        return selected;
+    };
+    const bool loaded = doc.find_chapter_part(index, chapter, error, detail, select, stop, [&](const Chapter& completed) {
+        if (!deferred && !(stop && stop())) save(store, doc, index, completed, stop);
     });
+    if (loaded && deferred && detail == ChapterLoad::Reading) *deferred = prepare(doc, index, chapter, stop);
+    return loaded;
 }
 } // namespace pico_page

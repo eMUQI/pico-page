@@ -2,6 +2,7 @@
 #include "pico_page/document.h"
 #include "pico_page/diagnostics.h"
 #include "page_cache.h"
+#include "content_cache.h"
 #include "pico_page/graphics.h"
 #include "pico_page/store.h"
 #include "pico_page/sync.h"
@@ -47,7 +48,7 @@ struct PaginationSession {
 /** A single job owns its parser and font, or borrows them from a PaginationSession. Only done() permits access to its result. */
 class ContentJob {
 public:
-    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks, LockScreenList, LockScreen };
+    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks, LockScreenList, LockScreen, ContentCacheWrite };
     enum class Target { Start, End, Before, Anchor, Fragment };
     enum class StartFailure { None, InternalMemory, TaskCreate };
     /**
@@ -80,6 +81,7 @@ public:
         std::vector<CoverSource> covers;
         std::string cache_header;
         std::optional<PageCache> page_cache;
+        ContentCacheEntry content_cache;
         std::vector<SpineItem> spine;
         std::optional<ReadingRecord> record;
         std::shared_ptr<FileDigest> font_scan;
@@ -116,6 +118,7 @@ public:
         std::vector<std::vector<std::uint8_t>> covers;
         std::unique_ptr<EpubDocument> document;
         Chapter chapter;
+        ContentCacheEntry content_cache;
         std::vector<std::pair<std::uint32_t, std::uint32_t>> history;
         std::size_t chapter_index = 0;
         ConfigResult configuration;
@@ -159,11 +162,15 @@ public:
 #endif
     bool started() const { return started_; }
     void cancel() { cancelled_.store(true, std::memory_order_relaxed); }
+    /** Requests a cooperative Chapter pause; true acknowledges a checkpoint. Cancellation releases it. */
+    bool pause() { pause_requested_.store(true, std::memory_order_release); return paused_.load(std::memory_order_acquire); }
+    void resume() { pause_requested_.store(false, std::memory_order_release); }
     bool done() const { return done_.load(std::memory_order_acquire); }
     void wait();
     const Request request;
     Result result;
 private:
+    bool checkpoint();
     void run();
 #ifdef CONFIG_PICO_PAGE_PERF_METRICS
     void execute();
@@ -177,6 +184,7 @@ private:
     void load_chapter();
     void library_covers();
     std::atomic<bool> cancelled_{false}, done_{false};
+    std::atomic<bool> pause_requested_{false}, paused_{false};
     bool started_ = false;
     StartFailure start_failure_ = StartFailure::None;
 #ifndef ESP_PLATFORM

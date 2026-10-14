@@ -598,7 +598,8 @@ StoreStatus safe_path(const std::string& root, const std::string& path) {
 }
 
 StoreStatus read_file(const std::string& root, const std::string& path,
-                      std::size_t limit, std::string& contents) {
+                      std::size_t limit, std::string& contents,
+                      const std::function<bool(std::size_t)>& admit) {
     const auto safe = safe_path(root, path);
     if (safe != StoreStatus::Ok) return safe;
     const int fd = open_no_follow(root + "/" + path, O_RDONLY);
@@ -606,6 +607,7 @@ StoreStatus read_file(const std::string& root, const std::string& path,
     struct stat info{};
     if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode)) { close(fd); return StoreStatus::IoError; }
     if (info.st_size < 0 || static_cast<std::uint64_t>(info.st_size) > limit) { close(fd); return StoreStatus::Invalid; }
+    if (admit && !admit(static_cast<std::size_t>(info.st_size))) { close(fd); return StoreStatus::Invalid; }
     // One request per file lets FatFs transfer whole clusters instead of single sectors.
     contents.assign(static_cast<std::size_t>(info.st_size), '\0');
     std::size_t filled = 0;
@@ -1062,8 +1064,9 @@ bool FileStore::card_space(std::uint64_t& total, std::uint64_t& available) const
 #endif
 }
 
-StoreStatus FileStore::load_cache(const std::string& name, std::size_t limit, std::string& bytes) const {
-    return store_internal::read_file(root_, "PicoPage/cache/" + name, limit, bytes);
+StoreStatus FileStore::load_cache(const std::string& name, std::size_t limit, std::string& bytes,
+                                  const std::function<bool(std::size_t)>& admit) const {
+    return store_internal::read_file(root_, "PicoPage/cache/" + name, limit, bytes, admit);
 }
 
 StoreStatus FileStore::save_private(const std::string& name, const std::string& bytes,

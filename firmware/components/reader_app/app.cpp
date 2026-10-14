@@ -907,6 +907,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     unsigned mapping_start_attempts = 0;
     std::chrono::steady_clock::time_point mapping_start_retry{};
     std::optional<ContentJob::Request> pending_content;
+    ContentCacheEntry pending_chapter_cache;
+    std::optional<std::chrono::steady_clock::time_point> chapter_feedback_after;
     std::unique_ptr<graphics::Canvas> prepared_image;
     std::vector<std::size_t> prepared_image_failures;
     std::uint64_t foreground_generation = 0;
@@ -920,6 +922,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         ++foreground_generation;
         if (foreground_job) foreground_job->cancel();
         pending_content.reset();
+        pending_chapter_cache = {};
+        chapter_feedback_after.reset();
         content_loading = image_prepared = false;
         inline_image_pending = false;
         prepared_image.reset();
@@ -1108,7 +1112,11 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (selected < parts.size() && !parts[selected].empty()) request.known_start = parts[selected].back();
         }
         pending_content = std::move(request);
-        loading("正在准备章节…");
+        if (view == View::Reading) {
+            loading_origin = origin_for(view);
+            content_loading = true; view = View::Loading; hits.clear(); loading_cancel = {};
+            chapter_feedback_after = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+        } else loading("正在准备章节…");
         clear_body_cache(); clear_prefetch(); covers.clear(); release(chapter); page = {};
         return true;
     }
@@ -1218,7 +1226,17 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
             return;
         }
+        if (!foreground_job->done() && chapter_feedback_after && !display.busy() &&
+            std::chrono::steady_clock::now() >= *chapter_feedback_after) {
+            // Chapter parsing must acknowledge a checkpoint before the panel starts scanning.
+            if (foreground_job->pause()) {
+                chapter_feedback_after.reset();
+                loading("正在准备章节…");
+            }
+        }
+        if (!chapter_feedback_after && !display.busy()) foreground_job->resume();
         if (!foreground_job->done() || display.busy()) return;
+        chapter_feedback_after.reset();
         auto job = std::move(foreground_job);
         const auto& request = job->request;
         if ((!content_loading && !inline_image_pending) || request.generation != foreground_generation) return;
@@ -1290,6 +1308,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (request.kind == ContentJob::Kind::Chapter) {
             content_loading = false;
             if (!job->result.error.empty()) { error(chapter_error(job->result.error)); return; }
+            pending_chapter_cache = std::move(job->result.content_cache);
             chapter = std::move(job->result.chapter); chapter_index = request.chapter;
             offset = job->result.offset;
             for (const auto& span : job->result.history) record_boundary(computed_pages, span.first, span.second);
@@ -1325,6 +1344,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto& request = job->request;
         const auto& result = job->result;
         if (request.generation != counting_generation) return;
+        if (request.kind == ContentJob::Kind::ContentCacheWrite) return;
         // The lock screen reads the cover cache itself; a failed or cancelled attempt falls back to the title.
         if (request.kind == ContentJob::Kind::SleepCover) return;
         if (request.kind == ContentJob::Kind::LockScreen) {
@@ -2588,6 +2608,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (restored.status != StoreStatus::Ok && restored.status != StoreStatus::Missing && restored.status != StoreStatus::Cleared)
             message = "原进度无法读取，未覆盖原记录";
         if (loaded) {
+            pending_chapter_cache = std::move(loaded->content_cache);
             chapter = std::move(loaded->chapter);
             chapter_index = loaded->chapter_index;
             offset = loaded->offset;
@@ -2870,7 +2891,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         usage.ui_glyphs = ui.cached_glyphs(); usage.body_glyphs = body.cached_glyphs();
         usage.ui_advances = ui.cached_advances(); usage.body_advances = body.cached_advances();
         usage.evictions = cache_evictions; usage.target = cache_target;
-        usage.retained = usage.body_bitmap + usage.next_layout + usage.next_bitmap +
+        usage.retained = pending_chapter_cache.bytes.capacity() + usage.body_bitmap + usage.next_layout + usage.next_bitmap +
             usage.page_index + usage.cover_pixels + usage.ui_glyph_bytes + usage.body_glyph_bytes +
             (usage.ui_advances + usage.body_advances) * (sizeof(std::uint64_t) + sizeof(int));
         return usage;
@@ -2887,6 +2908,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             return false;
 #endif
         };
+        if (!pressure()) return;
+        if (!pending_chapter_cache.bytes.empty()) { pending_chapter_cache = {}; ++cache_evictions; }
         if (!pressure()) return;
         // The counting session is rebuilt on demand, so it goes before any counted pages.
         if (yield_counting_session()) { defer_counting(); return; }
@@ -2921,6 +2944,18 @@ struct ReaderApp::Impl final : DisplayBackend {
         return !sleep_cover_deadline && !power_menu_wait && !session.needs_save() && view == View::Reading && !image_viewing && has_book() && card_available && !usb_prepared &&
                !display.busy() && !deferred && !save_job && !bookmark_job && !foreground_job && !pending_content && !body_images_pending &&
                !cover_job && !pending_covers;
+    }
+    bool chapter_cache_due() const {
+        return !pending_chapter_cache.bytes.empty() && background_content_ready() && !counting_job;
+    }
+    void write_chapter_cache() {
+        ContentJob::Request request;
+        request.kind = ContentJob::Kind::ContentCacheWrite;
+        request.root = root; request.generation = counting_generation;
+        request.content_cache = std::move(pending_chapter_cache);
+        pending_chapter_cache = {};
+        counting_job = std::make_unique<ContentJob>(std::move(request));
+        if (!counting_job->start()) counting_job.reset();
     }
     bool counting_due() const {
         return background_content_ready() &&
@@ -7987,7 +8022,7 @@ bool ReaderApp::content_busy() const {
 }
 bool ReaderApp::background_due() const {
     return !!impl_->cover_job || impl_->pending_covers.has_value() || !!impl_->counting_job ||
-           impl_->custom_prepare_due() || impl_->prefetch_due() || impl_->counting_due();
+           impl_->chapter_cache_due() || impl_->custom_prepare_due() || impl_->prefetch_due() || impl_->counting_due();
 }
 #if !defined(ESP_PLATFORM) || defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
 // Only the diagnostic console reads this; other firmware builds do not carry the name table.
@@ -8094,7 +8129,8 @@ void ReaderApp::background_step(const std::function<bool()>& stop) {
     if (impl_->view == View::PowerOff) return;
     impl_->poll_counting_job();
     if (stop && stop()) { if (impl_->counting_job) impl_->counting_job->cancel(); return; }
-    if (impl_->custom_prepare_due()) impl_->prepare_custom_sleep(false);
+    if (impl_->chapter_cache_due()) impl_->write_chapter_cache();
+    else if (impl_->custom_prepare_due()) impl_->prepare_custom_sleep(false);
     else if (impl_->prefetch_due()) impl_->prepare_next(stop);
     else if (impl_->counting_due()) impl_->count_pages(stop);
 }

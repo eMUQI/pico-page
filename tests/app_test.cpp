@@ -124,8 +124,13 @@ struct Driver {
         app.input({{sequence, Phase::End, key}, touch, x, y, true});
     }
     void present_at(int line) {
-        if (!app.pending_frame()) { std::cerr << "No frame to present at line " << line << '\n'; std::abort(); }
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (!app.pending_frame() && app.view() == View::Loading && app.content_busy()) {
+            app.poll_background();
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (!app.pending_frame()) { std::cerr << "No frame to present at line " << line << '\n'; std::abort(); }
         // A finished background commit may queue a further frame, as in the firmware loop.
         while (app.pending_frame()) {
             while (app.pending_frame()) {
@@ -3728,11 +3733,68 @@ int main(int argc, char** argv) {
             Anchor a, b;
             assert(cached.anchor_at(n, a) == original.anchor_at(n, b) && a == b);
         }
+        // A cached part fits below the former fixed 2 MiB allocation request.
+        static std::size_t cache_budget;
+        cache_budget = std::max<std::size_t>(data.size() + 128, 512U * 1024);
+        assert(cache_budget < 2U * 1024 * 1024);
+        set_chapter_memory_probe([](std::size_t bytes) { return bytes <= cache_budget; });
+        unsigned stops = 0;
+        assert(load_content(store, doc, 0, cached, error, ChapterLoad::Reading, 2, [&] { ++stops; return false; }));
+        set_chapter_memory_probe(nullptr);
+        assert(stops == 2 && cached.text == original.text);
+        // Rejecting the cache buffer falls back to the source without losing its anchors.
+        static unsigned allocations;
+        allocations = 0;
+        set_chapter_memory_probe([](std::size_t) { return ++allocations != 1; });
+        assert(load_content(store, doc, 0, cached, error, ChapterLoad::Reading, 2));
+        set_chapter_memory_probe(nullptr);
+        assert(cached.text == original.text);
+        fs::remove_all(cache.parent_path());
+        ContentCacheEntry deferred;
+        assert(load_content(store, doc, 0, cached, error, ChapterLoad::Reading, 2, {}, &deferred));
+        assert(cached.text == original.text && !deferred.bytes.empty() && !fs::exists(cache));
+        assert(!save_content_cache(store, deferred, [] { return true; }) && !fs::exists(cache));
+        write(card / "CacheBlocked", "not a directory");
+        assert(!save_content_cache(FileStore((card / "CacheBlocked").string()), deferred));
+        assert(cached.text == original.text && save_content_cache(store, deferred));
+        assert(read(cache) == data);
+        stops = 0;
+        assert(find_content(store, doc, 0, cached, error, ChapterLoad::Reading,
+            [](const Chapter& c) { return c.part == 2; }, [&] { ++stops; return false; }, &deferred));
+        assert(stops == 3 && deferred.bytes.empty() && cached.text == original.text);
+        fs::remove_all(cache.parent_path());
+        assert(find_content(store, doc, 0, cached, error, ChapterLoad::Reading,
+            [](const Chapter& c) { return c.part == 2; }, {}, &deferred));
+        assert(!deferred.bytes.empty() && !fs::exists(cache));
+        assert(fs::exists(cache.parent_path() / "0") && fs::exists(cache.parent_path() / "1"));
+        assert(save_content_cache(store, deferred));
+        assert(load_content(store, doc, 0, cached, error, ChapterLoad::Reading, 2, {}, &deferred));
+        assert(deferred.bytes.empty() && cached.text == original.text);
         write(cache, data.substr(0, data.size() / 2));
         assert(load_content(store, doc, 0, cached, error, ChapterLoad::Reading, 2));
         assert(cached.text == original.text && read(cache) == data);
         assert(!load_content(store, doc, 0, cached, error, ChapterLoad::Reading, 2, [] { return true; }));
         assert(error == kChapterCancelled && cached.text.empty());
+        for (bool cancel : {false, true}) {
+            ContentJob::Request request;
+            request.kind = ContentJob::Kind::Chapter; request.root = card.string();
+            request.path = (fixtures / "multi-part.epub").string(); request.identity = doc.metadata();
+            request.chapter = 0; request.part = 2; request.target = ContentJob::Target::Start;
+            ContentJob job(std::move(request));
+            assert(!job.pause() && job.start());
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+            while (!job.pause()) {
+                assert(!job.done() && std::chrono::steady_clock::now() < deadline);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            assert(!job.done());
+            if (cancel) job.cancel(); else job.resume();
+            while (!job.done()) {
+                assert(std::chrono::steady_clock::now() < deadline);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            assert(cancel ? job.result.chapter.text.empty() : job.result.chapter.text == original.text);
+        }
     }
     {
         const auto root = card / "CountWithoutCache";
@@ -4209,13 +4271,17 @@ int main(int argc, char** argv) {
         driver.key(Input::K1); driver.present(); driver.complete_content(); same_body();
         ref_driver.key(Input::K1); ref_driver.present();
         const auto previous = async.saved_record();
-        driver.key(Input::K1); driver.present();
+        ContentJob::delay_starts_for_test(ContentJob::Kind::Chapter, std::chrono::milliseconds(1500));
+        driver.key(Input::K1);
+        assert(!async.pending_frame() && async.saved_record() == previous);
+        driver.present();
         assert(async.view() == View::Loading && async.saved_record() == previous);
         driver.refresh(); driver.complete_content(); same_body();
+        ContentJob::delay_starts_for_test(ContentJob::Kind::Chapter, std::chrono::milliseconds(0));
         // The adjacent part is loaded by the turn that reaches it.
         ref_driver.key(Input::K3); ref_driver.present();
-        driver.key(Input::K3); driver.present();
-        assert(async.view() == View::Loading);
+        driver.key(Input::K3);
+        assert(async.view() == View::Loading && !async.pending_frame());
         driver.refresh(); driver.complete_content(); same_body();
         assert(async.saved_record()->anchor == first);
         for (auto* d : {&ref_driver, &driver}) {
