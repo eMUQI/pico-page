@@ -65,6 +65,7 @@ public:
     /** Evicts at most max_entries least-recent glyphs toward target_bytes; existing canvas pixels are unchanged. */
     void trim_glyph_cache(std::size_t target_bytes, std::size_t max_entries = 32);
     bool contains(char32_t scalar) const;
+    /** A character the face lacks keeps the face's .notdef advance and draws as a hollow box. */
     int advance(char32_t scalar);
     FontMetrics metrics() const;
     /** Rasterizes into the existing bounded glyph cache without modifying a canvas. */
@@ -88,6 +89,9 @@ private:
     };
     std::unordered_map<std::uint64_t, Glyph> glyphs_;
     std::size_t glyph_bytes_ = 0;
+    std::uint64_t glyph_key(char32_t scalar, bool bold) const;
+    bool rasterize(char32_t scalar, bool bold, Glyph& glyph);
+    bool placeholder(char32_t scalar, Glyph& glyph);
 
 };
 

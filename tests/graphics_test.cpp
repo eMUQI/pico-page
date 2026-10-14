@@ -15,12 +15,21 @@ int main(int argc, char** argv) {
     assert(font.open_fallback());
     const auto fallback_text = decode_utf8("未检测到存储卡，请插入后重新启动。初始化失败，重试。正在准备书籍章节图片…取消。内容任务无法启动。内存不足。");
     for (const auto c : fallback_text) assert(font.contains(c));
-    // The built-in subset holds common body characters; a rare one is absent and draws as the .notdef box.
+    // The built-in subset holds common body characters; a rare one is absent and draws as the placeholder box.
     for (const auto c : decode_utf8("我们在黄昏时读完了这本书，“窗外”下起雨来——他说：好！①")) assert(font.contains(c));
     {
-        Canvas missing;
+        Canvas missing, other, space;
         assert(!font.contains(U'龘') && font.size(28) && font.draw(missing, U'龘', 40, 60));
         assert(missing.pixels() != Canvas().pixels());
+        // Every missing character draws the same hollow box inside its advance and shares one cache entry.
+        const auto cached = font.cached_glyphs();
+        assert(!font.contains(U'歡') && font.advance(U'歡') == font.advance(U'龘'));
+        assert(font.draw(other, U'歡', 40, 60) && other.pixels() == missing.pixels() && font.cached_glyphs() == cached);
+        const int advance = font.advance(U'龘'), left = 40 + (advance - (std::min(advance, 28) - 4)) / 2;
+        assert(missing.pixel(left, 50) == 1 && missing.pixel(left + 6, 50) == 15 && missing.pixel(left - 1, 50) == 15);
+        assert(missing.pixel(left + 6, 60 - 20) == 1 && missing.pixel(left + 6, 60 + 1) == 1 && missing.pixel(left + 6, 60 + 2) == 15);
+        // A zero-width character the face lacks leaves the canvas untouched.
+        assert(!font.contains(U'\u200b') && font.draw(space, U'\u200b', 40, 60) && space.pixels() == Canvas().pixels());
     }
     {
         // Prewarming an independent font face must preserve the rasterized pixels.

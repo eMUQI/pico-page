@@ -3129,8 +3129,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             error("本页无法排版。" + reason(candidate.error) + "。");
             return false;
         }
-        // The built-in subset covers common characters only; the page stays readable and the
-        // missing ones draw as the font's .notdef box. The notice applies to this page alone.
+        // No face covers every character; the page stays readable and the missing ones draw
+        // as the placeholder box. The notice applies to this page alone.
         const bool missing = std::any_of(candidate.glyphs.begin(), candidate.glyphs.end(),
             [this](const auto &glyph) { return !body.contains(glyph.scalar); });
         if (missing) message = kMissingNotice;
