@@ -9,6 +9,8 @@ class SleepInput {
 public:
     void begin() { *this = {}; active_ = true; }
     bool active() const { return active_; }
+    /** Restoration and radio teardown must both finish before a retained power intent runs. */
+    bool ready(bool page_ready, bool network_idle) const { return active_ && page_ready && network_idle; }
     void clear() { *this = {}; }
     /** Contacts and queue resets cannot cancel sleep or replay into the restored page. */
     static bool ignores(EventKind kind) {

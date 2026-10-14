@@ -45,8 +45,12 @@ int main() {
         input.accept({EventKind::InputReset});
         input.accept({EventKind::K2, EventPhase::End, 3});
         CHECK(input.active() && input.menu() && !input.power());
+        CHECK(!input.ready(true, false) && input.menu());
+        CHECK(!input.ready(false, true) && input.menu());
+        CHECK(input.ready(true, true) && input.menu());
         input.clear();
         CHECK(!input.active() && !input.menu() && !input.power());
+        CHECK(!input.ready(true, true));
         input.accept({EventKind::PowerLong});
         CHECK(!input.menu());
     }

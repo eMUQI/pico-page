@@ -4344,6 +4344,39 @@ int main(int argc, char** argv) {
         }
     }
     write(card / "PicoPage/network.toml", "schema_version=2\n[[wifi]]\nssid=\"home\"\npassword=\"password\"\n");
+    {
+        const auto home = card / "PowerNetworkShutdown";
+        fs::create_directories(home / "Books");
+        fs::copy_file(fixtures / "valid.epub", home / "Books/book.epub");
+        write(home / "PicoPage/sync.toml", sync_config);
+        write(home / "PicoPage/network.toml", read(card / "PicoPage/network.toml"));
+        ReaderApp app(home.string()); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+        const auto saved = app.saved_record();
+        driver.sync_view(); const auto request = driver.check_remote();
+        app.stop_wifi(true); driver.present(); app.cancel_sleep();
+        assert(app.view() == View::NetworkClosing && request.cancelled->load() && !app.show_power_menu());
+        pico_page::platform::SleepInput deferred;
+        deferred.begin(); deferred.accept({pico_page::platform::EventKind::PowerLong});
+        const auto closing_pixels = app.canvas().pixels();
+        for (const auto kind : {pico_page::platform::EventKind::Touch, pico_page::platform::EventKind::K1,
+                               pico_page::platform::EventKind::K2, pico_page::platform::EventKind::K3,
+                               pico_page::platform::EventKind::InputReset}) {
+            deferred.accept({kind});
+            assert(!deferred.ready(true, false) && deferred.menu());
+            assert(app.view() == View::NetworkClosing && app.canvas().pixels() == closing_pixels && app.saved_record() == saved);
+        }
+        // The reply confirms worker teardown; a late success must not adopt a cancelled candidate.
+        app.complete_network(request.id, 200,
+            R"({"progress":"/body[1]/DocFragment[1]/body[1]/h1[1]/text()[1].0","percentage":0.1})", "");
+        driver.present();
+        assert(!deferred.ready(true, false)); // The radio may outlive the response queue entry.
+        assert(deferred.ready(!app.content_busy() && !app.pending_frame(), true) && deferred.menu());
+        assert(app.show_power_menu()); deferred.clear(); driver.present();
+        assert(app.view() == View::PowerMenu && app.saved_record() == saved && !app.take_network_request());
+        driver.tap(300, 1120); driver.present();
+        assert(app.view() == View::Sync && app.saved_record() == saved);
+    }
     // Save failure is before sync teardown: returning preserves both candidate and upload actions.
     for (const bool upload : {false, true}) {
         const auto home = card / (upload ? "PowerSyncUpload" : "PowerSyncCandidate");

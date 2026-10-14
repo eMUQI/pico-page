@@ -898,8 +898,10 @@ extern "C" void app_main() {
             } else {
                 resume_input.accept(event);
                 event = {};
-                if (!app->content_busy() && !app->pending_frame() && !app->power_menu_pending() &&
-                    !pico_page::platform::input_waiting_before(std::numeric_limits<std::int64_t>::max())) {
+                if (resume_input.ready(
+                        !app->content_busy() && !app->pending_frame() && !app->power_menu_pending() &&
+                            !pico_page::platform::input_waiting_before(std::numeric_limits<std::int64_t>::max()),
+                        !network_busy && !radio_active.load())) {
                     if (resume_input.menu()) {
                         resume_input.clear();
                         event.kind = EventKind::PowerLong;
@@ -920,7 +922,12 @@ extern "C" void app_main() {
         } else if (event.kind == EventKind::PowerLong) {
             app->cancel_sleep();
             sleep_requested = false;
-            if (!usb_mode && !network_busy && !pico_page::console::transfer_active()) {
+            if (sleep_recovery && !usb_mode && !pico_page::console::transfer_active() &&
+                (network_busy || radio_active.load())) {
+                // Keep the menu intent until the existing cancellation returns the radio and files.
+                resume_input.begin();
+                resume_input.accept(event);
+            } else if (!usb_mode && !network_busy && !pico_page::console::transfer_active()) {
                 released_tap.accept({EventKind::InputReset}, presentation_sequence);
                 physical_source = physical_sequence = 0;
                 physical_suppressed = false;
