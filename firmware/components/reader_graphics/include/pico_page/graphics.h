@@ -65,7 +65,8 @@ public:
     /** Evicts at most max_entries least-recent glyphs toward target_bytes; existing canvas pixels are unchanged. */
     void trim_glyph_cache(std::size_t target_bytes, std::size_t max_entries = 32);
     bool contains(char32_t scalar) const;
-    /** A character the face lacks keeps the face's .notdef advance and draws as a hollow box. */
+    /** A character the face lacks draws as a hollow box: one em wide for CJK and other wide
+     * characters, half an em otherwise. Missing spaces and zero-width characters draw nothing. */
     int advance(char32_t scalar);
     FontMetrics metrics() const;
     /** Rasterizes into the existing bounded glyph cache without modifying a canvas. */

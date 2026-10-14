@@ -23,13 +23,20 @@ int main(int argc, char** argv) {
         assert(missing.pixels() != Canvas().pixels());
         // Every missing character draws the same hollow box inside its advance and shares one cache entry.
         const auto cached = font.cached_glyphs();
-        assert(!font.contains(U'歡') && font.advance(U'歡') == font.advance(U'龘'));
+        assert(!font.contains(U'歡') && font.advance(U'歡') == 28 && font.advance(U'龘') == 28);
         assert(font.draw(other, U'歡', 40, 60) && other.pixels() == missing.pixels() && font.cached_glyphs() == cached);
-        const int advance = font.advance(U'龘'), left = 40 + (advance - (std::min(advance, 28) - 4)) / 2;
-        assert(missing.pixel(left, 50) == 1 && missing.pixel(left + 6, 50) == 15 && missing.pixel(left - 1, 50) == 15);
-        assert(missing.pixel(left + 6, 60 - 20) == 1 && missing.pixel(left + 6, 60 + 1) == 1 && missing.pixel(left + 6, 60 + 2) == 15);
-        // A zero-width character the face lacks leaves the canvas untouched.
-        assert(!font.contains(U'\u200b') && font.draw(space, U'\u200b', 40, 60) && space.pixels() == Canvas().pixels());
+        // A wide character takes a full em and a 24 x 22 box; the box sits one tenth of an em below the baseline.
+        assert(missing.pixel(42, 50) == 1 && missing.pixel(65, 50) == 1 && missing.pixel(41, 50) == 15 && missing.pixel(66, 50) == 15);
+        assert(missing.pixel(50, 40) == 1 && missing.pixel(50, 61) == 1 && missing.pixel(50, 39) == 15 && missing.pixel(50, 62) == 15);
+        assert(missing.pixel(50, 50) == 15);
+        // A narrow character takes half an em and a narrower box of the same height.
+        Canvas narrow;
+        assert(!font.contains(U'Ж') && font.advance(U'Ж') == 14 && font.draw(narrow, U'Ж', 40, 60));
+        assert(narrow.pixel(42, 50) == 1 && narrow.pixel(51, 50) == 1 && narrow.pixel(52, 50) == 15 && narrow.pixel(46, 50) == 15);
+        assert(font.cached_glyphs() == cached + 1);
+        // A zero-width character the face lacks takes no room and leaves the canvas untouched.
+        assert(!font.contains(U'\u200b') && font.advance(U'\u200b') == 0);
+        assert(font.draw(space, U'\u200b', 40, 60) && space.pixels() == Canvas().pixels());
     }
     {
         // Prewarming an independent font face must preserve the rasterized pixels.

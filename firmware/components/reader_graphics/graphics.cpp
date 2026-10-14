@@ -177,6 +177,25 @@ void Font::trim_glyph_cache(std::size_t target_bytes, std::size_t max_entries) {
     }
 }
 
+namespace {
+// Code points that draw nothing, so a face without them needs no placeholder.
+bool blank(char32_t c) {
+    return c <= 0x20 || (c >= 0x7f && c <= 0xa0) || c == 0xad || c == 0x1680 || (c >= 0x2000 && c <= 0x200f) ||
+           (c >= 0x2028 && c <= 0x202f) || (c >= 0x205f && c <= 0x2064) || c == 0x3000 ||
+           (c >= 0xfe00 && c <= 0xfe0f) || c == 0xfeff || (c >= 0xe0100 && c <= 0xe01ef);
+}
+// Blank code points that still separate words.
+bool spacing(char32_t c) {
+    return c == 0x20 || c == 0xa0 || c == 0x1680 || (c >= 0x2000 && c <= 0x200a) || c == 0x202f || c == 0x205f;
+}
+// Characters set on the full-width grid: CJK, Hangul, full-width forms and pictographs.
+bool wide(char32_t c) {
+    return (c >= 0x1100 && c <= 0x115f) || (c >= 0x2e80 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3) ||
+           (c >= 0xf900 && c <= 0xfaff) || (c >= 0xfe30 && c <= 0xfe6f) || (c >= 0xff00 && c <= 0xff60) ||
+           (c >= 0xffe0 && c <= 0xffe6) || (c >= 0x1f000 && c <= 0x1faff) || (c >= 0x20000 && c <= 0x323af);
+}
+}  // namespace
+
 bool Font::contains(char32_t scalar) const {
     return face_ && FT_Get_Char_Index(static_cast<FT_Face>(face_), scalar) != 0;
 }
@@ -191,6 +210,12 @@ int Font::advance(char32_t scalar) {
     if (!face) { error_ = "Font glyph metrics failed"; return -1; }
     int width;
     FT_Fixed design = 0;
+    if (!FT_Get_Char_Index(face, scalar)) {
+        // A missing character takes the cell of a present one, whatever the face's own .notdef
+        // advance is: a full em for wide characters, half an em for narrow ones.
+        width = !blank(scalar) ? (wide(scalar) ? pixel_size_ : (pixel_size_ + 1) / 2)
+              : scalar == 0x3000 ? pixel_size_ : spacing(scalar) ? pixel_size_ / 4 : 0;
+    } else
     // For static SFNT faces the hinted loader yields the scaled design advance rounded to a whole
     // pixel. Reading that advance alone avoids fetching and scaling the outline from storage.
     if (FT_IS_SFNT(face) && !FT_HAS_MULTIPLE_MASTERS(face) &&
@@ -219,24 +244,16 @@ FontMetrics Font::metrics() const {
             static_cast<int>((metrics.height + 63) >> 6)};
 }
 
-namespace {
-// Code points that draw nothing, so a face without them needs no placeholder.
-bool blank(char32_t c) {
-    return c <= 0x20 || (c >= 0x7f && c <= 0xa0) || c == 0xad || c == 0x1680 || (c >= 0x2000 && c <= 0x200f) ||
-           (c >= 0x2028 && c <= 0x202f) || (c >= 0x205f && c <= 0x2064) || c == 0x3000 ||
-           (c >= 0xfe00 && c <= 0xfe0f) || c == 0xfeff || (c >= 0xe0100 && c <= 0xe01ef);
-}
-}  // namespace
-
 std::uint64_t Font::glyph_key(char32_t scalar, bool bold) const {
-    // Every character the face lacks shares one placeholder per size.
-    if (!contains(scalar)) return (std::uint64_t(pixel_size_) << 32) | (blank(scalar) ? 0xfffffffeU : 0xffffffffU);
+    // The characters a face lacks share one wide and one narrow placeholder per size.
+    if (!contains(scalar))
+        return (std::uint64_t(pixel_size_) << 32) | (blank(scalar) ? 0xfffffffdU : wide(scalar) ? 0xffffffffU : 0xfffffffeU);
     return (std::uint64_t(bold) << 63) | (std::uint64_t(weight_) << 60) | (std::uint64_t(pixel_size_) << 32) | std::uint32_t(scalar);
 }
 
 bool Font::placeholder(char32_t scalar, Glyph& glyph) {
     // Faces draw their own .notdef as a box, a pattern or nothing at all. A hollow box inside
-    // the advance the layout already reserved keeps every missing character visible.
+    // the cell that advance() reserves keeps every missing character visible.
     const int reserved = advance(scalar), stroke = std::max(1, pixel_size_ / 16);
     if (reserved < 0) return false;
     const int width = std::min(reserved, pixel_size_) - 2 * std::max(1, pixel_size_ / 10);
