@@ -1702,7 +1702,22 @@ static void return_origin_test(const fs::path& root, const fs::path& fixtures, b
     write(config, "schema_version=1\n[library]\nsort='name'\n[power]\nsleep_screen='" +
                   std::string(scenario == "sleep-settings-custom" ? "custom" : "simple") + "'\n");
     ReaderApp app(root.string(), "return-test", true, async); Driver driver{app};
-    assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+    assert(app.initialize()); driver.present(); opened(app, "Books/book.epub");
+    if (scenario == "first-frame") {
+        assert(!app.saved_record()); app.complete_frame(false);
+        assert(app.view() == View::Error && app.status() == "屏幕更新失败。返回将回到书库。");
+        driver.present();
+        const auto failure = app.canvas().pixels();
+        driver.close(); driver.present(); assert(app.view() == View::Library && !app.saved_record());
+        app.show_error("屏幕更新失败。返回将回到书库。"); driver.present();
+        // A first-frame failure has the same library action as an error raised in the library.
+        assert(std::equal(failure.begin() + 1080 * app.canvas().stride(),
+                          failure.begin() + 1176 * app.canvas().stride(),
+                          app.canvas().pixels().begin() + 1080 * app.canvas().stride()));
+        driver.close(); driver.present(); assert(app.view() == View::Library && !app.saved_record());
+        return;
+    }
+    driver.present();
     driver.key(Input::K3); driver.present(); driver.complete_content();
     const auto saved = *app.saved_record();
     const auto body = app.canvas().pixels();
@@ -1838,7 +1853,7 @@ int main(int argc, char** argv) {
     const fs::path card(directory), fixtures(argv[1]);
     bool tested_origin = false;
     for (bool async : {false, true})
-        for (const std::string scenario : {"management", "details", "settings", "invalid-settings", "screen", "reading",
+        for (const std::string scenario : {"first-frame", "management", "details", "settings", "invalid-settings", "screen", "reading",
                                             "typography-settings", "sleep-settings", "sleep-settings-custom", "sleep-power", "sleep-library", "sleep-reading", "retry-save", "retry-settings", "offline-settings", "offline-reading", "card-library", "card-settings", "local-settings"}) {
             if (scenario.rfind("retry-", 0) == 0 && !async) continue;
             if (argc == 4 && scenario != argv[3]) continue;

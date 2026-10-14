@@ -797,15 +797,17 @@ struct ReaderApp::Impl final : DisplayBackend {
     PageEffect page_effect = PageEffect::Off;
     bool refresh_from_settings = false, import_from_settings = false, help_from_settings = false, typography_from_settings = false;
     Origin origin_for(View source) const {
+        const auto body_origin = has_book() && (session.visible_record() || session.saved_record())
+            ? Origin::Reading : Origin::Library;
         switch (source) {
         case View::Reading: case View::Tools: case View::Contents: case View::Sync: case View::Confirmation:
-            return Origin::Reading;
+            return body_origin;
         case View::Library: case View::BookDetails: case View::BookManagement:
             return Origin::Library;
         case View::Typography:
-            return typography_from_settings ? Origin::Settings : Origin::Reading;
+            return typography_from_settings ? Origin::Settings : body_origin;
         case View::Refresh: case View::RefreshConfirm: case View::RefreshInterval: case View::PageEffects:
-            return refresh_from_settings ? Origin::Settings : Origin::Reading;
+            return refresh_from_settings ? Origin::Settings : body_origin;
         case View::Help:
             return help_from_settings ? Origin::Settings : Origin::Library;
         case View::Import: case View::UsbTransfer: case View::Portal:
