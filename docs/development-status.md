@@ -2,7 +2,7 @@
 
 ## 当前摘要（2026-10-14）
 
-`0.2.0-beta.4` 计划第 3 项「非正文刷新只驱动变化像素」已完成实现候选（分支 `fix/overlay-changed-pixels`，基于最新 main `6989b0e`）：Display 统一为有效基准的 Overlay+Content 开启逐像素保持，覆盖整屏 UI 和既有局部更新；Body、K2、显式 FullClean、基准失效和失败恢复保留原规则。Debug 与 GCC ASan/UBSan/LSan CTest 各 24/24，标准与 release 固件构建及来源核验通过，静态 DRAM 未增加；首轮既有异步回归的时序失败及复跑结果见末尾记录。本轮已获授权创建 PR、跟进 CI/review 并在检查通过后合并；未刷写；默认与快速档的闪烁、灰阶、累积残影、K2 和同条件面板耗时待 DP08/IN08 真机验收。
+`0.2.0-beta.4` 计划第 3 项「非正文刷新只驱动变化像素」已通过 PR #97 提交候选（分支 `fix/overlay-changed-pixels`，基于最新 main `6989b0e`）：Display 统一为有效基准的 Overlay+Content 开启逐像素保持，覆盖整屏 UI 和既有局部更新；Body、K2、显式 FullClean、基准失效和失败恢复保留原规则。Debug 与 GCC ASan/UBSan/LSan CTest 各 24/24，标准与 release 固件构建及来源核验通过，静态 DRAM 未增加；首轮既有异步回归的时序失败及复跑结果见末尾记录。首轮 push/PR 的 host 与网站 CI 四项通过，Codex review 未提出意见；本轮按授权核对验证记录提交对应的检查后合并。未刷写；默认与快速档的闪烁、灰阶、累积残影、K2 和同条件面板耗时待 DP08/IN08 真机验收。
 
 `0.2.0-beta.4` 计划第 2 项「错误和状态页按来源返回」已通过 PR #96 提交候选（分支 `fix/return-to-origin`，始于 main `33b7e97`，已整合包含 PR #95 的 main `1353c5b`）：正文、书库、设置共用来源判定，覆盖错误、保存重试、网络收尾和休眠唤醒；从设置进入的排版及自定义锁屏回退提示已覆盖；新书首帧失败且没有确认位置时回书库，提示与按钮一致。首轮 review 的来源回退及摘要问题已修正。Debug 与 ASan/UBSan/LSan CTest 各 24/24，标准固件构建通过；PR #96 已合并为 main `6989b0e`，未刷写，待 DP02、PW07 真机验收。完整 View 归类见 [UI 实现说明](ui-implementation.md#错误和状态页的返回来源020-beta4待真机验收)，本日记录列出命令和边界。
 
@@ -5853,3 +5853,13 @@ PR 首轮网站构建通过、artifact 上传成功；GitHub 提示 `checkout`�
 - 主线整合：原实现提交为 `9df2fea`，获取到 main `4b827ff` 后整合主线。主线只修改路线图和开发状态；解决这两份文档的冲突，保留 PR #95/#96 已合并、版本已为 beta.4 的状态，以及本次第 3 项的实现、全部刷新出口和验证记录。代码与测试未因整合发生变化，上一条 Debug、sanitizer、两种固件与保持表核对的范围仍适用。
 - 配套检查：整合后执行 `python3 tools/check_handoff.py` 与 `git diff --check`；后续远端 CI 和评审按实际结果记录。原有异步回归的时序敏感性保留原记录，没有降低断言或跳过用例。
 - 下一步与未测：推送候选、创建 PR，核对最终提交的 push/PR CI、Codex review 与未解决讨论，必要修正后复验，再按授权合并。DP08/IN08 真机显示效果、残影、真实面板耗时及设备资源峰值仍待验收；合并不代表真机验收通过。
+
+
+## 2026-10-14 · PR #97：首轮 CI/review 与固件来源
+
+PR [非正文普通刷新只驱动变化像素](https://github.com/eMUQI/pico-page/pull/97) 已创建，当前代码候选为整合 main `4b827ff` 后的 `5680b7e`。本批没有修改代码或测试，没有连接或刷写设备。
+
+- 远端：`5680b7e` 的 push 与 pull_request 两组 Host checks、Website build 共四项全部成功；Host checks 含完整 Debug 与开启 trace events 的 Clang ASan/UBSan/LSan CTest，以及交接检查。Codex review 已完成，摘要对应 `5680b7e`，机器人已点赞，没有修改意见、待审 review 或未解决线程；无需为本轮修改代码。
+- 固件来源：复用既有 ESP-IDF 6.1 与锁定 BSP，在 `5680b7e` 干净检出执行 `sh tools/build_firmware.sh`、`sh tools/build_firmware.sh release`，构建与来源校验都通过。版本为 `0.2.0-beta.4+g5680b7e`，标准 BIN 3,494,704 字节、SHA-256 `01583e3a3ad43a955ac2790a89aef273e0be3fcb2722c65d94e782fb7836a09f`；release BIN 3,495,184 字节、SHA-256 `92e0e5d570960272de8179f2e4cd66b18da2b9b1ba9d7e23352000ecb17a894e`。与上一条代码候选的大小一致，静态 DRAM 比较及两张保持表检查仍适用。这些来源记录对应 `5680b7e`，之后补充本条验证文档，不将镜像称为后续文档提交的重新构建产物。
+- 本地资料：`python3 tools/check_handoff.py` 487 项与 `git diff --check` 通过。构建日志位于 `.local/pr-standard.log`、`pr-release.log`；来源记录位于各自构建目录的 `provenance.json`，首轮远端快照为 `.local/pr-first-round.json`。GitHub CLI 下载完整 run log 的接口返回 Forbidden；四项 CI 结果与步骤状态由 GitHub API 已核对，不把缺少下载日志描述为测试失败。
+- 未测与下一步：DP08/IN08 的两档闪烁、变化区域灰阶、累积残影、K2 清除效果和真实面板耗时仍未真机验收。推送本条验证文档后，重新核对最终提交的 CI/review 和未解决讨论，再按用户授权合并；没有新增版本发布或设备操作。
