@@ -24,54 +24,31 @@ int main() {
         using namespace pico_page::platform;
         SleepInput input;
         input.begin();
-        input.accept({EventKind::K3, EventPhase::Begin, 1});
-        CHECK(input.active() && input.held() && !input.tap());
-        input.accept({EventKind::K3, EventPhase::End, 1});
-        CHECK(input.tap() && input.tap()->kind == EventKind::K3 && !input.held());
-        input.accept({EventKind::K1, EventPhase::Begin, 2});
-        input.accept({EventKind::K1, EventPhase::End, 2});
-        CHECK(input.tap()->sequence == 1);
-        input.accept({EventKind::PowerLong});
-        CHECK(input.menu());
-        input.clear();
-        CHECK(!input.active() && !input.tap() && !input.menu());
-        input.begin();
-        input.accept({EventKind::Touch, EventPhase::Begin, 3, 300, 500, 100});
-        input.accept({EventKind::Touch, EventPhase::Cancel, 3});
-        CHECK(!input.held() && !input.tap());
-        input.accept({EventKind::K2, EventPhase::Begin, 4});
-        input.accept({EventKind::InputReset});
-        CHECK(!input.active() && !input.held());
-        input.begin();
-        input.accept({EventKind::K2, EventPhase::Begin, 5});
-        input.accept({EventKind::K2, EventPhase::End, 5});
+        for (const auto kind : {EventKind::Touch, EventKind::K1, EventKind::K2, EventKind::K3, EventKind::InputReset}) {
+            CHECK(SleepInput::ignores(kind));
+            for (const auto phase : {EventPhase::Begin, EventPhase::End, EventPhase::Cancel}) {
+                input.accept({kind, phase, 1, 300, 500, 1000});
+                CHECK(input.active() && !input.menu() && !input.power());
+            }
+        }
+        for (const auto kind : {EventKind::None, EventKind::Power, EventKind::PowerLong, EventKind::SdRemoved})
+            CHECK(!SleepInput::ignores(kind));
         input.accept({EventKind::Power});
-        CHECK(input.power() && !input.tap() && !input.held());
+        CHECK(input.power());
+        input.accept({EventKind::Touch, EventPhase::Begin, 2});
+        input.accept({EventKind::InputReset});
+        CHECK(input.active() && input.power());
         input.accept({EventKind::Power});
         CHECK(!input.power());
-        input.accept({EventKind::Power});
-        input.accept({EventKind::Touch, EventPhase::Begin, 6});
-        CHECK(!input.power() && input.held());
-        input.accept({EventKind::Power});
         input.accept({EventKind::PowerLong});
-        CHECK(input.menu() && !input.power() && !input.held());
+        input.accept({EventKind::Power});
+        input.accept({EventKind::InputReset});
+        input.accept({EventKind::K2, EventPhase::End, 3});
+        CHECK(input.active() && input.menu() && !input.power());
         input.clear();
-        CHECK(!input.active() && !input.power());
-        input.begin();
-        input.accept({EventKind::Touch, EventPhase::Begin, 7, 300, 500, 1000});
-        CHECK(!input.due(999 + kLongPressUs));
-        const auto held = input.due(1000 + kLongPressUs);
-        CHECK(held && held->sequence == 7 && held->x == 300 && input.held());
-        input.accept({EventKind::Touch, EventPhase::End, 7, 300, 500, 1000 + kLongPressUs});
-        CHECK(input.tap() && !input.held() && !input.due(1001 + kLongPressUs));
-        input.clear();
-        input.accept({EventKind::Touch, EventPhase::End, 7, 300, 500, 1002 + kLongPressUs});
-        CHECK(!input.tap() && !input.due(1002 + kLongPressUs));
-        input.begin();
-        input.accept({EventKind::K2, EventPhase::Begin, 8});
-        CHECK(!input.due(2 * kLongPressUs));
-        input.accept({EventKind::Touch, EventPhase::Cancel, 8});
-        CHECK(!input.held() && !input.due(2 * kLongPressUs));
+        CHECK(!input.active() && !input.menu() && !input.power());
+        input.accept({EventKind::PowerLong});
+        CHECK(!input.menu());
     }
     {
         CHECK((RefreshRegion{0, 0, 684, 1216}.fits(684, 1216)));
@@ -174,11 +151,6 @@ int main() {
         Event returned{EventKind::Touch, EventPhase::End, 1, 300, 400, 601000};
         returned.max_x = 329;
         CHECK(!long_press(begin, returned));
-        SleepInput resumed;
-        resumed.begin();
-        resumed.accept(begin);
-        resumed.accept({EventKind::Touch, EventPhase::End, 1, 200, 400, 651000});
-        CHECK(resumed.tap() && released_gesture(*resumed.tap(), resumed.end()) == ReleasedGesture::Next);
     }
     {
         using namespace pico_page::platform;

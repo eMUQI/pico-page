@@ -7,6 +7,7 @@
 #include "pico_page/store.h"
 #include "pico_page/provision.h"
 #include "pico_page/update.h"
+#include "../firmware/components/platform_read_pico/include/pico_page/released_tap.h"
 #include "../firmware/components/platform_read_pico/include/pico_page/sleep_input.h"
 
 #include <algorithm>
@@ -3696,7 +3697,8 @@ int main(int argc, char** argv) {
         ReaderApp app(root.string(), "sleep-input", true, true); Driver driver{app};
         assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
         driver.complete_content();
-        for (const auto kind : {EventKind::K3, EventKind::K2, EventKind::Touch}) {
+        driver.key(Input::K3); driver.present(); driver.complete_content();
+        for (const auto kind : {EventKind::K1, EventKind::K3, EventKind::K2, EventKind::Touch}) {
             const auto saved = *app.saved_record();
             const auto pixels = app.canvas().pixels();
             assert(sleep_frame(app)); driver.present();
@@ -3704,21 +3706,29 @@ int main(int argc, char** argv) {
             assert(app.view() == View::Loading);
             SleepInput input;
             input.begin();
-            input.accept({kind, EventPhase::Begin, 1, 342, 500});
-            input.accept({kind, EventPhase::End, 1, 342, 500});
+            // Contacts during lock-screen presentation or restoration are never replayed.
+            for (const auto phase : {EventPhase::Begin, EventPhase::End, EventPhase::Cancel}) {
+                assert(SleepInput::ignores(kind));
+                input.accept({kind, phase, 1, 342, 500});
+                assert(input.active() && !input.menu() && !input.power());
+            }
             driver.present(); driver.complete_content();
-            assert(input.tap() && app.view() == View::Reading && *app.saved_record() == saved);
+            assert(app.view() == View::Reading && *app.saved_record() == saved);
             // Reopening may update footer counts; the confirmed body must remain identical.
             assert(std::equal(pixels.begin(), pixels.begin() + 1128 * app.canvas().stride(), app.canvas().pixels().begin()));
+            input.clear();
+            // A fresh contact after restoration still performs its ordinary action.
             const auto restored_pixels = app.canvas().pixels();
-            if (kind == EventKind::Touch) driver.tap(input.tap()->x, input.tap()->y);
-            else driver.key(kind == EventKind::K3 ? Input::K3 : Input::K2);
+            if (kind == EventKind::Touch) driver.tap(342, 500);
+            else driver.key(kind == EventKind::K1 ? Input::K1 : kind == EventKind::K3 ? Input::K3 : Input::K2);
             if (kind == EventKind::K2)
                 assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean);
             driver.present(); driver.complete_content();
-            if (kind == EventKind::K3) assert(app.saved_record()->anchor != saved.anchor);
-            else if (kind == EventKind::Touch) assert(app.view() == View::Tools);
-            else assert(*app.saved_record() == saved && app.canvas().pixels() == restored_pixels);
+            if (kind == EventKind::K1 || kind == EventKind::K3) {
+                assert(app.saved_record()->anchor != saved.anchor);
+            } else if (kind == EventKind::Touch) {
+                assert(app.view() == View::Tools);
+            } else assert(*app.saved_record() == saved && app.canvas().pixels() == restored_pixels);
         }
         driver.tap(50, 50); driver.present();
         assert(app.view() == View::Library && app.can_long_press_at(300, 220));
@@ -3727,14 +3737,14 @@ int main(int argc, char** argv) {
         SleepInput input;
         input.begin();
         input.accept({EventKind::Touch, EventPhase::Begin, 2, 300, 220, 1000});
-        const auto held = input.due(1000 + kLongPressUs);
-        assert(held && app.can_long_press_at(held->x, held->y));
-        input.accept({EventKind::Touch, EventPhase::End, 2, held->x, held->y, 1000 + kLongPressUs});
-        driver.hold(input.tap()->x, input.tap()->y); driver.present(); driver.complete_content();
-        assert(app.view() == View::BookDetails);
+        input.accept({EventKind::Touch, EventPhase::End, 2, 300, 220, 1000 + kLongPressUs});
+        assert(app.view() == View::Library && !input.menu() && !input.power());
+        input.accept({EventKind::PowerLong});
+        input.accept({EventKind::InputReset});
+        assert(input.menu());
+        assert(app.show_power_menu()); driver.present();
+        assert(app.view() == View::PowerMenu);
         input.clear();
-        input.accept({EventKind::Touch, EventPhase::End, 2, 300, 220, 2000 + kLongPressUs});
-        assert(!input.tap());
     }
     {
         const auto root = card / "SleepWorker";

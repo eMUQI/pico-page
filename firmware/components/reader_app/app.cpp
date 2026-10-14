@@ -5039,7 +5039,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!custom_wait_footer) return;
         std::memcpy(custom_wait_footer.get(), canvas.data() + 342 * footer_top, kCustomWaitFooterBytes);
         canvas.fill_rect(0, footer_top, 684, 1216 - footer_top, 15);
-        text("正在准备休眠图片，操作可取消", 36, footer_top + 28, 24, 612, 1);
+        text("正在准备休眠图片，按电源键取消", 36, footer_top + 28, 24, 612, 1);
         present_custom_wait_footer();
     }
     bool custom_prepare_due() const {

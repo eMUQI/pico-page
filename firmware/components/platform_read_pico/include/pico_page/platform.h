@@ -144,6 +144,9 @@ Battery battery();
  * Enters light sleep and returns after a PMU power-key wake or an error.
  * The caller must finish display work, persist progress and stop network work
  * before calling. Touch and the three capacitive keys do not wake this mode.
+ * Pending contacts are discarded under the sampler lock, including on aborted
+ * preparation; only power-key events cancel the handoff. Contacts remain
+ * suppressed until release after the controller returns from standby.
  * The wake input is consumed; this function does not advance reading state.
  * Periodic PMU events and rejected sleep requests are handled without returning.
  * entered_sleep remains true after a sleep request even if wake cleanup fails.

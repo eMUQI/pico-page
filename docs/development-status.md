@@ -2,6 +2,8 @@
 
 ## 当前摘要（2026-10-14）
 
+`0.2.0-beta.4` 第 1 项已有本地候选（2026-10-14，基于 main `33b7e97`）：立即休眠、等待封面/自定义图片和自动休眠共用电源键取消规则；准备期间触摸和 K1/K2/K3 均忽略，K2 不全刷，不重放到原页。再短按电源键取消，长按仍请求电源菜单；等待页脚改为「正在准备休眠图片，按电源键取消」。host Debug 与 GCC ASan/UBSan/LSan 各 24/24，独立 release 固件构建与来源核验通过。未连接或刷写设备，PW05/PW07 真机待测。
+
 `0.2.0-beta.3` 已于 2026-10-14 作为预发布发布（标签 `v0.2.0-beta.3`，main `2937ca7`，PR #93）。这一版包含 PR #86 至 #92：Wi-Fi 传书接收字体和锁屏图片、传书接收期间刷新失败的修复、传书页随时加文件、锁屏轮播的冷缓存准备与精简、书库「继续阅读」卡片、键盘局刷和缺字方框。线上已有高于 beta.2 的版本，联网更新的真机验收（OTA03–OTA06）可以开始，需用保留双槽分区的第一台设备。详见本日「发布 0.2.0-beta.3」记录。
 
 缺字的显示已统一（2026-10-14，分支 `fix/missing-glyph-box`，基于 main `33f8ba9`，PR #91 已合并）：用户上传的两个字体缺繁体字，一个把缺字画成空白，一个画成花纹方块。现在任何字体缺少的字符都画同一种空心方框，汉字等宽字符占一个字宽，其余占半个字宽；分页缓存版本改为 `pagination-v4`，总页数会重新统计一次，阅读进度不受影响。逐字回退到其他字体没有做。host、sanitizer、固件构建通过，已在设备上用同一本繁体书确认。详见本日记录。
@@ -5715,3 +5717,18 @@ PR 首轮网站构建通过、artifact 上传成功；GitHub 提示 `checkout`�
 - 补充（同日）：用户确认保留全部 9 项。用户反馈 iPhone 热点认证页也能上传，第 9 项改为删去 `web/src/pages/docs.astro` 中对应的常见问题和第 3 步括注。
 - 检查：交接检查、diff 检查。
 - 下一步：先改 `firmware/version.txt`，从第 1–3 项开始实现。
+
+## 2026-10-14 · beta.4 第 1 项：休眠准备仅由电源键取消
+
+基于 main `33b7e97`，按用户要求实现路线图第 1 项。`firmware/version.txt` 改为 `0.2.0-beta.4`；本批是开发候选，不是发布版，未连接或刷写设备。
+
+- 变更：主循环不再因待处理触摸或电容键取消休眠，也不因这些输入取消锁屏 worker。请求休眠时重置已有接触；准备期间和取消恢复期间丢弃触摸、K1/K2/K3 与接触队列重置，不保留点按、轻扫或长按到原页面。再短按电源键取消，长按仍打开电源菜单；取消后恢复期间只保留电源键意图，触摸队列溢出不清掉菜单请求。立即休眠、等待图片和自动休眠共用规则。
+- 板级交接：在已有 `touch_lock` 内清空触摸队列，抑制当前接触直至释放，再将控制器置入待机。触摸队列、待处理触摸中断和触摸 IRQ 电平不再取消入睡；PMU 按键、事件确认、扩展器 IRQ 检查、周期唤醒重入和 USB 恢复保持原路径。核对了固定 BSP 的 `cst836u_set_mode()`/`cst836u_wake()`、本地 ESP-IDF v6.1 `esp_sleep.h`；乐鑫 MCP 返回 ESP32-S3 的 GPIO 低电平唤醒说明，与本项目只使用 PMU 扩展器唤醒线的实现一致。
+- 界面与资料：等待页脚为「正在准备休眠图片，按电源键取消」。D43、R4、架构、UI 实现说明、PW05/PW07、使用说明与根开发规则同步该例外；不改原始设计文件，不处理 beta.4 第 2–9 项。
+- 执行上下文与资源：仍由应用任务分发输入，板级交接仍持有采样器锁，没有新增任务、分配或等待。`SleepInput` 只保留三个布尔字段（编译期检查不超过 3 字节），删除接触与重放记录。现有显示、TF I/O、worker 取消和 PMU 的不可抢断区间没有扩大；准备失败沿用原错误/取消恢复，保存失败不进入休眠。
+- 回归证据：修改实现前，`core_test` 在「接触不应被保留」的断言失败（`/tmp/picopage-core-before.log` 为构建日志，失败断言见本次终端输出）。更新现有 core/app 测试覆盖各类接触的 Begin/End/Cancel、队列重置保留电源意图、取消恢复后正文位置和像素不变、恢复后的新按键与触摸正常，以及长按菜单；保留既有冷缓存等待、页脚恢复失败与菜单异步交接回归。
+- 环境与命令：Linux，GCC 14.2.0、CMake 3.31.6、Node.js 24.19.0，ESP-IDF v6.1（`fff9895c82d744c7237be8847347bdd1b07c6643`，工作区干净），BSP `5f3406deec33304de8801046db583dec7c49e55b`。通过 `/workspace/cloud-tools/activate-host.sh` 和 `activate-idf.sh` 使用已有工具链。运行 `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host -N` 和 `ctest --test-dir build/host --output-on-failure`，实际注册及通过 24/24；日志 `/tmp/picopage-host-configure.log`、`/tmp/picopage-host-build.log`、`/tmp/picopage-host-tests.log`。
+- 内存检查：按环境文档的三个 sanitizer CMake flags 配置 `build/sanitized`，构建后用 `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure`，24/24 通过，含 LSan，耗时 97.05 秒。普通 Debug 最终一轮耗时 45.59 秒。首次测试编译暴露原测试依赖 `sleep_input.h` 间接包含手势声明，已加显式 include；扩展 K1 用例原先从第一页尝试回翻，测试错误要求新帧，已改为先到第二页再测回翻，没有降低产品断言。
+- 固件：标准入口因已有 `firmware/sdkconfig` 缺少 rollback、交叉签名验证和 TLS 外部内存三项主线 defaults 被来源检查拒绝，保留该旧配置。改用已有 `sh tools/build_firmware.sh release` 的独立配置；首次编译完成，但测试修正期间源码变化，来源检查正确拒绝记录，资料补齐后重跑 release 入口与来源核验通过，版本为 `0.2.0-beta.4+g33b7e97.dirty`；BIN 为 3,492,864 字节，4 MiB 槽余 701,440 字节。生效配置包含 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`、`CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y`、`CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y`；新主循环和平台休眠路径均参与目标构建。首次完整编译有一处既有 FreeType 未使用变量警告。BIN SHA-256 为 `4c53953136a4df135d0683494887b7529d6f009665d47186d17df8332d0eb901`，来源记录为 `build/firmware-release/provenance.json`。日志 `/tmp/picopage-firmware-build.log`、`/tmp/picopage-firmware-release.log`。
+- 资料检查：`python3 tools/check_handoff.py` 486 项通过，`git diff --check` 通过。构建与测试日志另保存在忽略目录 `.local/validation/sleep-power-only-20261014/`；本批代码及文档留在工作区，未提交或推送。
+- 未测与下一步：PW05/PW07 真机验证立即/冷缓存/热缓存/自动休眠，在请求后持续点按、轻扫、长按正文及 K1/K2/K3 均能继续入睡且不全刷；等待提示与最终锁屏刷屏期间短按取消、长按菜单（含仍在退出的 worker），取消及真实唤醒后无旧接触穿透、下一次新接触正常。另测采样队列溢出、较长休眠的 PMU 周期唤醒、实体输入时延、功耗与内存/栈峰值；host 与构建不替代这些证据。
