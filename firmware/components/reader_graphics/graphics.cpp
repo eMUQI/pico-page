@@ -177,9 +177,27 @@ void Font::trim_glyph_cache(std::size_t target_bytes, std::size_t max_entries) {
     }
 }
 
+namespace {
+// Unicode Default_Ignorable_Code_Point and the C0 controls: characters with no visible form.
+// A face without them draws nothing; any other missing character draws the placeholder.
+bool blank(char32_t c) {
+    return c < 0x20 || c == 0xad || c == 0x34f || c == 0x61c || c == 0x115f || c == 0x1160 || c == 0x17b4 ||
+           c == 0x17b5 || (c >= 0x180b && c <= 0x180f) || (c >= 0x200b && c <= 0x200f) ||
+           (c >= 0x202a && c <= 0x202e) || (c >= 0x2060 && c <= 0x206f) || c == 0x3164 ||
+           (c >= 0xfe00 && c <= 0xfe0f) || c == 0xfeff || c == 0xffa0 || (c >= 0xfff0 && c <= 0xfff8) ||
+           (c >= 0x1bca0 && c <= 0x1bca3) || (c >= 0x1d173 && c <= 0x1d17a) || (c >= 0xe0000 && c <= 0xe0fff);
+}
+bool cjk(char32_t c) {
+    return (c >= 0x2e80 && c <= 0x9fff) || (c >= 0xf900 && c <= 0xfaff) ||
+           (c >= 0x20000 && c <= 0x323af);
+}
+}  // namespace
+
 bool Font::contains(char32_t scalar) const {
     return face_ && FT_Get_Char_Index(static_cast<FT_Face>(face_), scalar) != 0;
 }
+
+bool Font::missing(char32_t scalar) const { return !contains(scalar) && !blank(scalar); }
 
 int Font::advance(char32_t scalar) {
     if (scalar == U'\n' || scalar == U'\r') return 0;
@@ -191,6 +209,11 @@ int Font::advance(char32_t scalar) {
     if (!face) { error_ = "Font glyph metrics failed"; return -1; }
     int width;
     FT_Fixed design = 0;
+    if (!FT_Get_Char_Index(face, scalar)) {
+        // A missing character takes the cell of a present one, whatever the face's own .notdef
+        // advance is: a full em where line breaking treats it as CJK, half an em otherwise.
+        width = blank(scalar) ? 0 : cjk(scalar) ? pixel_size_ : (pixel_size_ + 1) / 2;
+    } else
     // For static SFNT faces the hinted loader yields the scaled design advance rounded to a whole
     // pixel. Reading that advance alone avoids fetching and scaling the outline from storage.
     if (FT_IS_SFNT(face) && !FT_HAS_MULTIPLE_MASTERS(face) &&
@@ -219,37 +242,69 @@ FontMetrics Font::metrics() const {
             static_cast<int>((metrics.height + 63) >> 6)};
 }
 
+std::uint64_t Font::glyph_key(char32_t scalar, bool bold) const {
+    // The characters a face lacks share one wide and one narrow placeholder per size.
+    if (!contains(scalar))
+        return (std::uint64_t(pixel_size_) << 32) | (blank(scalar) ? 0xfffffffdU : cjk(scalar) ? 0xffffffffU : 0xfffffffeU);
+    return (std::uint64_t(bold) << 63) | (std::uint64_t(weight_) << 60) | (std::uint64_t(pixel_size_) << 32) | std::uint32_t(scalar);
+}
+
+bool Font::placeholder(char32_t scalar, Glyph& glyph) {
+    // Faces draw their own .notdef as a box, a pattern or nothing at all. A hollow box inside
+    // the cell that advance() reserves keeps every missing character visible.
+    const int reserved = advance(scalar), stroke = std::max(1, pixel_size_ / 16);
+    if (reserved < 0) return false;
+    const int width = std::min(reserved, pixel_size_) - 2 * std::max(1, pixel_size_ / 10);
+    const int rows = pixel_size_ * 4 / 5;
+    if (blank(scalar) || width < 3 * stroke || rows < 3 * stroke) return true;
+    glyph.left = (reserved - width) / 2; glyph.top = rows - pixel_size_ / 10;
+    glyph.width = static_cast<unsigned>(width); glyph.rows = static_cast<unsigned>(rows);
+    glyph.coverage.assign(static_cast<std::size_t>(width) * rows, 0);
+    for (int row = 0; row < rows; ++row)
+        for (int col = 0; col < width; ++col)
+            if (row < stroke || row >= rows - stroke || col < stroke || col >= width - stroke)
+                glyph.coverage[static_cast<std::size_t>(row) * width + col] = 255;
+    return true;
+}
+
+bool Font::rasterize(char32_t scalar, bool bold, Glyph& glyph) {
+    if (FT_Load_Char(static_cast<FT_Face>(face_), scalar, FT_LOAD_DEFAULT | FT_LOAD_TARGET_NORMAL)) {
+        error_ = "Font glyph rasterization failed"; return false;
+    }
+    const auto slot = static_cast<FT_Face>(face_)->glyph;
+    if (weight_ && slot->format == FT_GLYPH_FORMAT_OUTLINE &&
+        FT_Outline_Embolden(&slot->outline, static_cast<FT_Pos>(pixel_size_ * weight_))) {
+        error_ = "Font stroke adjustment failed"; return false;
+    }
+    if (bold) FT_GlyphSlot_Embolden(slot);
+    if (FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL)) {
+        error_ = "Font glyph rasterization failed"; return false;
+    }
+    const auto& bitmap = slot->bitmap;
+    if (bitmap.pixel_mode != FT_PIXEL_MODE_GRAY && bitmap.pixel_mode != FT_PIXEL_MODE_MONO &&
+        bitmap.rows) { error_ = "Unsupported glyph pixel format"; return false; }
+    glyph.left = slot->bitmap_left; glyph.top = slot->bitmap_top;
+    glyph.width = bitmap.width; glyph.rows = bitmap.rows;
+    glyph.coverage.resize(static_cast<std::size_t>(bitmap.width) * bitmap.rows);
+    for (unsigned row = 0; row < bitmap.rows; ++row) {
+        const auto* bytes = bitmap.buffer + (bitmap.pitch >= 0 ? row : bitmap.rows - 1 - row) *
+                                           std::abs(bitmap.pitch);
+        for (unsigned col = 0; col < bitmap.width; ++col)
+            glyph.coverage[static_cast<std::size_t>(row) * bitmap.width + col] =
+                bitmap.pixel_mode == FT_PIXEL_MODE_MONO
+                    ? ((bytes[col / 8] & (0x80 >> (col & 7))) ? 255 : 0) : bytes[col];
+    }
+    return true;
+}
+
 bool Font::warm(char32_t scalar, bool bold) {
     if (scalar == U'\n' || scalar == U'\r' || scalar == U'\t') return true;
-    const auto key = (std::uint64_t(bold) << 63) | (std::uint64_t(weight_) << 60) | (std::uint64_t(pixel_size_) << 32) | std::uint32_t(scalar);
+    if (!face_) { error_ = "Font glyph rasterization failed"; return false; }
+    const auto key = glyph_key(scalar, bold);
     auto cached = glyphs_.find(key);
     if (cached == glyphs_.end()) {
-        if (!face_ || FT_Load_Char(static_cast<FT_Face>(face_), scalar,
-                                 FT_LOAD_DEFAULT | FT_LOAD_TARGET_NORMAL)) {
-            error_ = "Font glyph rasterization failed"; return false;
-        }
-        const auto slot = static_cast<FT_Face>(face_)->glyph;
-        if (weight_ && slot->format == FT_GLYPH_FORMAT_OUTLINE &&
-            FT_Outline_Embolden(&slot->outline, static_cast<FT_Pos>(pixel_size_ * weight_))) {
-            error_ = "Font stroke adjustment failed"; return false;
-        }
-        if (bold) FT_GlyphSlot_Embolden(slot);
-        if (FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL)) {
-            error_ = "Font glyph rasterization failed"; return false;
-        }
-        const auto& bitmap = slot->bitmap;
-        if (bitmap.pixel_mode != FT_PIXEL_MODE_GRAY && bitmap.pixel_mode != FT_PIXEL_MODE_MONO &&
-            bitmap.rows) { error_ = "Unsupported glyph pixel format"; return false; }
-        Glyph glyph{slot->bitmap_left, slot->bitmap_top, bitmap.width, bitmap.rows, {}, {}};
-        glyph.coverage.resize(static_cast<std::size_t>(bitmap.width) * bitmap.rows);
-        for (unsigned row = 0; row < bitmap.rows; ++row) {
-            const auto* bytes = bitmap.buffer + (bitmap.pitch >= 0 ? row : bitmap.rows - 1 - row) *
-                                               std::abs(bitmap.pitch);
-            for (unsigned col = 0; col < bitmap.width; ++col)
-                glyph.coverage[static_cast<std::size_t>(row) * bitmap.width + col] =
-                    bitmap.pixel_mode == FT_PIXEL_MODE_MONO
-                        ? ((bytes[col / 8] & (0x80 >> (col & 7))) ? 255 : 0) : bytes[col];
-        }
+        Glyph glyph;
+        if (!(contains(scalar) ? rasterize(scalar, bold, glyph) : placeholder(scalar, glyph))) return false;
         constexpr std::size_t glyph_cache_limit = 1024 * 1024;
         while (!glyph_order_.empty() && glyph_bytes_ + glyph.coverage.size() > glyph_cache_limit) {
             const auto oldest = glyph_order_.front();
@@ -269,8 +324,7 @@ bool Font::warm(char32_t scalar, bool bold) {
 bool Font::draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8_t gray, bool bold) {
     if (!warm(scalar, bold)) return false;
     if (scalar == U'\n' || scalar == U'\r' || scalar == U'\t') return true;
-    const auto key = (std::uint64_t(bold) << 63) | (std::uint64_t(weight_) << 60) | (std::uint64_t(pixel_size_) << 32) | std::uint32_t(scalar);
-    const auto& glyph = glyphs_.at(key);
+    const auto& glyph = glyphs_.at(glyph_key(scalar, bold));
     for (unsigned row = 0; row < glyph.rows; ++row) {
         const auto* bytes = glyph.coverage.data() + static_cast<std::size_t>(row) * glyph.width;
         for (unsigned col = 0; col < glyph.width; ++col) {
@@ -287,10 +341,6 @@ bool Font::draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8
 }
 
 namespace {
-bool cjk(char32_t c) {
-    return (c >= 0x2e80 && c <= 0x9fff) || (c >= 0xf900 && c <= 0xfaff) ||
-           (c >= 0x20000 && c <= 0x323af);
-}
 bool closing(char32_t c) { return std::u32string_view(U"，。！？、：；）】》」』〉…’”﹐﹑﹒﹔﹕﹖﹗﹚﹜﹞｡､｣,.!?;:)]}").find(c) != std::u32string_view::npos; }
 bool opening(char32_t c) { return std::u32string_view(U"（【《「『〈‘“﹙﹛﹝｢([{").find(c) != std::u32string_view::npos; }
 bool break_after(char32_t previous, char32_t next) {
