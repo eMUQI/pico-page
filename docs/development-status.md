@@ -2,7 +2,7 @@
 
 ## 当前摘要（2026-10-14）
 
-`0.2.0-beta.4` 第 1 项已有本地候选（2026-10-14，基于 main `33b7e97`）：立即休眠、等待封面/自定义图片和自动休眠共用电源键取消规则；准备期间触摸和 K1/K2/K3 均忽略，K2 不全刷，不重放到原页。再短按电源键取消，长按仍请求电源菜单；等待页脚改为「正在准备休眠图片，按电源键取消」。host Debug 与 GCC ASan/UBSan/LSan 各 24/24，独立 release 固件构建与来源核验通过。未连接或刷写设备，PW05/PW07 真机待测。
+`0.2.0-beta.4` 第 1 项已有本地候选（2026-10-14，基于 main `33b7e97`）：立即休眠、等待封面/自定义图片和自动休眠共用电源键取消规则；准备期间触摸和 K1/K2/K3 均忽略，K2 不全刷，不重放到原页。再短按电源键取消，长按仍请求电源菜单；PR #95 首轮 review 指出的菜单交接期间输入穿透已修正，屏蔽持续至菜单显示且旧队列排空。等待页脚改为「正在准备休眠图片，按电源键取消」。host Debug 与 GCC ASan/UBSan/LSan 各 24/24，独立 release 固件构建与来源核验通过。未连接或刷写设备，PW05/PW07 真机待测。
 
 `0.2.0-beta.3` 已于 2026-10-14 作为预发布发布（标签 `v0.2.0-beta.3`，main `2937ca7`，PR #93）。这一版包含 PR #86 至 #92：Wi-Fi 传书接收字体和锁屏图片、传书接收期间刷新失败的修复、传书页随时加文件、锁屏轮播的冷缓存准备与精简、书库「继续阅读」卡片、键盘局刷和缺字方框。线上已有高于 beta.2 的版本，联网更新的真机验收（OTA03–OTA06）可以开始，需用保留双槽分区的第一台设备。详见本日「发布 0.2.0-beta.3」记录。
 
@@ -5732,3 +5732,13 @@ PR 首轮网站构建通过、artifact 上传成功；GitHub 提示 `checkout`�
 - 固件：标准入口因已有 `firmware/sdkconfig` 缺少 rollback、交叉签名验证和 TLS 外部内存三项主线 defaults 被来源检查拒绝，保留该旧配置。改用已有 `sh tools/build_firmware.sh release` 的独立配置；首次编译完成，但测试修正期间源码变化，来源检查正确拒绝记录，资料补齐后重跑 release 入口与来源核验通过，版本为 `0.2.0-beta.4+g33b7e97.dirty`；BIN 为 3,492,864 字节，4 MiB 槽余 701,440 字节。生效配置包含 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`、`CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y`、`CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y`；新主循环和平台休眠路径均参与目标构建。首次完整编译有一处既有 FreeType 未使用变量警告。BIN SHA-256 为 `4c53953136a4df135d0683494887b7529d6f009665d47186d17df8332d0eb901`，来源记录为 `build/firmware-release/provenance.json`。日志 `/tmp/picopage-firmware-build.log`、`/tmp/picopage-firmware-release.log`。
 - 资料检查：`python3 tools/check_handoff.py` 486 项通过，`git diff --check` 通过。构建与测试日志另保存在忽略目录 `.local/validation/sleep-power-only-20261014/`；本批代码及文档留在工作区，未提交或推送。
 - 未测与下一步：PW05/PW07 真机验证立即/冷缓存/热缓存/自动休眠，在请求后持续点按、轻扫、长按正文及 K1/K2/K3 均能继续入睡且不全刷；等待提示与最终锁屏刷屏期间短按取消、长按菜单（含仍在退出的 worker），取消及真实唤醒后无旧接触穿透、下一次新接触正常。另测采样队列溢出、较长休眠的 PMU 周期唤醒、实体输入时延、功耗与内存/栈峰值；host 与构建不替代这些证据。
+
+## 2026-10-14 · PR #95 首轮 review：菜单交接期间保持输入屏蔽
+
+用户授权创建 PR、跟进 CI/review 并在问题处理后合并。PR #95 的 `d140728` 四项远端 CI 全部通过；Codex review 提出一项 P2，源码核对成立：长按电源取消休眠后，`sleep_requested` 已清除，但 `power_menu_wait` 仍可能等待 footer 刷新或锁屏 worker 退出，此时原页触摸和电容键提前恢复。
+
+- 修正：`ReaderApp::power_menu_pending()` 只读既有菜单交接状态。主循环保留本轮是否处于休眠/取消恢复的上下文，长按请求了待打开菜单时重新进入 `SleepInput` 输入屏蔽；只有菜单交接完成、必要内容和帧完成、旧输入队列排空后才能释放屏蔽。普通页面直接长按电源的既有输入行为不变。
+- 回归：扩展现有异步 `WaitPowerMenu` 用例，核对页脚恢复在途时菜单待打开，期间触摸与 K1/K2/K3 不保留电源意图、不改原画布；交接后菜单待打开标志清除，新的取消点按正常返回原页。host 测试不替代实体输入与面板时序。
+- 资源：仍由应用任务分发；未增加状态字段、任务、分配或阻塞。输入屏蔽复用三个布尔字段，内容 worker 仍协作退出。
+- 验证：Linux 环境及命令沿用上一批。`cmake --build build/host --parallel 4` 后 CTest 24/24；`cmake --build build/sanitized --parallel 4` 后以 `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1` 运行 CTest 24/24；`sh tools/build_firmware.sh release` 与来源核验通过，新增菜单查询和主循环路径参与固件编译。交接检查 486 项及 diff 检查通过。提交后再次构建该提交的固件并核对来源，远端 CI 和 review 按新提交重新检查。日志归档于 `.local/validation/sleep-power-only-20261014/pr95-review1/`。
+- 未测：没有连接或刷写设备，PW05/PW07 的持续误触、短按取消、长按菜单与睡眠交接仍待真机验证。

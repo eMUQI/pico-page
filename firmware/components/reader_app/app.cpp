@@ -7695,6 +7695,7 @@ void ReaderApp::show_portal(const PortalStatus &status) {
             RefreshIntent::Content, RefreshRegion{0, top, 684, 1072 - top}});
     } else impl_->overlay(codes_appear);
 }
+bool ReaderApp::power_menu_pending() const { return impl_->power_menu_wait.has_value(); }
 bool ReaderApp::show_power_menu() {
     if (impl_->network_worker_id || impl_->active_network || impl_->content_loading || impl_->foreground_job ||
         impl_->usb_prepared || impl_->view == View::Portal || impl_->view == View::PowerOff) return false;

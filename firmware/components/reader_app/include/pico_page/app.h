@@ -247,6 +247,8 @@ class ReaderApp {
      * or queued. Other busy tasks reject it.
      */
     bool show_power_menu();
+    /** True until the requested menu can replace its source page after resource handoff. */
+    bool power_menu_pending() const;
     /** Displays why the menu is unavailable while preserving the current task and controls. */
     void power_unavailable(const std::string& message);
     /** Consumes an explicit menu choice; the device loop performs the hardware operation. */

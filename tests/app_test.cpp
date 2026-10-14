@@ -1187,6 +1187,17 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         assert(!app.sleep_pending());
         if (open_menu) {
             assert(app.show_power_menu());
+            assert(app.power_menu_pending());
+            pico_page::platform::SleepInput suppressed;
+            suppressed.begin();
+            const auto before_menu = app.canvas().pixels();
+            for (const auto kind : {pico_page::platform::EventKind::Touch, pico_page::platform::EventKind::K1,
+                                    pico_page::platform::EventKind::K2, pico_page::platform::EventKind::K3}) {
+                suppressed.accept({kind, pico_page::platform::EventPhase::Begin, 1, 600, 50});
+                suppressed.accept({kind, pico_page::platform::EventPhase::End, 1, 600, 50});
+                assert(suppressed.active() && !suppressed.power() && !suppressed.menu());
+                assert(app.power_menu_pending() && app.canvas().pixels() == before_menu);
+            }
             driver.present();
             while (app.view() != View::PowerMenu) {
                 app.poll_background();
@@ -1194,6 +1205,8 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
                 assert(std::chrono::steady_clock::now() < deadline);
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
+            assert(!app.power_menu_pending());
+            suppressed.clear();
             driver.tap(300, 1120); driver.present();
             assert(app.view() == View::Library && app.canvas().pixels() == original);
         } else if (fail_frame) {

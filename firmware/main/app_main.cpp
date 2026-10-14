@@ -849,6 +849,7 @@ extern "C" void app_main() {
         if (event.kind == pico_page::platform::EventKind::None && !pico_page::platform::poll(event, error))
             ESP_LOGW(tag, "Input read failed: %s", error.c_str());
         using pico_page::platform::EventKind;
+        const bool sleep_recovery = sleep_requested || resume_input.active();
         if (sleep_requested && pico_page::platform::SleepInput::ignores(event.kind)) event = {};
         // An update check or download keeps the device awake and at full speed.
         if (event.kind != EventKind::None || pico_page::console::transfer_active() || app->update_busy()) {
@@ -897,7 +898,7 @@ extern "C" void app_main() {
             } else {
                 resume_input.accept(event);
                 event = {};
-                if (!app->content_busy() && !app->pending_frame() &&
+                if (!app->content_busy() && !app->pending_frame() && !app->power_menu_pending() &&
                     !pico_page::platform::input_waiting_before(std::numeric_limits<std::int64_t>::max())) {
                     if (resume_input.menu()) {
                         resume_input.clear();
@@ -924,6 +925,7 @@ extern "C" void app_main() {
                 physical_source = physical_sequence = 0;
                 physical_suppressed = false;
                 if (!app->show_power_menu()) app->power_unavailable("请先结束当前任务，再关机或重启。");
+                if (sleep_recovery && app->power_menu_pending()) resume_input.begin();
             } else app->power_unavailable(usb_mode ? "请先弹出设备并结束 USB 传输。" : "请先结束网络或传输任务。");
             present(*app);
         } else if (event.kind == EventKind::Power) {
