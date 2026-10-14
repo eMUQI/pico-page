@@ -421,7 +421,9 @@ struct ReaderApp::Impl final : DisplayBackend {
              36, 240, 40, 612, 1, true);
         wrapped(detail, 36, 360, 612, 28);
     }
-    bool resume_to_library = false, sleep_destination_captured = false;
+    enum class Origin : std::uint8_t { Reading, Library, Settings };
+    Origin error_origin = Origin::Library, sleep_origin = Origin::Library, loading_origin = Origin::Library;
+    bool sleep_destination_captured = false;
     bool usb_prepared = false, usb_active = false, usb_confirm = false;
     UsbTransferAction usb_action = UsbTransferAction::None;
     std::optional<View> usb_request_view;
@@ -793,7 +795,54 @@ struct ReaderApp::Impl final : DisplayBackend {
     reading_footer::Position footer_position = reading_footer::Position::Pages;
     reading_footer::Device footer_device = reading_footer::Device::Battery;
     PageEffect page_effect = PageEffect::Off;
-    bool refresh_from_settings = false, import_from_settings = false, help_from_settings = false;
+    bool refresh_from_settings = false, import_from_settings = false, help_from_settings = false, typography_from_settings = false;
+    Origin origin_for(View source) const {
+        const auto body_origin = has_book() && (session.visible_record() || session.saved_record())
+            ? Origin::Reading : Origin::Library;
+        switch (source) {
+        case View::Reading: case View::Tools: case View::Contents: case View::Sync: case View::Confirmation:
+            return body_origin;
+        case View::Library: case View::BookDetails: case View::BookManagement:
+            return Origin::Library;
+        case View::Typography:
+            return typography_from_settings ? Origin::Settings : body_origin;
+        case View::Refresh: case View::RefreshConfirm: case View::RefreshInterval: case View::PageEffects:
+            return refresh_from_settings ? Origin::Settings : body_origin;
+        case View::Help:
+            return help_from_settings ? Origin::Settings : Origin::Library;
+        case View::Import: case View::UsbTransfer: case View::Portal:
+            return import_from_settings ? Origin::Settings : Origin::Library;
+        case View::Settings: case View::WifiSettings: case View::PowerSettings: case View::StorageSettings:
+        case View::InputSettings: case View::SyncSettings: case View::TextEntry: case View::LockScreens:
+        case View::About: case View::Update:
+            return Origin::Settings;
+        case View::Error: return error_origin;
+        case View::Sleeping: return sleep_origin;
+        case View::Loading: return loading_origin;
+        case View::NetworkClosing: return origin_for(network_return_view);
+        case View::PowerMenu: case View::PowerOff: return origin_for(power_return_view);
+        }
+        return Origin::Library;
+    }
+    static const char *return_label(Origin origin) {
+        switch (origin) {
+        case Origin::Reading: return "恢复阅读";
+        case Origin::Library: return "返回书库";
+        case Origin::Settings: return "返回设置";
+        }
+        return "返回书库";
+    }
+    void return_to_origin(Origin origin, bool full = false) {
+        if (origin == Origin::Reading && has_book()) { recover_body(); return; }
+        if (origin == Origin::Settings) {
+            draft = {}; edit_snapshot = {}; reset_overrides = false;
+            leave_join(WifiPage::Home);
+            std::fill(account.password.begin(), account.password.end(), '\0');
+            account = {}; entry = {};
+            draw_settings();
+        } else draw_library();
+        overlay(full);
+    }
     std::string detail_path, detail_position, detail_error;
     BookSnapshot management_snapshot;
     bool delete_original = false, drawing_error = false;
@@ -883,6 +932,7 @@ struct ReaderApp::Impl final : DisplayBackend {
      * its content and shows the status in the footer zone.
      */
     void loading(const std::string &status) {
+        loading_origin = origin_for(view);
         const bool panel = view == View::Tools || view == View::Contents || view == View::Typography ||
                            view == View::Refresh || view == View::Sync || view == View::Confirmation;
         if (panel && body_canvas) canvas = *body_canvas;
@@ -1013,7 +1063,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         clear_prefetch(); covers.clear(); make_image_room();
         if (progressive) { inline_image_pending = true; return true; }
         // The typography panel draws the preview status itself.
-        if (preview) { content_loading = true; view = View::Loading; return true; }
+        if (preview) { loading_origin = origin_for(view); content_loading = true; view = View::Loading; return true; }
         loading("正在准备图片…");
         clear_body_cache();
         return true;
@@ -5487,7 +5537,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         load_fonts();
         if (has_book() && !restore_confirmed_position()) return;
         const auto position = has_book() ? book_position(offset, offset) : std::string("位置已保存");
-        const char *resume_hint = resume_to_library ? "按电源键返回书库" : "按电源键继续阅读";
+        const char *resume_hint = sleep_origin == Origin::Settings ? "按电源键返回设置" :
+                                  sleep_origin == Origin::Library ? "按电源键返回书库" : "按电源键继续阅读";
         if (settings.sleep_screen == "custom" && custom_sleep_image) {
             canvas = *custom_sleep_image;
             custom_sleep_image.reset();
@@ -5968,6 +6019,7 @@ struct ReaderApp::Impl final : DisplayBackend {
 #endif
         draw_sync();
         if (view != View::Sync) { abandon_content(); return; }
+        loading_origin = origin_for(view);
         view = View::Loading;
         overlay();
     }
@@ -6176,6 +6228,8 @@ struct ReaderApp::Impl final : DisplayBackend {
      * the rest explains it. retry names a book whose opening failed and can be repeated.
      */
     void error(const std::string &text_in, const std::string &retry = "") {
+        // Repainting an error must retain the destination captured when it first appeared.
+        error_origin = origin_for(view);
         image_viewing = false;
         viewer_original.reset();
         image_contrast_level = 0;
@@ -6208,16 +6262,18 @@ struct ReaderApp::Impl final : DisplayBackend {
         view = View::Error;
         hits.clear();
         const bool unsaved = session.needs_save();
-        const bool resumes = has_book() && (session.visible_record() || session.saved_record());
+        const bool resumes = error_origin == Origin::Reading && has_book() && (session.visible_record() || session.saved_record());
         if (retained) {
             canvas.fill_rect(0, 752, 684, 464, 15);
             canvas.line(0, 752, 683, 752, 1, 3);
             text(title, 36, 784, 32, 612, 1, true);
             title_lines(body, 36, 850, 612, 26, false, 3);
-            note("保留最后确认的位置。", 1012);
+            note(error_origin == Origin::Reading ? "保留最后确认的位置。" :
+                 error_origin == Origin::Settings ? "返回将回到设置首页。" : "返回将回到书库。", 1012);
         } else {
             canvas.clear();
-            header(retry.empty() ? "暂时无法继续" : "无法打开", unsaved || resumes ? 0 : Back, "书库");
+            header(retry.empty() ? "暂时无法继续" : "无法打开", unsaved || resumes ? 0 : Back,
+                   error_origin == Origin::Settings ? "设置" : "书库");
             title_lines(title, 36, 160, 612, 40, true);
             int y = 160 + std::min(wrapped(title, 0, 0, 612, 40, false), 96) + 28;
             if (!body.empty()) y += wrapped(body, 36, y, 612, 28) + 28;
@@ -6227,7 +6283,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
         }
         // Two actions share the row with the recommended one on the right; one action fills it.
-        const auto leave = unsaved || !card_available ? "返回" : resumes ? "恢复阅读" : "返回书库";
+        const auto leave = return_label(error_origin);
         const bool second = unsaved || !retry.empty();
         button(Back, leave, 24, 1080, second ? 306 : 636, 96, !second);
         if (unsaved) button(SaveRetry, "重试保存", 354, 1080, 306, 96, true);
@@ -6332,13 +6388,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             show_page(offset);
             return;
         }
-        if (view == View::Error && session.needs_save()) {
-            draw_settings();
-            overlay();
-            return;
-        }
-        if (view == View::Error && has_book()) {
-            recover_body();
+        if (view == View::Error) {
+            return_to_origin(error_origin);
             return;
         }
         draw_library();
@@ -6494,8 +6545,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (view == View::NetworkClosing) {
             if (id == ContinueOffline) {
                 network_after_cancel = 0;
-                if (has_book()) recover_body();
-                else { draw_library(); overlay(); }
+                return_to_origin(origin_for(view));
             }
             return;
         }
@@ -6762,6 +6812,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             break;
         }
         case Typography:
+            typography_from_settings = origin_for(view) == Origin::Settings;
             if (!begin_settings_edit())
                 return;
             draft = edit_snapshot.config.settings;
@@ -7112,12 +7163,13 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
             apply_refresh(id);
             return;
-        case SaveRetry:
+        case SaveRetry: {
+            const auto origin = origin_for(view);
             if (!persist()) { error(message); return; }
             message = "进度已保存";
-            if (has_book()) { recover_body(); return; }
-            draw_settings();
-            break;
+            return_to_origin(origin);
+            return;
+        }
         default:
             return;
         }
@@ -7445,8 +7497,12 @@ void ReaderApp::complete_frame(bool success) {
             impl_->draw_usb(); impl_->overlay(true);
         } else if (impl_->view == View::PowerMenu && impl_->power_return_canvas) {
             impl_->close_power_menu();
-        } else if (frame.region) impl_->error("屏幕局部更新失败。返回将恢复已确认位置。");
-        else impl_->error("屏幕更新失败。返回将恢复已确认位置。");
+        } else {
+            const auto origin = impl_->origin_for(impl_->view);
+            const auto destination = origin == Impl::Origin::Reading ? "恢复已确认位置。" :
+                                     origin == Impl::Origin::Settings ? "回到设置首页。" : "回到书库。";
+            impl_->error(std::string(frame.region ? "屏幕局部更新失败。返回将" : "屏幕更新失败。返回将") + destination);
+        }
     }
 }
 View ReaderApp::view() const {
@@ -7815,7 +7871,7 @@ bool ReaderApp::prepare_sleep() {
     if (impl_->network_worker_id || impl_->portal_live || impl_->usb_prepared || impl_->view == View::Portal || impl_->view == View::PowerMenu || impl_->view == View::PowerOff) return false;
     if (impl_->display.busy() || impl_->active_network) return false;
     if (!impl_->sleep_destination_captured) {
-        impl_->resume_to_library = impl_->view == View::Library || !impl_->has_book();
+        impl_->sleep_origin = impl_->origin_for(impl_->view);
         impl_->sleep_destination_captured = true;
     }
     if (impl_->counting_job) {
@@ -7885,12 +7941,11 @@ void ReaderApp::wake(bool slept) {
     impl_->custom_notice_pending = slept && impl_->settings.sleep_screen == "custom" && !impl_->custom_notice.empty();
     if (slept) impl_->sleep_wifi_target.reset();
     else cancel_sleep();
-    if (!impl_->resume_to_library && impl_->has_book()) {
+    if (impl_->sleep_origin == Impl::Origin::Reading && impl_->has_book()) {
         if (impl_->async_content) impl_->open(impl_->book_path);
         else impl_->recover_body();
     } else {
-        impl_->draw_library();
-        impl_->overlay(true);
+        impl_->return_to_origin(impl_->sleep_origin, true);
     }
 }
 void ReaderApp::card_removed() {
@@ -7997,7 +8052,7 @@ void ReaderApp::poll_background(bool cancel) {
     if (!cancel && impl_->custom_notice_pending &&
         !impl_->sleep_cover_deadline && !impl_->display.busy() && !impl_->content_loading &&
         !impl_->save_failed && !impl_->recent_save_failed &&
-        (impl_->view == View::Library || impl_->view == View::Reading)) {
+        (impl_->view == View::Library || impl_->view == View::Reading || impl_->view == View::Settings)) {
         impl_->custom_notice_pending = false;
 #ifdef ESP_PLATFORM
         ESP_LOGW("reader_app", "Sleep image notice: %s", impl_->custom_notice.c_str());
@@ -8005,7 +8060,8 @@ void ReaderApp::poll_background(bool cancel) {
         impl_->message = kSleepFallbackNotice;
         // Optional sleep imagery must not cancel body image work or replace the wake destination.
         if (impl_->view == View::Reading) impl_->footer();
-        else impl_->footer_bar(impl_->notice(), impl_->library_page, impl_->library_pages());
+        else if (impl_->view == View::Library) impl_->footer_bar(impl_->notice(), impl_->library_page, impl_->library_pages());
+        else impl_->footer_bar(impl_->notice());
         const int top = impl_->view == View::Reading ? footer_top : Impl::footer_zone;
         impl_->display.present({{"ui", 0, 0, ++impl_->ui_sequence}, {}, FramePurpose::Overlay,
             RefreshIntent::Content, RefreshRegion{0, top, 684, 1216 - top}});

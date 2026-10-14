@@ -2,6 +2,8 @@
 
 ## 当前摘要（2026-10-14）
 
+`0.2.0-beta.4` 计划第 2 项「错误和状态页按来源返回」已通过 PR #96 提交候选（分支 `fix/return-to-origin`，始于 main `33b7e97`，已整合包含 PR #95 的 main `1353c5b`）：正文、书库、设置共用来源判定，覆盖错误、保存重试、网络收尾和休眠唤醒；从设置进入的排版及自定义锁屏回退提示已覆盖；新书首帧失败且没有确认位置时回书库，提示与按钮一致。首轮 review 的来源回退及摘要问题已修正。Debug 与 ASan/UBSan/LSan CTest 各 24/24，标准固件构建通过；已推送并进入 CI/review，未刷写，待 DP02、PW07 真机验收。完整 View 归类见 [UI 实现说明](ui-implementation.md#错误和状态页的返回来源020-beta4待真机验收)，本日记录列出命令和边界。
+
 `0.2.0-beta.4` 第 1 项已有本地候选（2026-10-14，基于 main `33b7e97`）：立即休眠、等待封面/自定义图片和自动休眠共用电源键取消规则；准备期间触摸和 K1/K2/K3 均忽略，K2 不全刷，不重放到原页。再短按电源键取消，长按仍请求电源菜单；PR #95 首轮 review 指出的菜单交接期间输入穿透已修正，屏蔽持续至菜单显示且旧队列排空；网络退出期间的长按意图也保留至工作任务和无线电交还。等待页脚改为「正在准备休眠图片，按电源键取消」。host Debug 与 GCC ASan/UBSan/LSan 各 24/24，独立 release 固件构建与来源核验通过。未连接或刷写设备，PW05/PW07 真机待测。
 
 `0.2.0-beta.3` 已于 2026-10-14 作为预发布发布（标签 `v0.2.0-beta.3`，main `2937ca7`，PR #93）。这一版包含 PR #86 至 #92：Wi-Fi 传书接收字体和锁屏图片、传书接收期间刷新失败的修复、传书页随时加文件、锁屏轮播的冷缓存准备与精简、书库「继续阅读」卡片、键盘局刷和缺字方框。线上已有高于 beta.2 的版本，联网更新的真机验收（OTA03–OTA06）可以开始，需用保留双槽分区的第一台设备。详见本日「发布 0.2.0-beta.3」记录。
@@ -5753,3 +5755,42 @@ PR 首轮网站构建通过、artifact 上传成功；GitHub 提示 `checkout`�
 - 资源：复用既有三个布尔字段与任务退出/无线电状态，没有新增状态字段、任务、分配或阻塞；新增 readiness 查询为纯逻辑。最长不可取消区间仍来自已有网络 I/O、显示和 TF 提交，不扩大预算、不强删任务。
 - 验证：Linux 环境及命令沿用前两批。host Debug CTest 24/24；以 `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1` 运行 GCC ASan/UBSan/LSan CTest 24/24；`sh tools/build_firmware.sh release` 和来源核验通过，新增网络退出等待路径参与目标编译。交接检查 486 项及 diff 检查通过。提交后再次核对该提交的固件来源，远端 CI/review 按新提交重新检查。日志归档于 `.local/validation/sleep-power-only-20261014/pr95-review2/`。
 - 未测：仍未连接或刷写设备；网络退出时长按、网络/无线电退出时序、实体误触和浅睡交接待 PW04/PW05/PW07 真机核对。
+
+
+## 2026-10-14 · 0.2.0-beta.4 第 2 项：错误和状态页按来源返回
+
+- 起点与范围：先读取 AGENTS、路线图第 2 项及本日计划记录；获取 `origin/main` 后从 `33b7e97` 新建分支 `fix/return-to-origin`，独立 worktree 为 `/workspace/pico-page-return-to-origin`。原工作目录保持干净。按版本规则先将 `firmware/version.txt` 从 `0.2.0-beta.3` 更新为 `0.2.0-beta.4`，尚未发布。
+- 变更：`origin_for()` 统一判定正文、书库、设置类别；`error()` 弹出时捕获，`prepare_sleep()` 在等待背景工作前固定。错误返回、保存重试成功和继续离线共用返回入口；正文沿用 `recover_body()`，书库保留文件夹和分页，设置回首页并清除草稿。错误页再次失败保留首次来源；按钮改为「恢复阅读」「返回书库」「返回设置」，保存未完成仍优先提供「重试保存」。整屏和局刷失败只在正文来源提示恢复已确认位置，其他来源说明回书库或设置首页。保存、书签、外部 `show_error()` 和移卡的错误均在实际弹出时捕获当前页面来源。
+- 页面核对：33 个 View 的分类和依据完整列于 `docs/ui-implementation.md` 的「错误和状态页的返回来源」。Typography 确实可从 InputSettings 进入，新增入口布尔标记；刷新子页、帮助、传输沿用各自已有入口标记。Loading 在所有进入路径捕获来源；NetworkClosing 直接复用 `network_return_view`；Error、Sleeping 和 PowerMenu 分别保留错误、休眠及菜单前来源。PowerOff 是不接受返回或休眠的终态，正常路径不会走通用错误返回；未新增终态退出路径。没有待定的 View 归类。
+- 关联修正：自定义锁屏失败的唤醒提示原先只允许正文和书库显示；设置类现在能回设置，故增加设置首页的一次性页脚局刷，避免提示拖到进入书库才出现，不带书库分页控件。对应回归先在已修正返回来源、尚未补齐提示的代码上确认失败。
+- 修复前验证：`tests/app_test.cpp` 沿用 Driver，支持可选的第 4 个场景参数便于单独复现。对原 main 实现运行 `build/host/app_test build/host/document-fixtures .local/card/Fonts/LXGWWenKai-Regular.ttf <场景>`；management、details、settings、invalid-settings、screen、typography-settings、sleep-settings、sleep-power、retry-save 共 9 个场景失败，分别落在来源去向或屏幕失败文案断言。正文错误、正文休眠和书库休眠的 3 个保护场景通过，确认原位置恢复与 PW07 已有书库去向成立。
+- 修复后回归：新增 19 个场景，除两项异步保存场景仅运行 worker 模式外，其余均以同步和异步两种模式运行，共 36 组。覆盖书籍管理外部修改、详情错误、设置保存/配置无效、设置入口排版、整屏和设置键盘局刷失败、正文位置不变、书库/设置中的异步保存失败及再次重试、设置页脚保存重试、同步/账户收尾后继续离线及迟到结果、书库/设置移卡、三类休眠和设置自定义锁屏回退提示只出现一次。同步/异步旧用例中「未保存错误返回设置」「从设置休眠回书库/正文」的预期按新规则更新；保存内容、修订和重试断言保留，设置页脚重试另有新增回归。
+- 环境与命令：Debian 13、GCC 14.2、Python 3.12，复用 `/workspace/cloud-tools/activate-host.sh` 与 `activate-idf.sh`；ESP-IDF 为既有 v6.1（`fff9895c82d744c7237be8847347bdd1b07c6643`，源码干净），BSP 为锁定的 `5f3406deec33304de8801046db583dec7c49e55b`。未替换全局工具链；测试字体和固定 FreeType 源码沿用已准备资源，未提交到仓库。
+- host 验证：仓库根目录执行 `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug && cmake --build build/host --parallel 4`、`ctest --test-dir build/host --output-on-failure`，24/24 通过。按 `docs/environment.md` 的三个 sanitizer 标志配置并构建 `build/sanitized`，再执行 `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure`，24/24 通过，未报告内存、未定义行为或泄漏错误。
+- 固件验证：`sh tools/build_firmware.sh` 标准入口通过，版本核对为 `0.2.0-beta.4+g33b7e97.dirty`，对应提交前的本批代码候选；应用镜像为 `0x355990` 字节，4 MiB 槽剩余 17%。实际 sdkconfig 为 ESP32-S3，回滚和交叉签名 CA 验证仍启用。首轮构建期间继续补回归，来源校验如实拒绝了变化中的源码；冻结代码后重新执行标准入口，构建及来源核对通过。构建记录、host 与 sanitizer 日志保存在忽略目录 `.local/return-to-origin/`；本次不是发布构建或刷写记录。
+- 配套检查：`python3 tools/check_handoff.py` 487 项通过；`git diff --check` 通过。UI 规则、DP02/PW07 真机核对点和版本说明已同步，路线图第 2 项标为「已实现，待真机验收」。
+- 资源与边界：所有来源状态由既有应用执行者持有，三个字节级来源字段和一个入口布尔标记替代原单个布尔目的地；不增加任务、队列、画布或缓存。来源判定仅做有界分支，清理草稿和重绘沿用现有流程，没有新增扫描、解码或等待工作退出。未改变 `has_book()`、阅读位置与进度修订协议、保存时机、K2 全刷或页面布局；未测量真机时延及堆/栈峰值，不以 host 耗时替代设备性能证据。
+- 未测项：未连接设备，未推送、未开 PR、未刷写；DP02 的真实 TF 故障、异步书签/保存失败、面板整屏及局刷失败后的文字和按钮、返回热区与残影待真机核对。PW07 须核对读过书后的书库/详情/管理页保留文件夹和分页，设置及 Wi-Fi/帮助/排版/刷新子页回首页且丢弃草稿，正文恢复最后确认位置；同时验证设置的简洁屏保回退提示与已有轮播、冷缓存和连续失败场景。网络实际收尾及实体操作也待验收。
+- 下一步：本地提交后由用户审阅；按 DP02、PW07 做真机核对，再决定是否合入。没有改变其他 beta.4 计划项的实现状态。
+
+
+## 2026-10-14 · PR #96：整合主线并提交 CI/review
+
+用户授权创建 PR、跟进 CI/review、修复有效问题并在检查通过后合并。本批没有连接或刷写设备。
+
+- 主线整合：获取到 main `1353c5b`（已合并 PR #95 的休眠准备输入规则）后，在 `fix/return-to-origin` 合并主线为 `fe5459d`。源码和测试自动合并；手工整合验收矩阵、路线图和开发状态的三处文档冲突，PW04/PW05/PW07 保留第 1 项电源键取消规则，同时保留第 2 项来源返回及设置锁屏回退提示规则。双方历史记录完整保留，不修改其他实现范围。
+- PR：[错误和状态页按来源返回](https://github.com/eMUQI/pico-page/pull/96)。相对最新 main 只包含来源返回的 7 个文件；版本号已由 main 同步为 beta.4，因此不再出现版本文件差异。Codex 自动 review 已启动，push 和 pull_request 各自运行 host 与网站 CI。
+- 本地验证：复用上一批工具链和命令，整合后 Debug CTest 24/24；标准 `sh tools/build_firmware.sh` 与来源核验通过，产物记录在 `firmware/build/provenance.json`，对应整合提交 `fe5459d` 的干净检出。ASan/UBSan/LSan 正在跑完整 CTest。`python3 tools/check_handoff.py` 487 项、`git diff --check` 通过。日志位于 `.local/return-to-origin/pr-*.log`。
+- 当前状态与下一步：网站的 push/PR 检查均已通过，host CI 和 Codex review 尚在运行；将按实际反馈修复并复验，再核对最终提交的 CI、review 与未解决讨论后合并。DP02/PW07 真机验收仍未完成，不以 CI 通过替代。
+
+
+## 2026-10-14 · PR #96 首轮 review：无确认位置时回书库
+
+首轮 Codex review 基于 `fe5459d` 提出两项 P2。修正前的最新提交 `b8067aa` 的 push/PR host 与网站 CI 四项全部通过；本批仍未连接或刷写设备。
+
+- 首帧失败（成立，已修正）：新书的首个正文帧失败时，View 已为 Reading，但 session 没有已呈现或已保存的位置；原实现会给出「恢复阅读」和恢复位置提示，点击后实际回到书库。统一来源函数现在只在存在已打开书籍及确认位置时返回正文类别，无确认位置的正文入口回退书库类别，因此文案、按钮和去向一致。排版及刷新页的设置入口优先级保留，不改 Session、保存时机或阅读修订。
+- 回归证据：在修正实现前新增 first-frame 场景，断言「屏幕更新失败。返回将回到书库。」失败。修正后同步/异步两种模式均通过；用例还比较首帧错误与书库错误的实际按钮行像素，核对返回书库且没有创建保存记录。来源专项现为 20 个场景、38 组运行，完整 CTest 保留所有旧检查。
+- 开发摘要（成立，已处理）：`b8067aa` 已明确分支始于 `33b7e97`、整合的 main 为 `1353c5b`，并记录 `fe5459d` 的整合验证；本批再次更新摘要并追加本条，区分历史候选和本轮真实结果。
+- 验证：沿用前批的既有 Linux 工具链及命令，Debug CTest 24/24，GCC ASan/UBSan/LSan（显式 detect_leaks 与 halt_on_error）CTest 24/24，标准 `sh tools/build_firmware.sh` 及来源核验通过。本轮固件为 `0.2.0-beta.4+gb8067aa.dirty`，包含本次修正代码，BIN 为 `0x355340` 字节，4 MiB 槽剩余 17%。`python3 tools/check_handoff.py` 487 项及 `git diff --check` 通过；日志位于 `.local/return-to-origin/review1-*.log`。
+- 资源与未测：新增的是统一判定中的一个局部字节级类别值和可恢复性分支，不增加持久字段、任务、队列、分配或阻塞；既有呈现/保存边界不变。UI 与 DP02 补充无确认位置的书库回退规则；真实首帧面板错误、DP02/PW07 其余真机项仍未验收。
+- 下一步：推送修正，按新提交重新核对远端 CI 和 Codex review，处理首轮两条讨论；检查与评审无遗留问题后按用户授权合并。
