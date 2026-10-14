@@ -5039,7 +5039,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!custom_wait_footer) return;
         std::memcpy(custom_wait_footer.get(), canvas.data() + 342 * footer_top, kCustomWaitFooterBytes);
         canvas.fill_rect(0, footer_top, 684, 1216 - footer_top, 15);
-        text("正在准备休眠图片，操作可取消", 36, footer_top + 28, 24, 612, 1);
+        text("正在准备休眠图片，按电源键取消", 36, footer_top + 28, 24, 612, 1);
         present_custom_wait_footer();
     }
     bool custom_prepare_due() const {
@@ -7695,6 +7695,7 @@ void ReaderApp::show_portal(const PortalStatus &status) {
             RefreshIntent::Content, RefreshRegion{0, top, 684, 1072 - top}});
     } else impl_->overlay(codes_appear);
 }
+bool ReaderApp::power_menu_pending() const { return impl_->power_menu_wait.has_value(); }
 bool ReaderApp::show_power_menu() {
     if (impl_->network_worker_id || impl_->active_network || impl_->content_loading || impl_->foreground_job ||
         impl_->usb_prepared || impl_->view == View::Portal || impl_->view == View::PowerOff) return false;

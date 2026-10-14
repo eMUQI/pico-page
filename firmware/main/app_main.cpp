@@ -612,6 +612,11 @@ extern "C" void app_main() {
     std::int64_t last_activity = esp_timer_get_time();
     pico_page::platform::Event sleep_input;
     pico_page::platform::SleepInput resume_input;
+    const auto reset_contact = [&] {
+        released_tap.accept({pico_page::platform::EventKind::InputReset}, presentation_sequence);
+        physical_source = physical_sequence = 0;
+        physical_suppressed = false;
+    };
     const auto sleep_now = [&] {
         const bool ready = app->prepare_sleep();
         if (!ready && app->sleep_pending()) return false;
@@ -619,34 +624,34 @@ extern "C" void app_main() {
             // Presentation can outlast a new input; poll both the input queue and PMU before suspension.
             const bool polled = pico_page::platform::poll(sleep_input, error);
             if (!polled) ESP_LOGW(tag, "Sleep input check failed: %s", error.c_str());
+            if (pico_page::platform::SleepInput::ignores(sleep_input.kind)) sleep_input = {};
             bool slept = false;
             if (polled && sleep_input.kind == pico_page::platform::EventKind::None) {
                 if (!pico_page::platform::sleep(error, slept))
                     ESP_LOGW(tag, "Sleep failed: %s", error.c_str());
             }
-            // A second short press cancels this request; other input follows the normal dispatcher.
+            // A second short press cancels; a long press is retained until restoration completes.
             if (sleep_input.kind == pico_page::platform::EventKind::Power) sleep_input = {};
             if (!slept) resume_input.begin();
             app->wake(slept);
             present(*app);
-        } else app->cancel_sleep();
+        } else {
+            app->cancel_sleep();
+            resume_input.begin();
+        }
         // The timer keeps counting during light sleep; a failed attempt also waits a full period.
         last_activity = esp_timer_get_time();
         return true;
     };
     for (;;) {
-        if (sleep_requested && (physical_source || pico_page::platform::input_waiting_before(
-                std::numeric_limits<std::int64_t>::max()))) {
-            app->cancel_sleep();
-            sleep_requested = false;
-        }
-        app->poll_background(!resume_input.active() && (physical_source || pico_page::platform::input_waiting_before(
+        app->poll_background(!sleep_requested && !resume_input.active() && (physical_source || pico_page::platform::input_waiting_before(
             std::numeric_limits<std::int64_t>::max())));
         const auto battery = pico_page::platform::battery();
         app->set_battery(battery.valid ? std::optional<int>(battery.percent) : std::nullopt, battery.valid && battery.charging);
         if (app->pending_frame() && !present(*app) && sleep_requested) {
             app->cancel_sleep();
             sleep_requested = false;
+            resume_input.begin();
         }
         const auto requested_power = app->take_power_request();
         if (requested_power.action != pico_page::PowerAction::None) { pending_power = requested_power; }
@@ -844,16 +849,18 @@ extern "C" void app_main() {
         if (event.kind == pico_page::platform::EventKind::None && !pico_page::platform::poll(event, error))
             ESP_LOGW(tag, "Input read failed: %s", error.c_str());
         using pico_page::platform::EventKind;
+        const bool sleep_recovery = sleep_requested || resume_input.active();
+        if (sleep_requested && pico_page::platform::SleepInput::ignores(event.kind)) event = {};
         // An update check or download keeps the device awake and at full speed.
         if (event.kind != EventKind::None || pico_page::console::transfer_active() || app->update_busy()) {
             last_activity = esp_timer_get_time();
             pico_page::platform::set_performance(true);
         }
         const auto dispatch_tap = [&](const pico_page::platform::Event& tap,
-                                      const pico_page::platform::Event& end, bool resumed = false) {
+                                      const pico_page::platform::Event& end) {
             pico_page::AppInput input{
                 {physical_sequence, pico_page::Phase::Begin, pico_page::Input::TouchCenter},
-                tap.kind == EventKind::Touch, tap.x, tap.y, !resumed && tap.time_us < settled_us,
+                tap.kind == EventKind::Touch, tap.x, tap.y, tap.time_us < settled_us,
                 pico_page::platform::long_press(tap, end)};
             if (input.touch) {
                 const auto gesture = pico_page::platform::released_gesture(tap, end);
@@ -887,34 +894,21 @@ extern "C" void app_main() {
         if (resume_input.active()) {
             if (event.kind == EventKind::SdRemoved || app->view() == pico_page::View::Error) {
                 resume_input.clear();
+                if (pico_page::platform::SleepInput::ignores(event.kind)) event = {};
             } else {
                 resume_input.accept(event);
-                if (event.kind != EventKind::InputReset) event = {};
-                if (!app->content_busy() && !app->pending_frame()) {
-                    const auto now = esp_timer_get_time();
-                    const auto held = resume_input.due(now);
-                    if (held && app->view() == pico_page::View::Reading && app->can_long_press_at(held->x, held->y) &&
-                        !pico_page::platform::input_waiting_before(std::numeric_limits<std::int64_t>::max())) {
-                        resume_input.accept({EventKind::Touch, pico_page::platform::EventPhase::End,
-                                             held->sequence, held->x, held->y, now});
-                    }
+                event = {};
+                if (resume_input.ready(
+                        !app->content_busy() && !app->pending_frame() && !app->power_menu_pending() &&
+                            !pico_page::platform::input_waiting_before(std::numeric_limits<std::int64_t>::max()),
+                        !network_busy && !radio_active.load())) {
                     if (resume_input.menu()) {
                         resume_input.clear();
                         event.kind = EventKind::PowerLong;
                     } else if (resume_input.power()) {
                         resume_input.clear();
                         event.kind = EventKind::Power;
-                    } else if (resume_input.tap()) {
-                        const auto tap = *resume_input.tap();
-                        const auto end = resume_input.end();
-                        resume_input.clear();
-                        if (input_sequence != std::numeric_limits<std::uint64_t>::max()) {
-                            physical_sequence = ++input_sequence;
-                            dispatch_tap(tap, end, true);
-                            physical_sequence = 0;
-                            present(*app);
-                        }
-                    } else if (!resume_input.held()) resume_input.clear();
+                    } else resume_input.clear();
                 }
             }
         }
@@ -928,11 +922,17 @@ extern "C" void app_main() {
         } else if (event.kind == EventKind::PowerLong) {
             app->cancel_sleep();
             sleep_requested = false;
-            if (!usb_mode && !network_busy && !pico_page::console::transfer_active()) {
+            if (sleep_recovery && !usb_mode && !pico_page::console::transfer_active() &&
+                (network_busy || radio_active.load())) {
+                // Keep the menu intent until the existing cancellation returns the radio and files.
+                resume_input.begin();
+                resume_input.accept(event);
+            } else if (!usb_mode && !network_busy && !pico_page::console::transfer_active()) {
                 released_tap.accept({EventKind::InputReset}, presentation_sequence);
                 physical_source = physical_sequence = 0;
                 physical_suppressed = false;
                 if (!app->show_power_menu()) app->power_unavailable("请先结束当前任务，再关机或重启。");
+                if (sleep_recovery && app->power_menu_pending()) resume_input.begin();
             } else app->power_unavailable(usb_mode ? "请先弹出设备并结束 USB 传输。" : "请先结束网络或传输任务。");
             present(*app);
         } else if (event.kind == EventKind::Power) {
@@ -941,7 +941,9 @@ extern "C" void app_main() {
             if (sleep_requested) {
                 app->cancel_sleep();
                 sleep_requested = false;
+                resume_input.begin();
             } else {
+                reset_contact();
                 sleep_requested = true;
                 app->stop_wifi(true);
             }
@@ -952,10 +954,6 @@ extern "C" void app_main() {
                      static_cast<int>(event.phase), event.x, event.y);
 #endif
             if (event.phase == pico_page::platform::EventPhase::Begin) {
-                if (sleep_requested) {
-                    app->cancel_sleep();
-                    sleep_requested = false;
-                }
                 physical_source = event.sequence;
                 physical_suppressed = pico_page::console::transfer_active() && event.kind != EventKind::K2;
                 if (physical_suppressed) {
@@ -1048,8 +1046,10 @@ extern "C" void app_main() {
             pico_page::platform::set_performance(false);
         const std::int64_t sleep_after = app->auto_sleep_minutes() * 60'000'000LL;
         if (!usb_mode && app->view() != pico_page::View::PowerMenu && app->view() != pico_page::View::PowerOff &&
-            !resume_input.active() && sleep_after > 0 && idle >= sleep_after)
+            !sleep_requested && !resume_input.active() && sleep_after > 0 && idle >= sleep_after) {
+            reset_contact();
             sleep_requested = true;
+        }
         if (pico_page::console::transfer_active()) vTaskDelay(pdMS_TO_TICKS(1));
         // A full tick between counting slices lets lower-priority tasks run.
         else pico_page::platform::wait_for_input(background ? portTICK_PERIOD_MS : 20);

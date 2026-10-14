@@ -1,50 +1,32 @@
 #pragma once
 
-#include "released_tap.h"
+#include "platform.h"
 
 namespace pico_page::platform {
 
-/** Retains one gesture or power intent while the application restores its reading view. */
+/** Retains only power intents while a cancelled sleep restores the application. */
 class SleepInput {
 public:
     void begin() { *this = {}; active_ = true; }
     bool active() const { return active_; }
+    /** Restoration and radio teardown must both finish before a retained power intent runs. */
+    bool ready(bool page_ready, bool network_idle) const { return active_ && page_ready && network_idle; }
     void clear() { *this = {}; }
+    /** Contacts and queue resets cannot cancel sleep or replay into the restored page. */
+    static bool ignores(EventKind kind) {
+        return kind == EventKind::Touch || kind == EventKind::K1 ||
+               kind == EventKind::K2 || kind == EventKind::K3 || kind == EventKind::InputReset;
+    }
     void accept(const Event& event) {
         if (!active_) return;
-        if (event.kind == EventKind::InputReset) { clear(); return; }
         if (event.kind == EventKind::PowerLong) { menu_ = true; power_ = false; return; }
-        if (event.kind == EventKind::Power) {
-            if (!menu_) power_ = !power_;
-            contact_ = {};
-            tap_.reset();
-            return;
-        }
-        if (event.kind != EventKind::Touch && event.kind != EventKind::K1 &&
-            event.kind != EventKind::K2 && event.kind != EventKind::K3) return;
-        if (event.phase == EventPhase::Begin) power_ = false;
-        if (tap_) return;
-        if (const auto tap = contact_.accept(event, 0)) {
-            tap_ = tap;
-            end_ = event;
-        }
+        if (event.kind == EventKind::Power && !menu_) power_ = !power_;
     }
     bool menu() const { return menu_; }
     bool power() const { return power_; }
-    bool held() const { return contact_.pending(); }
-    /** Returns a retained touch that has reached the existing long-press threshold. */
-    std::optional<Event> due(std::int64_t now_us) const {
-        if (!active_ || tap_ || menu_ || power_) return std::nullopt;
-        return contact_.due(now_us, 0);
-    }
-    const std::optional<Event>& tap() const { return tap_; }
-    const Event& end() const { return end_; }
 private:
     bool active_ = false, menu_ = false, power_ = false;
-    ReleasedTap contact_;
-    std::optional<Event> tap_;
-    Event end_;
 };
-static_assert(sizeof(SleepInput) <= 256, "Sleep cancellation input must remain bounded");
+static_assert(sizeof(SleepInput) <= 3, "Sleep cancellation retains only power flags");
 
 } // namespace pico_page::platform
