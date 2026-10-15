@@ -105,6 +105,13 @@ void stop_clock() {
     clock_synchronized = false;
 }
 
+void start_clock() {
+    if (sntp_initialized) return;
+    esp_sntp_config_t configuration = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    configuration.sync_cb = rtc_clock::synchronized;
+    sntp_initialized = esp_netif_sntp_init(&configuration) == ESP_OK;
+}
+
 /** Creates the interfaces and starts the driver; access selects access point plus station. */
 esp_err_t start_wifi(wifi_config_t* access) {
     if (!netif_initialized) {
@@ -338,6 +345,7 @@ bool connect_network(const std::string& ssid, const std::string& password, std::
     }
     outcome.stage = ConnectFailure::Stage::None;
     connected = true;
+    start_clock();
     if (clock && !synchronize_clock(error, &outcome, cancelled)) {
         abandon_station();
         return false;
@@ -345,7 +353,7 @@ bool connect_network(const std::string& ssid, const std::string& password, std::
     return true;
 }
 
-bool synchronize_clock(std::string& error, ConnectFailure* failure, const std::atomic_bool* cancelled) {
+bool synchronize_clock(std::string& error, ConnectFailure* failure, const std::atomic_bool* cancelled, bool fresh) {
     error.clear();
     ConnectFailure ignored;
     auto& outcome = failure ? *failure : ignored;
@@ -356,17 +364,19 @@ bool synchronize_clock(std::string& error, ConnectFailure* failure, const std::a
         error = "Wi-Fi is not connected";
         return false;
     }
-    if (!sntp_initialized) {
-        esp_sntp_config_t time_configuration = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
-        time_configuration.sync_cb = rtc_clock::synchronized;
-        if (esp_netif_sntp_init(&time_configuration) == ESP_OK) sntp_initialized = true;
-    }
+    if (cancelled && cancelled->load()) { error = "操作已取消。"; return false; }
+    if (fresh) stop_clock();
+    start_clock();
     const auto deadline = esp_timer_get_time() + 10'000'000;
     while (sntp_initialized && !clock_synchronized && esp_timer_get_time() < deadline) {
         if (cancelled && cancelled->load()) { error = "操作已取消。"; return false; }
         clock_synchronized = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(100)) == ESP_OK;
     }
     if (cancelled && cancelled->load()) { error = "操作已取消。"; return false; }
+    if (fresh && !clock_synchronized) {
+        error = "时间未校准，请检查互联网连接后重试。";
+        return false;
+    }
     if (std::time(nullptr) < 1704067200) {
         error = "A valid clock is required for TLS; time synchronization failed";
         return false;

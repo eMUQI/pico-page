@@ -456,6 +456,11 @@ void network_worker(void *) {
                     } else if (operation.kind == pico_page::WifiOperation::Kind::Join) {
                         // Verifies new credentials on a link of their own; nothing keeps it afterwards.
                         ensure_station(operation.targets, *operation.cancelled, job->error, job->failure, true);
+                    } else if (operation.kind == pico_page::WifiOperation::Kind::Clock) {
+                        if (ensure_station(operation.targets, *operation.cancelled, job->error, job->failure)) {
+                            publish_wifi(pico_page::WifiPhase::Clock, station_target.ssid);
+                            platform::synchronize_clock(job->error, nullptr, operation.cancelled.get(), true);
+                        }
                     } else {
                         radio_active.store(true);
                         std::vector<platform::NearbyNetwork> scanned;

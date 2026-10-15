@@ -33,6 +33,7 @@ repository. The encoder allocates nothing: `qr.cpp` supplies two 407-byte buffer
   on white. The upstream branch iterated six RGB chunk bytes into a four-element temporary array.
 - Require deflate completion before IEND, and limit inflated bytes using the declared dimensions.
 - Keep the temporary RGBA tuple per decoder instead of in a static shared array.
+- Copy 8-bit color and alpha values directly after palette/transparency handling; retain the general scaling formula for other bit depths.
 
 Gamma correction is disabled. PNG CRC, palette and filter checks remain active. The wrapper
 requires a valid terminal IEND and the exact decoded pixel count. Bounds are checked before

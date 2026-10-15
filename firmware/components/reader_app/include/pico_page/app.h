@@ -91,8 +91,8 @@ struct WifiTargets {
     bool automatic = false;
 };
 struct WifiOperation {
-    /** Connect keeps the link until cancelled is set; Join verifies new credentials and releases the link. */
-    enum class Kind { Connect, Scan, Join };
+    /** Connect keeps the link; Join verifies credentials; Clock borrows a link for fresh network time. */
+    enum class Kind { Connect, Scan, Join, Clock };
     Kind kind = Kind::Connect;
     std::uint64_t id = 0;
     WifiTargets targets;

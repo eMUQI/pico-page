@@ -246,7 +246,7 @@ std::uint64_t image_decode_count() { return decode_count.load(std::memory_order_
 
 bool render_image(Canvas& canvas, const std::vector<std::uint8_t>& encoded,
                   int x, int y, int width, int height, std::string& error, bool crop, const std::function<bool()>& stop) {
-    const StageTimer timer{"image_decode_draw"};
+    const StageTimer timer{"image_decode_draw", 0};
     decode_count.fetch_add(1, std::memory_order_relaxed);
     error.clear();
     if (stop && stop()) return fail(error, kImageCancelled);

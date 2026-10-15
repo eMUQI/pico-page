@@ -151,6 +151,7 @@ enum Control {
     SyncEnable, SyncOnceAuto, SyncAccount, SyncStay, ContinueOffline,
     AccountEndpoint, AccountUser, AccountPassword, AccountVerify, AccountCancel, AccountRemove, AccountRemoveConfirm,
     EntryClear, EntryMask, EntryDefault,
+    WifiClock, WifiClockCancel,
     WifiSavedBase = 50100, WifiModeBase = 50200, WifiNearbyBase = 50300,
     SleepCustom = 51000, SleepRotation, SleepChoose, SleepRefresh, LockScreenBase = 52000,
     UpdateOpen = 53000, UpdateCheck, UpdateNotes, UpdateStart, UpdateConfirm, UpdateCancel,
@@ -3973,6 +3974,20 @@ struct ReaderApp::Impl final : DisplayBackend {
                 if (!online)
                     wrapped("同步和传书会自动联网，用完断开。立即连接后保持在线，直到断开或休眠。", 36, 824, 612, 24, true, 3);
             }
+            const bool calibrating = wifi_worker && wifi_kind == WifiOperation::Kind::Clock;
+            const auto now = std::time(nullptr);
+            auto clock_value = now >= provision::clock_floor ? reading_footer::clock(now, 8 * 60) : "尚未校准";
+            const bool can_calibrate = enabled && !wifi_saved.empty() && !wifi_worker && !active_network;
+            const int clock_action = calibrating && network::live(wifi_hold) ? WifiClockCancel
+                                   : can_calibrate ? WifiClock : 0;
+            if (calibrating) clock_value += network::live(wifi_hold) ? " · 取消" : " · 结束中";
+            else if (can_calibrate) clock_value += " · 校准";
+            const auto clock_detail = calibrating ? "UTC+8 · 正在获取网络时间"
+                                    : !enabled ? "UTC+8 · 打开 Wi-Fi 后可校准"
+                                    : wifi_saved.empty() ? "UTC+8 · 添加 Wi-Fi 后可校准"
+                                    : "UTC+8 · 联网时自动校准";
+            canvas.line(36, 916, 647, 916, 12, 2);
+            value_row(clock_action, "时间", clock_detail, clock_value, 916, 104, false, false);
             wrapped(notice_text, 36, 1060, 612, 24);
             break;
         }
@@ -6354,6 +6369,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         if (view == View::WifiSettings) {
             if (portal_live) { draw_portal(); overlay(); return; }
+            if (wifi_worker && wifi_kind == WifiOperation::Kind::Clock) network::release(wifi_hold);
             if (wifi_page == WifiPage::Joining || wifi_page == WifiPage::JoinFailed || wifi_page == WifiPage::Joined)
                 return;  // These pages end through their own buttons.
             if (wifi_page != wifi_root) {
@@ -6467,7 +6483,19 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         switch (id) {
         case WifiConnect: connect_wifi(); return;
+        case WifiClock:
+            if (wifi_free(true)) {
+                auto targets = wifi_targets(detail);
+                if (targets.networks.empty()) wifi_notice = detail;
+                else start_wifi(WifiOperation::Kind::Clock, std::move(targets), wifi_hold);
+            }
+            break;
+        case WifiClockCancel:
+            network::release(wifi_hold);
+            wifi_notice = "正在结束校准…";
+            break;
         case WifiDisconnect:
+            if (wifi_worker && wifi_kind == WifiOperation::Kind::Clock) network::release(wifi_hold);
             network::release(manual_hold); cancel_sync();
             if (wifi_status.phase != WifiPhase::Offline) { wifi_status.phase = WifiPhase::Closing; wifi_notice = "正在结束…"; }
             else wifi_notice.clear();
@@ -7494,8 +7522,11 @@ void ReaderApp::complete_frame(bool success) {
         impl_->custom_rotation_name.clear();
     }
     if (success) {
-        if (impl_->view == View::Reading && !impl_->image_viewing && impl_->body_images_pending && !impl_->inline_image_pending)
-            impl_->inline_image_after = std::chrono::steady_clock::now() + inline_image_delay;
+        if (impl_->view == View::Reading && !impl_->image_viewing && impl_->body_images_pending && !impl_->inline_image_pending) {
+            const auto delay = frame.purpose == FramePurpose::Body && !impl_->session.visible_record()
+                ? std::chrono::milliseconds(0) : inline_image_delay;
+            impl_->inline_image_after = std::chrono::steady_clock::now() + delay;
+        }
         if (frame.refresh == RefreshIntent::FullClean)
             impl_->body_updates = 0;
         else if (frame.purpose == FramePurpose::Body)
@@ -7665,6 +7696,12 @@ void ReaderApp::complete_wifi(std::uint64_t id, const std::vector<provision::Nea
     case WifiOperation::Kind::Connect:
         impl_->wifi_notice = error;
         if (!error.empty()) network::release(impl_->manual_hold);
+        break;
+    case WifiOperation::Kind::Clock:
+        impl_->wifi_notice = !network::live(impl_->wifi_hold) ? "校准已取消。" :
+                             error.empty() ? "时间已校准。" : error;
+        network::release(impl_->wifi_hold);
+        break;
     }
     if (impl_->view == View::WifiSettings && !impl_->display.busy()) { impl_->draw_wifi(); impl_->overlay(); }
 }
@@ -8117,7 +8154,7 @@ void ReaderApp::poll_background(bool cancel) {
             show_power_menu();
         }
     }
-    // Only prepare images after the displayed page has remained idle; panels may restore an unfinished page.
+    // The first body frame permits image preparation immediately; subsequent pages retain the dwell interval.
     if (!cancel && !impl_->sleep_cover_deadline && !impl_->power_menu_wait && impl_->async_content && impl_->body_images_pending && !impl_->inline_image_pending &&
         std::chrono::steady_clock::now() >= impl_->inline_image_after &&
         !impl_->content_loading && !impl_->foreground_job && !impl_->pending_content &&

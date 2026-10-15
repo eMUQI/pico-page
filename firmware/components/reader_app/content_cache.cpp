@@ -90,6 +90,7 @@ void encode(Writer& w, const EpubDocument& doc, const Chapter& c, const std::fun
 }
 ContentCacheEntry prepare(const EpubDocument& doc, std::size_t index, const Chapter& c,
                           const std::function<bool()>& stop) {
+    const StageTimer timer{"content_cache_prepare", 0};
     Writer w;
     encode(w, doc, c, stop);
     if ((stop && stop()) || !w.okay || w.size > limit - 32 || !room(w.size + 33)) return {};
@@ -108,7 +109,7 @@ void save(const FileStore& store, const EpubDocument& doc, std::size_t index, co
 }
 bool decode(const FileStore& store, const EpubDocument& doc, std::size_t index, std::uint32_t part, Chapter& c) {
     if (index >= doc.spine().size()) return false;
-    const StageTimer timer{"content_cache_read"};
+    const StageTimer timer{"content_cache_read", 0};
     std::string bytes;
     if (store.load_cache(key(doc, index, part), limit, bytes, [](std::size_t size) { return room(size + 1); }) != StoreStatus::Ok || bytes.size() < 32) return false;
     const auto digest = bytes.substr(bytes.size() - 32); bytes.resize(bytes.size() - 32);
@@ -187,7 +188,8 @@ bool load(const FileStore& store, const EpubDocument& doc, std::size_t index, st
 }
 bool save_content_cache(const FileStore& store, const ContentCacheEntry& entry, const std::function<bool()>& stop) {
     if (entry.bytes.empty() || (stop && stop())) return false;
-    const StageTimer timer{"content_cache_write"};
+    const StageTimer timer{"content_cache_write", 0};
+    const StageTimer commit_timer{"content_cache_commit", 0};
     const bool saved = store.save_cache(entry.name, entry.bytes) == StoreStatus::Ok &&
         (entry.last_name.empty() || (!(stop && stop()) && store.save_cache(entry.last_name, entry.bytes) == StoreStatus::Ok));
 #if defined(ESP_PLATFORM) && defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)

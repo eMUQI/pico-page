@@ -167,6 +167,10 @@ struct Host {
     }
     // The preview has no radio: a scan lists sample names, every connection is refused.
     void answer_wifi(const WifiOperation& wifi) {
+        if (wifi.kind == WifiOperation::Kind::Clock) {
+            app.complete_wifi(wifi.id, {}, "桌面预览不校准设备时间，请在真机操作。", LinkFailure::Other);
+            return;
+        }
         network::release(wifi.cancelled);
         if (wifi.kind == WifiOperation::Kind::Scan)
             app.complete_wifi(wifi.id, {{"Preview-2.4", -48, false}, {"Preview-Open", -67, true}}, "");
