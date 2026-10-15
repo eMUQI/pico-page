@@ -127,3 +127,7 @@ python3 tools/check_koreader_mapping.py
 
 
 早期诊断/EPUB 增量重建曾因 IDF 依赖管理器调用 psutil 的 `sysctl` 查询被沙箱拒绝，日志 `.local/firmware-current.log`。随后已完成授权环境中的完整构建；该历史批次结果见 `.local/firmware-metrics-cache.log`；后续批次以开发状态中对应日期、commit 和镜像摘要为准。没有修改全局 IDF；构建通过不代表尚未执行的设备功能已经验收。
+
+## EPUB 分段计时构建
+
+`sh tools/build_firmware.sh stages` 使用独立的 `build/firmware-stages/`，启用开发串口及旧式阶段日志，关闭聚合指标和事件跟踪。身份校验、EPUB 打开、章节解析、图片读取与解码、章节和图片缓存读写记录全部样本（`min_us=0`）；其他既有阶段仍使用各自阈值。日志使用单调墙钟，包含调度和日志开销，不是纯 CPU 时间。`chapter_parse` 包含章节缓存写入，`*_cache_write` 包含序列化或像素复制、校验和及 `*_cache_commit`；commit 包含文件提交协议，不等同于单次物理写卡。父子阶段不得直接相加。串口日志使用现有 `tools/summarize_reader_perf.py` 汇总，并按开书请求范围归属样本。该命令只构建，不刷写设备。

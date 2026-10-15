@@ -2597,6 +2597,23 @@ int main(int argc, char** argv) {
         assert(diagnostics::snapshot().dropped == 0);
 #endif
     }
+    {
+        const auto root = card / "FirstOpenImage";
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "image-flow.epub", root / "Books/images.epub");
+        ReaderApp app(root.string(), "first-open-image", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        opened(app, "Books/images.epub");
+        assert(app.pending_frame()->purpose == FramePurpose::Body);
+        // Failure injection makes immediate scheduling observable without waiting on a decoder thread.
+        ContentJob::fail_starts_for_test(ContentJob::Kind::Image, 1, ContentJob::StartFailure::InternalMemory);
+        app.complete_frame(true);
+        app.poll_background(); app.poll_background();
+        assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Overlay);
+        assert(app.view() == View::Reading && app.pending_frame()->region);
+        ContentJob::fail_starts_for_test(ContentJob::Kind::Image, 0, ContentJob::StartFailure::None);
+        driver.present();
+    }
     ReadingRecord image_record, after_image;
     {
         ReaderApp app(card.string()); Driver driver{app};

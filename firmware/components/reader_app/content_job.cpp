@@ -333,6 +333,7 @@ std::string image_cache_key(const std::string& book_id, const std::string& resou
         std::to_string(spec.top) + ":" + std::to_string(spec.width) + ":" + std::to_string(spec.height));
 }
 void ContentJob::render_image() {
+    const StageTimer timer{"image_worker", 0};
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
     if (stop()) return;
     FileStore store(request.root);
@@ -340,6 +341,7 @@ void ContentJob::render_image() {
                            request.page.images.front().height == request.layout.height && !request.cache_name.empty();
     constexpr std::size_t size = 684U * 1216U / 2;
     if (cacheable) {
+        const StageTimer cache_timer{"image_cache_read", 0};
 #ifdef ESP_PLATFORM
         // Cache bytes and the result canvas coexist; decoding has a separate, larger budget.
         if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2 * (size + 32) + 256U * 1024 ||
@@ -393,9 +395,11 @@ void ContentJob::render_image() {
     std::vector<std::uint8_t>().swap(bytes);
     if (stop()) return;
     if (cacheable && result.failed_images.empty()) {
+        const StageTimer cache_timer{"image_cache_write", 0};
         std::string pixels(reinterpret_cast<const char*>(result.image->data()), result.image->pixels().size());
         pixels += md5_hex(pixels);
         if (stop()) return;
+        const StageTimer commit_timer{"image_cache_commit", 0};
         store.save_cache(request.cache_name, pixels);
     }
 }
@@ -592,6 +596,7 @@ void ContentJob::prepare_cover() {
     }
 }
 void ContentJob::open_book() {
+    const StageTimer timer{"book_open_worker", 0};
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
     struct stat before{}, after{};
     if (stat(request.path.c_str(), &before) != 0) { result.error = "Book file unavailable"; return; }

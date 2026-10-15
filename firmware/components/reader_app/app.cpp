@@ -7487,8 +7487,11 @@ void ReaderApp::complete_frame(bool success) {
         impl_->custom_rotation_name.clear();
     }
     if (success) {
-        if (impl_->view == View::Reading && !impl_->image_viewing && impl_->body_images_pending && !impl_->inline_image_pending)
-            impl_->inline_image_after = std::chrono::steady_clock::now() + inline_image_delay;
+        if (impl_->view == View::Reading && !impl_->image_viewing && impl_->body_images_pending && !impl_->inline_image_pending) {
+            const auto delay = frame.purpose == FramePurpose::Body && !impl_->session.visible_record()
+                ? std::chrono::milliseconds(0) : inline_image_delay;
+            impl_->inline_image_after = std::chrono::steady_clock::now() + delay;
+        }
         if (frame.refresh == RefreshIntent::FullClean)
             impl_->body_updates = 0;
         else if (frame.purpose == FramePurpose::Body)
@@ -8116,7 +8119,7 @@ void ReaderApp::poll_background(bool cancel) {
             show_power_menu();
         }
     }
-    // Only prepare images after the displayed page has remained idle; panels may restore an unfinished page.
+    // The first body frame permits image preparation immediately; subsequent pages retain the dwell interval.
     if (!cancel && !impl_->sleep_cover_deadline && !impl_->power_menu_wait && impl_->async_content && impl_->body_images_pending && !impl_->inline_image_pending &&
         std::chrono::steady_clock::now() >= impl_->inline_image_after &&
         !impl_->content_loading && !impl_->foreground_job && !impl_->pending_content &&

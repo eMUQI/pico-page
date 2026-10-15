@@ -64,7 +64,7 @@ std::string key(const EpubDocument& doc, std::size_t index, std::uint32_t part) 
 }
 void save(const FileStore& store, const EpubDocument& doc, std::size_t index, const Chapter& c, const std::function<bool()>& stop) {
     if (!room() || (stop && stop())) return;
-    const StageTimer timer{"content_cache_write"};
+    const StageTimer timer{"content_cache_write", 0};
     Writer w;
     w.str(version); w.str(doc.metadata().book_id); w.str(c.resource);
     w.word(c.part); w.word(c.last_part); w.word(c.split_node); w.word(c.plain_dom);
@@ -86,12 +86,13 @@ void save(const FileStore& store, const EpubDocument& doc, std::size_t index, co
     if (!w.okay || w.bytes.size() > limit - 32) return;
     w.bytes += md5_hex(w.bytes);
     if (stop && stop()) return;
+    const StageTimer commit_timer{"content_cache_commit", 0};
     if (store.save_cache(key(doc, index, c.part), w.bytes) != StoreStatus::Ok) return;
     if (c.last_part && !(stop && stop())) store.save_cache(key(doc, index, kLastChapterPart), w.bytes);
 }
 bool load(const FileStore& store, const EpubDocument& doc, std::size_t index, std::uint32_t part, Chapter& c) {
     if (!room() || index >= doc.spine().size()) return false;
-    const StageTimer timer{"content_cache_read"};
+    const StageTimer timer{"content_cache_read", 0};
     std::string bytes;
     if (store.load_cache(key(doc, index, part), limit, bytes) != StoreStatus::Ok || bytes.size() < 32) return false;
     const auto digest = bytes.substr(bytes.size() - 32); bytes.resize(bytes.size() - 32);

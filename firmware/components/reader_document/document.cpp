@@ -789,7 +789,7 @@ struct EpubDocument::Impl {
                   const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop,
                   const std::function<void(const Chapter&)>& visit);
     bool parse(const std::string& path, Xml& xml, std::string& error, std::uint32_t max_bytes = kMaxXmlBytes, const std::function<bool()>& stop = {}) {
-        const StageTimer timer{"xml_read_inflate_parse"};
+        const StageTimer timer{"xml_read_inflate_parse", 0};
         const int index = mz_zip_reader_locate_file(&zip, path.c_str(), nullptr, MZ_ZIP_FLAG_CASE_SENSITIVE);
         mz_zip_archive_file_stat stat{};
         if (index < 0 || !mz_zip_reader_file_stat(&zip, index, &stat)) return fail(error, "Missing EPUB resource: " + path);
@@ -980,7 +980,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
         impl_ = std::move(next);
         return true;
     }
-    const StageTimer timer{"epub_open"};
+    const StageTimer timer{"epub_open", 0};
     epub_opens.fetch_add(1, std::memory_order_relaxed);
     close(); error.clear();
     if (stop && stop()) return fail(error, "EPUB open cancelled");
@@ -1039,7 +1039,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
         next->metadata.partial_md5 = identity->partial_md5;
     } else if (!cover_only) {
         identity_scans.fetch_add(1, std::memory_order_relaxed);
-        const StageTimer timer{"identity_read_hash"};
+        const StageTimer timer{"identity_read_hash", 0};
         Hash sha(false), md5(true); std::array<unsigned char, 8192> buffer{};
         if (std::fseek(next->file, 0, SEEK_SET) != 0) return fail(error, "Cannot hash EPUB");
         for (;;) {
@@ -1227,6 +1227,7 @@ bool EpubDocument::find_chapter_part(std::size_t index, Chapter& chapter, std::s
 bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
                               std::uint32_t wanted, const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop,
                               const std::function<void(const Chapter&)>& visit) {
+    const StageTimer timer{"chapter_parse", 0};
     pico_page::release(chapter); error.clear();
     if (stop && stop()) return fail(error, kChapterCancelled);
     if (!file || index >= spine.size()) return fail(error, "Invalid chapter index");
@@ -1363,7 +1364,7 @@ bool EpubDocument::chapter_index_for(const std::string& resource, std::size_t& i
 }
 bool EpubDocument::read_image(const std::string& resource, std::vector<std::uint8_t>& bytes, std::string& error,
                               const std::function<bool()>& stop) {
-    const StageTimer timer{"image_read_inflate"};
+    const StageTimer timer{"image_read_inflate", 0};
     bytes.clear(); error.clear();
     if (stop && stop()) return fail(error, "Image load cancelled");
     std::string canonical;

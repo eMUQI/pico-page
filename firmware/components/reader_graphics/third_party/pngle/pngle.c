@@ -333,10 +333,17 @@ static const uint8_t *adjust_color(pngle_t *pngle, uint16_t v[4])
 		v[1] = v[2] = v[0];
 	}
 
-	rgba[0] = (v[0] * 255 + maxval / 2) / maxval;
-	rgba[1] = (v[1] * 255 + maxval / 2) / maxval;
-	rgba[2] = (v[2] * 255 + maxval / 2) / maxval;
-	rgba[3] = (v[3] * 255 + maxval / 2) / maxval;
+	if (maxval == 255) {
+		rgba[0] = v[0];
+		rgba[1] = v[1];
+		rgba[2] = v[2];
+		rgba[3] = v[3];
+	} else {
+		rgba[0] = (v[0] * 255 + maxval / 2) / maxval;
+		rgba[1] = (v[1] * 255 + maxval / 2) / maxval;
+		rgba[2] = (v[2] * 255 + maxval / 2) / maxval;
+		rgba[3] = (v[3] * 255 + maxval / 2) / maxval;
+	}
 
 #ifndef PNGLE_NO_GAMMA_CORRECTION
 	if (pngle->gamma_table) {
