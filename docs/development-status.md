@@ -1,6 +1,8 @@
 # 开发状态
 
-## 当前摘要（2026-10-14）
+## 当前摘要（2026-10-15）
+
+自动全刷间隔的出厂默认值已按用户要求调整（2026-10-15，独立候选分支 `fix/default-full-refresh-intervals`）：均衡由 8 改为 25 次正文更新，快速由 5 改为 15 次正文更新；已有全局配置与单书覆盖保持原值，允许范围仍为 1–30。仅减少定期全刷频率，不改变波形；新间隔的累积残影待 DP01 真机验收。详见本日「默认全刷间隔调整」记录。
 
 官网 GA4 接入已提交并部署（衡量 ID `G-S9XSC6V1KV`，代码提交 `ed71966`）：正式域名打开页面后直接加载统计，不显示同意提示或统计设置入口；覆盖基础访问及四个安装流程事件。带 ID 和不带 ID 的网站构建、脚本隔离自检及 Website build 运行 `38582301270` 通过；线上部署标识匹配，浏览器已核对自动插入正确 ID 的 Google tag。Google Analytics 实时报告及真实安装事件接收仍待验证。详见本日「网站 GA4 部署结果」记录。
 
@@ -5915,3 +5917,16 @@ PR [非正文普通刷新只驱动变化像素](https://github.com/eMUQI/pico-pa
 网站代码提交 `ed71966` 已按授权推送到 main。Website build 运行 `38582301270` 完成且结论为 success，包括 Cloudflare 上传、正式站部署标识与固件清单核对。正式域名 `/deployment.txt` 返回代码提交完整 SHA、运行编号和重试次数 `1`，首页包含 `G-S9XSC6V1KV` 与 Google tag loader，且无同意控件。刷新正式站的实际浏览器页面后，DOM 出现异步加载的 `https://www.googletagmanager.com/gtag/js?id=G-S9XSC6V1KV`，说明初始化脚本已执行。
 
 本次只提交 6 个网站及记录文件，当前 `perf/chapter-cache` 和原有固件未提交改动保持。记录时关联 Host checks 仍在运行；本次网站验证不替代该检查。未登录 Google Analytics 核对实时报告，没有连接或刷写设备，安装成功/失败事件的真实接收仍待验证。此记录提交会再次触发网站工作流，最终部署标识按最后一次提交核对。
+
+
+## 2026-10-15 · 默认全刷间隔调整
+
+按用户要求，将 `ReaderSettings` 的均衡默认全刷间隔从 8 改为 25、快速从 5 改为 15；同步 TF 配置示例、图形运行说明和 DP01 验收要求。复用既有界面调整回归，将从默认间隔增加一步并保存的预期值改为 26，未新增测试。已有全局配置和单书覆盖保持原值，缺失字段才采用新默认；清晰模式、K2 全刷、1–30 范围及正文更新计数规则不变。
+
+执行上下文与资源：仍由应用任务按现有计数选择全刷，不新增任务、缓存或分配，不改变峰值内存、不可取消区间和刷新失败恢复。仅调整全刷频率，不改变 GL16、八灰阶 GL16 或 GC16 波形。当前 `perf/chapter-cache` 检出已有 OTA 地区分流的文档改动，本批保留原样。
+
+环境与命令：本机 AppleClang host Debug；复用 ESP-IDF 6.1、BSP `5f3406deec33304de8801046db583dec7c49e55b` 及既有激活脚本。执行 `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host -N` 和 `ctest --test-dir build/host --output-on-failure`，实际注册并通过 24/24，运行 50.98 秒。标准 `sh tools/build_firmware.sh` 被旧 `firmware/sdkconfig` 缺少 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`、`CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY` 阻止，保留该配置，改用独立 `sh tools/build_firmware.sh release`；首次编译完成后因构建期间补充验收文档而未通过来源核验，资料定稿后重新执行。最终 release 构建与来源核验通过；日志为本机 `/tmp/pico-page-refresh-release-final.log`。`python3 tools/check_handoff.py` 的 488 项检查和 `git diff --check` 通过。
+
+未测与下一步：未提交、推送、发布或刷写，未做真机性能、功耗与残影测量；本次为常量调整，不涉及内存或生命周期，未另跑 sanitizer。DP01 待同设备、同书、同位置，从 K2 全刷起点比较新旧间隔下的连续翻页残影、文字边缘与图片灰阶；现有测试和构建不代替该项验收。
+
+PR 整理：从最新 `origin/main`（`2593bca`）建立 `fix/default-full-refresh-intervals`，只带入本次默认值、示例、既有回归与配套文档。章节缓存 PR #100 和 OTA 地区分流文档未带入；原分支及未提交内容保留。上文 24/24 与 release 来源核验来自初始 `perf/chapter-cache` 检出；独立分支另行重新验证，结果在 PR 中报告。

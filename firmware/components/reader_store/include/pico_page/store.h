@@ -93,8 +93,8 @@ struct ReaderSettings {
     double paragraph_gap_lines = 0;
     int indent_chars = 2;
     std::string refresh_preset = "balanced";
-    int balanced_full_refresh_pages = 8;
-    int fast_full_refresh_pages = 5;
+    int balanced_full_refresh_pages = 25;
+    int fast_full_refresh_pages = 15;
     std::vector<std::string> library_roots = {"Books"};
     std::string library_view = "list";
     std::string library_folders = "first";  // Global only: first or recent.
