@@ -194,9 +194,11 @@ bool connect_network(const std::string& ssid, const std::string& password, std::
 /**
  * Waits up to 10 s for SNTP on a connection until its first successful sync, even with RTC time.
  * Timeout may use an already valid system clock. Returns false on cancellation, missing link
- * or a clock before 2024; the link stays up either way. Actual SNTP updates queue RTC persistence.
+ * or a clock before 2024; the link stays up either way. With fresh, restarts SNTP and requires a
+ * new synchronization even if the system clock is valid. Actual SNTP updates queue RTC persistence.
  */
-bool synchronize_clock(std::string& error, ConnectFailure* failure = nullptr, const std::atomic_bool* cancelled = nullptr);
+bool synchronize_clock(std::string& error, ConnectFailure* failure = nullptr, const std::atomic_bool* cancelled = nullptr,
+                       bool fresh = false);
 
 /**
  * Starts the station interface when Wi-Fi is not running, then scans once. networks receives up
