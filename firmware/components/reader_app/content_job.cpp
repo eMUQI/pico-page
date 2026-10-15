@@ -172,7 +172,8 @@ bool ContentJob::start() {
     // Optional work retains the same headroom after accounting for the already reserved stack.
     const auto required_internal = 32U * 1024 + (content_requests ? 0 : content_stack_bytes);
     if ((request.kind == Kind::Pagination || request.kind == Kind::FontIdentity || request.kind == Kind::LibraryCovers ||
-         request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite || request.kind == Kind::SleepCover || request.kind == Kind::LockScreen) &&
+         request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite || request.kind == Kind::ContentCacheWrite ||
+         request.kind == Kind::SleepCover || request.kind == Kind::LockScreen) &&
         heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < required_internal) {
         start_failure_ = StartFailure::InternalMemory;
         return false;
@@ -194,7 +195,7 @@ bool ContentJob::start() {
         const auto delay = request.kind == delayed_kind ? injected_delay : std::chrono::milliseconds{};
         thread_ = std::thread([this, delay] {
             const auto until = std::chrono::steady_clock::now() + delay;
-            while (!cancelled_.load(std::memory_order_relaxed) && std::chrono::steady_clock::now() < until)
+            while (!checkpoint() && std::chrono::steady_clock::now() < until)
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             run(); done_.store(true, std::memory_order_release);
         });
@@ -228,6 +229,10 @@ void ContentJob::run() {
 #endif
     result.offset = request.offset;
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
+    if (request.kind == Kind::ContentCacheWrite) {
+        result.cache_finished = save_content_cache(FileStore(request.root), request.content_cache, stop);
+        return;
+    }
     if (request.kind == Kind::SaveProgress) {
         const StageTimer timer{"progress_commit"};
         FileStore store(request.root);
@@ -621,7 +626,7 @@ void ContentJob::open_book() {
         std::uint32_t offset = 0;
         const auto match = [&](const Chapter& part) { return part.offset_for(anchor, offset); };
         if (!document.chapter_index_for(anchor.resource, result.chapter_index) ||
-            !find_content(store, document, result.chapter_index, result.chapter, result.error, ChapterLoad::Reading, match, stop) ||
+            !find_content(store, document, result.chapter_index, result.chapter, result.error, ChapterLoad::Reading, match, stop, &result.content_cache) ||
             !result.chapter.offset_for(anchor, offset)) {
             if (result.error.empty()) result.error = "Saved position cannot be mapped";
             return;
@@ -630,7 +635,7 @@ void ContentJob::open_book() {
     } else {
         while (result.chapter_index + 1 < document.spine().size() && !document.spine()[result.chapter_index].linear)
             ++result.chapter_index;
-        if (!load_content(store, document, result.chapter_index, result.chapter, result.error, ChapterLoad::Reading, 0, stop)) return;
+        if (!load_content(store, document, result.chapter_index, result.chapter, result.error, ChapterLoad::Reading, 0, stop, &result.content_cache)) return;
     }
     if (stop()) return;
     if (stat(request.path.c_str(), &after) != 0 || before.st_size != after.st_size ||
@@ -639,8 +644,20 @@ void ContentJob::open_book() {
     }
     result.file_size = after.st_size; result.file_modified = after.st_mtime; result.file_inode = after.st_ino;
 }
+bool ContentJob::checkpoint() {
+    while (pause_requested_.load(std::memory_order_acquire) && !cancelled_.load(std::memory_order_relaxed)) {
+        paused_.store(true, std::memory_order_release);
+#ifdef ESP_PLATFORM
+        vTaskDelay(1);
+#else
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+#endif
+    }
+    paused_.store(false, std::memory_order_release);
+    return cancelled_.load(std::memory_order_relaxed);
+}
 void ContentJob::load_chapter() {
-    const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
+    const auto stop = [this] { return checkpoint(); };
     EpubDocument document;
     FileStore store(request.root);
     result.chapter_index = request.chapter;
@@ -652,17 +669,17 @@ void ContentJob::load_chapter() {
                 part.fragment_offset(request.fragment, position);
         };
         if (request.target == Target::Fragment && request.fragment.empty()) {
-            if (!load_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading, 0, stop)) return;
-        } else if (!find_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading, match, stop)) return;
+            if (!load_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading, 0, stop, &result.content_cache)) return;
+        } else if (!find_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading, match, stop, &result.content_cache)) return;
         result.offset = position;
         if (request.target == Target::Fragment && result.offset >= result.chapter.text.size() && !result.chapter.last_part) {
             const auto next = result.chapter.part + 1;
-            if (!load_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading, next, stop)) return;
+            if (!load_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading, next, stop, &result.content_cache)) return;
             result.offset = 0;
         }
         return;
     }
-    if (!load_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading, request.part, stop)) return;
+    if (!load_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading, request.part, stop, &result.content_cache)) return;
     if (request.target == Target::Start) return;
     if (request.known_start && *request.known_start < result.chapter.text.size()) { result.offset = *request.known_start; return; }
     graphics::Font font;

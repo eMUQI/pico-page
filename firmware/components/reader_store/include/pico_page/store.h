@@ -290,8 +290,10 @@ public:
     std::string last_lock_screen() const;
     StoreStatus save_lock_screen(const std::string& name) const;
 
-    /** Reads a rebuildable file below PicoPage/cache. The caller validates its contents. */
-    StoreStatus load_cache(const std::string& name, std::size_t limit, std::string& bytes) const;
+    /** Reads a rebuildable file below PicoPage/cache. Admission receives its bounded byte size
+     * before allocation; refusal returns Invalid. The caller validates the contents. */
+    StoreStatus load_cache(const std::string& name, std::size_t limit, std::string& bytes,
+                           const std::function<bool(std::size_t)>& admit = {}) const;
 
     /**
      * Replaces a rebuildable file below PicoPage/cache, creating parent directories.
