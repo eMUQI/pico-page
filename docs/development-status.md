@@ -1,6 +1,8 @@
 # 开发状态
 
-## 当前摘要（2026-10-14）
+## 当前摘要（2026-10-15）
+
+自动全刷间隔的出厂默认值已按用户要求调整（2026-10-15，独立候选分支 `fix/default-full-refresh-intervals`）：均衡由 8 改为 25 次正文更新，快速由 5 改为 15 次正文更新；已有全局配置与单书覆盖保持原值，允许范围仍为 1–30。仅减少定期全刷频率，不改变波形；新间隔的累积残影待 DP01 真机验收。详见本日「默认全刷间隔调整」记录。
 
 章节缓存与跨章等待已有本地候选（`perf/chapter-cache`）：缓存按实际分配量准入，目标分段写入延后到正文成功呈现和必要保存之后；正文跨章先保留原画面，慢操作在 worker 确认暂停后显示等待提示。最终候选已刷入一台 Read Pico（标识末尾 `56:c8`）；受控小样本中，长章热加载中位数 1.48→0.92 秒，短章回翻 1.30→0.74 秒，冷加载改善较小。Debug、AppleClang ASan/UBSan 各 24/24，diagnostic 与 release 固件构建通过。未提交或发布；实体输入、屏幕观感和其他设备未验收。另补测三本真实 EPUB 的 61 次操作：长章后半段目录定位从首次 5.29 秒降至重复定位中位数 1.89 秒；三组连续往返及长章重新开书均在落盘后核对锚点。真实长章冷加载和封面图像仍有明显等待，不能承诺所有书都在 1 秒内完成。详见本日「章节缓存与跨章等待优化」及「实际 EPUB 扩展验证」记录。
 
@@ -5979,3 +5981,23 @@ B 首次完整封面显示需 15245.274 ms：trace 中 Open 内容任务约 282 
 命令与结果：使用既有 `/Users/wulu/.espressif/tools/python/v6.1/venv/bin/python` 和诊断控制台，执行本机 `run.py educated --path Books/cache-real-educated-r2-20261014.epub`、`run.py nahan`、`run.py howtolive`；三组分别 PASS 20/21/20。`summarize.py` 调用仓库 `tools/summarize_reader_perf.py` 汇总原始日志资源，再汇总单调时钟及 trace；完整结果为本机 `report.json`，每组另有 `samples.json`、`roundtrip.json` 和原始串口日志。诊断配置未启用旧阈值计时日志，标准脚本阶段表仍为空，不据此编造阶段分布。本批仅修改记录，不重复固件/host 构建；`python3 tools/check_handoff.py` 的 488 项检查通过，`git diff --check` 通过。
 
 结论与未测：实际长章重复定位能受益于缓存，但冷正文仍可能约 5 秒，封面补图可超过 10 秒；连续翻页也随文字、字形缓存和定期全刷变化。仅一台设备、每本一组完成流程，尚无多设备、多卡、长时间压力、实体输入和光学验收。连续诊断口操作等待上一帧结束，不能代替实体按键在刷新期间的 D14 排队验收。后续若继续提速，应分别测量冷解析与图像准备，不把这两类等待合并为章节缓存问题。
+
+## 2026-10-15 · 默认全刷间隔调整
+
+按用户要求，将 `ReaderSettings` 的均衡默认全刷间隔从 8 改为 25、快速从 5 改为 15；同步 TF 配置示例、图形运行说明和 DP01 验收要求。复用既有界面调整回归，将从默认间隔增加一步并保存的预期值改为 26，未新增测试。已有全局配置和单书覆盖保持原值，缺失字段才采用新默认；清晰模式、K2 全刷、1–30 范围及正文更新计数规则不变。
+
+执行上下文与资源：仍由应用任务按现有计数选择全刷，不新增任务、缓存或分配，不改变峰值内存、不可取消区间和刷新失败恢复。仅调整全刷频率，不改变 GL16、八灰阶 GL16 或 GC16 波形。当前 `perf/chapter-cache` 检出已有 OTA 地区分流的文档改动，本批保留原样。
+
+环境与命令：本机 AppleClang host Debug；复用 ESP-IDF 6.1、BSP `5f3406deec33304de8801046db583dec7c49e55b` 及既有激活脚本。执行 `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host -N` 和 `ctest --test-dir build/host --output-on-failure`，实际注册并通过 24/24，运行 50.98 秒。标准 `sh tools/build_firmware.sh` 被旧 `firmware/sdkconfig` 缺少 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`、`CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY` 阻止，保留该配置，改用独立 `sh tools/build_firmware.sh release`；首次编译完成后因构建期间补充验收文档而未通过来源核验，资料定稿后重新执行。最终 release 构建与来源核验通过；日志为本机 `/tmp/pico-page-refresh-release-final.log`。`python3 tools/check_handoff.py` 的 488 项检查和 `git diff --check` 通过。
+
+未测与下一步：未提交、推送、发布或刷写，未做真机性能、功耗与残影测量；本次为常量调整，不涉及内存或生命周期，未另跑 sanitizer。DP01 待同设备、同书、同位置，从 K2 全刷起点比较新旧间隔下的连续翻页残影、文字边缘与图片灰阶；现有测试和构建不代替该项验收。
+
+PR 整理：从最新 `origin/main`（`2593bca`）建立 `fix/default-full-refresh-intervals`，只带入本次默认值、示例、既有回归与配套文档。章节缓存 PR #100 和 OTA 地区分流文档未带入；原分支及未提交内容保留。上文 24/24 与 release 来源核验来自初始 `perf/chapter-cache` 检出；独立分支另行重新验证，结果在 PR 中报告。
+
+## 2026-10-15 · OTA 地区分流候选方案
+
+按用户要求，在 `docs/roadmap.md` 的 R11 加入「按地区选择固件下载源」候选，标为供考虑、未排期、未实现。记录保留官网清单、通过 Cloudflare 按访问 IP 地区选择腾讯云或现有下载源的方案，以及镜像一致性、证书兼容性、缓存隔离和同条件真机测量前提；明确不包含失败自动换源，清单仍依赖 Cloudflare。
+
+本批只修改路线图与开发记录，当前实现及验收状态未变，不更新当前摘要。环境为本机 `perf/chapter-cache` 检出；核对现有清单解析、HTTPS 下载及网站发布流程。未修改代码、服务器或线上清单，未构建或刷写固件。服务器管理配置、带宽和真机提速仍待验证；下一步在决定实施后完成服务器核查及两个下载源的同条件测量。
+
+验证：`python3 tools/check_handoff.py` 的 488 项检查通过，`git diff --check` 通过。本批为文档候选记录，未新增测试；这些检查不代表 OTA 或服务器部署验收。

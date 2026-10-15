@@ -3432,7 +3432,7 @@ int main(int argc, char** argv) {
         driver.tap(340, 1170); driver.present();
         assert(app.view() == View::RefreshInterval); driver.refresh();
         driver.tap(600, 480); driver.present(); driver.tap(500, 1120); driver.present();
-        assert(FileStore(card.string()).load_settings("Books/book.epub").settings.balanced_full_refresh_pages == 9);
+        assert(FileStore(card.string()).load_settings("Books/book.epub").settings.balanced_full_refresh_pages == 26);
         assert(*app.saved_record() == saved);
         driver.close(); driver.present();
         driver.tap(340, 500); driver.present(); driver.tap(50, 50); driver.present();
