@@ -233,6 +233,13 @@ class ReaderApp {
      */
     void show_portal(const PortalStatus &status);
     /**
+     * Captures the wake destination and queues immediate sleep feedback without storage or
+     * network teardown. Present the queued footer before stopping Wi-Fi or calling prepare_sleep().
+     * Returns false while a frame or power transition prevents feedback. Low memory may omit
+     * the optional footer snapshot; cancellation still preserves the source page.
+     */
+    bool begin_sleep();
+    /**
      * Saves progress and prepares a sleep frame. false with sleep_pending() means the cover
      * worker is still handing back resources; call again from the event loop. Other false
      * results reject sleep. Present a successful frame before suspending storage or hardware.

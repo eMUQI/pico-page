@@ -622,6 +622,16 @@ extern "C" void app_main() {
         physical_source = physical_sequence = 0;
         physical_suppressed = false;
     };
+    const auto begin_sleep = [&] {
+        if (!app->begin_sleep()) return;
+        sleep_requested = true;
+        if (!present(*app)) {
+            app->cancel_sleep();
+            sleep_requested = false;
+            resume_input.begin();
+            last_activity = esp_timer_get_time();
+        }
+    };
     const auto sleep_now = [&] {
         const bool ready = app->prepare_sleep();
         if (!ready && app->sleep_pending()) return false;
@@ -949,8 +959,7 @@ extern "C" void app_main() {
                 resume_input.begin();
             } else {
                 reset_contact();
-                sleep_requested = true;
-                app->stop_wifi(true);
+                begin_sleep();
             }
         } else if (event.kind != EventKind::None) {
 #ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
@@ -1053,7 +1062,7 @@ extern "C" void app_main() {
         if (!usb_mode && app->view() != pico_page::View::PowerMenu && app->view() != pico_page::View::PowerOff &&
             !sleep_requested && !resume_input.active() && sleep_after > 0 && idle >= sleep_after) {
             reset_contact();
-            sleep_requested = true;
+            begin_sleep();
         }
         if (pico_page::console::transfer_active()) vTaskDelay(pdMS_TO_TICKS(1));
         // A full tick between counting slices lets lower-priority tasks run.

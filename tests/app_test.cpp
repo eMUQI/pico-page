@@ -63,6 +63,8 @@ static void opened(ReaderApp& app, const std::string& book) {
     assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Body);
 }
 static bool sleep_frame(ReaderApp& app) {
+    if (!app.begin_sleep()) return false;
+    if (app.pending_frame()) app.complete_frame(true);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     while (!app.prepare_sleep()) {
         if (!app.sleep_pending()) return false;
@@ -1181,6 +1183,33 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         }
         assert(FileStore(rotating.string()).last_lock_screen() == "01.png");
     }
+    for (const auto* mode : {"cover", "reading", "simple", "custom"}) {
+        const auto feedback = root / (std::string("ImmediateFeedback-") + mode);
+        write(feedback / "PicoPage/settings.toml", std::string("schema_version=1\n[power]\nsleep_screen='") + mode + "'\n");
+        ReaderApp app(feedback.string(), "immediate-feedback", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        const auto original = app.canvas().pixels();
+        assert(app.begin_sleep() && app.pending_frame());
+        assert(app.view() == View::Library && !app.sleep_pending());
+        const auto feedback_pixels = app.canvas().pixels();
+        assert(feedback_pixels != original);
+        app.poll_background();
+        assert(app.canvas().pixels() == feedback_pixels);
+        app.cancel_sleep();
+        assert(app.canvas().pixels() == feedback_pixels);
+        driver.present();
+        assert(app.canvas().pixels() == original && !app.pending_frame());
+        app.show_error("测试错误。"); driver.present();
+        const auto error_pixels = app.canvas().pixels();
+        assert(app.begin_sleep()); driver.present();
+        app.cancel_sleep(); driver.present();
+        assert(app.view() == View::Error && app.canvas().pixels() == error_pixels);
+        assert(app.begin_sleep()); driver.present();
+        app.show_error("新的测试错误。");
+        const auto newer_error = app.canvas().pixels();
+        app.cancel_sleep(); driver.present();
+        assert(app.canvas().pixels() == newer_error);
+    }
     for (int action : {0, 1, 2}) {
         const bool fail_frame = action == 1, open_menu = action == 2;
         const auto waiting = root / (fail_frame ? "WaitFrameFailure" : open_menu ? "WaitPowerMenu" : "WaitCancel");
@@ -1189,18 +1218,21 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         ReaderApp app(waiting.string(), "wait-footer", true, true); Driver driver{app};
         assert(app.initialize()); driver.present();
         const auto original = app.canvas().pixels();
-        ContentJob::delay_starts_for_test(ContentJob::Kind::LockScreen, std::chrono::milliseconds(1500));
-        assert(!app.prepare_sleep() && app.sleep_pending());
-        ContentJob::delay_starts_for_test(ContentJob::Kind::LockScreen, std::chrono::milliseconds{});
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-        while (!app.pending_frame()) {
-            app.poll_background();
-            assert(std::chrono::steady_clock::now() < deadline);
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
+        const auto decodes = graphics::image_decode_count();
+        assert(app.begin_sleep());
+        assert(app.pending_frame() && !app.sleep_pending());
         assert(app.pending_frame()->region && app.pending_frame()->region->y == 1128 && app.pending_frame()->region->height == 88);
         assert(std::equal(original.begin(), original.begin() + 1128 * app.canvas().stride(), app.canvas().pixels().begin()));
+        assert(!app.prepare_sleep() && graphics::image_decode_count() == decodes);
+        app.poll_background();
+        assert(std::string(app.background_state()) != "sleep-cover");
         app.complete_frame(!fail_frame);
+        if (!fail_frame) {
+            ContentJob::delay_starts_for_test(ContentJob::Kind::LockScreen, std::chrono::milliseconds(1500));
+            assert(!app.prepare_sleep() && app.sleep_pending());
+            ContentJob::delay_starts_for_test(ContentJob::Kind::LockScreen, std::chrono::milliseconds{});
+        }
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         app.cancel_sleep(); // The firmware cancels the request when presentation fails.
         assert(!app.sleep_pending());
         if (open_menu) {
@@ -1256,6 +1288,7 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         const auto original = app.canvas().pixels();
         ContentJob::delay_starts_for_test(ContentJob::Kind::LockScreen, std::chrono::milliseconds(1500));
         fail_wait_footer_malloc = true;
+        assert(app.begin_sleep());
         assert(!app.prepare_sleep() && app.sleep_pending());
         ContentJob::delay_starts_for_test(ContentJob::Kind::LockScreen, std::chrono::milliseconds{});
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -4133,6 +4166,11 @@ int main(int argc, char** argv) {
         driver.complete_content();
         const auto saved = *app.saved_record();
         const auto pixels = app.canvas().pixels();
+        assert(app.begin_sleep() && app.pending_frame());
+        app.poll_background();
+        assert(*app.saved_record() == saved && app.pending_frame()->purpose == FramePurpose::Overlay);
+        driver.present(); app.cancel_sleep(); driver.present();
+        assert(*app.saved_record() == saved && app.canvas().pixels() == pixels);
         // Failed publication ends the sleep request after one attempt; nothing retries until the next request.
         fs::remove_all(root / "PicoPage/cache/covers");
         write(root / "PicoPage/cache/covers", "blocked");

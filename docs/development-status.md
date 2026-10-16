@@ -2,6 +2,8 @@
 
 ## 当前摘要（2026-10-16）
 
+休眠请求的页脚反馈已提前（2026-10-16，分支 `fix/immediate-sleep-feedback`，基于 `5011c62`）：手动和自动休眠共用「正在准备休眠，按电源键取消」，提示呈现后再进行网络、保存和图片准备；取消规则不变。host Debug 与 AppleClang ASan/UBSan 各 24/24、标准固件构建及桌面画布检查通过。本批整理为独立 PR；已按用户授权只写第二台 Read Pico（标识末尾 `56:c8`）的实测 `factory` 应用槽，写入摘要及书库首帧通过。提示与取消交由用户自测，实体输入、面板时延、低内存和网络在途场景待 PW05/PW07 真机验收。详见本日「休眠请求立即页脚反馈」及「休眠反馈候选烧录」。
+
 PR #107 的两项审查修复已有本地候选：OPF 解析停止后忽略结束回调，避免坏根元素触发空栈访问；ZIP 使用最多 32 KiB 的完整路径排序索引，移除逐章线性查找。新增坏文件、逆序大目录、大小写/长路径、重复成员、取消重开与分配失败回归。host 操作计数已确认线性扫描消失；未刷写，不宣称 #104 的真机看门狗专项通过。详见本日「PR #107 审查修复」。
 
 实际书籍扩展对照已完成 48 次开书、120 次章节操作，锚点核验通过。用户确认串口失联期间设备可正常操作，重新插拔 USB 后诊断恢复；续测完成后已恢复原固件并独立校验，原书锚点与 revision 一致，正文画布一致。最后八次在长时间运行后补测，不作为同条件性能证据；看门狗、串口根因和内部准备耗时分别由 #104、#105、#106 跟踪。详见本日「USB 重新连接与测试收尾」。
@@ -6519,3 +6521,42 @@ NUL 路径补丁验证：host Debug 24/24（41.85 秒）、AppleClang ASan/UBSan
 按用户要求，将新提供的一本长篇 EPUB 加入既有 `private/device-test-library/Books/`，更新本地 `manifest.json` 的来源、大小、SHA-256、书名作者、阅读顺序条目数及完整性检查结果。保留用户原始附件，保存名称去除附件序号；书籍内容未修改。测试集现有 22 本 EPUB、4 本 TXT，原有字体和样本保留。
 
 验证：Python ZIP 全成员 CRC 检查、container/OPF 元数据读取通过；该样本为 10,963,491 字节，1,755 个阅读顺序条目。复制时使用临时文件和替换，源文件与本地副本 SHA-256 一致，清单回读核对通过；书籍及清单均由 `private/` 忽略规则排除。执行交接及 diff 检查。只增加本地样本与记录，未修改代码、未运行固件构建或新增测试；开书、分页、渲染、缓存性能与真机兼容性尚未验证。本次未提交、推送或写入设备。
+
+
+## 2026-10-16 · 休眠请求立即页脚反馈
+
+用户确认将提示提前到休眠请求被接受时，再短按电源键取消的规则保持不变。本批基于 `5011c62` 的本地未提交候选；开始时工作区干净，未创建 worktree，未推送或操作设备。
+
+新增 `ReaderApp::begin_sleep()`：捕获唤醒目的地并提交一次 y=1128、h=88 的页脚「正在准备休眠，按电源键取消」。固件手动和自动休眠入口均先完成这次呈现，再进入既有网络停止与 `prepare_sleep()`；删除仅针对自定义图片、等待 1 秒才显示提示的条件。四种休眠画面共用反馈，提示不修改阅读锚点或进度修订。已在途的工作仍按既有协议结束，提示不能撤销此前已开始的存储提交。
+
+沿用原页脚快照与取消恢复，不新增任务、队列、配置或整屏缓冲。应用任务持有最多 30,096 字节快照，保留期间暂缓接收会改画面的后台结果；恢复在途时不改写画布，新的错误或不同来源页不会被旧页脚覆盖。从错误页发起休眠再取消也恢复原图。提示刷新失败取消本次请求并保留错误页；资源不足或快照分配失败沿用省略提示的降级，不阻止必要保存。正文位置仍由 session 独占，实际文件提交及封面 worker 退出沿用原流程。
+
+再次短按电源键取消，长按请求菜单；触摸和 K1/K2/K3 仍忽略且不重放。原有资源交还与菜单等待逻辑保留。host 的空格键休眠和脚本入口同步接入提示，准备期间只允许空格键取消，不再由普通鼠标或其他按键取消。
+
+验证环境为 macOS、AppleClang 21，已有 ESP-IDF `v6.1-dirty`、ESP32-S3 与固定 BSP `5f3406deec33304de8801046db583dec7c49e55b`；未替换工具链、修改 BSP、依赖锁、sdkconfig 或板级睡眠参数。
+
+- `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host -N` 与 `ctest --test-dir build/host --output-on-failure`：注册并通过 24/24，最终整组 37.35 秒。复用 app 回归覆盖四种画面的同步提示、提示在途取消、刷新失败、长按菜单交接、原错误页及新错误页、已保存锚点与正文像素保持；图片准备在提示完成前不启动。
+- 按 `docs/environment.md` 的独立 `build/sanitized` 配置重新构建，`ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure`：24/24，最终整组 81.13 秒。这是本机 ASan/UBSan 结果，不含 LSan；malloc 包装故障注入仅在现有支持该选项的构建启用，本机未执行该分支。
+- `sh tools/build_firmware.sh`：首轮沙箱因依赖工具的 `sysctl()` 权限失败，授权环境中的标准入口成功；补充错误恢复修复后再次通过。构建版本为 `0.2.0-beta.4+g5011c62.dirty`，应用 SHA-256 为 `7ed910a20d594335ddc68ed772a2aa188523a81560ae6c75c318c7b1aff29f93`。日志为 `.local/sleep-feedback-firmware.log`，最终构建来源见 `firmware/build/provenance.json`。已有 Homebrew dylib 目标系统版本和 IDF FatFS Kconfig 提示保留，未以关闭检查处理。
+- 临时 host 预览程序使用真实 ReaderApp/Canvas 输出 页脚画布（`artifacts/sleep-feedback-20261016/immediate-footer.png`，本地忽略的预览产物），目视确认文案完整、原页内容保持。单次空书库样本在初始化后调用 `begin_sleep()`，同步排队耗时 475 µs，快照计数为 30,096 字节；原始记录 `.local/sleep-feedback-preview.log`。这是单个 host 样本，只证明提示无须等待 worker 或 1 秒计时，不含面板、实体输入、TF 或 Wi-Fi 耗时，无真机前后分布对照。
+- `python3 tools/check_handoff.py` 与 `git diff --check`：通过，交接检查 488 项；原始设计未改。D43、R4、UI、架构与 PW05/PW07 已更新，历史发布说明保持原样。
+
+最长不可取消区间仍受现有面板刷新、单次 TF I/O 和已开始的文件提交限制，本批不承诺毫秒级取消上限。未刷写、未测实体按键、面板闪烁与提示时延、冷/热图片全流程、网络正在退出/传书接收时的显示资源竞争或真机低内存。下一步按 PW05/PW07 在同一设备与同条件下测量按键至提示可见、取消至恢复及完整休眠耗时，并记录 RAM/连续块/栈峰值。
+
+
+## 2026-10-16 · 休眠反馈候选烧录
+
+用户授权「烧录到设备上，我试一下提示和取消的效果」。首轮诊断口与两种复位方式的下载握手均无应答，没有写入 Flash；用户拔插 USB 后诊断恢复。重新识别到唯一 USB Read Pico，MAC 末尾 `56:c8`、ESP32-S3 revision v0.2。烧录前正文 `pending=0`、`save_busy=0`、`save_due=0`，保存修订 3、锚点 CRC `d0e48b13`；未执行翻页或更改配置。
+
+从设备 `0x8000` 读取分区表并由已有 IDF `gen_esp32part.py` 验证：`nvs` 为 `0x9000/24K`、`phy_init` 为 `0xf000/4K`，唯一应用槽为 `factory`、`0x10000/4M`。烧录前同时核对 USB 序列号、实机 MAC、分区类型和固件来源摘要，仅使用 esptool 5.3.1 写入 `0x10000` 的应用；不采用构建输出的全量 flash_args，不写 bootloader、分区表、NVS、PHY、工厂校准或 TF 卡。
+
+安装镜像为上一记录已通过本地验证的普通开发构建 `0.2.0-beta.4+g5011c62.dirty`，3,532,128 字节，SHA-256 `7ed910a20d594335ddc68ed772a2aa188523a81560ae6c75c318c7b1aff29f93`。写入正常结束，报告 `Hash of data verified.`，随后 watchdog reset。应用、构建来源与原始证据归档于忽略目录 `.local/sleep-feedback-install/`；来源摘要对应烧录前源码快照，本次只追加设备记录，不重新构建或刷写。
+
+烧录后诊断应答：`view=library`、`pending=0`、`card=1`、`frame_ok=1`、`content_busy=0`，书库首帧完成。书库尚未载入阅读会话，状态中的 `saved=0` 不用于判断原书进度；本次没有重新打开书或核对烧录前后的锚点。诊断 `tx_failures=1`，单次应答正常，不作串口长期稳定性结论。日志为 `before-status-reconnected.log`、`partition-read-reconnected.log`、`partition-table.csv`、`flash.log` 与 `after-status.log`。
+
+已将设备留在书库供用户手动试用；本批没有注入休眠、取消、翻页或触摸。提示出现速度、短按取消、长按菜单、物理显示与网络在途竞争仍由 PW05/PW07 验收，不能以烧录摘要和首帧应答替代。配套资料执行 `python3 tools/check_handoff.py` 和 `git diff --check`；未提交或推送。
+
+
+## 2026-10-16 · 休眠反馈 PR 整理
+
+按用户要求，在当前 checkout 创建 `fix/immediate-sleep-feedback` 分支，向 `main` 提交本次页脚反馈、取消恢复、host 入口、必要回归与配套文档。远端 main 已核对为 `5011c62`，与实现基线一致。此次整理未修改已验证的代码；沿用本批 host Debug 与 AppleClang ASan/UBSan 各 24/24、标准固件构建及单设备应用写入/首帧证据，重新执行交接与 diff 检查。不将用户要求创建 PR 视为实体输入或提示时延验收通过，不提交忽略目录中的个人内容、设备原始日志或构建产物。

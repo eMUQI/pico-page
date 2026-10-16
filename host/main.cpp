@@ -251,8 +251,9 @@ struct Host {
         return okay;
     }
     bool sleep() {
+        if (!app.begin_sleep() || !flush()) { app.cancel_sleep(); return false; }
         while (!app.prepare_sleep()) {
-            if (!app.sleep_pending()) return false;
+            if (!app.sleep_pending()) { app.cancel_sleep(); return false; }
             app.poll_background();
             if (app.pending_frame() && !flush()) return false;
             SDL_Delay(1);
@@ -368,18 +369,24 @@ int main(int argc, char **argv) {
         host.poll_network();
         host.app.poll_background();
         host.poll_portal();
-        if (sleep_requested && (host.app.prepare_sleep() || !host.app.sleep_pending()))
-            sleep_requested = false;
+        if (sleep_requested) {
+            const bool ready = host.app.prepare_sleep();
+            if (ready || !host.app.sleep_pending()) {
+                sleep_requested = false;
+                if (!ready) host.app.cancel_sleep();
+            }
+        }
         host.flush();
         SDL_Event event;
         if (!SDL_WaitEventTimeout(&event, host.app.background_due() ? 1 : 50)) {
-            host.app.background_step();
+            if (!sleep_requested) host.app.background_step();
             continue;
         }
-        if (sleep_requested && (event.type == SDL_KEYDOWN || event.type == SDL_MOUSEBUTTONDOWN)) {
+        if (sleep_requested && (event.type == SDL_KEYDOWN || event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_MOUSEBUTTONUP)) {
+            if (event.type != SDL_KEYDOWN || event.key.keysym.sym != SDLK_SPACE || event.key.repeat) continue;
             host.app.cancel_sleep();
             sleep_requested = false;
-            if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_SPACE) continue;
+            continue;
         }
         if (event.type == SDL_QUIT) {
             host.app.save_progress();
@@ -412,8 +419,11 @@ int main(int argc, char **argv) {
                 if (host.app.view() == View::Sleeping)
                     host.app.wake();
                 else
-                    sleep_requested = true;
-                host.flush();
+                    sleep_requested = host.app.begin_sleep();
+                if (!host.flush() && sleep_requested) {
+                    host.app.cancel_sleep();
+                    sleep_requested = false;
+                }
                 break;
             default:
                 break;

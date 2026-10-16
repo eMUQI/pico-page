@@ -32,7 +32,7 @@ namespace pico_page {
 namespace {
 using graphics::decode_utf8;
 constexpr int footer_top = 1128, toolbar_top = 1080;
-constexpr std::size_t kCustomWaitFooterBytes = 342U * (1216U - footer_top);
+constexpr std::size_t kSleepWaitFooterBytes = 342U * (1216U - footer_top);
 constexpr char kProjectHome[] = "picopage.wulu.zone";
 constexpr int viewer_left = 24, viewer_top = 104, viewer_width = 636, viewer_height = 1088;
 constexpr int viewer_toolbar_height = 96, viewer_action_left = 456;
@@ -2887,7 +2887,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         for (const auto& cover : covers) usage.cover_pixels += cover.pixels.capacity();
         if (detail_cover) usage.cover_pixels += detail_cover->pixels().capacity();
         if (custom_sleep_image) usage.cover_pixels += custom_sleep_image->pixels().capacity();
-        usage.cover_pixels += custom_wait_footer ? kCustomWaitFooterBytes : 0;
+        usage.cover_pixels += sleep_wait_footer ? kSleepWaitFooterBytes : 0;
         usage.ui_glyph_bytes = ui.cached_glyph_bytes(); usage.body_glyph_bytes = body.cached_glyph_bytes();
         usage.ui_glyphs = ui.cached_glyphs(); usage.body_glyphs = body.cached_glyphs();
         usage.ui_advances = ui.cached_advances(); usage.body_advances = body.cached_advances();
@@ -5073,8 +5073,9 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::string custom_rotation_name, custom_rotation_shown;
     std::chrono::steady_clock::time_point custom_retry_at{};
     std::optional<std::chrono::steady_clock::time_point> custom_sleep_deadline;
-    std::unique_ptr<std::uint8_t, decltype(&std::free)> custom_wait_footer{nullptr, &std::free};
-    bool custom_wait_restore_pending = false;
+    std::unique_ptr<std::uint8_t, decltype(&std::free)> sleep_wait_footer{nullptr, &std::free};
+    bool sleep_wait_restore_pending = false;
+    View sleep_wait_view = View::Library;
     bool clear_cache_pending = false;
     bool custom_prepare_finished = false, custom_sleep_attempted = false, custom_notice_pending = false;
     std::unique_ptr<graphics::Canvas> custom_sleep_image;
@@ -5112,35 +5113,33 @@ struct ReaderApp::Impl final : DisplayBackend {
         counting_job->cancel();
         return true;
     }
-    void present_custom_wait_footer() {
+    void present_sleep_wait_footer() {
         display.present({{"ui", 0, 0, ++ui_sequence}, {}, FramePurpose::Overlay,
             RefreshIntent::Content, RefreshRegion{0, footer_top, 684, 1216 - footer_top}});
     }
-    void restore_custom_wait() {
-        if (view == View::Error) {
-            custom_wait_footer.reset();
-            custom_wait_restore_pending = false;
+    void restore_sleep_wait() {
+        if (view != sleep_wait_view) {
+            sleep_wait_footer.reset();
+            sleep_wait_restore_pending = false;
             return;
         }
-        if (!custom_wait_footer || display.busy()) return;
-        std::memcpy(canvas.data() + 342 * footer_top, custom_wait_footer.get(), kCustomWaitFooterBytes);
-        custom_wait_footer.reset();
-        present_custom_wait_footer();
+        if (!sleep_wait_footer || display.busy()) return;
+        std::memcpy(canvas.data() + 342 * footer_top, sleep_wait_footer.get(), kSleepWaitFooterBytes);
+        sleep_wait_footer.reset();
+        present_sleep_wait_footer();
     }
-    void show_custom_wait() {
-        if (!custom_sleep_deadline || !sleep_cover_deadline ||
-            !counting_job || counting_job->request.kind != ContentJob::Kind::LockScreen || counting_job->done() ||
-            display.busy() || custom_wait_footer ||
-            std::chrono::steady_clock::now() < *custom_sleep_deadline - kLockScreenPrepareBudget + std::chrono::seconds(1)) return;
+    void show_sleep_wait() {
+        if (display.busy() || sleep_wait_footer) return;
 #ifdef ESP_PLATFORM
-        if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < kCustomWaitFooterBytes + 64U * 1024) return;
+        if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < kSleepWaitFooterBytes + 64U * 1024) return;
 #endif
-        custom_wait_footer.reset(static_cast<std::uint8_t*>(std::malloc(kCustomWaitFooterBytes)));
-        if (!custom_wait_footer) return;
-        std::memcpy(custom_wait_footer.get(), canvas.data() + 342 * footer_top, kCustomWaitFooterBytes);
+        sleep_wait_footer.reset(static_cast<std::uint8_t*>(std::malloc(kSleepWaitFooterBytes)));
+        if (!sleep_wait_footer) return;
+        sleep_wait_view = view;
+        std::memcpy(sleep_wait_footer.get(), canvas.data() + 342 * footer_top, kSleepWaitFooterBytes);
         canvas.fill_rect(0, footer_top, 684, 1216 - footer_top, 15);
-        text("正在准备休眠图片，按电源键取消", 36, footer_top + 28, 24, 612, 1);
-        present_custom_wait_footer();
+        text("正在准备休眠，按电源键取消", 36, footer_top + 28, 24, 612, 1);
+        present_sleep_wait_footer();
     }
     bool custom_prepare_due() const {
         return settings.sleep_screen == "custom" && !custom_prepare_finished &&
@@ -5581,8 +5580,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         graphics::render_page(canvas, body, title_page);
     }
     void draw_sleep(const std::string &sync_state) {
-        custom_wait_footer.reset();
-        custom_wait_restore_pending = false;
+        sleep_wait_footer.reset();
+        sleep_wait_restore_pending = false;
         hits.clear();
         load_fonts();
         if (has_book() && !restore_confirmed_position()) return;
@@ -6281,6 +6280,8 @@ struct ReaderApp::Impl final : DisplayBackend {
      * the rest explains it. retry names a book whose opening failed and can be repeated.
      */
     void error(const std::string &text_in, const std::string &retry = "") {
+        sleep_wait_footer.reset();
+        sleep_wait_restore_pending = false;
         // Repainting an error must retain the destination captured when it first appeared.
         error_origin = origin_for(view);
         image_viewing = false;
@@ -7555,9 +7556,9 @@ void ReaderApp::complete_frame(bool success) {
         work();
     // A final-frame failure must not restart application work during shutdown.
     if (impl_->view == View::PowerOff) return;
-    if (success && impl_->custom_wait_restore_pending) {
-        if (impl_->custom_wait_footer) impl_->restore_custom_wait();
-        else impl_->custom_wait_restore_pending = false;
+    if (success && impl_->sleep_wait_restore_pending) {
+        if (impl_->sleep_wait_footer) impl_->restore_sleep_wait();
+        else impl_->sleep_wait_restore_pending = false;
     }
     if (!success) {
         impl_->abandon_content();
@@ -7831,7 +7832,7 @@ bool ReaderApp::show_power_menu() {
     if (impl_->network_worker_id || impl_->active_network || impl_->content_loading || impl_->foreground_job ||
         impl_->usb_prepared || impl_->view == View::Portal || impl_->view == View::PowerOff) return false;
     if (impl_->display.busy()) {
-        if (!impl_->custom_wait_restore_pending || impl_->view == View::Error) return false;
+        if (!impl_->sleep_wait_restore_pending) return false;
         impl_->power_menu_wait = impl_->view; return true;
     }
     if (impl_->view == View::PowerMenu) return true;
@@ -7907,6 +7908,14 @@ void ReaderApp::show_power_off_help() {
         "请长按电源键强制关机；若连接 USB，请拔下电源线。", true);
     impl_->overlay(true);
 }
+bool ReaderApp::begin_sleep() {
+    if (impl_->display.busy() || impl_->power_menu_wait || impl_->usb_prepared ||
+        impl_->view == View::PowerMenu || impl_->view == View::PowerOff || update_busy()) return false;
+    impl_->sleep_origin = impl_->origin_for(impl_->view);
+    impl_->sleep_destination_captured = true;
+    impl_->show_sleep_wait();
+    return true;
+}
 bool ReaderApp::sleep_pending() const { return impl_->sleep_cover_deadline.has_value(); }
 void ReaderApp::cancel_sleep() {
     impl_->sleep_destination_captured = false;
@@ -7915,8 +7924,8 @@ void ReaderApp::cancel_sleep() {
     impl_->custom_sleep_image.reset();
     impl_->custom_sleep_deadline.reset();
     impl_->custom_rotation_name.clear();
-    impl_->custom_wait_restore_pending = bool(impl_->custom_wait_footer);
-    impl_->restore_custom_wait();
+    impl_->sleep_wait_restore_pending = bool(impl_->sleep_wait_footer);
+    impl_->restore_sleep_wait();
     if (impl_->sleep_cover_deadline) {
         impl_->sleep_cover_deadline.reset();
         if (impl_->counting_job) impl_->counting_job->cancel();
@@ -8101,8 +8110,9 @@ void ReaderApp::poll_background(bool cancel) {
         impl_->inline_image_after = std::chrono::steady_clock::now() + inline_image_delay;
     if (cancel && impl_->counting_job) impl_->counting_job->cancel();
     impl_->poll_counting_job();
-    if (impl_->custom_wait_restore_pending) impl_->restore_custom_wait();
-    if (!cancel) impl_->show_custom_wait();
+    if (impl_->sleep_wait_restore_pending) impl_->restore_sleep_wait();
+    // Keep completed background work from replacing the sleep feedback before preparation.
+    if (impl_->sleep_wait_footer && !impl_->sleep_wait_restore_pending && impl_->view == impl_->sleep_wait_view) return;
     if (impl_->clear_cache_pending) {
         if (impl_->view != View::StorageSettings || !impl_->card_available) impl_->clear_cache_pending = false;
         else if (!cancel && !impl_->counting_job && !impl_->display.busy() && !impl_->save_job && !impl_->bookmark_job)
