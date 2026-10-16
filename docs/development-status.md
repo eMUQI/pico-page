@@ -6699,3 +6699,11 @@ NUL 路径补丁验证：host Debug 24/24（41.85 秒）、AppleClang ASan/UBSan
 - 官网：Release 触发的 Website build `38924724866` 部署及生产验证通过，部署标识为 `6d62876 / 38924724866 / 1`。独立下载生产地址的 manifest、应用及全量镜像，与本地和 GitHub 附件逐字节相同，`ota_manifest.py --check` 通过；安装页显示 beta.5，更新日志含 beta.5 正文。核对文件位于 `.local/beta5-production/`。
 
 发布后同步 README、网站 README、版本管理、路线图和当前摘要，移除仍将 beta.4 称为当前线上版的描述；未重编号或改写历史记录。纯资料收尾的 `python3 tools/check_handoff.py` 492 项和 `git diff --check` 均通过，不重复固件测试。既有同步、看门狗、串口、许可缺口与真机待验清单继续保留；正式 beta.5 的 OTA、输入、充电插拔、显示观感、休眠及 KOReader 往返没有本次设备验收证据。
+
+## 2026-10-17 · beta.5 发布说明措辞调整
+
+按用户要求，将休眠说明中的「进行保存和网络收尾」改为「保存阅读进度并断开网络」，充电条目简化为「阅读页脚增加充电状态显示」。同步 `docs/releases/0.2.0-beta.5.md`、GitHub Release 正文和更新清单的 `notes`，官网更新日志与清单通过现有 main 部署流程同步。
+
+通过 `gh release edit --notes-file` 和 `gh release upload --clobber` 只更新说明正文与 manifest，随后读回正文和清单，确认与本地一致。清单除 `notes` 外的字段逐项不变，并使用原 release 应用镜像经 `ota_manifest.build_manifest()` 校验；两个固件附件及 provenance 的远端元数据均未变化。原发布标签、固件和版本号保持不变，历史发布时的镜像校验结果仍适用。
+
+本批仅调整文案，执行 `python3 tools/check_handoff.py` 和 `git diff --check`，不新增测试或重建固件；没有连接或刷写设备。读回和清单核验文件位于忽略目录 `.local/beta5-note-edit/`。
