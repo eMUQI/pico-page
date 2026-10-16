@@ -32,6 +32,68 @@ int main(int argc, char** argv) {
     {
         const std::string fixture = argv[1];
         const auto directory = fixture.substr(0, fixture.rfind('/') + 1);
+        const auto check_toc = [&](const char* name, const std::vector<TocEntry>& expected) {
+            EpubDocument source;
+            assert(source.open(directory + name, error));
+            assert(source.toc().size() == expected.size());
+            for (std::size_t i = 0; i < expected.size(); ++i) {
+                const auto& actual = source.toc()[i];
+                assert(actual.label == expected[i].label && actual.resource == expected[i].resource &&
+                       actual.fragment == expected[i].fragment && actual.depth == expected[i].depth);
+            }
+        };
+        check_toc("nested-toc.epub", {
+            {"第一章：长标题检查目录折行与右侧展开热区不能重叠", "EPUB/chapter1.xhtml", "", 0},
+            {"内联文字", "EPUB/chapter1.xhtml", "mixed", 1},
+            {"脚注位置", "EPUB/chapter1.xhtml", "note", 1},
+            {"第二章", "EPUB/chapter2.xhtml", "", 0}});
+        check_toc("ncx-nested.epub", {
+            {"第一卷 & 起点", "EPUB/chapter1.xhtml", "", 0},
+            {"内联 文字", "EPUB/chapter1.xhtml", "mixed", 1},
+            {"脚注位置", "EPUB/chapter1.xhtml", "note", 1},
+            {"第二章", "EPUB/chapter2.xhtml", "cross-chapter", 0}});
+        for (const char* name : {"nav-malformed-ncx.epub", "nav-empty-ncx.epub"})
+            check_toc(name, {
+                {"第一卷 & 起点", "EPUB/chapter1.xhtml", "", 0},
+                {"内联 文字", "EPUB/chapter1.xhtml", "mixed", 1},
+                {"脚注位置", "EPUB/chapter1.xhtml", "note", 1},
+                {"第二章", "EPUB/chapter2.xhtml", "cross-chapter", 0}});
+        for (const char* name : {"ncx-malformed.epub", "ncx-budget-entries.epub",
+                                 "ncx-budget-label.epub", "ncx-budget-strings.epub"})
+            check_toc(name, {{"one", "EPUB/chapter1.xhtml", "", 0},
+                             {"two", "EPUB/chapter2.xhtml", "", 0}});
+        for (const char* name : {"opf-budget-items.epub", "opf-budget-strings.epub"}) {
+            EpubDocument excessive;
+            assert(!excessive.open(directory + name, error));
+            assert(error.find("Package/navigation") != std::string::npos);
+        }
+        EpubDocument large;
+        const auto path = directory + "large-toc.epub";
+        unsigned checks = 0;
+        assert(large.open(path, error, [&] { ++checks; return false; }));
+        assert(large.spine().size() == 3000 && large.toc().size() == 3030);
+        for (std::size_t volume = 0; volume < 30; ++volume) {
+            const auto& parent = large.toc()[volume * 101];
+            assert(parent.label == "卷 " + std::to_string(volume) && parent.depth == 0 && parent.fragment.empty());
+            assert(parent.resource == "EPUB/chapter" + std::to_string(volume * 100) + ".xhtml");
+            for (std::size_t child = 0; child < 100; ++child) {
+                const auto number = std::to_string(volume * 100 + child);
+                const auto& item = large.toc()[volume * 101 + child + 1];
+                assert(item.label == "章 " + number + " & 正文" && item.resource == "EPUB/chapter" + number + ".xhtml");
+                assert(item.fragment == "body" && item.depth == 1);
+            }
+        }
+        Chapter last;
+        assert(large.load_chapter(2999, last, error) && last.text == U"正文 2999");
+        // The last cancellation checks occur while reading the final NCX chunks.
+        EpubDocument cancelled;
+        unsigned cancelling_checks = 0;
+        assert(checks > 4 && !cancelled.open(path, error, [&] { return ++cancelling_checks == checks - 2; }));
+        assert(error == kChapterCancelled && cancelled.spine().empty() && cancelled.toc().empty());
+    }
+    {
+        const std::string fixture = argv[1];
+        const auto directory = fixture.substr(0, fixture.rfind('/') + 1);
         for (const auto kind : {"crlf", "padding", "limit"}) {
             const auto path = directory + "mimetype-" + kind + ".epub";
             FileDigest before(path);

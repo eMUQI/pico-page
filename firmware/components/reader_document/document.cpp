@@ -288,40 +288,33 @@ struct Xml {
     }
 };
 
-struct TreeNode {
-    std::string name, text;
-    std::map<std::string, std::string> attrs;
-    std::size_t parent = 0;
-};
-struct XmlTree {
-    std::vector<TreeNode> nodes;
-    std::vector<std::size_t> stack;
-    Xml xml;
-    std::size_t text_bytes = 0;
-    XmlTree() {
-        xml.start = [this](const std::string& name, const char** attrs) {
-            if (nodes.size() >= 4096) { xml.stop("Package/navigation node limit exceeded"); return; }
-            TreeNode node; node.name = name; node.parent = stack.empty() ? 0 : stack.back();
-            for (auto p = attrs; p && *p; p += 2) node.attrs[local_name(p[0])] = p[1];
-            nodes.push_back(std::move(node)); stack.push_back(nodes.size() - 1);
-        };
-        xml.end = [this](const std::string&) { if (!stack.empty()) stack.pop_back(); };
-        xml.text = [this](const char* value, std::size_t count) {
-            if (stack.empty()) return;
-            for (auto index : stack) {
-                auto& node = nodes[index];
-                const bool label = node.name == "title" || node.name == "creator" || node.name == "language" || node.name == "a" || node.name == "text";
-                if (index != stack.back() && !label) continue;
-                text_bytes += count;
-                if (text_bytes > 262144 || node.text.size() + count > 32768) { xml.stop("Package/navigation text limit exceeded"); return; }
-                node.text.append(value, count);
-            }
-        };
+constexpr std::size_t kMaxPackageEntries = 4096;
+constexpr std::size_t kMaxTocEntries = 8192;
+constexpr std::size_t kMaxPackageStrings = 1024 * 1024;
+constexpr std::size_t kMaxNavigationLabel = 32768;
+
+// Counts live string payloads, not allocator capacity or record overhead.
+struct PackageBudget {
+    std::size_t bytes = 0;
+    bool add(Xml& xml, std::size_t count) {
+        if (count > kMaxPackageStrings - bytes) {
+            xml.stop("Package/navigation text limit exceeded"); return false;
+        }
+        bytes += count; return true;
+    }
+    bool replace(Xml& xml, std::string& target, std::string value) {
+        const auto old = target.size();
+        bytes -= old;
+        if (!add(xml, value.size())) { bytes += old; return false; }
+        target = std::move(value); return true;
+    }
+    void append(Xml& xml, std::string& target, const char* value, std::size_t count) {
+        if (count > kMaxNavigationLabel - target.size()) {
+            xml.stop("Package/navigation text limit exceeded"); return;
+        }
+        if (add(xml, count)) target.append(value, count);
     }
 };
-std::string get(const TreeNode& node, const std::string& name) {
-    auto found = node.attrs.find(name); return found == node.attrs.end() ? "" : found->second;
-}
 void warn(Chapter& chapter, const std::string& value) {
     if (std::find(chapter.warnings.begin(), chapter.warnings.end(), value) == chapter.warnings.end()) chapter.warnings.push_back(value);
 }
@@ -1055,82 +1048,178 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
         }
         if (!sha.finish(next->metadata.book_id) || !md5.finish(next->metadata.partial_md5)) return fail(error, "EPUB identity hash failed");
     }
-    XmlTree container;
-    if (!next->parse("META-INF/container.xml", container.xml, error, 262144, stop)) return false;
+    Xml container;
     std::string package;
-    for (const auto& n : container.nodes) if (n.name == "rootfile" && (get(n, "media-type").empty() || get(n, "media-type") == "application/oebps-package+xml")) { package = get(n, "full-path"); break; }
+    bool rootfile_found = false;
+    container.start = [&](const std::string& name, const char** attrs) {
+        if (!rootfile_found && name == "rootfile" && (attr(attrs, "media-type").empty() || attr(attrs, "media-type") == "application/oebps-package+xml")) {
+            rootfile_found = true; package = attr(attrs, "full-path");
+        }
+    };
+    if (!next->parse("META-INF/container.xml", container, error, kMaxXmlBytes, stop)) return false;
     std::string normalized;
     if (!path_parts(package, normalized) || package != normalized) return fail(error, "Invalid package path");
-    XmlTree opf;
-    if (!next->parse(package, opf.xml, error, 262144, stop)) return false;
-    if (opf.nodes.empty() || opf.nodes[0].name != "package") return fail(error, "Missing EPUB package");
-    struct Item { std::string path, type, properties; };
-    std::map<std::string, Item> manifest;
-    std::string navigation, ncx, cover_id;
-    for (const auto& n : opf.nodes) {
-        const auto& parent = opf.nodes[n.parent];
-        if (parent.name == "metadata") {
-            if (n.name == "meta" && get(n, "name") == "cover") cover_id = get(n, "content");
-            if (n.name == "title" && next->metadata.title.empty()) next->metadata.title = trim(n.text);
-            if (n.name == "creator" && next->metadata.author.empty()) next->metadata.author = trim(n.text);
-            if (n.name == "language" && next->metadata.language.empty()) next->metadata.language = trim(n.text);
-        }
-        if (n.name == "item" && parent.name == "manifest") {
+    PackageBudget budget;
+    std::string navigation, ncx;
+    {
+        struct RawItem { std::string id, href, type, properties; };
+        std::vector<RawItem> items;
+        std::vector<std::pair<std::string, bool>> itemrefs;
+        std::vector<std::string> guide_covers, elements;
+        std::string cover_id, text, metadata_name;
+        unsigned metadata_depth = 0;
+        Xml opf;
+        opf.start = [&](const std::string& name, const char** attrs) {
+            if (elements.empty() && name != "package") { opf.stop("Missing EPUB package"); return; }
+            const auto parent = elements.empty() ? std::string{} : elements.back();
+            if (parent == "metadata") {
+                if (name == "meta" && attr(attrs, "name") == "cover") budget.replace(opf, cover_id, attr(attrs, "content"));
+                if (!metadata_depth && (name == "title" || name == "creator" || name == "language")) {
+                    metadata_name = name; metadata_depth = opf.depth;
+                }
+            }
+            if (name == "item" && parent == "manifest") {
+                if (items.size() >= kMaxPackageEntries) { opf.stop("Package/navigation node limit exceeded"); return; }
+                RawItem item{attr(attrs, "id"), attr(attrs, "href"), attr(attrs, "media-type"), attr(attrs, "properties")};
+                if (!budget.add(opf, item.id.size() + item.href.size() + item.type.size() + item.properties.size())) return;
+                items.push_back(std::move(item));
+            }
+            if (name == "itemref" && parent == "spine") {
+                if (itemrefs.size() >= kMaxPackageEntries) { opf.stop("Package/navigation node limit exceeded"); return; }
+                auto id = attr(attrs, "idref");
+                if (!budget.add(opf, id.size())) return;
+                itemrefs.emplace_back(std::move(id), attr(attrs, "linear") != "no");
+            }
+            if (name == "reference" && parent == "guide" && token(attr(attrs, "type"), "cover")) {
+                // Empty references also consume vector storage and require a record bound.
+                if (guide_covers.size() >= kMaxPackageEntries) { opf.stop("Package/navigation node limit exceeded"); return; }
+                auto href = attr(attrs, "href");
+                if (!budget.add(opf, href.size())) return;
+                guide_covers.push_back(std::move(href));
+            }
+            elements.push_back(name);
+        };
+        opf.text = [&](const char* value, std::size_t count) { if (metadata_depth) budget.append(opf, text, value, count); };
+        opf.end = [&](const std::string&) {
+            if (metadata_depth == opf.depth) {
+                auto& target = metadata_name == "title" ? next->metadata.title : metadata_name == "creator" ? next->metadata.author : next->metadata.language;
+                auto value = trim(text);
+                budget.bytes -= text.size(); text.clear();
+                if (target.empty()) budget.replace(opf, target, std::move(value));
+                metadata_depth = 0;
+            }
+            elements.pop_back();
+        };
+        if (!next->parse(package, opf, error, kMaxXmlBytes, stop))
+            return opf.error == "Missing EPUB package" ? fail(error, opf.error) : false;
+        struct Item { std::string path, type, properties; };
+        std::map<std::string, Item> manifest;
+        for (auto& item : items) {
+            if (stop && stop()) return fail(error, kChapterCancelled);
             std::string resource, fragment;
-            const auto id = get(n, "id");
-            if (id.empty() || manifest.count(id) || !resolve(package, get(n, "href"), resource, fragment) || !fragment.empty()) return fail(error, "Invalid manifest resource");
-            manifest[id] = {resource, get(n, "media-type"), get(n, "properties")};
-            if (token(get(n, "properties"), "cover-image") && next->cover.empty()) next->cover = resource;
-            if (token(get(n, "properties"), "nav")) navigation = resource;
-            if (get(n, "media-type") == "application/x-dtbncx+xml") ncx = resource;
+            if (item.id.empty() || manifest.count(item.id) || !resolve(package, item.href, resource, fragment) || !fragment.empty()) return fail(error, "Invalid manifest resource");
+            if (!budget.replace(opf, item.href, std::move(resource))) return fail(error, opf.error);
+            if (token(item.properties, "cover-image") && next->cover.empty()) budget.replace(opf, next->cover, item.href);
+            if (token(item.properties, "nav")) budget.replace(opf, navigation, item.href);
+            if (item.type == "application/x-dtbncx+xml") budget.replace(opf, ncx, item.href);
+            manifest.emplace(std::move(item.id), Item{std::move(item.href), std::move(item.type), std::move(item.properties)});
         }
-    }
-    if (next->cover.empty() && manifest.count(cover_id)) next->cover = manifest.at(cover_id).path;
-    for (const auto& n : opf.nodes) if (n.name == "reference" && opf.nodes[n.parent].name == "guide" && token(get(n, "type"), "cover")) {
-        std::string resource, fragment;
-        if (resolve(package, get(n, "href"), resource, fragment)) next->cover_page = resource;
-    }
-    for (const auto& n : opf.nodes) if (n.name == "itemref" && opf.nodes[n.parent].name == "spine") {
-        const auto id = get(n, "idref"); auto item = manifest.find(id);
-        if (item == manifest.end() || item->second.type != "application/xhtml+xml" || !names.count(item->second.path)) return fail(error, "Unsupported or missing spine resource");
-        mz_zip_archive_file_stat stat{};
-        const int member = mz_zip_reader_locate_file(&next->zip, item->second.path.c_str(), nullptr, MZ_ZIP_FLAG_CASE_SENSITIVE);
-        if (member < 0 || !mz_zip_reader_file_stat(&next->zip, member, &stat)) return fail(error, "Unsupported or missing spine resource");
-        next->spine.push_back({item->second.path, id, get(n, "linear") != "no", static_cast<std::uint32_t>(stat.m_uncomp_size)});
+        if (next->cover.empty() && manifest.count(cover_id)) budget.replace(opf, next->cover, manifest.at(cover_id).path);
+        for (const auto& href : guide_covers) {
+            if (stop && stop()) return fail(error, kChapterCancelled);
+            std::string resource, fragment;
+            if (resolve(package, href, resource, fragment)) budget.replace(opf, next->cover_page, std::move(resource));
+        }
+        for (auto& ref : itemrefs) {
+            if (stop && stop()) return fail(error, kChapterCancelled);
+            const auto& id = ref.first; auto item = manifest.find(id);
+            if (item == manifest.end() || item->second.type != "application/xhtml+xml" || !names.count(item->second.path)) return fail(error, "Unsupported or missing spine resource");
+            mz_zip_archive_file_stat stat{};
+            const int member = mz_zip_reader_locate_file(&next->zip, item->second.path.c_str(), nullptr, MZ_ZIP_FLAG_CASE_SENSITIVE);
+            if (member < 0 || !mz_zip_reader_file_stat(&next->zip, member, &stat)) return fail(error, "Unsupported or missing spine resource");
+            if (!budget.add(opf, item->second.path.size())) return fail(error, opf.error);
+            next->spine.push_back({item->second.path, std::move(ref.first), ref.second, static_cast<std::uint32_t>(stat.m_uncomp_size)});
+        }
+        if (!opf.error.empty()) return fail(error, opf.error);
     }
     if (next->spine.empty()) return fail(error, "EPUB spine is empty");
     if (next->metadata.title.empty()) { auto slash = path.rfind('/'); next->metadata.title = path.substr(slash == std::string::npos ? 0 : slash + 1); }
+    // Raw OPF records are no longer live; navigation shares the remaining payload budget.
+    budget.bytes = next->metadata.title.size() + next->metadata.author.size() + next->metadata.language.size() + next->cover.size() + next->cover_page.size() + navigation.size() + ncx.size();
+    std::size_t fallback_bytes = 0;
+    for (const auto& item : next->spine) fallback_bytes += item.id.size() + item.resource.size();
+    budget.bytes += fallback_bytes;
+    // The mandatory spine-derived table must also fit if every optional source fails.
+    if (budget.bytes > kMaxPackageStrings || fallback_bytes > kMaxPackageStrings - budget.bytes)
+        return fail(error, "Package/navigation text limit exceeded");
     if (cover_only) { impl_ = std::move(next); return true; }
-    if (!navigation.empty()) {
-        XmlTree nav;
-        if (!next->parse(navigation, nav.xml, error, 262144, stop)) return false;
-        for (std::size_t i = 0; i < nav.nodes.size(); ++i) {
-            const auto& n = nav.nodes[i];
-            if (n.name != "a") continue;
-            bool in_toc = false; unsigned depth = 0;
-            for (auto p = n.parent; p > 0; p = nav.nodes[p].parent) {
-                if (nav.nodes[p].name == "nav" && token(get(nav.nodes[p], "type"), "toc")) in_toc = true;
-                if (nav.nodes[p].name == "ol") ++depth;
+    for (const auto* source : {&navigation, &ncx}) {
+        if (source->empty() || !next->toc.empty()) continue;
+        Xml xml;
+        auto toc_budget = budget;
+        std::vector<TocEntry> toc;
+        struct OpenEntry { std::size_t index; unsigned depth; };
+        std::vector<OpenEntry> open, texts;
+        std::vector<unsigned> toc_navs;
+        unsigned lists = 0;
+        const bool is_ncx = source == &ncx;
+        auto add_entry = [&]() {
+            if (toc.size() >= kMaxTocEntries) { xml.stop("Navigation entry limit exceeded"); return false; }
+            toc.push_back({}); return true;
+        };
+        xml.start = [&](const std::string& name, const char** attrs) {
+            if (is_ncx) {
+                if (name == "navPoint") {
+                    if (!add_entry()) return;
+                    toc.back().depth = open.size(); open.push_back({toc.size() - 1, xml.depth});
+                } else if (!open.empty() && name == "text") {
+                    const auto index = open.back().index;
+                    toc_budget.replace(xml, toc[index].label, ""); texts.push_back({index, xml.depth});
+                } else if (!open.empty() && name == "content") {
+                    auto& entry = toc[open.back().index];
+                    std::string resource = entry.resource, fragment = entry.fragment;
+                    resolve(*source, attr(attrs, "src"), resource, fragment);
+                    toc_budget.replace(xml, entry.resource, std::move(resource));
+                    toc_budget.replace(xml, entry.fragment, std::move(fragment));
+                }
+            } else {
+                if (name == "nav" && token(attr(attrs, "type"), "toc")) toc_navs.push_back(xml.depth);
+                if (name == "ol") ++lists;
+                if (name == "a" && !toc_navs.empty()) {
+                    if (!add_entry()) return;
+                    auto& entry = toc.back(); entry.depth = lists ? lists - 1 : 0;
+                    std::string resource, fragment;
+                    if (resolve(*source, attr(attrs, "href"), resource, fragment)) {
+                        toc_budget.replace(xml, entry.resource, std::move(resource));
+                        toc_budget.replace(xml, entry.fragment, std::move(fragment));
+                    }
+                    open.push_back({toc.size() - 1, xml.depth});
+                }
             }
-            if (!in_toc) continue;
-            TocEntry entry; entry.depth = depth > 0 ? depth - 1 : 0; entry.label = trim(n.text);
-            if (resolve(navigation, get(n, "href"), entry.resource, entry.fragment)) next->toc.push_back(std::move(entry));
-        }
-    } else if (!ncx.empty()) {
-        XmlTree nav;
-        if (!next->parse(ncx, nav.xml, error, 262144, stop)) return false;
-        for (std::size_t i = 0; i < nav.nodes.size(); ++i) if (nav.nodes[i].name == "navPoint") {
-            TocEntry entry;
-            for (auto p = nav.nodes[i].parent; p > 0; p = nav.nodes[p].parent) if (nav.nodes[p].name == "navPoint") ++entry.depth;
-            for (std::size_t j = i + 1; j < nav.nodes.size(); ++j) {
-                auto p = nav.nodes[j].parent;
-                while (p > i && nav.nodes[p].name != "navPoint") p = nav.nodes[p].parent;
-                if (p != i) continue;
-                if (nav.nodes[j].name == "text") entry.label = trim(nav.nodes[j].text);
-                if (nav.nodes[j].name == "content") resolve(ncx, get(nav.nodes[j], "src"), entry.resource, entry.fragment);
+        };
+        xml.text = [&](const char* value, std::size_t count) {
+            if (is_ncx) {
+                if (!texts.empty() && !open.empty() && texts.back().index == open.back().index)
+                    toc_budget.append(xml, toc[texts.back().index].label, value, count);
+            } else for (const auto& entry : open) toc_budget.append(xml, toc[entry.index].label, value, count);
+        };
+        xml.end = [&](const std::string& name) {
+            if (is_ncx) {
+                if (name == "text" && !texts.empty() && texts.back().depth == xml.depth) texts.pop_back();
+                if (name == "navPoint" && !open.empty()) open.pop_back();
+            } else {
+                if (name == "a" && !open.empty() && open.back().depth == xml.depth) open.pop_back();
+                if (name == "ol") --lists;
+                if (name == "nav" && !toc_navs.empty() && toc_navs.back() == xml.depth) toc_navs.pop_back();
             }
-            if (!entry.resource.empty()) next->toc.push_back(std::move(entry));
-        }
+        };
+        std::string toc_error;
+        if (next->parse(*source, xml, toc_error, kMaxXmlBytes, stop)) {
+            for (auto& entry : toc) entry.label = trim(entry.label);
+            toc.erase(std::remove_if(toc.begin(), toc.end(), [](const TocEntry& entry) { return entry.resource.empty(); }), toc.end());
+            next->toc = std::move(toc);
+        } else if (toc_error == kChapterCancelled) return fail(error, toc_error);
+        // Optional navigation failures fall through to NCX or the spine-derived table.
     }
     if (next->toc.empty()) for (const auto& item : next->spine) next->toc.push_back({item.id, item.resource, "", 0});
     impl_ = std::move(next);

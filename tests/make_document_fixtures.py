@@ -59,6 +59,69 @@ def generate(directory: Path) -> None:
         '<ol><li><a href="chapter1.xhtml#mixed">内联文字</a></li>'
         '<li><a href="chapter1.xhtml#note">脚注位置</a></li></ol></li>')
     write_fixture(directory / "nested-toc.epub", entries)
+    ncx = fixture_entries()
+    ncx["EPUB/package.opf"] = ncx["EPUB/package.opf"].replace('version="3.0"', 'version="2.0"').replace(
+        '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>',
+        '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>')
+    ncx["EPUB/toc.ncx"] = '''<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"><navMap>
+<navPoint><navLabel><text>  第一卷 &amp; 起点  </text></navLabel><content src="chapter1.xhtml"/>
+  <navPoint><navLabel><text> 内联&#x20;文字 </text></navLabel><content src="chapter1.xhtml#mixed"/></navPoint>
+</navPoint>
+<navPoint><navLabel><text>无目标的父项</text></navLabel>
+  <navPoint><navLabel><text> 脚注位置 </text></navLabel><content src="chapter1.xhtml#note"/></navPoint>
+</navPoint>
+<navPoint><navLabel><text>旧标题</text><text> 第二章 </text></navLabel>
+  <content src="chapter1.xhtml"/><content src="chapter2.xhtml#cross-chapter"/>
+</navPoint></navMap></ncx>'''
+    write_fixture(directory / "ncx-nested.epub", ncx)
+    broken_ncx = dict(ncx)
+    broken_ncx["EPUB/toc.ncx"] = '<ncx><navMap><navPoint></navMap></ncx>'
+    write_fixture(directory / "ncx-malformed.epub", broken_ncx)
+    dual = dict(ncx)
+    dual["EPUB/package.opf"] = dual["EPUB/package.opf"].replace('</manifest>',
+        '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/></manifest>')
+    dual["EPUB/nav.xhtml"] = '<html><nav><a></html>'
+    write_fixture(directory / "nav-malformed-ncx.epub", dual)
+    dual["EPUB/nav.xhtml"] = '<html><body><nav type="toc"/></body></html>'
+    write_fixture(directory / "nav-empty-ncx.epub", dual)
+    for kind, count, label in (("entries", 8193, "章"), ("label", 1, "x" * 32769),
+                               ("strings", 1100, "x" * 1000)):
+        limited = dict(ncx)
+        limited["EPUB/toc.ncx"] = '<ncx><navMap>' + ''.join(
+            '<navPoint><navLabel><text>' + label + '</text></navLabel>'
+            '<content src="chapter1.xhtml"/></navPoint>' for _ in range(count)) + '</navMap></ncx>'
+        write_fixture(directory / ("ncx-budget-" + kind + ".epub"), limited)
+    excessive = fixture_entries()
+    excessive["EPUB/package.opf"] = excessive["EPUB/package.opf"].replace('</manifest>', ''.join(
+        f'<item id="extra{i}" href="chapter1.xhtml" media-type="application/xhtml+xml"/>'
+        for i in range(4094)) + '</manifest>')
+    write_fixture(directory / "opf-budget-items.epub", excessive)
+    excessive = fixture_entries()
+    excessive["EPUB/package.opf"] = excessive["EPUB/package.opf"].replace('</manifest>', ''.join(
+        f'<item id="extra{i}" href="chapter1.xhtml" media-type="application/xhtml+xml" properties="' +
+        'x' * 8000 + '"/>' for i in range(140)) + '</manifest>')
+    write_fixture(directory / "opf-budget-strings.epub", excessive)
+    large = {name: value for name, value in fixture_entries().items()
+             if name in ("mimetype", "META-INF/container.xml")}
+    manifest = '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
+    spine = ''
+    points = []
+    for volume in range(30):
+        points.append(f'<navPoint><navLabel><text>卷 {volume}</text></navLabel>'
+                      f'<content src="chapter{volume * 100}.xhtml"/>')
+        for chapter in range(volume * 100, (volume + 1) * 100):
+            manifest += f'<item id="c{chapter}" href="chapter{chapter}.xhtml" media-type="application/xhtml+xml"/>'
+            spine += f'<itemref idref="c{chapter}"/>'
+            points.append(f'<navPoint><navLabel><text>章 {chapter} &amp; 正文</text></navLabel>'
+                          f'<content src="chapter{chapter}.xhtml#body"/></navPoint>')
+            large[f'EPUB/chapter{chapter}.xhtml'] = (
+                f'<html xmlns="http://www.w3.org/1999/xhtml"><body><p id="body">正文 {chapter}</p></body></html>')
+        points.append('</navPoint>')
+    # The spine precedes the manifest to exercise order-independent OPF collection.
+    large['EPUB/package.opf'] = '<package><spine>' + spine + '</spine><manifest>' + manifest + '</manifest></package>'
+    large['EPUB/toc.ncx'] = '<ncx><navMap>' + ''.join(points) + '</navMap></ncx>'
+    assert len(large['EPUB/package.opf'].encode()) > 262144
+    write_fixture(directory / "large-toc.epub", large)
     (directory / "malformed.epub").write_bytes(b"This is not a ZIP archive.")
     entries = fixture_entries()
     entries["EPUB/chapter2.xhtml"] = "<html><body>" + "超" * 200001 + "</body></html>"
