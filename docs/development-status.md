@@ -6443,3 +6443,4 @@ r0 的开书矩阵结束后，两版各对四本书执行正文目标定位、�
 
 后续项已建单：[任务看门狗告警 #104](https://github.com/eMUQI/pico-page/issues/104)、[刷写后串口无应答及恢复 #105](https://github.com/eMUQI/pico-page/issues/105)、[章节与每页准备耗时补测 #106](https://github.com/eMUQI/pico-page/issues/106)。设备测试暂停，仍缺八次开书；原固件未恢复。此次提交不刷写或重启设备，不合并 PR。
 
+最新 main `d8a6653` 已整合为 `7a9e5b8`，仅开发记录追加发生冲突，双方记录均保留。整合后 host Debug CTest 24/24（45.81 秒）、AppleClang ASan/UBSan CTest 24/24（86.07 秒，不含 LSan）；既有 EIM/ESP-IDF 6.1 执行标准 `sh tools/build_firmware.sh` 成功，来源记录为干净 `7a9e5b8`，应用 SHA-256 `734b54c61bdde0446d7d646b991f3e60012cde80d168c2d9a5c60231a0bf8840`。后续仅补充本段文档并清理末尾空行，交接 488 项和分支 diff 检查通过。未将整合后固件刷入设备；真机统计仍对应此前基于 `897a505` 的候选，不冒充最新整合提交的设备验证。
