@@ -5743,6 +5743,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             text("书籍、字体、锁屏图片", 324, 660, 22, 324, 3);
             canvas.line(0, portal_summary_line = 816, 683, 816, 1, 3);
             upload_summary(844, 28);
+            const int hint_y = portal.saved_books > 0 ? 970 : 936;
+            text("iPhone 提示无互联网时，选择「不连接互联网使用」，", 36, hint_y, 22, 612, 3);
+            text("再用浏览器打开上述地址。", 36, hint_y + 32, 22, 612, 3);
         }
         if (!portal_closing) button(PortalStop, "结束传书", 24, 1080, 636, 96);
     }
