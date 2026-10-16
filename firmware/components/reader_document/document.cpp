@@ -1028,8 +1028,10 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
             if (stop && stop()) return fail(error, "EPUB open cancelled");
             mz_zip_archive_file_stat stat{};
             if (!mz_zip_reader_file_stat(&next->zip, i, &stat)) return fail(error, "Invalid ZIP entry");
-            if (mz_zip_reader_get_filename(&next->zip, i, nullptr, 0) > 512) return fail(error, "ZIP path exceeds limit");
+            const auto name_bytes = mz_zip_reader_get_filename(&next->zip, i, nullptr, 0);
+            if (name_bytes > 512) return fail(error, "ZIP path exceeds limit");
             const std::string name = stat.m_filename; std::string canonical; std::u32string unicode;
+            if (name_bytes != name.size() + 1) return fail(error, "Unsafe or duplicate ZIP path");
             const bool directory = !name.empty() && name.back() == '/';
             if (!decode(name.data(), name.size(), unicode) || !path_parts(name, canonical) || canonical != (directory ? name.substr(0, name.size() - 1) : name)) return fail(error, "Unsafe or duplicate ZIP path");
             const auto file_type = (stat.m_external_attr >> 16) & 0170000;

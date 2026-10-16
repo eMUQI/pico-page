@@ -66,10 +66,10 @@ int main(int argc, char** argv) {
             assert(indexed.load_chapter(i, chapter, error));
             assert(chapter.text == U"chapter " + std::u32string(1, U'0' + i));
         }
-        for (const char* name : {"zip-index-missing-case.epub", "zip-index-duplicate.epub"}) {
+        for (const char* name : {"zip-index-missing-case.epub", "zip-index-duplicate.epub", "zip-index-nul.epub"}) {
             assert(!indexed.open(directory + name, error));
-            assert(error == (std::string(name) == "zip-index-duplicate.epub" ?
-                "Unsafe or duplicate ZIP path" : "Unsupported or missing spine resource"));
+            assert(error == (std::string(name) == "zip-index-missing-case.epub" ?
+                "Unsupported or missing spine resource" : "Unsafe or duplicate ZIP path"));
             assert(indexed.spine().empty());
         }
         for (const unsigned cancel_at : {5U, 9U}) {

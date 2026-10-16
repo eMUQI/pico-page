@@ -145,6 +145,12 @@ def generate(directory: Path) -> None:
     write_fixture(duplicate, indexed)
     with zipfile.ZipFile(duplicate, "a") as archive:
         archive.writestr("EPUB/Chapter.xhtml", indexed["EPUB/Chapter.xhtml"])
+    nul_names = dict(indexed)
+    nul_names["EPUB/Chapter.xhtml!bad"] = nul_names.pop("EPUB/Chapter.xhtml")
+    nul_path = directory / "zip-index-nul.epub"
+    write_fixture(nul_path, nul_names)
+    # Preserve ZIP name lengths while inserting NUL into both local and central headers.
+    nul_path.write_bytes(nul_path.read_bytes().replace(b"EPUB/Chapter.xhtml!bad", b"EPUB/Chapter.xhtml\x00bad"))
     (directory / "malformed.epub").write_bytes(b"This is not a ZIP archive.")
     entries = fixture_entries()
     entries["EPUB/chapter2.xhtml"] = "<html><body>" + "超" * 200001 + "</body></html>"

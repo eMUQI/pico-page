@@ -6471,7 +6471,7 @@ r0 的开书矩阵结束后，两版各对四本书执行正文目标定位、�
 
 验证增加 3,000 章 ZIP 逆序样本、完整长路径末尾差异、仅大小写不同路径、错误大小写、重复成员、索引校验期间取消及重开。Linux document 回归沿用仓库已有 `--wrap=calloc` 注入方式，验证索引分配失败、错误分类和后续成功重开；macOS 通过临时调用点 shim 在 ASan/UBSan 下执行同一分配失败断言，未为此添加生产测试接口。既有 EPUB/图片/CSS/位置映射及异步应用回归继续执行。
 
-host 对照基线为 `7d5c720`，候选为本批源码，macOS AppleClang `-O2`，两版共用本地 miniz/Expat 和 OpenSSL；临时 miniz 仅增加操作计数，阶段计时复用 `StageTimer`，开启阶段日志。每次重新创建文档，无正文/图片缓存；OS 文件缓存未清，样本为连续十次，不代表 TF 冷缓存。原始日志及临时探针脚本归档在忽略目录 `.local/pr107-review/`，统计通过 `tools/summarize_reader_perf.py`。以下是 host 小样本，不推定真机加速：
+host 对照基线为 `7d5c720`，候选为首个索引修复提交 `6ae9c6a` 的源码，macOS AppleClang `-O2`，两版共用本地 miniz/Expat 和 OpenSSL；临时 miniz 仅增加操作计数，阶段计时复用 `StageTimer`，开启阶段日志。每次重新创建文档，无正文/图片缓存；OS 文件缓存未清，样本为连续十次，不代表 TF 冷缓存。原始日志及临时探针脚本归档在忽略目录 `.local/pr107-review/`，统计通过 `tools/summarize_reader_perf.py`。以下是 host 小样本，不推定真机加速：
 
 | 样本 | 基线开书 P50 / P95 / 最大值（ms） | 候选开书 P50 / P95 / 最大值（ms） | 每版 n |
 |---|---:|---:|---:|
@@ -6484,3 +6484,7 @@ host 对照基线为 `7d5c720`，候选为本批源码，macOS AppleClang `-O2`�
 未测：本轮未授权刷写，未操作设备；真机取消延迟、排序最长区间、堆峰值、无诊断轮询条件下的 watchdog 仍待专项验证。#104 的缓存回收/诊断堆扫描等其他路径、#105 串口根因与 #106 内部耗时不在本次修复范围内。最终本地验证和远端结果在下方补记。
 
 本地验证结果：host Debug CTest 注册 24 项并全部通过（41.70 秒）；加强两处错误/取消断言后单独重建并复跑 document 1/1（1.10 秒）。最终 AppleClang ASan/UBSan 24/24（84.18 秒，不含 LSan），临时调用点分配失败注入及 document 回归通过。命令为 `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host -N`、`ctest --test-dir build/host --output-on-failure`；sanitized 按 environment.md 配置相同目标，测试使用 `ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1`。已有 OpenSSL/SDL2 的 macOS 目标版本链接警告保留，没有改变全局工具链。标准 `sh tools/build_firmware.sh` 通过（EIM ESP-IDF v6.1，SDK commit `fff9895c82d744c7237be8847347bdd1b07c6643`，固定 BSP，ESP32-S3），初次候选来源核验为 `7d5c720 dirty`；提交后再构建生成干净提交来源。488 项交接检查和 diff 检查通过。固件 watchdog 仍为 5 秒、两核 idle 检查开启、panic 关闭。
+
+提交 `6ae9c6a` 后的只读边界复核发现：miniz 返回文件名中的嵌入 NUL，C 字符串比较会把带 NUL 后缀的成员误匹配为此前缀路径。临时坏样本在原 PR 上拒绝，在首次索引候选上被接受。已在建索引前将中央目录声明的完整名称字节数与实际字符串长度核对，不一致即按不安全路径拒绝；增加同时修改本地和中央目录文件名的回归，不依赖 Python zipfile 自动截断 NUL 的行为。该补丁需要重新验证并等待新提交的 CI/review，不能沿用上一提交的通过状态。
+
+NUL 路径补丁验证：host Debug 24/24（41.85 秒）、AppleClang ASan/UBSan 24/24（84.80 秒，不含 LSan），标准固件构建及 dirty 来源核验通过；488 项交接检查与 diff 检查通过。补丁仅增加名称完整性校验，没有重新测量 host 阶段耗时；上表对应 `6ae9c6a`。提交后再构建并核对干净来源，不刷写。
