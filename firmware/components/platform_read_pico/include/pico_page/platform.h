@@ -31,10 +31,11 @@ struct Event {
 };
 
 struct Battery {
+    /** Percentage validity; a valid PMU charging state does not depend on SOC validity. */
     bool valid = false;
     int percent = 0;
     int millivolts = 0;
-    bool charging = false;
+    bool charging = false;  // Cleared when the PMU status cannot be validated.
 };
 
 /**

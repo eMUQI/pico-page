@@ -795,6 +795,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool library_directory_unavailable = false;
     reading_footer::Position footer_position = reading_footer::Position::Pages;
     reading_footer::Device footer_device = reading_footer::Device::Battery;
+    bool footer_charging = false;
     PageEffect page_effect = PageEffect::Off;
     bool refresh_from_settings = false, import_from_settings = false, help_from_settings = false, typography_from_settings = false;
     Origin origin_for(View source) const {
@@ -2736,15 +2737,26 @@ struct ReaderApp::Impl final : DisplayBackend {
     void footer() {
         canvas.fill_rect(0, footer_top, 684, 88, 15);
         text(notice().empty() ? footer_position_text() : message, 36, 1156, 24, 476, 3);
+        footer_charging = battery_charging;
         if (footer_device == reading_footer::Device::Clock) {
             // The system clock is restored from RTC or calibrated by on-demand networking.
             center(reading_footer::clock(std::time(nullptr), 8 * 60), reading_footer::device_left, 1156,
                    684 - reading_footer::device_left, 24, 3);
         } else {
-            outline(556, 1165, 32, 17, 2);
-            canvas.fill_rect(588, 1170, 3, 7, 1);
-            if (battery_percent) canvas.fill_rect(560, 1169, *battery_percent * 24 / 100, 9, 3);
-            text(battery_percent ? std::to_string(*battery_percent) + "%" : "—", 600, 1156, 24, 80, 3);
+            const auto level = battery_percent ? std::to_string(*battery_percent) + "%" : "—";
+            const int level_width = text_width(level, 24);
+            const int level_x = 648 - level_width;
+            const int icon_x = level_x - 10 - 35;
+            outline(icon_x, 1166, 32, 18, 2, 3);
+            canvas.fill_rect(icon_x + 32, 1171, 3, 8, 3);
+            if (battery_charging) {
+                // Each row stores nine pixels, with the leftmost pixel in bit 8.
+                static constexpr std::uint16_t bolt[] = {12, 28, 56, 112, 224, 510, 255, 14, 28, 56, 112, 224, 192};
+                for (int y = 0; y < 13; ++y)
+                    for (int x = 0; x < 9; ++x)
+                        if (bolt[y] & (1U << (8 - x))) canvas.pixel(icon_x + 11 + x, 1168 + y, 3);
+            } else if (battery_percent) canvas.fill_rect(icon_x + 4, 1170, *battery_percent * 24 / 100, 10, 3);
+            text(level, level_x, 1156, 24, level_width, 3);
         }
     }
     std::size_t readable_offset(std::size_t start) const {
@@ -7477,9 +7489,17 @@ bool ReaderApp::open_book(const std::string &path) {
     impl_->release_counting();
     return !impl_->usb_prepared && impl_->open(path);
 }
-void ReaderApp::set_battery(std::optional<int> percent, bool charging) {
+void ReaderApp::set_battery(std::optional<int> percent, bool charging, bool allow_refresh) {
     impl_->battery_percent = percent && *percent >= 0 && *percent <= 100 ? percent : std::nullopt;
     impl_->battery_charging = charging;
+    if (allow_refresh && impl_->footer_charging != charging && impl_->view == View::Reading &&
+        impl_->footer_device == reading_footer::Device::Battery &&
+        !impl_->display.busy() && !impl_->content_loading && !impl_->image_viewing &&
+        !impl_->sleep_wait_footer && !impl_->sleep_wait_restore_pending && !impl_->sleep_destination_captured) {
+        impl_->footer();
+        impl_->display.present({{"ui", 0, 0, ++impl_->ui_sequence}, {}, FramePurpose::Overlay,
+            RefreshIntent::Content, RefreshRegion{0, footer_top, 684, 1216 - footer_top}});
+    }
 }
 void ReaderApp::set_firmware_version(const std::string& version) { impl_->running_version = version; }
 std::optional<UpdateOperation> ReaderApp::take_update_request() {

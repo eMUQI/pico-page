@@ -662,7 +662,9 @@ extern "C" void app_main() {
         app->poll_background(!sleep_requested && !resume_input.active() && (physical_source || pico_page::platform::input_waiting_before(
             std::numeric_limits<std::int64_t>::max())));
         const auto battery = pico_page::platform::battery();
-        app->set_battery(battery.valid ? std::optional<int>(battery.percent) : std::nullopt, battery.valid && battery.charging);
+        app->set_battery(battery.valid ? std::optional<int>(battery.percent) : std::nullopt, battery.charging,
+            !sleep_requested && !resume_input.active() && !physical_source &&
+            !pico_page::platform::input_waiting_before(std::numeric_limits<std::int64_t>::max()));
         if (app->pending_frame() && !present(*app) && sleep_requested) {
             app->cancel_sleep();
             sleep_requested = false;

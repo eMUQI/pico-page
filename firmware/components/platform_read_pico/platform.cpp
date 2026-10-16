@@ -231,7 +231,7 @@ bool pmu_events(bool& short_press, bool& wake_press, std::string& error, bool* l
         const auto result = read_pico_pmu_poll();
         const auto* snapshot = read_pico_pmu_get();
         if (result != ESP_OK || !snapshot->identity_ok || !snapshot->status_ok) {
-            battery_state.valid = false;
+            battery_state = {};
             return failure(error, "PMU status", result != ESP_OK ? result : ESP_ERR_INVALID_RESPONSE);
         }
         battery_state.valid = (snapshot->flags & PMU_STATUS_BATTERY_VALID) && snapshot->soc_permille <= 1000;

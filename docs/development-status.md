@@ -2,6 +2,10 @@
 
 ## 当前摘要（2026-10-16）
 
+PR #110 的两项审查修复已完成本地验证：充电状态独立于百分比有效性，PMU 状态失败时清空快照；充电刷新遵守主循环的输入排队、输入序列和唤醒恢复门槛。最新 host Debug 与 AppleClang ASan/UBSan 各 24/24、标准固件构建及交接检查通过，等待修复提交的 CI 与复审后按用户授权压缩合并。审查修复尚未重新刷写，设备仍为此前用户确认外观的候选。详见本日「PR #110 审查修复」。
+
+阅读页脚充电标识已优化并安装到第二台 Read Pico（2026-10-16，末尾 `56:C8`，基于 `main fceca72`）：仅电量模式在电池内显示闪电，电池与百分比垂直居中、间隔 10 px，整组按 x=648 靠右；时钟模式不变。host Debug 24/24、标准固件构建、桌面边界状态及设备画布检查通过；应用写入摘要校验通过，已恢复原书，锚点 `fc7b8102`、保存修订 1 与烧录前一致。用户确认本次显示效果改善；当前设备显示 100% 且无充电标识，实际充电插拔、实体输入及残影仍待 IN07 验收。本批按用户要求整理为独立 PR，分支 `fix/reading-footer-charging`；详见本日「充电标识与百分比对齐优化及烧录」及「充电标识 PR 整理」。
+
 休眠请求的页脚反馈已提前（2026-10-16，分支 `fix/immediate-sleep-feedback`，基于 `5011c62`）：手动和自动休眠共用「正在准备休眠，按电源键取消」，提示呈现后再进行网络、保存和图片准备；取消规则不变。host Debug 与 AppleClang ASan/UBSan 各 24/24、标准固件构建及桌面画布检查通过。本批整理为独立 PR；已按用户授权只写第二台 Read Pico（标识末尾 `56:c8`）的实测 `factory` 应用槽，写入摘要及书库首帧通过。提示与取消交由用户自测，实体输入、面板时延、低内存和网络在途场景待 PW05/PW07 真机验收。详见本日「休眠请求立即页脚反馈」及「休眠反馈候选烧录」。
 
 PR #107 的两项审查修复已有本地候选：OPF 解析停止后忽略结束回调，避免坏根元素触发空栈访问；ZIP 使用最多 32 KiB 的完整路径排序索引，移除逐章线性查找。新增坏文件、逆序大目录、大小写/长路径、重复成员、取消重开与分配失败回归。host 操作计数已确认线性扫描消失；未刷写，不宣称 #104 的真机看门狗专项通过。详见本日「PR #107 审查修复」。
@@ -6560,3 +6564,78 @@ NUL 路径补丁验证：host Debug 24/24（41.85 秒）、AppleClang ASan/UBSan
 ## 2026-10-16 · 休眠反馈 PR 整理
 
 按用户要求，在当前 checkout 创建 `fix/immediate-sleep-feedback` 分支，向 `main` 提交本次页脚反馈、取消恢复、host 入口、必要回归与配套文档。远端 main 已核对为 `5011c62`，与实现基线一致。此次整理未修改已验证的代码；沿用本批 host Debug 与 AppleClang ASan/UBSan 各 24/24、标准固件构建及单设备应用写入/首帧证据，重新执行交接与 diff 检查。不将用户要求创建 PR 视为实体输入或提示时延验收通过，不提交忽略目录中的个人内容、设备原始日志或构建产物。
+
+
+## 2026-10-16 · 阅读页脚充电标识
+
+按用户要求，本批仅在阅读页脚右侧增加静态闪电：电量模式保留电池及百分比，时钟模式保留时间。图标沿用 Canvas 基础绘制，不依赖字体字符或新增资源；原有点击热区、左右切换、K2、正文和进度保存规则不变。复用已接入的 PMU `charging` 状态，不根据 USB 连接或 100% 电量推断；设置及其他页面不增加入口。稳定规则同步到决定、UI 说明和 IN07。
+
+执行上下文仍为主应用任务，`set_battery()` 对比最新状态与已绘制状态，仅在阅读页空闲时提交既有 `684 × 88` 整条页脚局刷。显示在途、正文加载、图片查看、休眠准备或页脚恢复期间不改写画布；后续主循环采样或页脚重画采用最新状态。重复快照不排队。新增一个布尔值，不新增任务、定时器、队列、图片缓冲、文件或网络操作；闪电固定为三次短线绘制，无新增等待或不可取消的 I/O，页面刷新失败沿用既有基准失效、错误页全刷与位置保留路径。面板耗时、能耗和整机峰值未测，不作性能收益结论。
+
+验证基线为 `fceca720a9b4e84530726508a48354402e4530ab`，本次开始时 checkout 干净。复用本机 AppleClang 21 和 EIM 的 ESP-IDF 6.1（`fff9895c82d744c7237be8847347bdd1b07c6643`），BSP 仍为 `5f3406deec33304de8801046db583dec7c49e55b`；依赖锁、sdkconfig、波形和全局工具链未修改。
+
+- `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host -N` 及完整 CTest：注册 24 项，最终 24/24 通过。既有 `footer_test` 同步及固件对应的异步模式覆盖电量/时钟显示、重复快照、在途保护和后续更新、休眠准备保护、正文/已保存位置/进度文件不变，以及局刷失败恢复；未新增测试目标。最终日志为 `.local/charging-host-ctest.log`，39.01 秒。
+- 按 `docs/environment.md` 的 AppleClang ASan/UBSan 命令配置及构建 `build/sanitized`，完整 CTest 最终 24/24 通过，83.22 秒；日志为 `.local/charging-sanitized-ctest.log`。本机结果不包含 LSan，不代替 Linux CI。
+- `sh tools/build_firmware.sh`：标准固件构建与来源校验通过，版本 `0.2.0-beta.4+gfceca72.dirty`。首次配置受到沙箱 `sysctl` 权限限制，随后在获准环境复用原工具链；一次构建期间测试及文档变动触发来源校验拒绝，源码稳定后已重新构建通过。日志为 `.local/charging-firmware-build.log`。本批未执行烧录命令。
+- 桌面画布：从生产 `ReaderApp` 导出普通/充电电量及普通/充电时钟四帧，检查图标、百分比、时间和页脚边界，未发生遮挡；原始整帧及页脚裁切在 `artifacts/charging-footer-20261016/`，`capture.json` 记录来源、字体和图片 SHA-256。书籍为合成 `valid.epub`，68% 与充电状态为模拟值，时间来自 host；不是面板实拍或 PMU 验收。
+- `python3 tools/check_handoff.py` 和 `git diff --check`：通过。host 链接仍有既有 Homebrew dylib 目标系统版本警告，未调整依赖。
+
+未提交、推送、连接或刷写设备。下一步按 IN07 在真机验证充电开始/停止、充满后停止标识、无效读数、正文及休眠准备时插拔，以及两种模式下的可辨识度、局刷残影和时延；host 模拟不能证明 PMU 报告时机或实际充电行为。
+
+
+## 2026-10-16 · 充电标识限定电量模式
+
+用户更新要求「时钟模式不必可见」。闪电绘制限定在阅读页脚的电量分支，时钟恢复原有居中位置；充电变化触发局刷的条件也限定为电量模式，时钟模式只更新内存快照。切回电量模式时按最新快照绘制，不额外排队。决定、UI 说明及 IN07 同步收紧范围；上一记录保留为前一候选的历史。
+
+复用原主应用任务、PMU 快照和显示事务，不新增资源、任务或等待。既有 `footer_test` 已改为核对时钟模式下充电开始/停止均无待显示帧且画布不变，切回电量显示最新状态；保留电量模式的重复快照、在途保护、休眠准备、失败恢复及正文/进度不变检查。
+
+- `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host --output-on-failure`：24/24，通过，39.05 秒；日志 `.local/charging-battery-only-ctest.log`。
+- `sh tools/build_firmware.sh`：复用原 ESP-IDF 6.1/EIM 与 sdkconfig，标准构建及来源校验通过；日志 `.local/charging-battery-only-firmware.log`。本轮未新增内存或生命周期逻辑，未另跑 ASan/UBSan；上一轮 sanitizer 结果不作为本次模式调整的结果。
+- 从当前生产 ReaderApp 重新导出四种桌面状态，更新 `artifacts/charging-footer-20261016/` 的候选截图及 `capture.json`；时钟无闪电且位置恢复，电量模式标识仍可见。合成书籍、模拟电量及充电状态的边界不变，不是真机画面。
+- `python3 tools/check_handoff.py`：488 项通过；`git diff --check` 通过。
+
+未提交、推送、连接或刷写设备。下一步按 IN07 在真机核对电量模式插拔更新、时钟不因充电变化刷屏、切回电量后的最新状态，以及标识可辨识度与残影。
+
+
+## 2026-10-16 · 充电标识与百分比对齐优化及烧录
+
+用户要求先优化充电标识与百分比的对齐，再烧录看实屏，并明确使用 Product Design。按该技能检查当前生产 ReaderApp 画布：原闪电可见高度 27 px，电池为 17 px，比例不协调；电池可见 y=1165–1181，数字为 y=1166–1183，视觉中心约差 2 px。参考当前字体、灰阶和页脚结构做局部调整，没有重做导航或布局。
+
+当前电量组沿 x=648 靠右，文字按实际字宽排布，图标与文字间隔 10 px；电池主体 32 × 18 px，端子 3 px，灰度与百分比一致，可见高度与 Noto Sans SC 24 px 数字对齐。充电时在电池内部显示 9 × 13 px 的实心闪电，替代电量填充，百分比继续显示真实数值；停止充电恢复填充。时钟及其充电变化不刷屏的规则不变。已更新 UI 说明、决定及 IN07。
+
+仍由主应用任务绘制，复用既有局刷和状态快照。新增 26 B 的只读位图常量及最多 117 次固定像素检查，测宽输入最多 4 个 Unicode 标量，沿既有字符串/字体路径处理；不新增 worker、定时器、图像缓冲、文件或网络操作，无新增阻塞 I/O。不改变刷新面积、波形或失败恢复路径；不以 host 画布证明面板时延或功耗。既有回归继续覆盖重复快照、在途保护、休眠准备、失败恢复、正文及进度不变；删除只适用于旧外置闪电几何的断言，没有新增测试目标。
+
+本地验证：
+
+- 使用原 AppleClang 21，配置及构建 `build/host`，`ctest --test-dir build/host --output-on-failure` 最终 24/24，通过，37.92 秒；`.local/charging-alignment-ctest.log`。本轮为固定大小绘制和定位调整，未另跑 sanitizer，旧轮结果不替代本次结果。
+- `sh tools/build_firmware.sh` 使用原 EIM/ESP-IDF 6.1、锁定 BSP 与已有 sdkconfig，标准构建及来源校验通过；`.local/charging-alignment-firmware.log`。版本 `0.2.0-beta.4+gfceca72.dirty`，应用 3,532,752 字节，SHA-256 `1320acb20ce798d26ca68753a0d2de28530face581f856ed2094548b97c42311`。
+- 当前生产 ReaderApp 导出普通/充电电量、时钟及 0%、68%、100%、未知值，核对对齐、间隔及边界；模拟值不作为 PMU 证据。原候选与新候选截图在 `artifacts/charging-alignment-20261016/`，`capture.json` 记录来源、尺寸、差异和摘要。均为程序画布，不是面板实拍。
+
+烧录前已读取设备状态，原书已保存，修订 1、锚点 `fc7b8102`、pending/save_busy/save_due/importing 均为 0。首次 USB-reset 和随后 DTR/RTS 方式都未握手，没有写入 Flash；用户重新插拔并回复「可以了」后，重新识别 USB VID/PID `303A:1001`、完整序列号及芯片 MAC `14:c1:9f:d1:56:c8`，不沿用端口名推断身份。重新读取 `0x8000` 分区表并用 IDF 官方解析器校验，确认唯一 `factory` 应用槽 `0x10000/4M`。脚本核对源码快照、镜像摘要、应用大小、USB 与芯片身份，在写入前再次确认 USB 序列号，只向该应用槽写入应用。
+
+写入报告 `Hash of data verified.`，随后 watchdog reset。bootloader、分区表、NVS、工厂校准和 TF 卡均未写入；未执行擦除全 Flash 或迁移操作。重启后书库首帧 frame_ok=1、card=1，打开「继续阅读」并核对为 reading、frame_ok=1、saved=1、修订 1、锚点 `fc7b8102`，与烧录前一致，未翻页或修改配置。读取实际已确认画布后，仅将右侧状态区裁切保存为 `artifacts/charging-alignment-20261016/device-status.png`；含正文的原始画布只留在忽略目录。当前显示 100% 及普通电池填充，没有充电闪电；该帧不构成充电状态切换验收。重启诊断 tx_failures=1，单次状态及画布读取正常，不作串口长期稳定性结论。
+
+来源清单、分区读回、安装脚本、摘要与诊断证据在忽略目录 `.local/charging-alignment-install/`；原始个人正文和日志不提交。配套资料执行 `python3 tools/check_handoff.py`（488 项通过）及 `git diff --check`。设备已停在原书正文供用户目视验收；实际插拔、充满状态、字体回退的面板效果、实体输入及残影待 IN07。未提交或推送。
+
+
+## 2026-10-16 · 充电标识 PR 整理
+
+用户确认「这样好多了」，要求提交 PR。本批在当前 checkout 创建 `fix/reading-footer-charging`，仅提交阅读页脚充电标识、图标/百分比对齐、既有回归及配套资料，不包含忽略目录中的书籍、原始设备日志、画布或固件。无新增代码改动，沿用上一记录的最终 host Debug 24/24、标准固件构建和设备应用摘要/位置恢复证据；本次重新执行 `python3 tools/check_handoff.py` 与 `git diff --check`。PR 指向 `main`，保留真实充电变化与残影未验收的边界；本次没有合并授权。
+
+
+## 2026-10-16 · PR #110 审查修复
+
+用户授权持续处理 review，CI 与审查无问题后压缩合并。初始提交 `1d7d243` 的四项远端检查均通过，但 Codex review 提出两个有效 P2：百分比无效会连带隐藏有效充电状态；充电变化自动刷页脚可能抢在排队输入前，使其被按旧画面事件丢弃。沿 ponytail-review 核对生产调用、平台快照、显示完成时间及输入分发后实施最小修复。
+
+`app_main` 独立传递 PMU 的充电位，不再与 SOC 有效标志相与；`platform` 在读取/身份/状态校验失败时清空整个电池快照，避免保留旧充电位，正常状态下 SOC 无效仍可报告正在充电。`set_battery` 增加调用者控制的 `allow_refresh`，为 false 时只更新快照；固件仅在没有排队输入、没有进行中的物理输入、没有唤醒输入恢复且未准备休眠时允许自动局刷，沿用原显示和内容保护条件。未新增任务、队列、定时器或动态缓存；判断使用既有零等待队首检查，不移除输入，不新增阻塞。
+
+技术核对：乐鑫 MCP 返回的 ESP32-S3 FreeRTOS 官方说明确认 `xQueuePeek` 不消费队首、零等待参数不阻塞；该检索指向 latest，另核对本机 IDF 6.1 commit `fff9895c82d744c7237be8847347bdd1b07c6643` 的 `FreeRTOS-Kernel/include/freertos/queue.h` 对应契约，以及当前 `input_waiting_before()` 实现，未根据其他芯片或版本推断行为。稳定规则已同步 UI 说明与 IN07。
+
+复用 `footer_test` 同步及固件对应的异步模式，增加延后刷新时画布和待显示帧不变、K2 仍提交全刷、允许刷新后采用最新状态，以及未知百分比下有效充电与停止充电的像素差异；继续核对正文、锚点和进度文件不变，未新增测试目标。平台 PMU 分支及真实 FreeRTOS 输入队列由标准固件构建覆盖；host 不冒充对 PMU CRC 故障和实体输入时序的硬件验证。
+
+- `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、构建及完整 CTest：24/24 通过，38.82 秒，`.local/charging-review-ctest.log`。
+- 复用原 AppleClang ASan/UBSan 配置、构建及完整 CTest：24/24 通过，82.76 秒，`.local/charging-review-sanitized-ctest.log`；不包含本机不支持的 LSan，Linux CI 仍须单独通过。
+- `sh tools/build_firmware.sh`：标准固件构建及来源校验通过，`.local/charging-review-firmware.log`；复用原 IDF/BSP、sdkconfig 和依赖，没有刷写设备。
+- `python3 tools/check_handoff.py`：488 项通过；`git diff --check` 通过。
+
+随后提交并推送修复，重新请求当前提交的 Codex review 并等待其 CI。旧提交的绿色检查不作为新提交的通过证据；当前设备仍安装审查修复前的外观候选，真实 SOC 无效/PMU 故障、充电与排队输入竞争、实体输入和残影仍待 IN07 真机验收。

@@ -168,8 +168,10 @@ class ReaderApp {
     bool initialize();
     /** Refuses during active sync or portal work; cancelled HTTP may drain while local reading resumes. */
     bool open_book(const std::string &relative_path);
-    /** Updates the latest battery reading for the next render; nullopt means unknown. charging permits a firmware installation below 20%. */
-    void set_battery(std::optional<int> percent, bool charging = false);
+    /** Updates the battery reading; nullopt means unknown. Call regularly on the owning task.
+     * Set allow_refresh=false while input is pending or active; the snapshot still updates.
+     * Charging is independent of percentage validity and permits installation below 20%. */
+    void set_battery(std::optional<int> percent, bool charging = false, bool allow_refresh = true);
     /**
      * Replaces the version that update decisions treat as the running firmware. Call before
      * initialize(); host previews and tests use it in place of the build's own version.

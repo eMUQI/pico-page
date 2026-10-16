@@ -1013,6 +1013,58 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     assert(footer_pixels(app, 540, 684) == battery);
     unchanged();
 
+    const auto position = footer_pixels(app, 0, 540);
+    const auto before_charging = app.canvas().pixels();
+    app.set_battery(75, true, false);
+    assert(!app.pending_frame() && app.canvas().pixels() == before_charging);
+    driver.key(Input::K2);
+    assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::ManualRefresh);
+    assert(app.canvas().pixels() == before_charging);
+    driver.present(); unchanged();
+    app.set_battery(75, true);
+    assert(app.pending_frame() && app.pending_frame()->region && app.pending_frame()->changed_pixels_only);
+    assert(app.pending_frame()->purpose == FramePurpose::Overlay && app.pending_frame()->region->y == 1128);
+    const auto charging = footer_pixels(app, 540, 684);
+    assert(charging != battery && footer_pixels(app, 0, 540) == position);
+    driver.present(); unchanged();
+    app.set_battery(75, true);
+    assert(!app.pending_frame());
+    toggle(600);
+    const auto charging_clock = footer_pixels(app, 540, 684);
+    assert(charging_clock != charging);
+    const auto clock_pixels = app.canvas().pixels();
+    app.set_battery(75, false);
+    assert(!app.pending_frame() && app.canvas().pixels() == clock_pixels);
+    app.set_battery(75, true);
+    assert(!app.pending_frame() && app.canvas().pixels() == clock_pixels);
+    toggle(600);
+    assert(footer_pixels(app, 540, 684) == charging);
+    app.set_battery(75, false);
+    assert(app.pending_frame());
+    const auto frame_pixels = app.canvas().pixels();
+    app.set_battery(75, true);
+    assert(app.canvas().pixels() == frame_pixels);
+    driver.present(); unchanged();
+    app.set_battery(75, true);
+    assert(app.pending_frame() && footer_pixels(app, 540, 684) == charging);
+    driver.present(); unchanged();
+    app.set_battery(75, false);
+    assert(app.pending_frame() && footer_pixels(app, 540, 684) == battery);
+    driver.present(); unchanged();
+    app.set_battery(75, false);
+    assert(!app.pending_frame());
+
+    app.set_battery(std::nullopt, true);
+    assert(app.pending_frame());
+    const auto unknown_charging = footer_pixels(app, 540, 684);
+    driver.present(); unchanged();
+    app.set_battery(std::nullopt, false);
+    assert(app.pending_frame() && footer_pixels(app, 540, 684) != unknown_charging);
+    driver.present(); unchanged();
+    app.set_battery(75, false);
+    toggle(600); toggle(600);
+    assert(footer_pixels(app, 540, 684) == battery);
+
     if (fixture == "nonlinear-footer.epub") {
         driver.tap(342, 500); driver.present();
         driver.tap(68, 1140); driver.present();
@@ -1024,7 +1076,14 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
         expect_text("100.00%");
         return;
     }
-    driver.tap(36, 1160);
+    if (fixture == "valid.epub") {
+        assert(app.begin_sleep()); driver.present();
+        const auto sleep_pixels = app.canvas().pixels();
+        app.set_battery(75, true);
+        assert(!app.pending_frame() && app.canvas().pixels() == sleep_pixels);
+        app.cancel_sleep(); driver.present(); unchanged();
+        app.set_battery(75, true);
+    } else driver.tap(36, 1160);
     assert(app.pending_frame() && app.pending_frame()->region);
     app.complete_frame(false);
     assert(app.view() == View::Error && app.saved_record() == saved);
