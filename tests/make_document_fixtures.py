@@ -14,6 +14,11 @@ def generate(directory: Path) -> None:
     (directory / "invalid.txt").write_bytes(b"valid\xffinvalid")
     (directory / "gb18030.txt").write_bytes(("甲" * 24575 + "😀\ue587" + "乙" * 500 + "\r\n末尾").encode("gb18030"))
     write_fixture(directory / "valid.epub")
+    for kind, package in (("empty", "<wrong/>"), ("paired", "<wrong></wrong>"),
+                          ("attribute", '<package id="' + 'x' * 8193 + '"/>')):
+        invalid = fixture_entries()
+        invalid["EPUB/package.opf"] = package
+        write_fixture(directory / ("opf-invalid-" + kind + ".epub"), invalid)
     for kind, mime in (
         ("crlf", "application/epub+zip\r\n"),
         ("padding", " \t\r\napplication/epub+zip\n\r\t "),
@@ -122,6 +127,24 @@ def generate(directory: Path) -> None:
     large['EPUB/toc.ncx'] = '<ncx><navMap>' + ''.join(points) + '</navMap></ncx>'
     assert len(large['EPUB/package.opf'].encode()) > 262144
     write_fixture(directory / "large-toc.epub", large)
+    write_fixture(directory / "large-toc-reversed.epub", dict(reversed(list(large.items()))))
+    indexed = {name: value for name, value in fixture_entries().items()
+               if name in ("mimetype", "META-INF/container.xml")}
+    paths = ["Chapter.xhtml", "chapter.xhtml", "x" * 480 + "a.xhtml", "x" * 480 + "b.xhtml"]
+    indexed["EPUB/package.opf"] = '<package><manifest>' + ''.join(
+        f'<item id="c{i}" href="{path}" media-type="application/xhtml+xml"/>'
+        for i, path in enumerate(paths)) + '</manifest><spine>' + ''.join(
+        f'<itemref idref="c{i}"/>' for i in range(len(paths))) + '</spine></package>'
+    for i, path in enumerate(paths):
+        indexed["EPUB/" + path] = f'<html><body><p>chapter {i}</p></body></html>'
+    write_fixture(directory / "zip-index-paths.epub", dict(reversed(list(indexed.items()))))
+    missing_case = dict(indexed)
+    missing_case["EPUB/package.opf"] = indexed["EPUB/package.opf"].replace('href="Chapter.xhtml"', 'href="CHAPTER.xhtml"')
+    write_fixture(directory / "zip-index-missing-case.epub", missing_case)
+    duplicate = directory / "zip-index-duplicate.epub"
+    write_fixture(duplicate, indexed)
+    with zipfile.ZipFile(duplicate, "a") as archive:
+        archive.writestr("EPUB/Chapter.xhtml", indexed["EPUB/Chapter.xhtml"])
     (directory / "malformed.epub").write_bytes(b"This is not a ZIP archive.")
     entries = fixture_entries()
     entries["EPUB/chapter2.xhtml"] = "<html><body>" + "超" * 200001 + "</body></html>"

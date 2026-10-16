@@ -5,6 +5,18 @@
 
 using namespace pico_page;
 
+#ifdef PICO_PAGE_WRAP_CALLOC_TEST
+static bool fail_zip_index = false;
+extern "C" void* __real_calloc(std::size_t count, std::size_t size);
+extern "C" void* __wrap_calloc(std::size_t count, std::size_t size) {
+    if (fail_zip_index && count == 7 && size == 8) {
+        fail_zip_index = false;
+        return nullptr;
+    }
+    return __real_calloc(count, size);
+}
+#endif
+
 int main(int argc, char** argv) {
     assert(argc >= 2);
     std::string error;
@@ -32,6 +44,40 @@ int main(int argc, char** argv) {
     {
         const std::string fixture = argv[1];
         const auto directory = fixture.substr(0, fixture.rfind('/') + 1);
+        for (const char* name : {"opf-invalid-empty.epub", "opf-invalid-paired.epub", "opf-invalid-attribute.epub"}) {
+            EpubDocument invalid;
+            assert(!invalid.open(directory + name, error));
+            assert(error.find("Missing EPUB package") != std::string::npos ||
+                   error.find("XML attribute limit exceeded") != std::string::npos);
+            assert(invalid.spine().empty() && invalid.toc().empty());
+        }
+        EpubDocument indexed;
+        assert(indexed.open(directory + "zip-index-paths.epub", error));
+        assert(indexed.spine().size() == 4);
+#ifdef PICO_PAGE_WRAP_CALLOC_TEST
+        // This fixture has seven ZIP members; each index record is two uint32_t values.
+        fail_zip_index = true;
+        assert(!indexed.open(directory + "zip-index-paths.epub", error));
+        assert(!fail_zip_index && error == "ZIP index allocation failed" && indexed.spine().empty());
+        assert(indexed.open(directory + "zip-index-paths.epub", error));
+#endif
+        for (std::size_t i = 0; i < 4; ++i) {
+            Chapter chapter;
+            assert(indexed.load_chapter(i, chapter, error));
+            assert(chapter.text == U"chapter " + std::u32string(1, U'0' + i));
+        }
+        for (const char* name : {"zip-index-missing-case.epub", "zip-index-duplicate.epub"}) {
+            assert(!indexed.open(directory + name, error));
+            assert(error == (std::string(name) == "zip-index-duplicate.epub" ?
+                "Unsafe or duplicate ZIP path" : "Unsupported or missing spine resource"));
+            assert(indexed.spine().empty());
+        }
+        for (const unsigned cancel_at : {5U, 9U}) {
+            unsigned index_checks = 0;
+            assert(!indexed.open(directory + "zip-index-paths.epub", error, [&] { return ++index_checks == cancel_at; }));
+            assert(error == "EPUB open cancelled" && indexed.spine().empty());
+        }
+        assert(indexed.open(directory + "zip-index-paths.epub", error));
         const auto check_toc = [&](const char* name, const std::vector<TocEntry>& expected) {
             EpubDocument source;
             assert(source.open(directory + name, error));
@@ -85,6 +131,12 @@ int main(int argc, char** argv) {
         }
         Chapter last;
         assert(large.load_chapter(2999, last, error) && last.text == U"正文 2999");
+        EpubDocument reversed;
+        assert(reversed.open(directory + "large-toc-reversed.epub", error));
+        assert(reversed.spine().size() == large.spine().size() && reversed.toc().size() == large.toc().size());
+        for (std::size_t i = 0; i < large.spine().size(); ++i)
+            assert(reversed.spine()[i].resource == large.spine()[i].resource && reversed.spine()[i].bytes == large.spine()[i].bytes);
+        assert(reversed.load_chapter(2999, last, error) && last.text == U"正文 2999");
         // The last cancellation checks occur while reading the final NCX chunks.
         EpubDocument cancelled;
         unsigned cancelling_checks = 0;

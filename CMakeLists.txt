@@ -77,6 +77,10 @@ add_executable(document_test tests/document_test.cpp)
 add_dependencies(document_test document_fixtures_target)
 target_link_libraries(document_test PRIVATE reader_document)
 target_compile_options(document_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(document_test PRIVATE "LINKER:--wrap=calloc")
+    target_compile_definitions(document_test PRIVATE PICO_PAGE_WRAP_CALLOC_TEST=1)
+endif()
 add_test(NAME document COMMAND document_test ${document_fixtures}/valid.epub
     ${document_fixtures}/malformed.epub ${document_fixtures}/oversized-chapter.epub ${document_fixtures}/styled.epub
     ${document_fixtures}/image-flow.epub ${document_fixtures}/long-chapter.epub ${document_fixtures}/nested-toc.epub

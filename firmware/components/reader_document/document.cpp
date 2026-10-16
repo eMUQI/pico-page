@@ -754,6 +754,24 @@ struct EpubDocument::Impl {
         return result + 1;
     }
     DocumentMetadata metadata;
+    struct ZipEntry { std::uint32_t member, bytes; };
+    static_assert(sizeof(ZipEntry) == 8);
+    std::unique_ptr<ZipEntry, decltype(&std::free)> zip_index{nullptr, &std::free};
+    std::size_t zip_entries = 0;
+    // Names remain owned by miniz; the index is valid until this archive is closed.
+    const ZipEntry* find_member(const std::string& path) {
+        if (!zip_index) return nullptr;
+        const auto* begin = zip_index.get();
+        const auto* end = begin + zip_entries;
+        char name[512];
+        const auto* found = std::lower_bound(begin, end, path, [&](const ZipEntry& entry, const std::string& target) {
+            mz_zip_reader_get_filename(&zip, entry.member, name, sizeof(name));
+            return std::strcmp(name, target.c_str()) < 0;
+        });
+        if (found == end) return nullptr;
+        mz_zip_reader_get_filename(&zip, found->member, name, sizeof(name));
+        return path == name ? found : nullptr;
+    }
     std::vector<SpineItem> spine;
     std::vector<TocEntry> toc;
     std::string cover, cover_page;
@@ -783,10 +801,9 @@ struct EpubDocument::Impl {
                   const std::function<void(const Chapter&)>& visit);
     bool parse(const std::string& path, Xml& xml, std::string& error, std::uint32_t max_bytes = kMaxXmlBytes, const std::function<bool()>& stop = {}) {
         const StageTimer timer{"xml_read_inflate_parse", 0};
-        const int index = mz_zip_reader_locate_file(&zip, path.c_str(), nullptr, MZ_ZIP_FLAG_CASE_SENSITIVE);
-        mz_zip_archive_file_stat stat{};
-        if (index < 0 || !mz_zip_reader_file_stat(&zip, index, &stat)) return fail(error, "Missing EPUB resource: " + path);
-        if (stat.m_uncomp_size > max_bytes) return fail(error, "EPUB XML resource exceeds limit: " + path);
+        const auto* entry = find_member(path);
+        if (!entry) return fail(error, "Missing EPUB resource: " + path);
+        if (entry->bytes > max_bytes) return fail(error, "EPUB XML resource exceeds limit: " + path);
         ZipTiming timing;
         struct ActiveRead {
             Impl& owner;
@@ -799,7 +816,7 @@ struct EpubDocument::Impl {
             const std::function<bool()>& stop;
             bool cancelled = false;
         } feed{xml, timing, stop};
-        const bool extracted = mz_zip_reader_extract_to_callback(&zip, index, [](void* opaque, mz_uint64, const void* data, std::size_t count) -> std::size_t {
+        const bool extracted = mz_zip_reader_extract_to_callback(&zip, entry->member, [](void* opaque, mz_uint64, const void* data, std::size_t count) -> std::size_t {
             auto& feed = *static_cast<Feed*>(opaque);
             for (std::size_t offset = 0; offset < count;) {
                 feed.timing.checkpoint();
@@ -1001,22 +1018,40 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
     next->zip.m_pRealloc = Impl::reallocate; next->zip.m_pAlloc_opaque = next.get();
     if (!mz_zip_reader_init(&next->zip, length, 0)) return fail(error, "Invalid EPUB ZIP or ZIP memory limit exceeded");
     if (mz_zip_is_zip64(&next->zip) || mz_zip_reader_get_num_files(&next->zip) > 4096) return fail(error, "ZIP64 or oversized ZIP directory is unsupported");
-    std::set<std::string> names;
-    std::uint64_t total = 0;
-    for (mz_uint i = 0; i < mz_zip_reader_get_num_files(&next->zip); ++i) {
-        if (stop && stop()) return fail(error, "EPUB open cancelled");
-        mz_zip_archive_file_stat stat{};
-        if (!mz_zip_reader_file_stat(&next->zip, i, &stat)) return fail(error, "Invalid ZIP entry");
-        if (mz_zip_reader_get_filename(&next->zip, i, nullptr, 0) > 512) return fail(error, "ZIP path exceeds limit");
-        const std::string name = stat.m_filename; std::string canonical; std::u32string unicode;
-        const bool directory = !name.empty() && name.back() == '/';
-        if (!decode(name.data(), name.size(), unicode) || !path_parts(name, canonical) || canonical != (directory ? name.substr(0, name.size() - 1) : name) || !names.insert(name).second) return fail(error, "Unsafe or duplicate ZIP path");
-        const auto file_type = (stat.m_external_attr >> 16) & 0170000;
-        if ((stat.m_bit_flag & 1) || (stat.m_method != 0 && stat.m_method != 8) || file_type == 0120000) return fail(error, "Encrypted, linked or unsupported ZIP entry");
-        total += stat.m_uncomp_size;
-        if (stat.m_uncomp_size > 32 * 1024 * 1024 || total > 512ULL * 1024 * 1024 || (stat.m_uncomp_size > 4096 && stat.m_uncomp_size > std::max<mz_uint64>(1, stat.m_comp_size) * 1000)) return fail(error, "ZIP expansion limit exceeded");
+    next->zip_entries = mz_zip_reader_get_num_files(&next->zip);
+    next->zip_index.reset(static_cast<Impl::ZipEntry*>(std::calloc(next->zip_entries, sizeof(Impl::ZipEntry))));
+    if (!next->zip_index) return fail(error, "ZIP index allocation failed");
+    {
+        const StageTimer timer{"zip_index_build", 0};
+        std::uint64_t total = 0;
+        for (mz_uint i = 0; i < next->zip_entries; ++i) {
+            if (stop && stop()) return fail(error, "EPUB open cancelled");
+            mz_zip_archive_file_stat stat{};
+            if (!mz_zip_reader_file_stat(&next->zip, i, &stat)) return fail(error, "Invalid ZIP entry");
+            if (mz_zip_reader_get_filename(&next->zip, i, nullptr, 0) > 512) return fail(error, "ZIP path exceeds limit");
+            const std::string name = stat.m_filename; std::string canonical; std::u32string unicode;
+            const bool directory = !name.empty() && name.back() == '/';
+            if (!decode(name.data(), name.size(), unicode) || !path_parts(name, canonical) || canonical != (directory ? name.substr(0, name.size() - 1) : name)) return fail(error, "Unsafe or duplicate ZIP path");
+            const auto file_type = (stat.m_external_attr >> 16) & 0170000;
+            if ((stat.m_bit_flag & 1) || (stat.m_method != 0 && stat.m_method != 8) || file_type == 0120000) return fail(error, "Encrypted, linked or unsupported ZIP entry");
+            total += stat.m_uncomp_size;
+            if (stat.m_uncomp_size > 32 * 1024 * 1024 || total > 512ULL * 1024 * 1024 || (stat.m_uncomp_size > 4096 && stat.m_uncomp_size > std::max<mz_uint64>(1, stat.m_comp_size) * 1000)) return fail(error, "ZIP expansion limit exceeded");
+            next->zip_index.get()[i] = {i, static_cast<std::uint32_t>(stat.m_uncomp_size)};
+        }
+        const auto compare = [&](const Impl::ZipEntry& a, const Impl::ZipEntry& b) {
+            char left[512], right[512];
+            mz_zip_reader_get_filename(&next->zip, a.member, left, sizeof(left));
+            mz_zip_reader_get_filename(&next->zip, b.member, right, sizeof(right));
+            return std::strcmp(left, right);
+        };
+        auto* entries = next->zip_index.get();
+        std::sort(entries, entries + next->zip_entries, [&](const auto& a, const auto& b) { return compare(a, b) < 0; });
+        for (std::size_t i = 1; i < next->zip_entries; ++i) {
+            if (stop && stop()) return fail(error, "EPUB open cancelled");
+            if (compare(entries[i - 1], entries[i]) == 0) return fail(error, "Unsafe or duplicate ZIP path");
+        }
     }
-    if (names.count("META-INF/encryption.xml")) return fail(error, "Encrypted or obfuscated EPUB is unsupported");
+    if (next->find_member("META-INF/encryption.xml")) return fail(error, "Encrypted or obfuscated EPUB is unsupported");
     char mime[64]{};
     mz_zip_archive_file_stat mime_stat{};
     const int mime_index = mz_zip_reader_locate_file(&next->zip, "mimetype", nullptr, 0);
@@ -1101,6 +1136,8 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
         };
         opf.text = [&](const char* value, std::size_t count) { if (metadata_depth) budget.append(opf, text, value, count); };
         opf.end = [&](const std::string&) {
+            // Expat may deliver an empty element's end callback after start aborts parsing.
+            if (!opf.error.empty()) return;
             if (metadata_depth == opf.depth) {
                 auto& target = metadata_name == "title" ? next->metadata.title : metadata_name == "creator" ? next->metadata.author : next->metadata.language;
                 auto value = trim(text);
@@ -1130,15 +1167,15 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
             std::string resource, fragment;
             if (resolve(package, href, resource, fragment)) budget.replace(opf, next->cover_page, std::move(resource));
         }
+        const StageTimer spine_timer{"epub_spine_validate", 0};
         for (auto& ref : itemrefs) {
             if (stop && stop()) return fail(error, kChapterCancelled);
             const auto& id = ref.first; auto item = manifest.find(id);
-            if (item == manifest.end() || item->second.type != "application/xhtml+xml" || !names.count(item->second.path)) return fail(error, "Unsupported or missing spine resource");
-            mz_zip_archive_file_stat stat{};
-            const int member = mz_zip_reader_locate_file(&next->zip, item->second.path.c_str(), nullptr, MZ_ZIP_FLAG_CASE_SENSITIVE);
-            if (member < 0 || !mz_zip_reader_file_stat(&next->zip, member, &stat)) return fail(error, "Unsupported or missing spine resource");
+            if (item == manifest.end() || item->second.type != "application/xhtml+xml") return fail(error, "Unsupported or missing spine resource");
+            const auto* entry = next->find_member(item->second.path);
+            if (!entry) return fail(error, "Unsupported or missing spine resource");
             if (!budget.add(opf, item->second.path.size())) return fail(error, opf.error);
-            next->spine.push_back({item->second.path, std::move(ref.first), ref.second, static_cast<std::uint32_t>(stat.m_uncomp_size)});
+            next->spine.push_back({item->second.path, std::move(ref.first), ref.second, entry->bytes});
         }
         if (!opf.error.empty()) return fail(error, opf.error);
     }
@@ -1350,13 +1387,12 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
     if (detail == ChapterLoad::Mapping) {
         for (const auto& path : parser.css_links) {
             if (stop && stop()) { pico_page::release(chapter); return fail(error, kChapterCancelled); }
-            mz_zip_archive_file_stat info{};
-            const auto member = mz_zip_reader_locate_file(&zip, path.c_str(), nullptr, MZ_ZIP_FLAG_CASE_SENSITIVE);
-            if (member < 0 || !mz_zip_reader_file_stat(&zip, member, &info) || info.m_uncomp_size > kMaxCssBytes - parser.css_bytes) {
+            const auto* entry = find_member(path);
+            if (!entry || entry->bytes > kMaxCssBytes - parser.css_bytes) {
                 parser.chapter.plain_dom = false; warn(parser.chapter, "Missing or oversized stylesheet is not loaded"); continue;
             }
-            std::string css(static_cast<std::size_t>(info.m_uncomp_size), '\0');
-            if (!mz_zip_reader_extract_to_mem(&zip, member, css.data(), css.size(), 0)) {
+            std::string css(entry->bytes, '\0');
+            if (!mz_zip_reader_extract_to_mem(&zip, entry->member, css.data(), css.size(), 0)) {
                 parser.chapter.plain_dom = false; warn(parser.chapter, "Invalid stylesheet is not loaded"); continue;
             }
             if (stop && stop()) { pico_page::release(chapter); return fail(error, kChapterCancelled); }
@@ -1458,14 +1494,13 @@ bool EpubDocument::read_image(const std::string& resource, std::vector<std::uint
     if (stop && stop()) return fail(error, "Image load cancelled");
     std::string canonical;
     if (!impl_->file || resource.empty() || !path_parts(resource, canonical) || canonical != resource) return fail(error, "Invalid internal image path");
-    const int index = mz_zip_reader_locate_file(&impl_->zip, resource.c_str(), nullptr, MZ_ZIP_FLAG_CASE_SENSITIVE);
-    mz_zip_archive_file_stat stat{};
-    if (index < 0 || !mz_zip_reader_file_stat(&impl_->zip, index, &stat)) return fail(error, "Missing EPUB image");
-    if (!stat.m_uncomp_size || stat.m_uncomp_size > 2 * 1024 * 1024) return fail(error, "EPUB image exceeds 2 MiB limit");
-    if (!platform_memory_room(static_cast<std::size_t>(stat.m_uncomp_size))) return fail(error, "Image allocation unavailable");
-    bytes.resize(static_cast<std::size_t>(stat.m_uncomp_size));
+    const auto* entry = impl_->find_member(resource);
+    if (!entry) return fail(error, "Missing EPUB image");
+    if (!entry->bytes || entry->bytes > 2 * 1024 * 1024) return fail(error, "EPUB image exceeds 2 MiB limit");
+    if (!platform_memory_room(entry->bytes)) return fail(error, "Image allocation unavailable");
+    bytes.resize(entry->bytes);
     struct Output { std::vector<std::uint8_t>& bytes; const std::function<bool()>& stop; bool cancelled = false; } output{bytes, stop};
-    const bool extracted = mz_zip_reader_extract_to_callback(&impl_->zip, index,
+    const bool extracted = mz_zip_reader_extract_to_callback(&impl_->zip, entry->member,
         [](void* opaque, mz_uint64 offset, const void* data, std::size_t count) -> std::size_t {
             auto& output = *static_cast<Output*>(opaque);
             if (output.stop && output.stop()) { output.cancelled = true; return 0; }
