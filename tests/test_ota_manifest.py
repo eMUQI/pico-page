@@ -6,6 +6,7 @@ import struct
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
@@ -55,6 +56,38 @@ class ManifestTest(unittest.TestCase):
             manifest=1, board='read_pico', version='0.2.0-beta.2', published_at='2026-10-18',
             url='https://picopage.wulu.zone/firmware/' + name, size=len(data),
             sha256=hashlib.sha256(data).hexdigest(), data_schema=dict(progress=1, config=1), notes='## 新增\n- 书签'))
+
+    def test_publish_origin_changes_only_the_url_after_validation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            data = image()
+            name, manifest = self.build(data)
+            (directory / name).write_bytes(data)
+            path = directory / 'manifest.json'
+            original = json.dumps(manifest).encode()
+            command = ['ota_manifest.py', '--check', str(directory), '--expect-version', manifest['version'],
+                       '--publish-base-url', 'https://oc.wulu.zone/firmware/']
+            for damaged in (False, True):
+                path.write_bytes(original)
+                (directory / name).write_bytes(data[:-1] if damaged else data)
+                with patch.object(sys, 'argv', command):
+                    if damaged:
+                        with self.assertRaises(SystemExit):
+                            ota_manifest.main()
+                        self.assertEqual(path.read_bytes(), original)
+                    else:
+                        ota_manifest.main()
+                        self.assertEqual(json.loads(path.read_text()),
+                                         {**manifest, 'url': 'https://oc.wulu.zone/firmware/' + name})
+                        self.assertEqual((directory / name).read_bytes(), data)
+            for origin, version in [('http://oc.wulu.zone/firmware/', manifest['version']),
+                                    ('https://oc.wulu.zone/firmware/', '0.2.0-beta.9')]:
+                path.write_bytes(original)
+                (directory / name).write_bytes(data)
+                command[4], command[-1] = version, origin
+                with patch.object(sys, 'argv', command), self.assertRaises(SystemExit):
+                    ota_manifest.main()
+                self.assertEqual(path.read_bytes(), original)
 
     def test_rejects_what_the_device_would_refuse(self):
         for data in (image('0.2.0-beta.2+g1234567'), image('1234567890.0.0'), image(project='other'), image(chip=5), b'\xe9' * 64,

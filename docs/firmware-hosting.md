@@ -1,10 +1,10 @@
-# 腾讯云固件下载镜像
+# 腾讯云固件下载
 
 ## 当前范围
 
 `https://oc.wulu.zone/firmware/` 是独立的 HTTPS 下载镜像，2026-10-17 部署于 Ubuntu 26.04 LTS，使用 Caddy 2.11.7。当前清单及对应应用、全量镜像为 `0.2.0-beta.6`，2026-10-17 手动更新；保留 beta.5 的版本文件。两个 BIN 与 GitHub Release 附件逐字节相同；镜像清单只修改 `url`，指向本域名下的应用镜像，其余字段沿用发布附件。
 
-设备仍从 `https://picopage.wulu.zone/firmware/manifest.json` 读取清单，官网及网站发布工作流保持原状。镜像部署没有切换设备下载源，也没有实现地区分流或后续版本自动上传。当前阶段不能宣称真机 OTA 或中国大陆下载提速已验收。
+设备仍从 `https://picopage.wulu.zone/firmware/manifest.json` 读取清单；官网部署副本将清单的 `url` 指向 `https://oc.wulu.zone/firmware/` 下的同名应用镜像。固定清单入口不变，已安装固件无需重新烧录。GitHub Release 的原附件保留，官网部署前先校验附件，再用 `--publish-base-url https://oc.wulu.zone/firmware/` 只修改清单地址。网站安装页的全量镜像仍从官网提供。此次切换不包含地区分流或服务器自动上传，也不代表真机 OTA 或下载提速已验收；生产切换结果见开发状态对应记录。
 
 ## 文件与访问边界
 
@@ -47,6 +47,6 @@ SSH 禁止 root 和空密码登录，登录等待为 30 秒，关闭 X11 转发�
 4. 经 SSH 上传至非公开暂存目录，由管理员先安装带版本号的两个 BIN，再读回核对。文件先写入同目录临时名称，完成后重命名；不要覆盖已发布版本的 BIN。
 5. 两个镜像就绪后，最后原子替换清单。公开目录的临时文件名不得符合下载允许规则。
 6. 从公网完整下载两个 BIN，与发布附件逐字节比较，并核对清单、证书、HEAD、Range、缺失文件及写入请求。缺失路径应返回 404，POST、PUT、DELETE、TRACE 应返回 405。
-7. 正式接入须另行调整现有清单和发布工作流，并验证已发布固件的证书兼容性及真机 OTA。仅在本镜像上传文件，不会改变设备使用的固定清单入口。
+7. 完成上述核验后，按网站手动发布步骤修改官网部署副本的清单地址，再部署官网；仅上传本服务器不会改变设备下载地址。Actions 恢复后，网站工作流同样先校验原附件并替换部署副本地址，部署前完整读取腾讯云应用镜像并与附件比较；服务器尚未上传目标版本时拒绝部署。证书的真机兼容性、OTA 完整流程及同条件速度须另行验证。
 
 安装与维护参考：[Caddy 官方安装说明](https://caddyserver.com/docs/install)、[自动 HTTPS](https://caddyserver.com/docs/automatic-https)、[Ubuntu 自动更新说明](https://ubuntu.com/server/docs/how-to/software/automatic-updates/)。

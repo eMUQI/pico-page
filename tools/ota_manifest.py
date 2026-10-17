@@ -7,6 +7,9 @@ holds the bootloader, the partition table and the same application, to an erased
 address 0. The files are attached to the GitHub release of a version; the website build copies
 those of the newest release into web/public/firmware, which is not kept in the repository.
 Nothing here uploads or publishes.
+
+With --check --publish-base-url, the verified deployment copy can use a different HTTPS
+download origin without rebuilding images or changing the original release attachments.
 """
 import argparse
 import datetime
@@ -232,9 +235,12 @@ def main():
                         help='also write the full-flash image from the bootloader and partition table of the same build')
     parser.add_argument('--notes', type=Path, help='Markdown release notes, UTF-8')
     parser.add_argument('--base-url', default='https://picopage.wulu.zone/firmware/')
+    parser.add_argument('--publish-base-url', help='with --check: publish the verified manifest using this download origin')
     parser.add_argument('--published', default=datetime.date.today().isoformat(), help='YYYY-MM-DD')
     parser.add_argument('--out', type=Path, help='directory for manifest.json and the named image')
     arguments = parser.parse_args()
+    if arguments.publish_base_url and not arguments.check:
+        parser.error('--publish-base-url requires --check')
     if arguments.pick_release:
         print(newest_release(json.loads(arguments.pick_release.read_text(encoding='utf-8'))) or '')
         return
@@ -245,6 +251,19 @@ def main():
             sys.exit(str(error))
         if arguments.expect_version and version != arguments.expect_version:
             sys.exit('Expected firmware ' + arguments.expect_version + ', found ' + (version or 'none'))
+        if version and arguments.publish_base_url:
+            try:
+                path = arguments.check / 'manifest.json'
+                manifest = json.loads(path.read_text(encoding='utf-8'))
+                image = (arguments.check / manifest['url'].rsplit('/', 1)[-1]).read_bytes()
+                _, manifest = build_manifest(image, manifest['notes'], arguments.publish_base_url,
+                                             manifest['published_at'], tuple(manifest['data_schema'][key]
+                                                                            for key in ('progress', 'config')))
+                temporary = path.with_suffix('.json.tmp')
+                temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+                temporary.replace(path)
+            except (OSError, ValueError) as error:
+                sys.exit(str(error))
         print('Firmware ' + version + ' matches its manifest' if version else 'No firmware published')
         return
     if not (arguments.image and arguments.notes and arguments.out):

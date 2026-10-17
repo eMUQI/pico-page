@@ -27,7 +27,7 @@ npm run preview --prefix web
 
 [网站构建工作流](../.github/workflows/web.yml) 在推送、拉取请求和手动运行时独立执行，与 host 检查并行。使用 Node.js 24，按 `package-lock.json` 缓存 npm 下载，执行 `npm ci --ignore-scripts` 和 `npm run build`；构建失败时不上传产物。
 
-构建前，工作流把非草稿的发布列表写到 `web/public/firmware/releases.json`（见「更新日志」），并从 GitHub Release 取回已发布的固件：在非草稿的发布中选出版本最高的 `v<版本>` 标签，把它附带的 `manifest.json`、应用镜像和全量镜像（如果有）下载到 `web/public/firmware/`，再用 `python3 tools/ota_manifest.py --check` 核对清单与应用镜像逐项一致、版本与标签相同，全量镜像中的应用与应用镜像相同，不一致时工作流失败。没有这样的发布时跳过下载。发布一个 Release 也会触发本工作流。
+构建前，工作流把非草稿的发布列表写到 `web/public/firmware/releases.json`（见「更新日志」），并从 GitHub Release 取回已发布的固件：在非草稿的发布中选出版本最高的 `v<版本>` 标签，把它附带的 `manifest.json`、应用镜像和全量镜像（如果有）下载到 `web/public/firmware/`，再用 `python3 tools/ota_manifest.py --check` 核对清单与应用镜像逐项一致、版本与标签相同，全量镜像中的应用与应用镜像相同，不一致时工作流失败。校验通过后，`--publish-base-url https://oc.wulu.zone/firmware/` 只将部署副本的下载地址切到腾讯云，保留原发布附件；生产部署前完整下载腾讯云应用镜像，与附件逐字节比较，不一致或目标版本尚未上传时拒绝部署。没有这样的发布时跳过下载。发布一个 Release 也会触发本工作流。
 
 构建成功后保存 `web/dist/` 为 `pico-page-web` artifact，缺少产物时报错。下载并解压后得到静态站内容，可用于核对或手动部署；artifact 遵循仓库的保留期限和访问权限，不作为设备 OTA 下载地址。
 
@@ -61,16 +61,16 @@ GitHub 对 Release 事件使用标签所在提交中的工作流文件。标签�
 
 1. 完成固件发布附件的生成和核验，将应用镜像、全量镜像、清单和来源记录发布到对应的 GitHub Release；未获得发布授权时停留在本地准备阶段。
 2. 备份 `web/public/firmware/`，将其替换为目标 Release 的清单和两个 BIN，避免混放不同版本的 BIN。重新从 Release 下载并逐字节比较，不直接使用旧构建目录中的附件。
-3. 在仓库根目录执行 `gh release list --repo eMUQI/pico-page --limit 100 --exclude-drafts --json tagName,publishedAt > web/public/firmware/releases.json`，让更新日志只列出已公开的版本；然后运行 `python3 tools/ota_manifest.py --check web/public/firmware --expect-version <版本>`。本流程保留清单中的原官网地址，不隐式切换到腾讯云。
+3. 先按[腾讯云固件下载](../docs/firmware-hosting.md)上传并完整读回目标版本，确认应用和全量镜像与原发布附件一致。在仓库根目录执行 `gh release list --repo eMUQI/pico-page --limit 100 --exclude-drafts --json tagName,publishedAt > web/public/firmware/releases.json`，让更新日志只列出已公开的版本；然后运行 `python3 tools/ota_manifest.py --check web/public/firmware --expect-version <版本> --publish-base-url https://oc.wulu.zone/firmware/`，校验原附件并只修改官网部署副本的下载地址。后续复验该副本时增加 `--base-url https://oc.wulu.zone/firmware/`；不要改写 GitHub 原附件。
 4. 执行 `npm ci --prefix web --ignore-scripts` 和 `PUBLIC_GA_MEASUREMENT_ID=G-S9XSC6V1KV npm run build --prefix web`。在 `web/dist/deployment.txt` 写入本次网站源码的完整 commit、`manual` 以及 UTC 时间，保留同内容的本地副本用于读回比较。
 5. 在已登录且具有 Pages 编辑权限的本机，用 `npx --yes wrangler@4.144.0 pages deploy web/dist --project-name=picopage --branch=main` 部署；只上传 `web/dist`。凭据通过本机登录或现有环境提供，不写入命令、仓库或日志。也可在现有 Pages 项目中创建生产部署并上传同一目录。参考 [Cloudflare Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/)。
-6. 独立读回正式域名的 `deployment.txt`、清单、应用和全量镜像，与本次本地文件逐字节比较，并复验清单；核对安装页版本、更新日志、GA ID 和第三方模块能正常加载。失败时按上一节处理，不把「上传成功」记录为验收通过。
+6. 独立读回正式域名的 `deployment.txt` 和清单，与本次本地文件逐字节比较；确认无查询参数的固定清单地址返回的 `url` 以 `https://oc.wulu.zone/firmware/` 开头。沿清单地址下载应用镜像，完整核对大小和 SHA-256；官网全量镜像仍与附件逐字节比较。用 `--base-url https://oc.wulu.zone/firmware/` 复验部署目录，核对安装页版本、更新日志、GA ID 和第三方模块能正常加载。失败时按上一节处理，不把「上传成功」记录为验收通过。
 
 腾讯云镜像按[固件下载镜像](../docs/firmware-hosting.md)单独上传和校验。仅更新 `oc.wulu.zone` 不会改变设备固定的 `picopage.wulu.zone/firmware/manifest.json` 入口；GitHub Actions 不可用期间，不依赖 Release 事件自动完成上述步骤。
 
 ## 固件更新文件
 
-设备从 `https://picopage.wulu.zone/firmware/manifest.json` 读取更新清单，并下载清单指向的应用镜像；安装页另外使用同一版本的全量镜像（见「安装页」）。这些文件不放在仓库里：它们是 GitHub Release 的附件，由网站构建工作流取回，随 `pico-page-web` artifact 一起部署。`web/public/firmware/` 已被 Git 忽略。目前线上是 `0.2.0-beta.6`（2026-10-17 发布），本轮因 GitHub Actions 不可用而手动部署，正式域名的清单及两个 BIN 已与 Release 附件逐字节核对。
+设备从 `https://picopage.wulu.zone/firmware/manifest.json` 读取更新清单，再从 `https://oc.wulu.zone/firmware/` 下载清单指向的应用镜像；安装页另外使用官网提供的同一版本全量镜像（见「安装页」）。这些文件不放在仓库里：原文件来自 GitHub Release，部署副本只修改清单的 `url`，随 `pico-page-web` artifact 一起部署。`web/public/firmware/` 已被 Git 忽略。目前线上版本是 `0.2.0-beta.6`（2026-10-17 发布），因 GitHub Actions 不可用而手动部署；切换下载源的生产核验结果见开发状态。
 
 发布一个版本的步骤（创建 Release 需要项目所有者授权；Actions 可用时由发布事件触发部署，不可用时按上面的手动流程执行）：
 
@@ -89,7 +89,7 @@ GitHub 对 Release 事件使用标签所在提交中的工作流文件。标签�
 
 说明：
 
-- 清单在第 2 步由带标签的源码生成，其中的数据格式版本取自该版本的源码；工作流只取回和核对，不重新生成。
+- 清单在第 2 步由带标签的源码生成，其中的数据格式版本取自该版本的源码；工作流核对原附件后只修改部署副本的 `url`，不重建镜像、不修改版本、摘要、数据格式或更新日志。
 - 设备只有一个更新通道，取版本最高的发布，预发布也算在内。撤回一个版本时删除该 Release 或改为草稿，然后在 `main` 上手动运行工作流重新部署。
 - 任何分支构建出的 artifact 都带有当前最新发布的固件，部署任一份都不会让设备失去更新文件。
 - 发布说明不超过 8 KiB，写法见 [版本管理](../docs/versioning.md)。

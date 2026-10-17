@@ -50,3 +50,5 @@ ESP-IDF 应用描述的版本字段为 32 字节，其中一字节用于终止�
 设备端的版本比较在 `firmware/components/reader_sync/update.cpp`，与 `tools/project_version.py` 接受同一组版本形式：`+` 后的构建元数据不参与排序；带构建元数据的版本视为开发构建，不能据此判断新旧。清单中的版本必须是不带构建元数据的发布版本，并与镜像应用描述中的版本一致，否则设备拒绝写入。
 
 更新清单由 `python3 tools/ota_manifest.py --image <release 构建的 pico_page.bin> --notes <发布说明.md> --out <目录>` 生成（`--out` 可以是任意目录，例如 `build/release`）。清单和镜像作为该版本 GitHub Release 的附件发布，不提交到仓库；网站构建工作流取回版本最高的发布，用同一脚本的 `--check` 核对后放进网站产物。步骤见 [网站说明](../web/README.md) 的「固件更新文件」。脚本先按 ESP 镜像格式校验整个文件（各段长度、校验和与末尾的 SHA-256），再从镜像读取版本，拒绝截断或损坏的镜像、开发构建、其他项目或芯片的镜像、超过 4 MiB 的镜像和超过 8 KiB 的发布说明，并按上文的命名复制镜像。加上 `--full` 时，脚本从同一个构建目录读取 `bootloader/bootloader.bin` 和 `partition_table/partition-table.bin`，合并出全量镜像；`--check` 在目录中有全量镜像时核对它的 bootloader、分区表，以及其中的应用与清单描述的应用镜像逐字节相同。每个版本同时发布全量镜像和应用镜像（D41）。脚本和网站也接受只有应用镜像的发布，此时设备可以联网更新，网站安装页不开放。清单的 `data_schema` 取自设备源码中的 `progress_schema` 和 `config_schema`；修改进度或配置文件格式时同步修改这两个常量。脚本不上传文件，发布到网站需单独授权。
+
+网站部署使用腾讯云作为 OTA 应用下载源。`--check --publish-base-url https://oc.wulu.zone/firmware/` 先完成原清单和所有镜像校验，再原子替换部署副本清单的 `url`；版本、大小、SHA-256、日期、数据格式和说明不变。原 GitHub Release 附件不修改。服务器须先上传并完整核验对应版本，再发布官网清单；官网仍提供固定清单入口和网页安装的全量镜像。
