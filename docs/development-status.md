@@ -8,6 +8,8 @@
 
 beta.6 第 1 项已完成代码精简：翻页效果仅保留关闭和水波纹，删除文字转页 A/B/C 的界面、诊断命令及驱动实现；非正文逐像素保持收窄为独立纯函数。开发版本为 `0.2.0-beta.6`，尚未发布，上一页反向已实现待真机验证，字体选择页已有本地候选。本批验证与未测边界见文末记录。
 
+腾讯云固件下载镜像已部署于 `https://oc.wulu.zone/firmware/`（2026-10-17）：Ubuntu 26.04、Caddy 2.11.7，保存 beta.5 的两个发布镜像及镜像专用清单。公网完整下载与附件逐字节核对、HTTPS、HEAD、Range、404 和拒绝写入检查通过；Caddy 专用用户及只读目录、最小能力集、UFW、SSH 限速和 Fail2ban 已生效，Ubuntu 安全源与 Caddy 稳定源自动更新 dry-run 通过。设备固定清单入口、官网和发布工作流未切换；新内核已安装但待重启，设备 OTA、同条件提速、后续版本自动上传和地区分流仍未验收或实现。运维边界见[固件下载镜像](firmware-hosting.md)，完整记录见本日「腾讯云固件下载镜像与主机防护」。
+
 `0.2.0-beta.5` 已于 2026-10-16 23:32（UTC+8）作为预发布发布，标签 `v0.2.0-beta.5` 指向 `6d62876`。干净标签的 release 构建与来源检查通过，main 和标签的 host、web CI 均通过；Linux Debug 与 ASan/UBSan/LSan 各 24/24。四个附件下载核验通过，发布触发的官网部署 `38924724866` 通过，线上清单和两个镜像与附件逐字节一致，安装页与更新日志均显示 beta.5。发布范围见[本版说明](releases/0.2.0-beta.5.md)，完整结果见本日「发布 0.2.0-beta.5」记录；既有 Issue、许可缺口和真机未验项保持原状态。
 
 PR #110 的两项审查修复已随 `013e39a` 压缩合并：充电状态独立于百分比有效性，PMU 状态失败时清空快照；充电刷新遵守主循环的输入排队、输入序列和唤醒恢复门槛。该批 host Debug 与 AppleClang ASan/UBSan 各 24/24、标准固件构建及交接检查通过，修复提交的四项远端检查通过。审查修复尚未重新刷写，设备仍为此前用户确认外观的候选。详见本日「PR #110 审查修复」。
@@ -6819,3 +6821,38 @@ Codex 对 `0d2dea4` 的新增 P2 意见成立：含图片的预览在字体列�
 
 
 最终验证：`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host -N`（实际注册 24 项）与 `ctest --test-dir build/host --output-on-failure` 全部通过，最终 24/24，41.90 秒。标准 `sh tools/build_firmware.sh` 重跑及来源核验通过，版本 `0.2.0-beta.6+g427ee11.dirty`，镜像 3,508,240 字节（`0x358810`），4 MiB 槽剩余 16%，SHA-256 `4068b21f468fe329b6e787345a14ed5bd7cc9b44dc24e5ca44993f43bff73353`；日志与来源文件保留在 `.local/footer-firmware-build-final.log`、`firmware/build/provenance.json`。`python3 tools/check_handoff.py` 493 项及 `git diff --check` 通过。构建完成后仅补写本段结果，代码和配置未再修改。下一步按 IN07 在真机核对隐藏、恢复和局刷效果。
+
+## 2026-10-17 · 腾讯云固件下载镜像与主机防护
+
+用户确认继续使用 `oc.wulu.zone`，授权配置 Caddy 和固件下载，并要求以安全为主。本批先部署独立镜像，不切换设备固定清单入口、官网、发布工作流或地区路由。仓库起点为 `main eed1b6a`，开始时工作区干净；本机 Python 3.14.7，服务器为 Ubuntu 26.04 LTS x86_64。用户在聊天内终端自行完成密码认证，通过本机私有目录中的 SSH ControlMaster 复用连接；没有传递密码或私钥，没有永久安装代理密钥。
+
+服务器初始仅监听 SSH，UFW 尚未启用，SSH 允许 root 登录。原 SSH、UFW 和自动更新配置保存在仅 root 可访问的 `/root/pico-page-setup-20261017/`，安装 Caddy 后另存其软件包默认配置。执行 `apt-get update`，经模拟确认无软件包移除后执行 `apt-get upgrade --with-new-pkgs`，该步升级 196 项、新装 7 项；再安装 Fail2ban 和 Caddy 官方签名稳定源的 Caddy 2.11.7。`dpkg --audit` 无待处理项，最终无失败 systemd 单元。升级后 SSH 由 socket 激活，初次直接 reload 非活跃服务失败；确认 22 端口仍由 systemd 监听后启动服务，再完成其余防护配置，没有中断用户已有连接。
+
+主机防护：UFW 默认拒绝入站，仅允许 TCP 22、80、443，IPv4/IPv6 均生效，22 端口启用连接限速。SSH 的有效配置为 `PermitRootLogin no`、`PermitEmptyPasswords no`、`LoginGraceTime 30`、`X11Forwarding no`，保留 `ubuntu` 密码登录。Fail2ban 的 sshd jail 使用 systemd 日志，10 分钟内 6 次失败封禁 1 小时；配置检查与 jail 状态通过。没有执行真实封禁、密码猜测或关闭用户密码登录。
+
+自动更新检查发现原镜像的 `50unattended-upgrades` 将安全源注释掉，不能由定时器已启用推定安全补丁会自动安装。新增 `52-pico-page-updates`，补充 `Ubuntu:resolute-security` 和 `cloudsmith/caddy/stable:any-version`。`unattended-upgrade --dry-run --debug` 确认三项来源匹配（含原有 Ubuntu release pocket），返回无可自动升级包、无待自动删除包。显式持续关闭自动重启的拟议设置被自动审批拒绝，最终未写入该项，保持原有重启策略。五项普通 updates 包仍保留未升级，没有强制安装。
+
+下载服务：从 `v0.2.0-beta.5` 重新下载四个 Release 附件；两个 BIN 和 provenance 与本地发布产物逐字节相同，清单采用 Release 当前附件的更新日志。制作镜像清单，只修改 `url` 为 `https://oc.wulu.zone/firmware/pico-page-0.2.0-beta.5-read_pico-release.bin`，运行 `python3 tools/ota_manifest.py --check <镜像目录> --base-url https://oc.wulu.zone/firmware/ --expect-version 0.2.0-beta.5` 通过。先安装两个镜像，最后原子替换清单；目录为 `root:caddy 0750`，文件为 `root:caddy 0640`。
+
+Caddy 配置在 `/etc/caddy/Caddyfile`，只允许 GET/HEAD 读取允许命名的清单和 BIN，其他路径返回 404，其他方法返回 405；没有目录列表、上传、动态脚本或反向代理。清单 `no-store`，为官网设置跨域读取响应头，访问日志按 10 MiB 滚动、最多 5 个归档、保留 7 天。使用专用 caddy 用户和 systemd 服务，管理 API 仅监听 `127.0.0.1:2019`，HTTP/3 未启用；服务隔离补充 `NoNewPrivileges=true`、`ProtectHome=true`、只读 `/srv/pico-page`，能力边界和环境能力均仅保留 `CAP_NET_BIND_SERVICE`。以 caddy 用户确认配置有效、文件可读且目录及文件不可写，证书签发成功；重启后有效隔离属性和服务状态复验通过。
+
+验证结果：公网 HTTPS 完整下载两个镜像，与 Release 附件逐字节相同。应用镜像 3,507,776 字节，SHA-256 `06d358592736c996cb309de6f25ea922822d81034e2fed6985e282f8c8f085a2`；全量镜像 3,573,312 字节，SHA-256 `b97f645ee23ff9816184138a2846efb6ee567719be472dc3672be17b8ec61fcd`。公网清单及响应头、HEAD、Range 206、九类非公开或缺失路径的 404、POST/PUT/DELETE/TRACE 的 405 共 18 次 HTTP 请求检查通过，TLS 证书和域名验证始终开启。直接连接公网 IP 的清单请求同样返回 200 且 TLS 校验为 0；这不是跳过域名校验。收紧 systemd 权限时，另一组并行直连完整下载被服务重启中止，没有作为通过证据；重启后通过服务器本机 HTTPS 完整读回两个镜像并比较，同时补验公网 Range，均通过。
+
+运行记录位于本机私有临时目录和服务器 root 备份目录，不提交原始 SSH、访问或系统日志。服务配置完成后删除服务器私有暂存目录，确认临时公钥未被授权，并删除本机未使用的临时密钥文件。新增运维说明 `docs/firmware-hosting.md`，更新路线图中的服务器前提和当前摘要。仅部署、主机配置和文档变更，未修改固件代码、未构建或烧录设备、未推送仓库。
+
+未测与下一步：当前仍运行 `7.0.0-30-generic`，新内核 `7.0.0-38-generic` 已安装，系统明确要求重启；为保留用户登录，本次未执行重启，需在维护窗口重启后核对服务、端口和下载。公网下载核验不是同条件性能测试，不能据此宣称大陆提速。真机证书链、OTA 安装、腾讯云控制台防火墙、流量告警和 DDoS 防护仍未验收。后续版本自动上传、原清单切换和地区分流尚未实现；正式接入前须单独完成发布流程及设备验收。
+
+收尾：SSH 共享管理监听已通过 `ssh -O stop` 关闭，确认本机控制 socket 和临时私钥均不存在，保留用户交互终端。`python3 tools/check_handoff.py` 494 项及 `git diff --check` 通过；本批文档保留为本地未提交修改。
+
+## 2026-10-17 · 固件镜像文档提交与 main 同步
+
+用户授权先提交腾讯云镜像的三个文档，再同步最新 main 并保留双方记录。已将 `docs/firmware-hosting.md`、路线图镜像状态及开发记录提交为 `4d7fe25`，随后执行 `git fetch origin main`，将最新主线 `427ee11`（包含 PR #111、#112）合入当前 main。冲突仅在开发状态的当前摘要和文末追加位置，双方摘要及历史记录完整保留；路线图自动合并，保留主线 beta.6 进展和本地镜像状态。
+
+验证环境为本机 macOS、现有 Python 3.14.7。一次性核对双方开发状态的全部非空行及重复次数均保留；相对 `origin/main` 的差异仅为上述三个文档，代码、测试、配置及版本文件与远端主线一致。`python3 tools/check_handoff.py` 495 项和 `git diff --check` 通过。本批仅合并文档差异，未新增测试或重复 host、sanitizer、固件构建，未连接服务器或设备，未推送远端；本地 main 包含最新远端提交及本地文档提交，后续推送须另行授权。
+
+
+## 2026-10-17 · 固件镜像文档变基推送准备
+
+用户进一步授权变基并推送。执行 `git fetch origin main` 获取最新主线 `bbb5ca7`（新增 PR #114），将本地固件镜像文档变基到该提交并整理为线性历史。开发状态冲突保留双方摘要及全部历史记录，包含上一轮 `e5582d4` 的同步记录；原本地提交号及其「未推送」说明仅描述当时状态，不作为变基后的当前状态。
+
+本机执行 `python3 tools/check_handoff.py` 495 项及 `git diff --check` 通过；一次性核对原本地版本与最新主线的开发记录非空行及重复次数均保留。相对最新主线仍仅修改三个文档，代码、测试、配置和版本文件保持主线原样，未重复 host、sanitizer 或固件构建，未连接服务器或设备。推送后以远端 main、本地 HEAD 及干净工作区的一致性核对为准；无需强制推送。
