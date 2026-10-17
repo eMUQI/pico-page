@@ -39,6 +39,8 @@ SSH 禁止 root 和空密码登录，登录等待为 30 秒，关闭 X11 转发�
 
 ## 后续上传与切换
 
+2026-10-17 用户确认 GitHub Actions 整体暂不可用，下一版先手动上传，不接入自动部署，不新增长期 CI 登录凭据。除本镜像外，还须按[网站手动发布步骤](../web/README.md#github-actions-不可用时)更新原官网入口；不能依赖创建 Release 自动完成网站部署。
+
 1. 从已发布的 GitHub Release 获取清单、应用镜像、全量镜像和来源记录，不在服务器重新编译固件。
 2. 在私有暂存目录保留原附件，制作镜像专用副本，只将清单 `url` 改为 `https://oc.wulu.zone/firmware/` 下的同名应用镜像。版本、镜像大小、SHA-256、数据格式版本和更新日志保持不变。
 3. 在仓库根目录运行 `python3 tools/ota_manifest.py --check <镜像目录> --base-url https://oc.wulu.zone/firmware/ --expect-version <版本>`，同时核对来源记录及原发布附件。

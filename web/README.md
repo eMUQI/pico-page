@@ -55,6 +55,19 @@ GitHub 对 Release 事件使用标签所在提交中的工作流文件。标签�
 
 需要手动部署时，下载 `pico-page-web` artifact，在 Pages 项目中创建生产部署，仅上传其中的内容，不要上传仓库根目录。
 
+### GitHub Actions 不可用时
+
+没有可用 CI artifact 时，可在本地复现同一套构建与部署。发布授权、本地检查及干净匹配标签的要求不变；创建 GitHub Release 不代表官网已经更新。操作顺序如下：
+
+1. 完成固件发布附件的生成和核验，将应用镜像、全量镜像、清单和来源记录发布到对应的 GitHub Release；未获得发布授权时停留在本地准备阶段。
+2. 备份 `web/public/firmware/`，将其替换为目标 Release 的清单和两个 BIN，避免混放不同版本的 BIN。重新从 Release 下载并逐字节比较，不直接使用旧构建目录中的附件。
+3. 在仓库根目录执行 `gh release list --repo eMUQI/pico-page --limit 100 --exclude-drafts --json tagName,publishedAt > web/public/firmware/releases.json`，让更新日志只列出已公开的版本；然后运行 `python3 tools/ota_manifest.py --check web/public/firmware --expect-version <版本>`。本流程保留清单中的原官网地址，不隐式切换到腾讯云。
+4. 执行 `npm ci --prefix web --ignore-scripts` 和 `PUBLIC_GA_MEASUREMENT_ID=G-S9XSC6V1KV npm run build --prefix web`。在 `web/dist/deployment.txt` 写入本次网站源码的完整 commit、`manual` 以及 UTC 时间，保留同内容的本地副本用于读回比较。
+5. 在已登录且具有 Pages 编辑权限的本机，用 `npx --yes wrangler@4.144.0 pages deploy web/dist --project-name=picopage --branch=main` 部署；只上传 `web/dist`。凭据通过本机登录或现有环境提供，不写入命令、仓库或日志。也可在现有 Pages 项目中创建生产部署并上传同一目录。参考 [Cloudflare Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/)。
+6. 独立读回正式域名的 `deployment.txt`、清单、应用和全量镜像，与本次本地文件逐字节比较，并复验清单；核对安装页版本、更新日志、GA ID 和第三方模块能正常加载。失败时按上一节处理，不把「上传成功」记录为验收通过。
+
+腾讯云镜像按[固件下载镜像](../docs/firmware-hosting.md)单独上传和校验。仅更新 `oc.wulu.zone` 不会改变设备固定的 `picopage.wulu.zone/firmware/manifest.json` 入口；GitHub Actions 不可用期间，不依赖 Release 事件自动完成上述步骤。
+
 ## 固件更新文件
 
 设备从 `https://picopage.wulu.zone/firmware/manifest.json` 读取更新清单，并下载清单指向的应用镜像；安装页另外使用同一版本的全量镜像（见「安装页」）。这些文件不放在仓库里：它们是 GitHub Release 的附件，由网站构建工作流取回，随 `pico-page-web` artifact 一起部署。`web/public/firmware/` 已被 Git 忽略。目前线上是 `0.2.0-beta.5`（2026-10-16 发布）。
