@@ -2,7 +2,7 @@
 
 ## 当前范围
 
-`https://oc.wulu.zone/firmware/` 是独立的 HTTPS 下载镜像，2026-10-17 部署于 Ubuntu 26.04 LTS，使用 Caddy 2.11.7。当前保存 `0.2.0-beta.5` 的应用镜像、全量镜像及镜像专用清单。两个 BIN 与 GitHub Release 附件逐字节相同；镜像清单只修改 `url`，指向本域名下的应用镜像，其余字段沿用发布附件。
+`https://oc.wulu.zone/firmware/` 是独立的 HTTPS 下载镜像，2026-10-17 部署于 Ubuntu 26.04 LTS，使用 Caddy 2.11.7。当前清单及对应应用、全量镜像为 `0.2.0-beta.6`，2026-10-17 手动更新；保留 beta.5 的版本文件。两个 BIN 与 GitHub Release 附件逐字节相同；镜像清单只修改 `url`，指向本域名下的应用镜像，其余字段沿用发布附件。
 
 设备仍从 `https://picopage.wulu.zone/firmware/manifest.json` 读取清单，官网及网站发布工作流保持原状。镜像部署没有切换设备下载源，也没有实现地区分流或后续版本自动上传。当前阶段不能宣称真机 OTA 或中国大陆下载提速已验收。
 

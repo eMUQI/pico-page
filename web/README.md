@@ -70,9 +70,9 @@ GitHub 对 Release 事件使用标签所在提交中的工作流文件。标签�
 
 ## 固件更新文件
 
-设备从 `https://picopage.wulu.zone/firmware/manifest.json` 读取更新清单，并下载清单指向的应用镜像；安装页另外使用同一版本的全量镜像（见「安装页」）。这些文件不放在仓库里：它们是 GitHub Release 的附件，由网站构建工作流取回，随 `pico-page-web` artifact 一起部署。`web/public/firmware/` 已被 Git 忽略。目前线上是 `0.2.0-beta.5`（2026-10-16 发布）。
+设备从 `https://picopage.wulu.zone/firmware/manifest.json` 读取更新清单，并下载清单指向的应用镜像；安装页另外使用同一版本的全量镜像（见「安装页」）。这些文件不放在仓库里：它们是 GitHub Release 的附件，由网站构建工作流取回，随 `pico-page-web` artifact 一起部署。`web/public/firmware/` 已被 Git 忽略。目前线上是 `0.2.0-beta.6`（2026-10-17 发布），本轮因 GitHub Actions 不可用而手动部署，正式域名的清单及两个 BIN 已与 Release 附件逐字节核对。
 
-发布一个版本的步骤（创建 Release 需要项目所有者授权；Release 一经发布，工作流就会把它部署到线上）：
+发布一个版本的步骤（创建 Release 需要项目所有者授权；Actions 可用时由发布事件触发部署，不可用时按上面的手动流程执行）：
 
 1. 在带有 `v<版本>` 标签的干净检出上构建 release 配置，并完成该版本要求的设备验证。
 2. 在仓库根目录生成清单和按版本命名的镜像：
