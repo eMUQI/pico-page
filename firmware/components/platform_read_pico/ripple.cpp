@@ -49,7 +49,7 @@ void release_ripple() {
     phase_data = nullptr;
     for (auto& lut : phase_luts) lut = nullptr;
 }
-EpdDrawError present_ripple(EpdiyHighlevelState& display, int temperature) {
+EpdDrawError present_ripple(EpdiyHighlevelState& display, int temperature, bool reverse) {
     if (!phase_data || epd_width() != height || epd_height() != width ||
         epd_get_rotation() != EPD_ROT_INVERTED_PORTRAIT) return EPD_DRAW_NO_PHASES_AVAILABLE;
     const auto area = epd_full_screen();
@@ -59,7 +59,7 @@ EpdDrawError present_ripple(EpdiyHighlevelState& display, int temperature) {
     std::memset(display.dirty_columns, 0xFF, height / 2);
     for (int tick = 0; tick < ripple_ticks; ++tick) {
         for (int row = 0; row < width; ++row) {
-            line_phases[row] = static_cast<std::int8_t>(ripple_phase(tick, row, width));
+            line_phases[row] = static_cast<std::int8_t>(ripple_phase(tick, row, width, reverse));
             display.dirty_lines[row] = line_phases[row] >= 0;
         }
         epd_set_line_phase_luts(phase_luts, line_phases, ripple_phases);

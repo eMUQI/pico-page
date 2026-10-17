@@ -2033,23 +2033,42 @@ int main(int argc, char** argv) {
         ReaderApp app(root.string(), "effects", async, async); Driver driver{app};
         assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
         assert(app.page_effect() == PageEffect::Off);
+        bool reverse = false;
+        unsigned body_frames = 0;
+        driver.frame_observer = [&](const Frame& frame) {
+            if (frame.purpose == FramePurpose::Body) {
+                assert(frame.reverse_page_effect == reverse);
+                ++body_frames;
+            } else assert(!frame.reverse_page_effect);
+        };
+        for (bool swipe : {false, true}) {
+            for (bool previous : {false, true}) {
+                reverse = previous;
+                const auto before_frames = body_frames;
+                if (swipe) driver.swipe(!previous);
+                else driver.key(previous ? Input::K1 : Input::K3);
+                driver.present(); driver.complete_content();
+                assert(body_frames == before_frames + 1);
+                driver.refresh();
+            }
+        }
+        driver.frame_observer = {};
         const auto record = app.saved_record();
         const auto config = root / "PicoPage/settings.toml";
         const auto before = read(config);
         driver.tap(342, 500); driver.present();
         driver.tap(479, 1140); driver.present(); assert(app.view() == View::Refresh);
         driver.tap(490, 1060); driver.present(); assert(app.view() == View::PageEffects);
-        const PageEffect effects[] = {PageEffect::Off, PageEffect::TextTurnA, PageEffect::TextTurnB,
-                                      PageEffect::TextTurnC, PageEffect::Ripple};
-        for (unsigned index = 0; index < 5; ++index) {
+        const PageEffect effects[] = {PageEffect::Off, PageEffect::Ripple};
+        for (unsigned index = 0; index < 2; ++index) {
             driver.tap(300, 260 + index * 136); driver.present();
             assert(app.page_effect() == effects[index]);
             driver.refresh();
             assert(app.view() == View::PageEffects && app.page_effect() == effects[index]);
             assert(app.saved_record() == record && read(config) == before);
         }
-        app.set_page_effect(PageEffect::TextTurnA);
-        assert(app.pending_frame() && app.page_effect() == PageEffect::TextTurnA);
+        app.set_page_effect(PageEffect::Ripple);
+        assert(app.pending_frame() && app.page_effect() == PageEffect::Ripple);
         driver.present(); driver.refresh();
         driver.tap(60, 50); driver.present(); assert(app.view() == View::Refresh);
         ReaderApp restarted(root.string()); assert(restarted.page_effect() == PageEffect::Off);
@@ -4404,12 +4423,22 @@ int main(int argc, char** argv) {
         assert(async.cache_usage().next_bitmap == 684U * 1216U / 2);
         driver.refresh();
         const auto bitmap_hits = async.cache_usage().bitmap_hits;
+        bool reverse = false;
+        auto check_direction = [&](const Frame& frame) {
+            if (frame.purpose == FramePurpose::Body) assert(frame.reverse_page_effect == reverse);
+            else assert(!frame.reverse_page_effect);
+        };
+        ref_driver.frame_observer = check_direction;
+        driver.frame_observer = check_direction;
+        reverse = false;
         ref_driver.key(Input::K3); ref_driver.present();
         driver.key(Input::K3); driver.present();
         assert(async.cache_usage().bitmap_hits == bitmap_hits + 1);
         same_body();
+        reverse = true;
         ref_driver.key(Input::K1); ref_driver.present();
         driver.key(Input::K1); driver.present(); driver.complete_content(); same_body();
+        reverse = true;
         ref_driver.key(Input::K1); ref_driver.present();
         const auto previous = async.saved_record();
         ContentJob::delay_starts_for_test(ContentJob::Kind::Chapter, std::chrono::milliseconds(1500));
@@ -4420,21 +4449,26 @@ int main(int argc, char** argv) {
         driver.refresh(); driver.complete_content(); same_body();
         ContentJob::delay_starts_for_test(ContentJob::Kind::Chapter, std::chrono::milliseconds(0));
         // The adjacent part is loaded by the turn that reaches it.
+        reverse = false;
         ref_driver.key(Input::K3); ref_driver.present();
         driver.key(Input::K3);
         assert(async.view() == View::Loading && !async.pending_frame());
         driver.refresh(); driver.complete_content(); same_body();
         assert(async.saved_record()->anchor == first);
+        reverse = false;
         for (auto* d : {&ref_driver, &driver}) {
             d->tap(342, 500); d->present(); d->tap(68, 1140); d->present();
             d->tap(300, 752); d->present(); d->complete_content();
         }
         assert(async.saved_record()->anchor.resource.find("chapter2") != std::string::npos);
         same_body();
+        reverse = true;
         ref_driver.key(Input::K1); ref_driver.present();
         driver.key(Input::K1); driver.present(); driver.complete_content(); same_body();
+        reverse = true;
         ref_driver.key(Input::K1); ref_driver.present();
         driver.key(Input::K1); driver.present(); driver.complete_content(); same_body();
+        reverse = false; // Opening another book and following links use the default direction.
         fs::copy_file(fixtures / "multi-part-link.epub", card / "Worker/link-reference.epub");
         fs::copy_file(fixtures / "multi-part-link.epub", card / "Worker/link-async.epub");
         opened(reference, "Worker/link-reference.epub"); ref_driver.present();

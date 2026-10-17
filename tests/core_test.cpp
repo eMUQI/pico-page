@@ -287,8 +287,9 @@ int main() {
 
     // A delayed save acknowledges only the record originally submitted.
     save = session.request_save();
-    token = session.request_page(first);
+    token = session.request_page(first, RefreshIntent::Content, true);
     CHECK(session.layout_ready(token));
+    CHECK(backend.frames.back().reverse_page_effect);
     result = display.finish(token, true);
     CHECK(session.presented(*result));
     CHECK(session.saved(*save, true));

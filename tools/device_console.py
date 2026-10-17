@@ -174,7 +174,7 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status")
     waveform = commands.add_parser("waveform")
-    waveform.add_argument("variant", choices=("default", "A", "B", "C", "ripple"))
+    waveform.add_argument("variant", choices=("default", "ripple"))
     listing = commands.add_parser("ls")
     listing.add_argument("path", nargs="?", default=".")
     listing.add_argument("--offset", type=int, default=0)

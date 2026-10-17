@@ -1,6 +1,8 @@
 # 开发状态
 
-## 当前摘要（2026-10-16）
+## 当前摘要（2026-10-17）
+
+beta.6 第 1 项已完成代码精简：翻页效果仅保留关闭和水波纹，删除文字转页 A/B/C 的界面、诊断命令及驱动实现；非正文逐像素保持收窄为独立纯函数。开发版本为 `0.2.0-beta.6`，尚未发布，上一页反向已实现待真机验证，字体选择页仍待实现。本批验证与未测边界见文末记录。
 
 `0.2.0-beta.5` 已于 2026-10-16 23:32（UTC+8）作为预发布发布，标签 `v0.2.0-beta.5` 指向 `6d62876`。干净标签的 release 构建与来源检查通过，main 和标签的 host、web CI 均通过；Linux Debug 与 ASan/UBSan/LSan 各 24/24。四个附件下载核验通过，发布触发的官网部署 `38924724866` 通过，线上清单和两个镜像与附件逐字节一致，安装页与更新日志均显示 beta.5。发布范围见[本版说明](releases/0.2.0-beta.5.md)，完整结果见本日「发布 0.2.0-beta.5」记录；既有 Issue、许可缺口和真机未验项保持原状态。
 
@@ -6713,3 +6715,46 @@ NUL 路径补丁验证：host Debug 24/24（41.85 秒）、AppleClang ASan/UBSan
 用户要求更新下个测试版本的 roadmap，新增三项待实现计划：翻页效果仅保留水波纹及关闭选项，上一页的水波纹相对下一页反向，优化字体选择页面设计。已在 `docs/roadmap.md` 新增 beta.6 计划，并同步 R10 总览、范围、验收与待确认项；beta.5 的遗留问题继续独立跟踪，不自动全部纳入下一版。
 
 本批只修改计划，保留现有固件行为、会话内效果选择及默认关闭规则；`firmware/version.txt` 仍为 `0.2.0-beta.5`，进入固件实现阶段时再更新版本号。字体选择页沿用原入口和视觉，具体布局尚未设计。本轮未新增测试、构建或设备操作；`python3 tools/check_handoff.py` 492 项通过，`git diff --check` 通过。用户随后授权提交并推送本批路线图和配套记录。
+
+
+## 2026-10-17 · beta.6 翻页效果精简
+
+基于 main `eed1b6a`，用户授权完成下一版第 1 项。刷新页仅保留关闭和水波纹，水波纹移至第二行；屏幕、应用枚举、串口协议与 CLI 同步移除 A/B/C，平台删除专用 LUT、表对象与驱动分支。非正文逐像素保持仍需要对角线抑制，现收窄为 `build_changed_pixels_waveform`，删除左对齐、前导擦白及选项。沿用 Apache-2.0 来源声明。默认关闭、会话内有效，K2、清晰模式、自动全刷与失败恢复沿用原路径；水波纹调度未修改。版本文件进入 `0.2.0-beta.6`，未发布。
+
+执行上下文仍为应用所有者任务，无新增任务、队列、分配或阻塞；删除 2,368 字节文字转页 LUT 及配套表对象，正式逐像素保持表保留。水波纹 PSRAM 预算、关闭释放、准备失败回退及完整事务不可取消区间不变；本批不宣称真机耗时、资源峰值或光学效果改善。
+
+验证环境为现有 Linux GCC、ESP-IDF 6.1 与 BSP `5f3406d`，复用 `/workspace/cloud-tools/activate-host.sh`、`activate-idf.sh`。执行 Debug 与 ASan/UBSan/LSan 完整 CTest、release 与 diagnostic 标准固件构建；Debug CTest 24/24（109.70 秒）、GCC ASan/UBSan/LSan CTest 24/24（228.55 秒）通过；两套构建均使用 Debug，sanitizer 运行设置 `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1`。固件最终结果见下方补记。应用回归覆盖同步/异步选择、K2 不改进度/配置及重启关闭；保留逐像素变换全部灰阶序列和缓冲边界检查，以及水波纹调度、分配失败、释放和失败返回回归。headless host 画布位于忽略目录 `artifacts/beta6-page-effects/`，已核对两项布局及选中状态，K2 前后像素一致。日志位于 `/tmp/beta6-*.log`。
+
+未连接或刷写设备。水波纹的方向、残影、耗时、实体输入和故障恢复仍待 DP07 真机验证；上一页反向是第 2 项，字体页是第 3 项，均未在本批实施。未提交、推送或发布。
+
+
+固件首次编译和镜像生成成功，但构建期间补齐项目文档使来源摘要变化，标准入口拒绝生成来源证明；未绕过检查。文档稳定后重新执行 release 与 diagnostic 标准入口，核对版本及来源，最终结果见对应 `build/firmware-release/provenance.json`、`build/firmware-diagnostic/provenance.json` 和 `/tmp/beta6-*-final.log`。交接检查 492 项、CLI 仅含 default/ripple 的帮助输出和 `git diff --check` 已通过。
+
+
+## 2026-10-17 · beta.6 上一页水波纹反向
+
+第一点按本次用户指令提交为 `0e600d9` 后继续第二点。方向随 Session 创建的正文帧传至应用显示所有者；同分段回翻和同步回翻显式标记反向，异步 Chapter 请求由 End/Before 目标决定反向，避免等待提示、缓存路径或跨章加载丢失方向。下一页保留右向左，上一页镜像为左向右；其他正文重画沿用默认方向，Overlay、补图和 K2 不继承回翻方向。只镜像条带顺序，不倒放灰阶波形或改最终页面；保存仍由最终帧成功呈现确认。效果默认关闭，自动全刷、清晰模式、失败重刷和忙时最多保留一次翻页的规则沿用原实现。
+
+无新增任务、队列、分配或 I/O；Frame 增加一个布尔值，平台保存当前事务方向。水波纹仍使用原 37 相、16 条带、52 拍、既有 PSRAM 表及逐行索引，生产者借用和释放边界、不可取消的面板事务与失败恢复路径不变。源码核对锁定 BSP 的旋转与逐行 LUT 接口，复用现有倒置竖屏的行映射；未改 BSP、频率、供电窗口或波形数据。不以 host 结果推断面板耗时或峰值内存。
+
+复用现有 Linux GCC、ESP-IDF 6.1、BSP `5f3406d`。回归覆盖同步/异步的按键与轻扫前后翻、跨分段与跨章等待后的方向、K2 不继承方向、Session 帧方向传递；水波纹测试对两个方向逐拍逐行核对，分别注入全部 52 个失败点并检查 back buffer 不变、借用清除及成功提交；调度检查镜像关系、不同条带宽度和每行相位顺序。执行 Debug 与 ASan/UBSan/LSan CTest、release 与 diagnostic 标准固件构建、来源核验及交接检查，结果在本批交付中报告，日志 `/tmp/beta6-direction-*.log`，来源记录 `build/firmware-{release,diagnostic}/provenance.json`。
+
+未连接或刷写设备；DP07 的实际左右方向、灰阶、条带边界、残影、耗时、连续输入与恢复待真机验证。本批未推送或发布，字体选择页未实施。
+
+
+首轮 Debug 的应用回归在跨章测试后继续打开另一书时失败：新增观察器仍期待上一页方向，而开书按设计恢复默认方向。已在换书前切换预期，保留该默认方向断言；其余 23 项通过。最终回归与固件构建在测试稳定后重新执行，构建中的资料/测试变更若触发来源检查拒绝，均以随后标准入口重建的记录为准。
+
+
+最终验证：Debug CTest 24/24（45.93 秒），GCC ASan/UBSan/LSan CTest 24/24（109.22 秒），内存检查使用 `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1`，无 sanitizer 报错。release 与 diagnostic 标准构建及来源核验通过，应用分别为 3,504,480、3,540,928 字节，版本 `0.2.0-beta.6+g0e600d9.dirty`。最终测试日志为 `/tmp/beta6-direction-{host,sanitized}-final.log`；文档补记后再次通过标准入口生成来源记录，日志为 `/tmp/beta6-direction-{release,diagnostic}-recorded.log`。交接检查 492 项及 `git diff --check` 通过。第二点保留为未提交的本地候选。
+
+
+## 2026-10-17 · beta.6 翻页效果 PR 准备
+
+用户授权提交第二点并创建 PR，持续检查 CI 与 review 并修正问题。本分支基于最新 main `eed1b6a`，包含第一点提交 `0e600d9` 和上一页反向候选；上一批 Debug 与 GCC ASan/UBSan/LSan 各 24/24、release/diagnostic 构建及来源核验结果适用于本批未改动的代码。PR 准备仅追加交接记录，执行 `python3 tools/check_handoff.py` 及 `git diff --check`；不新增设备证据，不发布或刷写。远端 CI 与 review 结果在本次交付中报告。
+
+
+## 2026-10-17 · PR #111 首轮 review 文档修正
+
+PR #111 的首轮 Codex review 在 `def0164` 提出两项 P2，核对均成立。诊断对比步骤仍列 A/B/C，已改为默认 GL16 与水波纹，并核对两个翻页方向；同类检索还发现诊断工作台命令清单残留 A/B/C，已同步删除。验收表原有两个 DP06，第一点按 ID 删除时误删了仍有效的页脚页数/百分比/时钟边界，现恢复完整要求并改为唯一 ID DP09；仅已删除文字转页效果的 DP06 保持移除。原先漏改/误删属于本批资料整理错误，未改变固件行为。
+
+本批只改文档，执行 `python3 tools/check_handoff.py`、`git diff --check` 和现行文档残留命令检查，不新增测试或重建固件。首轮 review 前的 host/web 远端 CI 结果与更新后新提交的 CI 分别核对；修正提交后请求 Codex 重新审阅。没有新增设备验收、刷写或发布。

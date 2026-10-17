@@ -479,11 +479,8 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
     if (word == "waveform") {
         PageEffect effect;
         if (input == "default") effect = PageEffect::Off;
-        else if (input == "A") effect = PageEffect::TextTurnA;
-        else if (input == "B") effect = PageEffect::TextTurnB;
-        else if (input == "C") effect = PageEffect::TextTurnC;
         else if (input == "ripple") effect = PageEffect::Ripple;
-        else { error(id, "usage_waveform_default_A_B_C_ripple"); return; }
+        else { error(id, "usage_waveform_default_ripple"); return; }
         app.set_page_effect(effect);
         reply("PP %lu OK waveform=%.*s\n", static_cast<unsigned long>(id),
               static_cast<int>(input.size()), input.data());

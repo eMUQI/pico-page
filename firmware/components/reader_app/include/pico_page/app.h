@@ -45,7 +45,7 @@ enum class View {
     About,
     Update
 };
-enum class PageEffect { Off, TextTurnA, TextTurnB, TextTurnC, Ripple };
+enum class PageEffect { Off, Ripple };
 enum class PowerAction { None, Shutdown, Restart };
 /** install restarts into the firmware image that the last completed update download verified. */
 struct PowerRequest { PowerAction action = PowerAction::None; bool without_save = false; bool install = false; };

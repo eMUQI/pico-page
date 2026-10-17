@@ -100,7 +100,7 @@ enum Control {
     LibraryGrid,
     RefreshAccept,
     RefreshInterval,
-    PageEffects, EffectOff, EffectA, EffectB, EffectC, EffectRipple,
+    PageEffects, EffectOff, EffectRipple,
     IntervalLess,
     IntervalMore,
     IntervalSave,
@@ -1314,7 +1314,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             chapter = std::move(job->result.chapter); chapter_index = request.chapter;
             offset = job->result.offset;
             for (const auto& span : job->result.history) record_boundary(computed_pages, span.first, span.second);
-            show_page(offset);
+            // End/Before are backward turns; the job retains its target across loading waits.
+            show_page(offset, request.target == ContentJob::Target::End || request.target == ContentJob::Target::Before);
             return;
         }
         if (request.chapter != chapter_index || request.part != chapter.part) return;
@@ -3282,7 +3283,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         else clear_body_cache();
         return true;
     }
-    bool show_page(std::size_t start) {
+    bool show_page(std::size_t start, bool reverse_page_effect = false) {
         const auto spec = layout(settings, link_return ? 144 : 64);
         const bool reused = body_reusable(start, spec);
         const bool hit = next_page && next_bitmap && next_page->start == readable_offset(start) && same_layout(next_spec, spec);
@@ -3311,7 +3312,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             anchor, (settings.refresh_preset == "clear" ||
                      body_updates >= static_cast<unsigned>(refresh_interval(settings)))
                         ? RefreshIntent::FullClean
-                        : RefreshIntent::Content);
+                        : RefreshIntent::Content, reverse_page_effect);
         inline_image_after = std::chrono::steady_clock::time_point::max();
         if (!session.layout_ready(token))
             return false;
@@ -3360,14 +3361,14 @@ struct ReaderApp::Impl final : DisplayBackend {
             error("上一页无法排版");
             return;
         }
-        show_page(previous);
+        show_page(previous, true);
     }
     /**
      * Shows the preceding page. Cache misses over long text ranges are announced before
      * pagination because the first measurements may read glyph metrics from the card.
      */
     void turn_back_to(std::size_t limit) {
-        if (const auto cached = previous_page(limit)) { show_page(*cached); return; }
+        if (const auto cached = previous_page(limit)) { show_page(*cached, true); return; }
         if (async_content) { begin_chapter(chapter_index, chapter.part, ContentJob::Target::Before, limit); return; }
         constexpr std::size_t announced_scalars = 10000;
         if (limit > announced_scalars)
@@ -3831,10 +3832,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         hits.clear(); canvas.clear(); header("翻页效果", Back, "刷新");
         text("实验功能 · 本次启动有效", 36, 144, 26, 612, 3);
         choice(EffectOff, "关闭", "沿用当前刷新模式", 220, page_effect == PageEffect::Off);
-        choice(EffectA, "文字转页 A", "仅左对齐，保留全部驱动动作", 356, page_effect == PageEffect::TextTurnA);
-        choice(EffectB, "文字转页 B", "A + 未变化像素不驱动", 492, page_effect == PageEffect::TextTurnB);
-        choice(EffectC, "文字转页 C", "B + 去掉深色目标的前导擦白", 628, page_effect == PageEffect::TextTurnC);
-        choice(EffectRipple, "水波纹", "条带依次展开，翻页可能更慢", 764, page_effect == PageEffect::Ripple);
+        choice(EffectRipple, "水波纹", "条带依次展开，翻页可能更慢", 356, page_effect == PageEffect::Ripple);
         wrapped("仅用于正文非全刷更新。清晰模式每页全刷，不播放效果。", 36, 936, 612, 25, 3);
         wrapped("效果、残影和灰阶均待真机验证。按全刷键可清理当前画面。", 36, 1040, 612, 25, 3);
     }
@@ -6960,9 +6958,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         case PageEffects:
             draw_page_effects();
             break;
-        case EffectOff: case EffectA: case EffectB: case EffectC: case EffectRipple:
-            page_effect = id == EffectOff ? PageEffect::Off : id == EffectA ? PageEffect::TextTurnA :
-                          id == EffectB ? PageEffect::TextTurnB : id == EffectC ? PageEffect::TextTurnC : PageEffect::Ripple;
+        case EffectOff: case EffectRipple:
+            page_effect = id == EffectOff ? PageEffect::Off : PageEffect::Ripple;
             draw_page_effects();
             break;
         case RefreshAccept:

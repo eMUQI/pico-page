@@ -97,10 +97,11 @@ bool Session::current(const OperationContext& token) const {
     return token.book_id == book_id_ && token.session == session_ && token.layout == layout_;
 }
 
-OperationContext Session::request_page(Anchor anchor, RefreshIntent refresh) {
+OperationContext Session::request_page(Anchor anchor, RefreshIntent refresh, bool reverse_page_effect) {
     auto token = next_token();
     pending_body_.reset();
     pending_layout_ = Frame{token, std::move(anchor), FramePurpose::Body, refresh};
+    pending_layout_->reverse_page_effect = reverse_page_effect;
     return token;
 }
 

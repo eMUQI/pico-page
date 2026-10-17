@@ -12,7 +12,7 @@ namespace {
 std::array<std::uint8_t, 37 * 64> source{};
 EpdWaveformPhases source_phases{37, source.data(), nullptr};
 const EpdWaveformTempInterval interval{0, 50};
-bool allocation_fails = false, source_missing = false;
+bool allocation_fails = false, source_missing = false, reverse = false;
 int allocations = 0, frees = 0, draws = 0, fail_at = -1, rotation = EPD_ROT_INVERTED_PORTRAIT;
 const std::uint8_t* const* borrowed = nullptr;
 const std::int8_t* rows = nullptr;
@@ -44,7 +44,7 @@ EpdDrawError epd_draw_base(EpdRect, const std::uint8_t*, EpdRect, EpdDrawMode mo
     assert(mode == (MODE_PACKING_1PPB_DIFFERENCE | MODE_GL16));
     assert(waveform->mode_data[0]->range_data[0]->phases == 1);
     for (int row = 0; row < width; ++row) {
-        assert(rows[row] == ripple_phase(draws, row, width));
+        assert(rows[row] == ripple_phase(draws, row, width, reverse));
         assert(dirty[row] == (rows[row] >= 0));
         if (rows[row] >= 0) assert(borrowed[rows[row]][0] == rows[row]);
     }
@@ -60,15 +60,19 @@ int main() {
     std::array<bool, width> dirty{};
     EpdiyHighlevelState display{front.data(), back.data(), difference.data(), dirty.data(), columns.data()};
     rotation = 0; assert(present_ripple(display, 24) == EPD_DRAW_NO_PHASES_AVAILABLE); rotation = EPD_ROT_INVERTED_PORTRAIT;
-    for (fail_at = 0; fail_at < 52; ++fail_at) {
-        draws = 0;
-        assert(present_ripple(display, 24) == EPD_DRAW_EMPTY_LINE_QUEUE);
-        assert(!borrowed && !rows && count == 0 && draws == fail_at + 1);
-        for (auto value : back) assert(value == 0x15);
+    for (bool direction : {false, true}) {
+        reverse = direction;
+        std::fill(back.begin(), back.end(), 0x15);
+        for (fail_at = 0; fail_at < 52; ++fail_at) {
+            draws = 0;
+            assert(present_ripple(display, 24, reverse) == EPD_DRAW_EMPTY_LINE_QUEUE);
+            assert(!borrowed && !rows && count == 0 && draws == fail_at + 1);
+            for (auto value : back) assert(value == 0x15);
+        }
+        fail_at = -1; draws = 0;
+        assert(present_ripple(display, 24, reverse) == EPD_DRAW_SUCCESS && draws == 52);
+        assert(!borrowed && back == front);
     }
-    fail_at = -1; draws = 0;
-    assert(present_ripple(display, 24) == EPD_DRAW_SUCCESS && draws == 52);
-    assert(!borrowed && back == front);
     release_ripple(); assert(frees == 1);
     assert(present_ripple(display, 24) == EPD_DRAW_NO_PHASES_AVAILABLE);
 }

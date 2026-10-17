@@ -110,7 +110,7 @@ GB18030 解码表的来源与复核（2026-10-07）：`firmware/components/reade
 
 ## 2026-10-11 · 文字转页与水波纹候选
 
-文字转页来源：[FreeInk SDK](https://github.com/0x1abin/freeink-sdk/tree/96de1be6ce08eb732909e6e8149af8f892b9a2c5)，完整 commit `96de1be6ce08eb732909e6e8149af8f892b9a2c5`，文件 `libs/display/EpdiyLcd/src/e0470/e0470_epaper_waveform.c`。移植前读取根 `LICENSE`（MIT、2026 FreeInk）、同目录 `LICENSE` 与源码头（2026 mindreset、Apache-2.0）；适用的波形文件许可为 Apache-2.0，不能用根 MIT 替代。仅移植左对齐、对角线保持、深色目标前导擦白置零三步至 `platform_read_pico/text_turn_waveform.cpp`。修改为不依赖 ESP-IDF 的纯函数、独立布尔选项、容量与重叠检查，删除临时序列数组；不引入 FreeInk 波形数据或其他代码。保留版权/SPDX 与修改声明，组件原 `LICENSE` 署名保留，增加完整 `Apache-2.0.txt`。
+文字转页来源：[FreeInk SDK](https://github.com/0x1abin/freeink-sdk/tree/96de1be6ce08eb732909e6e8149af8f892b9a2c5)，完整 commit `96de1be6ce08eb732909e6e8149af8f892b9a2c5`，文件 `libs/display/EpdiyLcd/src/e0470/e0470_epaper_waveform.c`。移植前读取根 `LICENSE`（MIT、2026 FreeInk）、同目录 `LICENSE` 与源码头（2026 mindreset、Apache-2.0）；适用的波形文件许可为 Apache-2.0，不能用根 MIT 替代。仅移植左对齐、对角线保持、深色目标前导擦白置零三步至 `platform_read_pico/changed_pixels_waveform.cpp`。修改为不依赖 ESP-IDF 的纯函数、独立布尔选项、容量与重叠检查，删除临时序列数组；beta.6 移除文字转页后仅保留对角线保持及边界检查，删除左对齐、前导擦白处理和布尔选项。不引入 FreeInk 波形数据或其他代码。保留版权/SPDX 与修改声明，组件原 `LICENSE` 署名保留，增加完整 `Apache-2.0.txt`。
 
 参考中文注释反对清对角线，但代码实际清除，对应本项目 B/C；中文注释中的抗锯齿残影风险仍未解决。C 将前导动作 2 置为 0，不再次压缩或左移后续推黑，也不把动作 3 改成推黑；`to != 15` 涵盖 1–14 级灰色，并非只有纯黑，最终亮度必须真机对比。A 提供保守对照，三步也分别受合成 LUT 测试覆盖。
 

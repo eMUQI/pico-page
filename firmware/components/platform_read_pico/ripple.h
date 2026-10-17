@@ -6,5 +6,5 @@ namespace pico_page::platform {
 bool prepare_ripple();
 void release_ripple();
 /** Full-frame inverted-portrait ripple; failure leaves back_fb unchanged. */
-EpdDrawError present_ripple(EpdiyHighlevelState& display, int temperature);
+EpdDrawError present_ripple(EpdiyHighlevelState& display, int temperature, bool reverse = false);
 }

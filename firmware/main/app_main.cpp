@@ -505,10 +505,7 @@ bool present(pico_page::ReaderApp &app) {
         std::string error;
         using pico_page::platform::PageWaveform;
         const auto effect = app.page_effect();
-        const auto candidate = effect == pico_page::PageEffect::TextTurnA ? PageWaveform::TextTurnA :
-            effect == pico_page::PageEffect::TextTurnB ? PageWaveform::TextTurnB :
-            effect == pico_page::PageEffect::TextTurnC ? PageWaveform::TextTurnC :
-            effect == pico_page::PageEffect::Ripple ? PageWaveform::Ripple : PageWaveform::Gray16;
+        const auto candidate = effect == pico_page::PageEffect::Ripple ? PageWaveform::Ripple : PageWaveform::Gray16;
         if (candidate != pico_page::platform::page_effect_waveform() &&
             !pico_page::platform::set_page_effect_waveform(candidate, error)) {
             ESP_LOGW(tag, "Page effect unavailable: %s; using configured refresh", error.c_str());
@@ -519,7 +516,8 @@ bool present(pico_page::ReaderApp &app) {
         const bool use_effect = app.pending_frame()->purpose == pico_page::FramePurpose::Body &&
                                 selected != PageWaveform::Gray16;
         pico_page::platform::set_page_waveform(use_effect ? selected :
-            app.fast_page_updates() ? PageWaveform::Gray8 : PageWaveform::Gray16);
+            app.fast_page_updates() ? PageWaveform::Gray8 : PageWaveform::Gray16,
+            app.pending_frame()->reverse_page_effect);
         if (flash_lock) xSemaphoreTake(flash_lock, portMAX_DELAY);
         PP_DIAGNOSTIC(const auto measurement = diag::begin(diag::Kind::Frame,
             {app.pending_frame()->token.session, app.pending_frame()->token.layout,

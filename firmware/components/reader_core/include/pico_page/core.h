@@ -58,6 +58,8 @@ struct Frame {
     std::optional<RefreshRegion> region = std::nullopt;
     /** Display sets this for Overlay+Content only; equal old/new pixels stay electrically idle. */
     bool changed_pixels_only = false;
+    /** Previous-page body frames reverse directional display effects; other frames default forward. */
+    bool reverse_page_effect = false;
 };
 struct FrameResult {
     Frame frame;
@@ -102,7 +104,8 @@ public:
     void open(std::string book_id, std::string content_revision, std::string writer_id,
               std::optional<ReadingRecord> restored = std::nullopt);
     void change_layout();
-    OperationContext request_page(Anchor anchor, RefreshIntent refresh = RefreshIntent::Content);
+    OperationContext request_page(Anchor anchor, RefreshIntent refresh = RefreshIntent::Content,
+                                  bool reverse_page_effect = false);
     bool layout_ready(const OperationContext& token);
     bool force_refresh();
     /** Accept only results emitted by Display::finish; returns true for adopted body frames. */
