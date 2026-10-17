@@ -542,6 +542,131 @@ static void help_test(const fs::path& root, const fs::path& fixtures, bool async
     if (!with_book) assert(!fs::exists(root));
 }
 
+static void font_picker_test(const fs::path& root, const fs::path& fixtures, const fs::path& font, bool async) {
+    fs::create_directories(root / "Books"); fs::create_directories(root / "Fonts");
+    fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
+    fs::copy_file(font, root / "Fonts/LXGWWenKai-Regular.ttf");
+    const auto local_font = root / "Fonts/LXGWWenKai-Regular.ttf";
+    fs::create_hard_link(local_font, root / "Fonts/NotoSansSC-Regular.otf");
+    for (int i = 0; i < 14; ++i) {
+        const auto name = (i < 10 ? "0" : "") + std::to_string(i) +
+            (i == 13 ? "-a-very-long-font-name-that-wraps-onto-two-lines.ttf" : ".ttf");
+        fs::create_hard_link(local_font, root / "Fonts" / name);
+    }
+    write(root / "Fonts/z-broken.ttf", "not a font");
+    write(root / "PicoPage/settings.toml", "schema_version=1\n[reader]\nfont_weight='bold'\n");
+    FileStore store(root.string());
+    ReaderApp app(root.string(), "font-picker", true, async); Driver d{app};
+    assert(app.initialize()); d.present(); opened(app, "Books/book.epub"); d.present();
+    const auto saved = app.saved_record();
+    const auto progress = read(root / "Books/book.epub.picopage/progress.json");
+    const auto config = read(root / "PicoPage/settings.toml");
+    const auto original_size = store.load_settings("Books/book.epub").settings.font_size_px;
+    d.typography();
+    // Preserve a size edit made before entering the font picker.
+    d.tap(580, 1020); d.present();
+    const auto typography = app.canvas().pixels();
+    d.tap(90, 820); d.present();
+    assert(app.view() == View::Typography && app.canvas().pixel(624, 849) == 1);
+    const auto initial = app.canvas().pixels();
+    d.refresh();
+    // The current font opens on page four. The fifth page has only the broken file.
+    d.tap(540, 1040); d.present();
+    assert(std::equal(initial.begin(), initial.begin() + 500 * 342, app.canvas().pixels().begin()));
+    d.tap(540, 1040); assert(!app.pending_frame());
+    d.tap(300, 760); assert(!app.pending_frame());
+    d.tap(300, 660); d.present();
+    d.tap(500, 1140); assert(!app.pending_frame());
+    assert(read(root / "PicoPage/settings.toml") == config);
+    d.tap(150, 1140); d.present();
+    assert(app.canvas().pixels() == typography);
+    d.tap(90, 820); d.present();
+    assert(app.canvas().pixels() == initial);
+    // Selection may be on a different list page. Browsing and K2 must retain it.
+    d.tap(300, 660); d.present();
+    assert(app.canvas().pixel(624, 669) == 1 && app.canvas().pixel(624, 849) == 15);
+    d.tap(140, 1040); d.present();
+    d.refresh();
+    d.tap(540, 1040); d.present();
+    assert(app.canvas().pixel(624, 669) == 1);
+    // Cancel restores both the earlier font weight and the pre-existing size draft.
+    d.tap(150, 1140); d.present();
+    assert(app.canvas().pixels() == typography);
+    d.tap(90, 820); d.present();
+    d.tap(300, 660); d.present();
+    d.tap(140, 1040); d.present();
+    d.tap(500, 1140); d.present();
+    assert(store.load_settings("Books/book.epub").settings.font == "Fonts/LXGWWenKai-Regular.ttf");
+    assert(read(root / "PicoPage/settings.toml") == config);
+    const auto confirmed = app.canvas().pixels();
+    d.tap(90, 820); d.present();
+    assert(app.canvas().pixel(624, 669) == 1);
+    // Reach both list boundaries, including a full first screen and its disabled control.
+    for (int i = 0; i < 3; ++i) { d.tap(140, 1040); d.present(); }
+    d.tap(140, 1040); assert(!app.pending_frame());
+    d.tap(300, 660); d.present();
+    d.tap(150, 1140); d.present();
+    assert(app.canvas().pixels() == confirmed);
+    assert(app.saved_record() == saved && read(root / "Books/book.epub.picopage/progress.json") == progress);
+    // Only the typography panel's apply button persists the confirmed font.
+    d.tap(500, 1130); d.present(); d.complete_content();
+    const auto settings = store.load_settings("Books/book.epub").settings;
+    assert(settings.font == "Fonts/12.ttf" && settings.font_weight == "regular" && settings.font_size_px == original_size + 2);
+    assert(app.saved_record()->anchor == saved->anchor);
+    assert(read(root / "PicoPage/settings.toml") == config);
+    d.typography(); d.tap(90, 820); d.present();
+    d.tap(150, 1140); d.present();
+    d.close(); d.present();
+    assert(app.view() == View::Reading);
+}
+
+static void font_picker_image_test(const fs::path& root, const fs::path& fixtures, const fs::path& font) {
+    fs::create_directories(root / "Books"); fs::create_directories(root / "Fonts");
+    fs::copy_file(fixtures / "image-cover.epub", root / "Books/book.epub");
+    const auto local_font = root / "Fonts/LXGWWenKai-Regular.ttf";
+    fs::copy_file(font, local_font);
+    for (int i = 0; i < 6; ++i)
+        fs::create_hard_link(local_font, root / ("Fonts/Picker" + std::to_string(i) + ".ttf"));
+    ReaderApp app(root.string(), "font-picker-image", true, true); Driver d{app};
+    assert(app.initialize()); d.present(); opened(app, "Books/book.epub"); d.present(); d.complete_content();
+    const auto saved = app.saved_record();
+    const auto progress = read(root / "Books/book.epub.picopage/progress.json");
+    d.tap(342, 500); d.present();
+    d.tap(205, 1140); d.present(); d.complete_content();
+    assert(app.view() == View::Typography);
+    d.tap(90, 820); d.present(); d.complete_content();
+    assert(app.view() == View::Typography && !app.content_busy());
+    const auto pixels = app.canvas().pixels();
+    const auto decodes = graphics::image_decode_count();
+    auto browse = [&](int x) {
+        d.tap(x, 1040);
+        // A cached image could avoid decoding yet still start a blocking preview job.
+        assert(app.view() == View::Typography && !app.content_busy());
+        assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Overlay);
+        d.present();
+        assert(graphics::image_decode_count() == decodes);
+        assert(std::equal(pixels.begin(), pixels.begin() + 500 * app.canvas().stride(), app.canvas().pixels().begin()));
+        assert(app.saved_record() == saved && read(root / "Books/book.epub.picopage/progress.json") == progress);
+    };
+    browse(540); d.refresh(); browse(140); browse(540);
+    // A font change still requests a fresh preview; subsequent browsing must reuse its pixels.
+    d.tap(300, 660);
+    assert(app.view() == View::Loading && app.content_busy());
+    d.present(); d.complete_content();
+    const auto selected = app.canvas().pixels();
+    const auto selected_decodes = graphics::image_decode_count();
+    d.tap(140, 1040);
+    assert(app.view() == View::Typography && !app.content_busy());
+    d.present();
+    assert(graphics::image_decode_count() == selected_decodes);
+    assert(std::equal(selected.begin(), selected.begin() + 500 * app.canvas().stride(), app.canvas().pixels().begin()));
+    d.tap(150, 1140); d.present(); d.complete_content();
+    assert(app.view() == View::Typography);
+    d.close(); d.present(); d.complete_content();
+    assert(app.view() == View::Reading && app.saved_record() == saved);
+    assert(!fs::exists(root / "PicoPage/settings.toml"));
+}
+
 static void layout_review_test(const fs::path& root, const fs::path& fixtures, const fs::path& font, bool async) {
     fs::create_directories(root / "Books"); fs::create_directories(root / "Fonts");
     fs::copy_file(font, root / "Fonts/LXGWWenKai-Regular.ttf");
@@ -2013,6 +2138,9 @@ int main(int argc, char** argv) {
 
     layout_review_test(card / "LayoutSync", fixtures, argv[2], false);
     layout_review_test(card / "LayoutAsync", fixtures, argv[2], true);
+    font_picker_test(card / "FontPickerSync", fixtures, argv[2], false);
+    font_picker_test(card / "FontPickerAsync", fixtures, argv[2], true);
+    font_picker_image_test(card / "FontPickerImage", fixtures, argv[2]);
     for (bool async : {false, true})
         for (bool grid : {false, true})
             library_resume_pagination_test(card / (std::string("ResumePages") + (grid ? "Grid" : "List") +

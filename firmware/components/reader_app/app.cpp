@@ -155,7 +155,8 @@ enum Control {
     WifiSavedBase = 50100, WifiModeBase = 50200, WifiNearbyBase = 50300,
     SleepCustom = 51000, SleepRotation, SleepChoose, SleepRefresh, LockScreenBase = 52000,
     UpdateOpen = 53000, UpdateCheck, UpdateNotes, UpdateStart, UpdateConfirm, UpdateCancel,
-    UpdateRetry, UpdateLater, UpdateRestart, UpdateDismiss
+    UpdateRetry, UpdateLater, UpdateRestart, UpdateDismiss,
+    FontEntryBase = 54000, FontAccept = 54300, FontCancel
 };
 static_assert(ContentsBookmarks < EntryBase);
 std::string basename(const std::string &path) {
@@ -860,6 +861,10 @@ struct ReaderApp::Impl final : DisplayBackend {
     unsigned body_updates = 0;
     std::string effective_font, effective_weight, last_recorded;
     std::vector<std::string> fonts;
+    static constexpr std::size_t fonts_per_screen = 4;
+    bool font_picker_open = false, font_entry_reset = false;
+    std::size_t font_picker_page = 0;
+    std::string font_entry, font_entry_weight;
     std::function<void()> deferred;
     bool save_failed = false, notice_shown = false;
     // The most recent accepted input turned a page; see AppInput::queued.
@@ -1058,7 +1063,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         request.root = root; request.path = root + "/" + book_path; request.identity = document.metadata();
         request.preview = preview;
         request.progressive = progressive;
-        request.layout = preview ? layout(draft, 64, preview_bottom) : layout(settings, link_return ? 144 : 64);
+        request.layout = preview ? layout(draft, 64, typography_preview_bottom()) : layout(settings, link_return ? 144 : 64);
         request.page = planned;
         request.image_resource = planned.images.front().resource;
         if (planned.images.size() == 1 && planned.glyphs.empty())
@@ -3634,12 +3639,93 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (toc.empty()) note("这本书未提供目录，可收起后继续阅读。", list_top + 40);
         footer_bar("", toc_page, toc_starts.size());
     }
+    int typography_preview_bottom() const { return font_picker_open ? 500 : preview_bottom; }
+    void draw_font_picker() {
+        const bool unavailable = font_fallback || weight_unavailable;
+        canvas.fill_rect(0, 500, 684, 716, 15);
+        canvas.line(0, 500, 683, 500, 1, 2);
+        text("预览 · 尚未应用", 36, 514, 22, 350, 3);
+        const auto label = font_name(draft.font);
+        const auto width = std::min(220, text_width(label, 22));
+        text(label, 648 - width, 514, 22, width, 3);
+        canvas.line(0, 550, 683, 550, 1, 2);
+        text("选择字体", 36, 576, 30, 350, 1, true);
+        const auto count = "共 " + std::to_string(fonts.size()) + " 款";
+        text(count, 648 - text_width(count, 22), 582, 22, 220);
+        const auto pages = std::max<std::size_t>(1, (fonts.size() + fonts_per_screen - 1) / fonts_per_screen);
+        font_picker_page = std::min(font_picker_page, pages - 1);
+        for (std::size_t row = 0; row < fonts_per_screen; ++row) {
+            const auto index = font_picker_page * fonts_per_screen + row;
+            if (index >= fonts.size()) break;
+            const int y = 624 + static_cast<int>(row) * 90;
+            const auto& path = fonts[index];
+            const bool current = path == edit_snapshot.config.settings.font;
+            auto name = font_name(path);
+            // Keep weight files distinguishable even when their family has a friendly name.
+            if (name != basename(path)) {
+                if (path.find("-Light.") != std::string::npos) name += " · 细";
+                else if (path.find("-Medium.") != std::string::npos) name += " · 中粗";
+                else if (path.find("-Bold.") != std::string::npos) name += " · 粗";
+            }
+            const int name_width = current ? 444 : 552;
+            const bool multiline = text_width(name, 26) > name_width;
+            title_lines(name, 36, y + (multiline ? 10 : 28), name_width, 26, false, 2);
+            if (current) text("当前使用", 500, y + 32, 22, 100, 3);
+            for (int dy = -18; dy <= 18; ++dy)
+                for (int dx = -18; dx <= 18; ++dx) {
+                    const int radius = dx * dx + dy * dy;
+                    if ((radius <= 324 && radius >= 256) || (path == draft.font && radius <= 144))
+                        canvas.pixel(624 + dx, y + 45 + dy, 1);
+                }
+            canvas.line(36, y + 89, 648, y + 89, 9);
+            hits.push_back({24, y, 636, 90, FontEntryBase + static_cast<int>(index)});
+        }
+        if (font_picker_page) button(Prev, "上一页", 36, 1008, 216, 64, false, 24);
+        else disabled_button("上一页", 36, 1008, 216, 64);
+        center(std::to_string(font_picker_page + 1) + " / " + std::to_string(pages), 252, 1026, 180, 24);
+        if (font_picker_page + 1 < pages) button(Next, "下一页", 432, 1008, 216, 64, false, 24);
+        else disabled_button("下一页", 432, 1008, 216, 64);
+        button(FontCancel, "取消", 24, 1104, 312, 80, false, 26);
+        if (!unavailable) button(FontAccept, "选用此字体", 348, 1104, 312, 80, true, 26);
+        else disabled_button("选用此字体", 348, 1104, 312, 80);
+    }
+    void cancel_font_picker() {
+        draft.font = font_entry;
+        draft.font_weight = font_entry_weight;
+        reset_overrides = font_entry_reset;
+        font_picker_open = false;
+        draw_typography();
+    }
+    void font_picker_control(int id) {
+        if (id == FontCancel || id == Back) cancel_font_picker();
+        else if (id == FontAccept) {
+            if (font_fallback || weight_unavailable) return;
+            font_picker_open = false;
+            draw_typography();
+        } else if (id == Prev || id == Next) {
+            const auto pages = (fonts.size() + fonts_per_screen - 1) / fonts_per_screen;
+            if (id == Prev && font_picker_page) --font_picker_page;
+            else if (id == Next && font_picker_page + 1 < pages) ++font_picker_page;
+            else return;
+            // Browsing leaves the completed preview intact, including any prepared image.
+            hits.clear();
+            draw_font_picker();
+        } else if (id >= FontEntryBase && id < FontAccept) {
+            const auto index = static_cast<std::size_t>(id - FontEntryBase);
+            if (index >= fonts.size() || draft.font == fonts[index]) return;
+            draft.font = fonts[index];
+            draft.font_weight = "regular";
+            reset_overrides = false;
+            draw_typography();
+        } else return;
+        overlay();
+    }
     void draw_typography() {
         view = View::Typography;
         hits.clear();
         canvas.clear();
         load_fonts(&draft);
-        const auto spec = layout(draft, 64, preview_bottom);
+        const auto spec = layout(draft, 64, typography_preview_bottom());
         const auto preview = plan_page(offset, spec);
         if (async_content && !image_prepared && preview.error.empty() && !preview.images.empty()) {
             // The worker prepares the image; the panel stays visible and only cancelling is accepted.
@@ -3650,6 +3736,17 @@ struct ReaderApp::Impl final : DisplayBackend {
         } else {
             if (!preview.error.empty() || !draw_page_content(preview, spec))
                 text("预览暂不可用", 36, 96, 28);
+        }
+        if (font_picker_open) {
+            if (font_fallback || weight_unavailable) {
+                int clear_top = 430;
+                for (const auto& line : preview.lines)
+                    if (line.top < clear_top && line.bottom > 430) clear_top = line.top;
+                canvas.fill_rect(0, clear_top, 684, 500 - clear_top, 15);
+                note("所选字体不可用，预览使用替代字体。", 446);
+            }
+            draw_font_picker();
+            return;
         }
         const bool changed = typography_changed();
         tabs(656, Typography);
@@ -3694,10 +3791,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         auto can_step = [&](int direction) {
             switch (parameter) {
-            case FontChoice: {
-                const auto at = std::find(fonts.begin(), fonts.end(), draft.font);
-                return direction < 0 ? at != fonts.begin() : at != fonts.end() && at + 1 != fonts.end();
-            }
             case FontWeight: return direction < 0 ? draft.font_weight != (light_available(draft) ? "light" : "regular") : draft.font_weight != "bold";
             case FontSize: return direction < 0 ? draft.font_size_px > 28 : draft.font_size_px < 56;
             case LineHeight: return direction < 0 ? draft.line_height > 1.35001 : draft.line_height < 1.64999;
@@ -6358,6 +6451,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     void back() {
         if (view == View::NetworkClosing) return;
         if (network_worker_id && active_network) { wait_network(Back); return; }
+        if (view == View::Typography && font_picker_open) { cancel_font_picker(); overlay(); return; }
         if (view == View::TextEntry) {
             const auto field = entry.field;
             entry = {};
@@ -6604,6 +6698,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         draw_wifi(); overlay();
     }
     void control(int id) {
+        if (view == View::Typography && font_picker_open && id != FullRefresh) {
+            font_picker_control(id); return;
+        }
         if (view == View::Update && update_control(id)) return;
         if (id == UpdateOpen) { update_open(); return; }
         if (id == SleepCustom) { draft.sleep_screen = "custom"; draw_power(); overlay(); return; }
@@ -6893,6 +6990,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (!begin_settings_edit())
                 return;
             draft = edit_snapshot.config.settings;
+            font_picker_open = false;
             parameter = FontSize;
             reset_overrides = false;
             book_scope = true;
@@ -7179,6 +7277,22 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
             break;
         case FontChoice:
+            font_entry = draft.font;
+            font_entry_weight = draft.font_weight;
+            font_entry_reset = reset_overrides;
+            {
+                auto at = std::find(fonts.begin(), fonts.end(), draft.font);
+                if (at == fonts.end()) {
+                    // One extra entry keeps a missing configured font visible after the scan's 256 files.
+                    if (fonts.size() < 257) fonts.push_back(draft.font);
+                    else fonts.back() = draft.font;
+                    at = fonts.end() - 1;
+                }
+                font_picker_page = static_cast<std::size_t>(at - fonts.begin()) / fonts_per_screen;
+            }
+            font_picker_open = true;
+            draw_typography();
+            break;
         case FontWeight:
         case FontSize:
         case LineHeight:
@@ -7201,13 +7315,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         case Plus: {
             reset_overrides = false;
             const int direction = id == Plus ? 1 : -1;
-            if (parameter == FontChoice) {
-                auto i = std::find(fonts.begin(), fonts.end(), draft.font);
-                auto n = i == fonts.end() ? 0 : static_cast<int>(i - fonts.begin());
-                n = std::clamp(n + direction, 0, static_cast<int>(fonts.size()) - 1);
-                draft.font = fonts[n];
-                draft.font_weight = "regular";
-            } else if (parameter == FontWeight) {
+            if (parameter == FontWeight) {
                 const std::array<std::string, 4> weights{{"light", "regular", "medium", "bold"}};
                 const auto at = std::find(weights.begin(), weights.end(), draft.font_weight);
                 const int first = light_available(draft) ? 0 : 1;
