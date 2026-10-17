@@ -10,7 +10,7 @@
 
 beta.6 第 1 项已完成代码精简：翻页效果仅保留关闭和水波纹，删除文字转页 A/B/C 的界面、诊断命令及驱动实现；非正文逐像素保持收窄为独立纯函数。已随 `0.2.0-beta.6` 发布，上一页反向与分页字体选择仍待真机验证。本批验证与未测边界见文末记录。
 
-腾讯云固件下载镜像已部署于 `https://oc.wulu.zone/firmware/`（2026-10-17）：Ubuntu 26.04、Caddy 2.11.7，已手动更新 beta.6 的两个发布镜像及镜像专用清单，保留 beta.5 版本文件。公网完整下载与附件逐字节核对、HTTPS、HEAD、Range、404 和拒绝写入检查通过；Caddy 专用用户及只读目录、最小能力集、UFW、SSH 限速和 Fail2ban 已生效，Ubuntu 安全源与 Caddy 稳定源自动更新 dry-run 通过。设备固定清单入口和发布工作流未切换，官网另行手动更新为 beta.6；新内核已安装但待重启，设备 OTA、同条件提速、后续版本自动上传和地区分流仍未验收或实现。运维边界见[固件下载镜像](firmware-hosting.md)，完整记录见本日「腾讯云固件下载镜像与主机防护」。
+腾讯云固件下载镜像已部署于 `https://oc.wulu.zone/firmware/`（2026-10-17）：Ubuntu 26.04、Caddy 2.11.7，已手动更新 beta.6 的两个发布镜像及镜像专用清单，保留 beta.5 版本文件。公网完整下载与附件逐字节核对、HTTPS、HEAD、Range、404 和拒绝写入检查通过；Caddy 专用用户及只读目录、最小能力集、UFW、SSH 限速和 Fail2ban 已生效，Ubuntu 安全源与 Caddy 稳定源自动更新 dry-run 通过。设备固定清单入口和发布工作流未切换，官网另行手动更新为 beta.6；已按用户授权重启至内核 `7.0.0-38-generic` 并核对服务、防火墙和 HTTPS，设备 OTA、同条件提速、后续版本自动上传和地区分流仍未验收或实现。运维边界见[固件下载镜像](firmware-hosting.md)，完整记录见本日「腾讯云固件下载镜像与主机防护」。
 
 `0.2.0-beta.5` 已于 2026-10-16 23:32（UTC+8）作为预发布发布，标签 `v0.2.0-beta.5` 指向 `6d62876`。干净标签的 release 构建与来源检查通过，main 和标签的 host、web CI 均通过；Linux Debug 与 ASan/UBSan/LSan 各 24/24。四个附件下载核验通过，发布触发的官网部署 `38924724866` 通过，线上清单和两个镜像与附件逐字节一致，安装页与更新日志均显示 beta.5。发布范围见[本版说明](releases/0.2.0-beta.5.md)，完整结果见本日「发布 0.2.0-beta.5」记录；既有 Issue、许可缺口和真机未验项保持原状态。
 
@@ -6901,3 +6901,13 @@ Caddy 配置在 `/etc/caddy/Caddyfile`，只允许 GET/HEAD 读取允许命名�
 ## 2026-10-17 · beta.6 正式发布属性与服务器重启
 
 用户明确要求 beta.6 使用正式发布属性，并授权重启腾讯云服务器使新内核生效，重启后核对 Caddy、防火墙及固件下载。已执行 `gh release edit v0.2.0-beta.6 --repo eMUQI/pico-page --prerelease=false --latest`，读回 `isDraft=false`、`isPrerelease=false`。版本号仍为 `0.2.0-beta.6`，标签和四个附件保持原样；取消 GitHub 预发布标记不代表补齐真机验收。原 SSH 共享连接已按上一批结束流程清理，当前免密登录不可用，重启前后分别由用户在终端认证，密码不进入聊天或仓库。重启及核验结果在本节补记。
+
+
+重启前通过用户重新建立的 SSH 共享连接核对：运行内核为 `7.0.0-30-generic`，`/boot/vmlinuz` 和 initrd 均已指向 `7.0.0-38-generic`；Caddy、UFW、Fail2ban、SSH 均 enabled，防火墙 active。随后执行 `sudo -n systemctl reboot`。重启期间 HTTPS 连接短暂失败，有限重试后恢复，未关闭 TLS 校验或防火墙。用户在本机终端重新登录，核对服务器启动时间为 2026-10-17 22:47:23（UTC+8），启动标识与重启前不同，当前内核为 `7.0.0-38-generic`，`/var/run/reboot-required` 已不存在。
+
+重启后 Caddy、UFW、Fail2ban 均 active 且 enabled。UFW 仍默认拒绝入站，仅允许 TCP 80、443，并限速 TCP 22，IPv4/IPv6 均保留；Fail2ban 的 sshd jail 已启动。Caddy 管理端口仍仅绑定 `127.0.0.1:2019`，公网监听仅 TCP 22、80、443；下载目录 `root:caddy 0750`、清单 `0640`，caddy 用户可读不可写，systemd 只读目录、`NoNewPrivileges`、`ProtectHome` 和仅 `CAP_NET_BIND_SERVICE` 的能力集仍有效。原始系统及访问记录仅保留在忽略目录，不提交到仓库。
+
+
+实际 IPv4/IPv6 INPUT 策略均为 DROP，UFW 用户链仍只允许限速 SSH、HTTP 和 HTTPS；腾讯云代理的前置链仅增加拒绝规则，没有提前放行绕过 UFW。当前启动的 Caddy 错误日志为空，`systemctl --failed` 没有失败服务。重启后域名 HTTPS 清单匹配，HEAD 200、Range 206 及返回字节正确，五类未公开或缺失路径返回 404，POST/PUT/DELETE/TRACE 均返回 405；清单缓存、官网 CORS 和 nosniff 响应头正确。公网直连服务器并保持 TLS 域名验证，完整下载 beta.6 的应用镜像 3,508,592 字节、全量镜像 3,574,128 字节，与正式附件逐字节一致；SHA-256 分别为 `de84ebe4bf17e3569ae11d87ecc02ca118411470f375365c33206c9435ed421c` 和 `16f28a1912d2c4cecd967d0583bbc4e00bb487fc0f420644d7ec3a65dd5e93af`，镜像清单复验通过。
+
+核验完成后关闭本次 SSH 共享监听，确认控制 socket 已清理，保留用户交互登录。更新镜像运维说明及当前摘要，历史「待重启」记录保持原样；`python3 tools/check_handoff.py` 499 项和 `git diff --check` 通过。本批未修改固件、网站源码、标签、清单或发布附件，不新增测试、不重复固件构建，未进行真机 OTA；控制台防护与下载提速的既有未验证项保持原状态。GitHub beta.6 的正式 Release 与 Latest 属性已在上一批读回确认。
