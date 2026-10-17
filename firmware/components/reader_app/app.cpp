@@ -1826,6 +1826,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     std::string footer_position_text() const {
         switch (footer_position) {
+        case reading_footer::Position::Hidden:
+            return {};
         case reading_footer::Position::Chapters:
             return "第 " + std::to_string(chapter_index + 1) + " 章 / 共 " + std::to_string(document.spine().size()) + " 章";
         case reading_footer::Position::ChapterName:
@@ -2748,7 +2750,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             // The system clock is restored from RTC or calibrated by on-demand networking.
             center(reading_footer::clock(std::time(nullptr), 8 * 60), reading_footer::device_left, 1156,
                    684 - reading_footer::device_left, 24, 3);
-        } else {
+        } else if (footer_device == reading_footer::Device::Battery) {
             const auto level = battery_percent ? std::to_string(*battery_percent) + "%" : "—";
             const int level_width = text_width(level, 24);
             const int level_x = 648 - level_width;
@@ -7448,13 +7450,17 @@ struct ReaderApp::Impl final : DisplayBackend {
                          (input.touch_bounds->min_x >= reading_footer::device_left) != device ||
                          (input.touch_bounds->max_x >= reading_footer::device_left) != device)) return;
                     if (device) {
-                        footer_device = footer_device == reading_footer::Device::Battery
-                                            ? reading_footer::Device::Clock : reading_footer::Device::Battery;
+                        switch (footer_device) {
+                        case reading_footer::Device::Battery: footer_device = reading_footer::Device::Clock; break;
+                        case reading_footer::Device::Clock: footer_device = reading_footer::Device::Hidden; break;
+                        case reading_footer::Device::Hidden: footer_device = reading_footer::Device::Battery; break;
+                        }
                     } else {
                         switch (footer_position) {
                         case reading_footer::Position::Pages: footer_position = reading_footer::Position::Percent; break;
                         case reading_footer::Position::Chapters: footer_position = reading_footer::Position::ChapterName; break;
-                        case reading_footer::Position::ChapterName: footer_position = reading_footer::Position::Pages; break;
+                        case reading_footer::Position::ChapterName: footer_position = reading_footer::Position::Hidden; break;
+                        case reading_footer::Position::Hidden: footer_position = reading_footer::Position::Pages; break;
                         case reading_footer::Position::Percent: footer_position = reading_footer::Position::Chapters; break;
                         }
                     }

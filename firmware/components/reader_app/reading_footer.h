@@ -9,8 +9,8 @@
 #include <string_view>
 
 namespace pico_page::reading_footer {
-enum class Position { Pages, Chapters, ChapterName, Percent };
-enum class Device { Battery, Clock };
+enum class Position { Pages, Chapters, ChapterName, Percent, Hidden };
+enum class Device { Battery, Clock, Hidden };
 inline constexpr int device_left = 540;
 
 /** Formats a rounded whole-book percentage; uncounted pages use whole percent. */

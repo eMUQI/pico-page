@@ -1032,7 +1032,7 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     app.set_battery(75);
     opened(app, "Books/book.epub"); driver.present();
     // Dismiss any first-open notice, then return to the default page-count mode.
-    for (int i = 0; i < 4; ++i) { driver.tap(36, 1160); driver.present(); }
+    for (int i = 0; i < 5; ++i) { driver.tap(36, 1160); driver.present(); }
     if (fixture == "empty-label.epub" || fixture == "whitespace-label.epub") {
         driver.tap(342, 500); driver.present();
         assert(app.view() == View::Tools);
@@ -1097,6 +1097,10 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     toggle(540);
     assert(footer_pixels(app, 0, 540) == estimated && footer_pixels(app, 540, 684) != battery);
     toggle(600);
+    const auto hidden_device = footer_pixels(app, 540, 684);
+    assert(std::all_of(hidden_device.begin(), hidden_device.end(), [](auto pixel) { return pixel == 15; }));
+    assert(footer_pixels(app, 0, 540) == estimated);
+    toggle(600);
     assert(footer_pixels(app, 0, 540) == estimated && footer_pixels(app, 540, 684) == battery);
     toggle(539);
     const auto chapters = footer_pixels(app, 0, 540);
@@ -1106,6 +1110,26 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     const auto chapter_name = footer_pixels(app, 0, 540);
     assert(chapter_name != chapters && footer_pixels(app, 540, 684) == battery);
     expect_text(title);
+    toggle(36);
+    expect_text("");
+    assert(footer_pixels(app, 540, 684) == battery);
+    toggle(600); toggle(600);
+    assert(footer_pixels(app, 540, 684) == hidden_device);
+    const auto hidden_pixels = app.canvas().pixels();
+    driver.refresh(); unchanged();
+    assert(app.canvas().pixels() == hidden_pixels);
+    if (fixture == "valid.epub") {
+        assert(app.begin_sleep()); driver.present();
+        assert(app.canvas().pixels() != hidden_pixels);
+        app.cancel_sleep(); driver.present(); unchanged();
+        assert(app.canvas().pixels() == hidden_pixels);
+    }
+    app.set_battery(75, true);
+    assert(!app.pending_frame() && app.canvas().pixels() == hidden_pixels);
+    app.set_battery(75, false);
+    assert(!app.pending_frame() && app.canvas().pixels() == hidden_pixels);
+    toggle(600);
+    expect_text("");
     toggle(36);
     assert(footer_pixels(app, 0, 540) == page_waiting && footer_pixels(app, 540, 684) == battery);
     const auto pixels = app.canvas().pixels();
@@ -1135,6 +1159,7 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     toggle(36);
     assert(footer_pixels(app, 0, 540) != page_waiting);
     toggle(600);
+    toggle(600);
     assert(footer_pixels(app, 540, 684) == battery);
     unchanged();
 
@@ -1163,6 +1188,8 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     app.set_battery(75, true);
     assert(!app.pending_frame() && app.canvas().pixels() == clock_pixels);
     toggle(600);
+    assert(footer_pixels(app, 540, 684) == hidden_device);
+    toggle(600);
     assert(footer_pixels(app, 540, 684) == charging);
     app.set_battery(75, false);
     assert(app.pending_frame());
@@ -1187,7 +1214,7 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     assert(app.pending_frame() && footer_pixels(app, 540, 684) != unknown_charging);
     driver.present(); unchanged();
     app.set_battery(75, false);
-    toggle(600); toggle(600);
+    toggle(600); toggle(600); toggle(600);
     assert(footer_pixels(app, 540, 684) == battery);
 
     if (fixture == "nonlinear-footer.epub") {
@@ -1196,8 +1223,8 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
         assert(app.view() == View::Contents);
         driver.tap(300, 522 + 92 + 46); driver.present(); driver.complete_content();
         assert(app.view() == View::Reading && app.saved_record()->anchor.resource.find("chapter2") != std::string::npos);
-        // Chapters -> chapter name -> pages -> percentage, with one extra cycle to clear notices.
-        for (int i = 0; i < 7; ++i) { driver.tap(36, 1160); driver.present(); }
+        // A complete cycle clears notices before returning from chapters to percentage.
+        for (int i = 0; i < 9; ++i) { driver.tap(36, 1160); driver.present(); }
         expect_text("100.00%");
         return;
     }
