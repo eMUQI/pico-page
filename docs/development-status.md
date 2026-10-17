@@ -6707,3 +6707,9 @@ NUL 路径补丁验证：host Debug 24/24（41.85 秒）、AppleClang ASan/UBSan
 通过 `gh release edit --notes-file` 和 `gh release upload --clobber` 只更新说明正文与 manifest，随后读回正文和清单，确认与本地一致。清单除 `notes` 外的字段逐项不变，并使用原 release 应用镜像经 `ota_manifest.build_manifest()` 校验；两个固件附件及 provenance 的远端元数据均未变化。原发布标签、固件和版本号保持不变，历史发布时的镜像校验结果仍适用。
 
 本批仅调整文案，执行 `python3 tools/check_handoff.py` 和 `git diff --check`，不新增测试或重建固件；没有连接或刷写设备。读回和清单核验文件位于忽略目录 `.local/beta5-note-edit/`。
+
+## 2026-10-17 · beta.6 路线图
+
+用户要求更新下个测试版本的 roadmap，新增三项待实现计划：翻页效果仅保留水波纹及关闭选项，上一页的水波纹相对下一页反向，优化字体选择页面设计。已在 `docs/roadmap.md` 新增 beta.6 计划，并同步 R10 总览、范围、验收与待确认项；beta.5 的遗留问题继续独立跟踪，不自动全部纳入下一版。
+
+本批只修改计划，保留现有固件行为、会话内效果选择及默认关闭规则；`firmware/version.txt` 仍为 `0.2.0-beta.5`，进入固件实现阶段时再更新版本号。字体选择页沿用原入口和视觉，具体布局尚未设计。本轮未新增测试、构建或设备操作；`python3 tools/check_handoff.py` 492 项通过，`git diff --check` 通过。用户随后授权提交并推送本批路线图和配套记录。
