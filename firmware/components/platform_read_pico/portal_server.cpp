@@ -186,9 +186,17 @@ esp_err_t upload(httpd_req_t* request) {
     char block[2048];
     while (transaction->received() < request->content_len) {
         // Not reading lets TCP flow control hold the sender for the duration of a panel update.
-        while (presenting() && !(cancelled && cancelled->load())) vTaskDelay(pdMS_TO_TICKS(10));
-        if (cancelled && cancelled->load()) return fail(closed);
+        // A stalled sender holds the gate for at most recv_wait_timeout, after which the upload fails.
+        while (!presentation_gate.try_network()) {
+            if (cancelled && cancelled->load()) return fail(closed);
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        if (cancelled && cancelled->load()) {
+            presentation_gate.finish_network();
+            return fail(closed);
+        }
         const auto count = httpd_req_recv(request, block, std::min<std::size_t>(sizeof(block), request->content_len - transaction->received()));
+        presentation_gate.finish_network();
         if (count <= 0) return fail(interrupted);
         if (transaction->append(transaction->received(), block, count, error) != StoreStatus::Ok)
             return fail(write_failed);

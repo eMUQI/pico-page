@@ -4690,7 +4690,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!manifest || offer == update::Offer::Current || offer == update::Offer::Skipped) {
             update_head(development ? "当前版本 · 开发构建" : "当前版本", running_version);
             canvas.line(36, 300, 647, 300, 1, 2);
-            text(!manifest ? "尚未检查更新" : offer == update::Offer::Skipped ? "没有可安装的更新" : "已是最新版本", 36, 328, 30, 612, 1, true);
+            text(!manifest ? "尚未检查更新" : offer == update::Offer::Skipped ? "没有可安装的更新" : "上次检查未发现新版本", 36, 328, 30, 612, 1, true);
             int y = 384;
             if (manifest) { text(update_checked(), 36, y, 24, 612, 3); y += 52; }
             if (offer == update::Offer::Skipped)

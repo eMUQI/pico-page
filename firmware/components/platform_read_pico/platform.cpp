@@ -42,6 +42,7 @@
 #include "sc7a20h.h"
 
 namespace pico_page::platform {
+DisplayNetworkGate presentation_gate;
 namespace {
 constexpr char tag[] = "pico_platform";
 constexpr int key_area_top = 1300;
@@ -53,7 +54,6 @@ bool attempted = false;
 bool ready = false;
 bool display_ready = false;
 bool baseline_valid = false;
-std::atomic<bool> present_active{false};
 bool mounted = false;
 bool usb_owns_card = false;
 bool suppress_power = true;
@@ -649,11 +649,6 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
         (region && !region->fits(width, height))) {
         return failure(error, "Panel frame", ESP_ERR_INVALID_ARG);
     }
-    // Raised before the frame copy, which leaves receivers time to stop before the first scan.
-    struct Presenting {
-        Presenting() { present_active.store(true, std::memory_order_release); }
-        ~Presenting() { present_active.store(false, std::memory_order_release); }
-    } presenting_scope;
     const bool clear = full_clean || !baseline_valid;
     const EpdWaveform* pixel_table = nullptr;
     if (changed_pixels_only && !clear) {
@@ -740,7 +735,10 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
     return true;
 }
 
-bool presenting() { return present_active.load(std::memory_order_acquire); }
+void guard_flash_io(bool begin) {
+    if (begin) xSemaphoreTake(touch_lock, portMAX_DELAY);
+    else xSemaphoreGive(touch_lock);
+}
 
 InputDiagnostics input_diagnostics() {
     return {input_overflows.load(std::memory_order_relaxed),
@@ -752,6 +750,11 @@ bool poll(Event& event, std::string& error) {
     error.clear();
     if (!on_owner(error) || !ready) return false;
     const auto now = esp_timer_get_time();
+    // Share the sampler lock with OTA across complete I2C transactions, including task-side waits.
+    struct InputGuard {
+        InputGuard() { xSemaphoreTake(touch_lock, portMAX_DELAY); }
+        ~InputGuard() { xSemaphoreGive(touch_lock); }
+    } input_guard;
     if (sleep_report.due && now >= sleep_report.due) {
         sleep_report.due = 0;
         ESP_LOGI(tag, "Light sleep: wakes=%d rejected=%d pmu_retries=%d touch_edges=%d touch_low=%d "

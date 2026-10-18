@@ -24,6 +24,16 @@ sh tools/build_firmware.sh diagnostic
 
 已审计并编译保护主循环的输入、分发、帧完成、页数统计、Wi-Fi 阶段和网络任务资源明细，以及同步映射、HTTP 结果明细。内容 worker 的每次完成资源输出已移除，创建失败的资源证据保留为 WARN。`StageTimer` 和 ZIP 读/解析/checkpoint 的旧计时只在 `CONFIG_PICO_PAGE_LEGACY_PERF_LOG` 下执行。该兼容开关默认关闭，依赖诊断控制台且不能与 PERF_METRICS 同开；保留 `tools/summarize_reader_perf.py` 对旧日志的使用方式。没有关闭全局 ESP-IDF 日志，启动信息和 WARN/ERROR 仍保留。本次没有证据证明旧日志导致了卡顿。
 
+## OTA 分阶段计时
+
+启用 `CONFIG_PICO_PAGE_PERF_METRICS` 时，下载任务输出 `pico_ota_perf` 的 `start`、每 5% 的 `progress` 和终态 `end`，显示所有者另外输出逐帧 `frame`。计时使用 `esp_timer_get_time()`，字段以 `_us` 结尾的值均为单调微秒；这些串口输出位于聚合记录器的临界区之外。关闭开关时不读取时钟或输出日志，不改变正式发布配置。
+
+`end` 的 `read_us` 是全部读取步骤的墙钟总和；当前每步可在 `http_step()` 内多次轮询 `esp_http_client_read()`，计时包含 TCP 等待、TLS 解密、重试间隔、显示门控及任务调度，不等同于单纯的公网传输时间；`write_us` 是全部 `esp_ota_write()` 的总和；旧顺序擦写实现包含逐扇区擦除，当前预擦除实现的擦除另计入 `begin_us`。`wait_us` 计下载任务等待 Flash/显示锁及输入事务锁的时间，`begin_us`、`digest_us`、`verify_us`、`connect_us` 和 `headers_us` 分别记录 OTA 初始化及预擦除、流式摘要、最终镜像校验、HTTPS 建连和响应头。`total_us` 从下载函数内准备 HTTP 连接到下载及校验返回，不包含之前的 Wi-Fi 连接、校时和清单检查，也不包含后续 HTTP 清理与页面确认。`read_calls` 是读取步骤数，一步可包含多次 SDK 轮询；`write_calls` 是实际写入调用数；两项 `max_us` 分别是最长读取步骤与最长写入调用的墙钟耗时；失败时同样输出已完成字节及对应阶段数据，不能将失败样本当作完整下载。
+
+`frame` 的 `present_us` 覆盖完整平台刷新调用，另列等待 Flash 锁及已有 copy/power/draw 分项。HTTPS 与屏幕现由门控串行执行，等待显示的时间计入相应网络阶段墙钟，刷屏总耗时不能与下载阶段直接相加；下载任务的 `wait_us` 仅说明直接等待显示/Flash 锁及输入事务锁的时间，不包含网络门控等待。`begin_us` 包括初始块及后续预擦除，`erase_max_us` 为最长单块擦除；`write_us` 不再包含顺序扇区擦除。按 `start`/`end` 时间选取相交帧，完整帧时长与窗口内相交时长分开报告，避免把最后一次刷新在下载结束之后的部分算入下载总时长。`connect_us` 和 `headers_us` 累计探测及擦除后下载两次连接。原始字节、构建来源、生效配置、完整镜像大小及摘要、网络条件、样本数和未测项须随结果保留；5% 区间分布不是单次 4 KiB 读取或擦写的完整分布。
+
+本项目使用的 ESP-IDF 为 v6.1；参考同版本的 [native_ota_example](https://github.com/espressif/esp-idf/blob/v6.1/examples/system/ota/native_ota_example/main/native_ota_example.c)、[advanced_https_ota](https://github.com/espressif/esp-idf/blob/v6.1/examples/system/ota/advanced_https_ota/main/advanced_https_ota_example.c#L400-L413)、[OTA 性能说明](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/api-reference/system/ota.html#tuning-ota-performance)及 [Wi-Fi 性能与省电说明](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/api-guides/wifi-driver/wifi-performance-and-power-save.html)。官方示例用于对照机制，不替代本板的取消、显示、电源和内存验收。
+
 ## 指标与事件语义
 
 记录器仅供任务上下文调用，禁止 ISR 使用。应用任务、网络 worker 和内容 worker 的写入由 ESP-IDF `portMUX` 跨核临界区串行化；临界区只读单调时钟并更新固定数据，不做 I/O、分配、格式化或等待队列。host 使用互斥锁测试同一记录器逻辑。没有新增任务、栈、优先级、亲和性或取消协议，原有任务仍独占业务对象。缓冲满时丢弃新事件并增加 `dropped`，聚合计数继续更新。最长新增临界区是一份固定事件或快照的更新/复制；实际微秒开销待真机测量。

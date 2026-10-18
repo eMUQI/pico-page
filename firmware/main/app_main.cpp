@@ -382,8 +382,13 @@ void update_written(void* context, std::uint32_t written) {
     xQueueOverwrite(update_events, &event);
 }
 void guard_flash(void*, bool begin) {
-    if (begin) xSemaphoreTake(flash_lock, portMAX_DELAY);
-    else xSemaphoreGive(flash_lock);
+    if (begin) {
+        xSemaphoreTake(flash_lock, portMAX_DELAY);
+        pico_page::platform::guard_flash_io(true);
+    } else {
+        pico_page::platform::guard_flash_io(false);
+        xSemaphoreGive(flash_lock);
+    }
 }
 /**
  * Fetches the update manifest or streams the firmware image into the inactive slot. The link
@@ -500,6 +505,14 @@ void network_worker(void *) {
     }
 }
 bool present(pico_page::ReaderApp &app) {
+    auto& gate = pico_page::platform::presentation_gate;
+    if (!app.pending_frame()) { gate.cancel_display(); return true; }
+    // Deferred presentation is not a display failure; the main loop continues to handle input.
+    if (!gate.try_display()) return true;
+    struct Release {
+        pico_page::platform::DisplayNetworkGate& gate;
+        ~Release() { gate.finish_display(); }
+    } release{gate};
     while (app.pending_frame()) {
         ++presentation_sequence;
         std::string error;
@@ -518,7 +531,9 @@ bool present(pico_page::ReaderApp &app) {
         pico_page::platform::set_page_waveform(use_effect ? selected :
             app.fast_page_updates() ? PageWaveform::Gray8 : PageWaveform::Gray16,
             app.pending_frame()->reverse_page_effect);
+        PP_DIAGNOSTIC(const auto frame_wait_started = esp_timer_get_time();)
         if (flash_lock) xSemaphoreTake(flash_lock, portMAX_DELAY);
+        PP_DIAGNOSTIC(const auto frame_present_started = esp_timer_get_time();)
         PP_DIAGNOSTIC(const auto measurement = diag::begin(diag::Kind::Frame,
             {app.pending_frame()->token.session, app.pending_frame()->token.layout,
              presentation_sequence, app.pending_frame()->token.request,
@@ -527,8 +542,18 @@ bool present(pico_page::ReaderApp &app) {
             app.canvas().data(), app.canvas().pixels().size(),
             app.pending_frame()->refresh == pico_page::RefreshIntent::FullClean, error, app.pending_frame()->region,
             app.pending_frame()->changed_pixels_only);
+        PP_DIAGNOSTIC(const auto frame_present_finished = esp_timer_get_time();)
         if (flash_lock) xSemaphoreGive(flash_lock);
         PP_DIAGNOSTIC(diag::end(measurement, okay ? diag::Outcome::Success : diag::Outcome::Failure);)
+        PP_DIAGNOSTIC(
+            const auto frame_timing = pico_page::platform::present_timing();
+            ESP_LOGI("pico_ota_perf", "frame at_us=%lld seq=%llu ok=%d wait_us=%lld present_us=%lld copy_us=%lld power_us=%lld draw_us=%lld",
+                     static_cast<long long>(frame_present_started), static_cast<unsigned long long>(presentation_sequence), okay,
+                     static_cast<long long>(frame_present_started - frame_wait_started),
+                     static_cast<long long>(frame_present_finished - frame_present_started),
+                     static_cast<long long>(frame_timing.copy_us), static_cast<long long>(frame_timing.power_us),
+                     static_cast<long long>(frame_timing.draw_us));
+        )
         pico_page::console::frame_completed(*app.pending_frame(), okay);
 #ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
         const auto completed = esp_timer_get_time();
@@ -663,7 +688,7 @@ extern "C" void app_main() {
         app->set_battery(battery.valid ? std::optional<int>(battery.percent) : std::nullopt, battery.charging,
             !sleep_requested && !resume_input.active() && !physical_source &&
             !pico_page::platform::input_waiting_before(std::numeric_limits<std::int64_t>::max()));
-        if (app->pending_frame() && !present(*app) && sleep_requested) {
+        if (!present(*app) && sleep_requested) {
             app->cancel_sleep();
             sleep_requested = false;
             resume_input.begin();
@@ -855,7 +880,7 @@ extern "C" void app_main() {
                 }
             }
         }
-        if (sleep_requested) app->stop_wifi(true);
+        if (sleep_requested && !app->pending_frame()) app->stop_wifi(true);
         if (!usb_mode && sleep_requested && !network_busy && !radio_active.load() && !physical_source &&
             !pico_page::console::transfer_active()) {
             sleep_requested = !sleep_now();

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pico_page/core.h"
+#include "display_network_gate.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -77,11 +78,16 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
              bool changed_pixels_only = false);
 
 /**
- * True from the start of a present() call until it returns; callable from any task.
+ * Serializes panel frames with network receive steps; callable from any task.
  * Wi-Fi reception during the panel scan delays the driver's line producers past the depth
- * of their queue, so a task that receives bulk data should stop reading while this is set.
+ * of their queue, so a task that receives bulk data reads only while it holds the network side.
  */
-bool presenting();
+extern DisplayNetworkGate presentation_gate;
+
+/** Network worker pairs these calls while holding the display/Flash lock.
+ * Prevents Flash cache suspension from interrupting touch, PMU and card-detect I2C transactions.
+ */
+void guard_flash_io(bool begin);
 
 /**
  * Polls one event; EventKind::None means no new event. Touch coordinates use
@@ -89,7 +95,8 @@ bool presenting();
  * InputReset cancels all prior contacts after queue overflow; input resumes after release.
  * A held input never repeats. Read failures cancel an active touch sequence.
  * A sampler task records touch and key events every 5 ms, including while the
- * application task is blocked; they are returned here in order with their sample time.
+ * application task is blocked, except while Flash operations or sleep hold the controller lock.
+ * Events are returned here in order with their sample time.
  */
 bool poll(Event& event, std::string& error);
 
