@@ -59,6 +59,8 @@ struct NetworkJob {
     // A firmware update check or download; update_failure reports how it ended.
     std::optional<pico_page::UpdateOperation> update = std::nullopt;
     pico_page::UpdateFailure update_failure = pico_page::UpdateFailure::None;
+    // Network the update request ran over; empty when no station link was established.
+    std::string joined = {};
 };
 QueueHandle_t requests = nullptr, responses = nullptr;
 QueueHandle_t wifi_events = nullptr;
@@ -402,16 +404,29 @@ void run_update(NetworkJob& job) {
     const auto perform = [&]() -> UpdateFailure {
         if (cancelled.load()) return UpdateFailure::Cancelled;
         if (!ensure_station(operation.targets, cancelled, job.error, job.failure)) return UpdateFailure::Link;
+        job.joined = station_target.ssid;
         publish_wifi(pico_page::WifiPhase::Clock, station_target.ssid);
         platform::ConnectFailure failure;
         if (!platform::synchronize_clock(job.error, &failure, &cancelled)) {
-            job.error = wifi_failure(station_target.ssid, failure);
-            return UpdateFailure::Link;
+            if (failure.stage != platform::ConnectFailure::Stage::Clock) {
+                job.error = wifi_failure(station_target.ssid, failure);
+                return UpdateFailure::Link;
+            }
+            job.error = "时间未校准";
+            return UpdateFailure::Internet;
         }
-        publish_wifi(pico_page::WifiPhase::Request, station_target.ssid);
-        if (operation.kind == pico_page::UpdateOperation::Kind::Check)
+        if (operation.kind == pico_page::UpdateOperation::Kind::Check) {
+            // A failed lookup separates a network without internet access from a failing server.
+            if (!platform::resolve_host(operation.url, job.error, &cancelled)) {
+                ESP_LOGW(tag, "Update check: %s", job.error.c_str());
+                job.error = "找不到服务器";
+                return UpdateFailure::Internet;
+            }
+            publish_wifi(pico_page::WifiPhase::Request, station_target.ssid);
             return platform::http_request("GET", operation.url, {}, "", job.body, job.status, job.error, &cancelled)
                 ? UpdateFailure::None : UpdateFailure::Network;
+        }
+        publish_wifi(pico_page::WifiPhase::Request, station_target.ssid);
         auto reason = platform::FirmwareFailure::None;
         std::uint64_t id = operation.id;
         const platform::FirmwareHooks hooks{update_written, guard_flash, &id};
@@ -430,8 +445,8 @@ void run_update(NetworkJob& job) {
         }
     };
     job.update_failure = perform();
-    // Only a link failure carries a sentence for the user; other diagnostics stay in the log.
-    if (job.update_failure != UpdateFailure::Link) job.error.clear();
+    // Only link and internet failures carry text for the user; other diagnostics stay in the log.
+    if (job.update_failure != UpdateFailure::Link && job.update_failure != UpdateFailure::Internet) job.error.clear();
     if (cancelled.load() && job.update_failure != UpdateFailure::None) job.update_failure = UpdateFailure::Cancelled;
 }
 #ifdef CONFIG_PICO_PAGE_PERF_METRICS
@@ -812,7 +827,8 @@ extern "C" void app_main() {
                 portal_stop.reset();
             } else if (completed->update)
                 app->complete_update(completed->update->id, completed->update_failure, completed->status,
-                                     completed->body, completed->error);
+                                     completed->body, completed->error, completed->failure,
+                                     completed->joined);
             else if (completed->wifi)
                 app->complete_wifi(completed->wifi->id, completed->nearby, completed->error, completed->failure);
             else

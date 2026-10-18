@@ -271,6 +271,13 @@ bool start_upload_server(const UploadServer& session, std::string& error);
 void stop_portal_server();
 
 /**
+ * Resolves the host of an HTTPS URL over the joined station link, between panel frames. The
+ * lwIP lookup itself cannot be interrupted and is bounded by its DNS retries; cancelled is
+ * checked before it starts. A successful answer stays in the lwIP cache for the request.
+ */
+bool resolve_host(const std::string& url, std::string& error, const std::atomic_bool* cancelled = nullptr);
+
+/**
  * Performs one HTTPS GET/PUT/POST after connect_network(), without redirects.
  * Certificate chain and server-name verification remain enabled. Request bodies
  * are limited to 16 KiB and responses to 32 KiB. true means complete transport;

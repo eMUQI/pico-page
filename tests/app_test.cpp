@@ -727,7 +727,7 @@ static void layout_review_test(const fs::path& root, const fs::path& fixtures, c
         assert(!library.can_long_press_at(300, 480));
         d.tap(600, 50); d.present(); d.tap(300, 560); d.present();
         assert(library.view() == View::InputSettings);
-        d.tap(300, 840); d.present();
+        d.tap(300, 260); d.present();
         assert(library_store.load_settings().settings.library_folders == "recent");
         d.tap(60, 50); d.present(); d.tap(60, 50); d.present();
         assert(library.view() == View::Library && library.can_long_press_at(300, 480));
@@ -740,7 +740,7 @@ static void layout_review_test(const fs::path& root, const fs::path& fixtures, c
         assert(library.initialize()); d.present();
         assert(!library.can_long_press_at(300, 480));
         d.tap(600, 50); d.present(); d.tap(300, 560); d.present();
-        d.tap(300, 840); d.present();
+        d.tap(300, 260); d.present();
         assert(library.status() == "最近阅读记录无法读取，暂按书名排序");
         d.tap(60, 50); d.present(); d.tap(60, 50); d.present();
         d.tap(300, 610); d.present(); d.complete_content();
@@ -1736,8 +1736,8 @@ static void update_test(const fs::path& root) {
         driver.tap(300, 856); driver.present(); assert(app.view() == View::Update);
     };
     const auto check = [&](ReaderApp& app, Driver& driver, int y, const std::string& body, int status = 200,
-                           UpdateFailure failure = UpdateFailure::None, const std::string& detail = "") {
-        driver.tap(300, y); driver.present();
+                           UpdateFailure failure = UpdateFailure::None, const std::string& detail = "", int x = 300) {
+        driver.tap(x, y); driver.present();
         assert(app.update_busy());
         const auto request = app.take_update_request();
         assert(request && request->kind == UpdateOperation::Kind::Check && request->url == update::manifest_url &&
@@ -1752,15 +1752,17 @@ static void update_test(const fs::path& root) {
         open_page(app, driver);
         assert(!fs::exists(root / "PicoPage/cache" / update::state_cache));
         // A failed check leaves nothing cached: no link, an HTTP error, another board, a malformed version.
+        // A failed check names its step; the retry is the primary button except after a Wi-Fi failure.
         check(app, driver, 1130, "", 0, UpdateFailure::Link, "找不到网络“home”。");
         check(app, driver, 1130, "not found", 404);
-        check(app, driver, 1130, "{\"manifest\":1,\"board\":\"other\"}");
-        check(app, driver, 1130, update_manifest("0.2"));
+        check(app, driver, 1130, "{\"manifest\":1,\"board\":\"other\"}", 200, UpdateFailure::None, "", 500);
+        check(app, driver, 1130, update_manifest("0.2"), 200, UpdateFailure::None, "", 500);
+        check(app, driver, 1130, "", 0, UpdateFailure::Internet, "找不到服务器", 500);
         assert(!fs::exists(root / "PicoPage/cache" / update::state_cache));
         // A request the worker has not taken ends at once; one it holds ends with its completion.
-        driver.tap(300, 1130); driver.present(); assert(app.update_busy());
+        driver.tap(500, 1130); driver.present(); assert(app.update_busy());
         driver.tap(300, 1130); driver.present(); assert(!app.update_busy() && !app.take_update_request());
-        driver.tap(300, 1130); driver.present();
+        driver.tap(500, 1130); driver.present();
         auto held = app.take_update_request(); assert(held);
         driver.tap(300, 1130); driver.present();
         assert(app.update_busy() && !network::live(held->cancelled));
@@ -1771,7 +1773,7 @@ static void update_test(const fs::path& root) {
         driver.present(); assert(!app.update_busy() && !fs::exists(root / "PicoPage/cache" / update::state_cache));
 
         check(app, driver, 1130, update_manifest("0.2.0-beta.2", update::progress_schema,
-              "## 新增\\n" + [] { std::string items; for (int i = 0; i < 60; ++i) items += "- 第 " + std::to_string(i) + " 项改动，说明文字较长以便换行和分屏。\\n"; return items; }()));
+              "## 新增\\n" + [] { std::string items; for (int i = 0; i < 60; ++i) items += "- 第 " + std::to_string(i) + " 项改动，说明文字较长以便换行和分屏。\\n"; return items; }()), 200, UpdateFailure::None, "", 500);
         auto cached = state();
         assert(cached.manifest && cached.manifest->version == "0.2.0-beta.2" && cached.pending_to.empty());
         // Release notes span several screens; K1/K3 turn them and the header returns.
@@ -1928,6 +1930,10 @@ static void update_test(const fs::path& root) {
         assert(confirm && confirm->kind == UpdateOperation::Kind::Check);
         app.complete_update(confirm->id, UpdateFailure::Network, 0, "", ""); driver.present();
         assert(!app.update_busy() && !app.take_update_request());
+        // The cause of the failed check stays on the page after leaving it and opening it again.
+        const auto failed = app.canvas().pixels();
+        driver.tap(60, 50); driver.present(); assert(app.view() == View::Settings);
+        driver.tap(300, 890); driver.present(); assert(app.view() == View::Update && app.canvas().pixels() == failed);
         driver.tap(300, 1040); driver.present();
         const auto again = app.take_update_request();
         assert(again && again->kind == UpdateOperation::Kind::Check);
@@ -2001,8 +2007,8 @@ static void return_origin_test(const fs::path& root, const fs::path& fixtures, b
             driver.tap(340, 640); driver.present(); assert(app.view() == View::PowerSettings);
             driver.tap(600, 750); driver.present();
         } else if (scenario == "typography-settings") {
-            driver.tap(300, 580); driver.present();
-            driver.tap(300, 250); driver.present(); driver.complete_content();
+            driver.tap(300, 400); driver.present(); assert(app.view() == View::Refresh);
+            driver.tap(300, 280); driver.present(); driver.complete_content();
             assert(app.view() == View::Typography);
         }
     } else {

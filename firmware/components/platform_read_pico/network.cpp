@@ -27,6 +27,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
+#include "lwip/netdb.h"
 #include "psa/crypto.h"
 
 namespace pico_page::platform {
@@ -455,6 +456,29 @@ std::string station_address() {
 
 bool station_connected() {
     return connected && events && (xEventGroupGetBits(events) & has_address);
+}
+
+bool resolve_host(const std::string& url, std::string& error, const std::atomic_bool* cancelled) {
+    error.clear();
+    if (!valid_url(url)) { error = "Invalid HTTPS URL"; return false; }
+    if (!connected || network_owner != xTaskGetCurrentTaskHandle() || !events ||
+        !(xEventGroupGetBits(events) & has_address)) {
+        error = "Wi-Fi is not connected";
+        return false;
+    }
+    const auto host = url.substr(8, url.find_first_of("/?#:", 8) - 8);
+    const int result = http_step([&] {
+        addrinfo hints{};
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+        addrinfo* found = nullptr;
+        const int status = getaddrinfo(host.c_str(), nullptr, &hints, &found);
+        if (found) freeaddrinfo(found);
+        return status == 0 ? 0 : 1;
+    }, -1, esp_timer_get_time() + 25'000'000, cancelled);
+    if (result == 0) return true;
+    error = result < 0 ? "Name lookup cancelled or timed out" : "Name lookup failed for " + host;
+    return false;
 }
 
 bool http_request(const std::string& method, const std::string& url,

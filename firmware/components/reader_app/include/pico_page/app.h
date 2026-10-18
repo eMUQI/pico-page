@@ -109,7 +109,8 @@ struct NetworkOperation {
 enum class UpdateFailure {
     None,
     Cancelled,
-    Link,        // No station link or clock; detail holds a sentence for the user.
+    Link,        // No station link; detail holds a sentence for the user.
+    Internet,    // Joined, but network time or the server name was not obtained; detail holds a short cause.
     Network,     // The transfer failed or was interrupted.
     Server,      // The server did not answer with the requested file.
     Mismatch,    // Length or digest differs from the manifest.
@@ -338,11 +339,12 @@ class ReaderApp {
     void update_progress(std::uint64_t id, std::uint32_t bytes);
     /**
      * Ends the request with this ID after the worker released its resources. A check passes the
-     * HTTP status and body; a completed download passes UpdateFailure::None and leaves the
+     * HTTP status and body; link names the Wi-Fi cause of a Link failure and ssid the joined
+     * network, empty when none was joined. A completed download passes UpdateFailure::None and leaves the
      * verified image waiting for a restart requested through take_power_request().
      */
     void complete_update(std::uint64_t id, UpdateFailure failure, int status, const std::string& body,
-                         const std::string& detail);
+                         const std::string& detail, LinkFailure link = LinkFailure::None, const std::string& ssid = "");
     /** True from a check or download request until its completion; the device stays awake meanwhile. */
     bool update_busy() const;
     /**
