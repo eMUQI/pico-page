@@ -4592,11 +4592,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         return offer == update::Offer::Newer || offer == update::Offer::NewerSchema || offer == update::Offer::Development;
     }
     bool update_waiting() const { return update_request || update_worker; }
-    /** Why the battery forbids an installation now; empty at 20% or above, or on external power. */
+    /** Why the battery forbids installation; empty at 20% or above, or while charging. */
     std::string update_battery_block() const {
         if (battery_charging || (battery_percent && *battery_percent >= 20)) return {};
         return battery_percent ? "电量 " + std::to_string(*battery_percent) + "%。充电或电量到 20% 以上再安装。"
-                               : "电量未知。接上电源后再安装。";
+                               : "电量未知。请确认设备正在充电后再安装。";
     }
     /** Why an installation cannot start now; empty when it can. */
     std::string update_block() const {
@@ -5271,7 +5271,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             {x + left, y, right - left, foot, HelpTools}, {x + right, y, width - right, foot, HelpNext},
             {x, y + foot, device, height - foot, HelpPosition}, {x + device, y + foot, width - device, height - foot, HelpDevice}}};
         for (const auto& zone : zones) {
-            canvas.fill_rect(zone.x, zone.y, zone.w, zone.h, zone.id == help_zone ? 1 : 15);
+            const bool hidden = help_page == 3 && ((zone.id == HelpPosition && help_position == 4) ||
+                (zone.id == HelpDevice && help_device == 2));
+            canvas.fill_rect(zone.x, zone.y, zone.w, zone.h, zone.id == help_zone && !hidden ? 1 : 15);
             hits.push_back(zone);
         }
         for (int split : {left, right}) canvas.line(x + split, y, x + split, y + foot, 9, 2);
@@ -5298,13 +5300,14 @@ struct ReaderApp::Impl final : DisplayBackend {
             center("点按示例 · 不改变阅读位置", 36, 646, 612, 26, 1, true);
             center("点任一区域，查看对应操作", 36, 700, 612, 24);
             center("按 K1 / K3 或左右轻扫离开", 36, 754, 612, 24);
-            const char* positions[] = {"第 12 / 340 页", "3.53%", "第 2 / 10 章", "第一章 从一页开始"};
+            const char* positions[] = {"第 12 / 340 页", "3.53%", "第 2 / 10 章", "第一章 从一页开始", ""};
             text(positions[help_position], 36, 1154, 24, 476, help_zone == HelpPosition ? 15 : 1);
-            center(help_device ? "12:00" : "84%", 540, 1154, 144, 24, help_zone == HelpDevice ? 15 : 1);
+            const char* devices[] = {"84%", "12:00", ""};
+            center(devices[help_device], 540, 1154, 144, 24, help_zone == HelpDevice ? 15 : 1);
             return;
         }
         help_regions(36, 276, 274, 486);
-        const char* labels[] = {"左侧：上一页", "中部：打开工具", "右侧：下一页", "页脚左：切换位置", "页脚右：电量 / 时钟"};
+        const char* labels[] = {"左侧：上一页", "中部：打开工具", "右侧：下一页", "页脚左：切换位置", "页脚右：切换状态"};
         for (int i = 0; i < 5; ++i) {
             const int id = HelpPrevious + i, y = 290 + i * 88;
             if (help_zone == id) canvas.fill_rect(330, y, 330, 72, 1);
@@ -5315,9 +5318,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         for (int i = 0; i < 3; ++i)
             button(HelpKey1 + i, "K" + std::to_string(i + 1), 24 + i * 216, 842, 204, 72, help_key == HelpKey1 + i, 26);
         const char* description = help_key == HelpKey2 ? "所有可交互页面：立即全刷。" :
-            help_key == HelpKey1 ? "正文：上一页。书库、目录、说明：上一屏。" : "正文：下一页。书库、目录、说明：下一屏。";
+            help_key == HelpKey1 ? "正文：上一页。书库、目录、书签、说明：上一屏。" : "正文：下一页。书库、目录、书签、说明：下一屏。";
         wrapped(description, 36, 942, 612, 24);
-        text(help_key == HelpKey2 ? "不关闭面板，不改变阅读位置。" : "工具、排版和键盘中不翻动正文。", 36, 1030, 24, 612, 3);
+        text(help_key == HelpKey2 ? "休眠准备时忽略 K2，不全刷。" : "工具、排版和键盘中不翻动正文。", 36, 1030, 24, 612, 3);
         footer_bar("", help_page, kHelpPages.size());
     }
     void draw_help() {
@@ -7388,8 +7391,8 @@ struct ReaderApp::Impl final : DisplayBackend {
             inspect_book(has_book() ? book_path : last_book); if (!display.busy()) overlay(); return;
         case HelpPrevious: case HelpTools: case HelpNext: case HelpPosition: case HelpDevice:
             help_zone = id;
-            if (id == HelpPosition) help_position = (help_position + 1) % 4;
-            if (id == HelpDevice) help_device = 1 - help_device;
+            if (id == HelpPosition) help_position = (help_position + 1) % 5;
+            if (id == HelpDevice) help_device = (help_device + 1) % 3;
             draw_help(); break;
         case HelpKey1: case HelpKey2: case HelpKey3:
             help_key = id; draw_help(); break;

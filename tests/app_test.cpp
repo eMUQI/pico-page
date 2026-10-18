@@ -508,8 +508,22 @@ static void help_test(const fs::path& root, const fs::path& fixtures, bool async
             driver.tap(index == 2 ? 60 : 600, index == 2 ? 350 : 400); driver.present();
             assert(app.canvas().pixels() != original && app.view() == View::Help);
             if (index == 3) {
-                driver.tap(100, 1160); driver.present();
-                driver.tap(600, 1160); driver.present();
+                for (const auto& cycle : {std::pair<int, int>{100, 5}, {600, 3}}) {
+                    driver.tap(cycle.first, 1160); driver.present();
+                    const auto selected = app.canvas().pixels();
+                    for (int step = 0; step < cycle.second; ++step) {
+                        driver.tap(cycle.first, 1160); driver.present();
+                    }
+                    assert(app.canvas().pixels() == selected);
+                    for (int step = 0; step < cycle.second - 2; ++step) {
+                        driver.tap(cycle.first, 1160); driver.present();
+                    }
+                    assert(app.canvas().pixel(cycle.first, 1140) == 15);
+                    driver.refresh();
+                    assert(app.canvas().pixel(cycle.first, 1140) == 15);
+                    driver.tap(cycle.first, 1160); driver.present();
+                    assert(app.canvas().pixel(cycle.first, 1140) == 1);
+                }
             }
         }
         driver.refresh();
