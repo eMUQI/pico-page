@@ -2,6 +2,8 @@
 
 ## 当前摘要（2026-10-18）
 
+CI 额度优化已创建 PR #116：PR 保留检查结果并按路径选择构建，移除分支 push 重复触发，增加取消、超时、缓存和网站产物保留期。完整本地 Debug 与 AppleClang ASan/UBSan 各 25/25，网站和标准固件构建通过；两轮 Linux Debug 与 ASan/UBSan/LSan 也各 25/25，README 旧说明及部署过期判断的审查问题已修正，最新提交的检查状态以 PR 为准。工作流修改尚未合并。已清理 195 个旧网站 artifact，剩余 44 个、855,414,301 字节；付费预算由用户自行设置。详见本日「CI 额度优化与旧网站产物清理」及后续 PR 记录。
+
 PR #115 的上传取消门控修复已推送为 `8add5b6`，该提交的 Codex review 无新问题（2026-10-18）。真机已验证 1 MiB 传书与 K2、发送端超时、取消后返回书库并继续全刷，未遗留取消文件。实际 OTA 路径尚未通过：官网正式清单的 HTTPS 建连重复超时，未收到状态码和正文，尚未进入腾讯云镜像下载；不能沿用旧候选的下载性能结论。设备已恢复留装 `8add5b6` 的诊断镜像，分区表和启动选择不变。GitHub CI 因账户付款或额度限制未启动；本地 Debug、ASan/UBSan 各 25/25。详情见本日「PR #115 当前路径真机验证」。
 
 OTA 吞吐修复已完成本地实现与同设备对照（2026-10-18）：同一 beta.6 应用 3,508,592 字节，局域网由 127.705–131.966 秒降至 33.158–33.297 秒（各 2 次），腾讯云由 341.317 秒降至 75.213 秒（各 1 次）。主要改为按 64 KiB 预擦除、擦除前后断开并重连下载、下载期关闭省电、32 KiB TCP 接收窗口，并将 HTTPS/显示及 Flash/I²C 事务错开。最终完整样本无欠载、触摸/PMU 告警或误报拔卡，取消及部分失败路径通过；8 轮 HTTPS 取消返回图片页的位置不变。历史 #49 原专项因未形成要求的图片/网络重叠仍为无法判定，未认领为本次新修复。Debug 25/25、新门控 sanitizer 1/1、标准与诊断构建通过；候选已提交 PR #115，尚未合并或发布，安装及回滚仍待验收。设备留装与原始证据见本日「OTA 吞吐与 HTTPS 显示互斥」。
@@ -7103,3 +7105,49 @@ OTA 未通过：主机读回的官网清单为 beta.6，下载地址仍是 `http
 原始证据与命令：`.local/pr115/install-reviewed.py`、`install-probe.py`、`install-final.py` 记录安装前核对、写入、独立验证及启动日志；`device-install/` 保存已审查镜像和 provenance，`device-install-final/` 记录最终恢复。`portal-tests-2/`、`portal-tests-5/`、`portal-final-check/`、`portal-results.json` 保存有效传书样本与独立断言；`production-check/`、`production-check-retry/`、`production-check-probe/` 保存正式清单失败证据，`production-cancel/` 未开始下载，不记为取消通过。临时脚本、页面令牌及原始日志不提交。没有修改远端服务、发布附件或合并 PR。
 
 收尾：通过书籍详情页核对 `PR115-current-path` 后使用现有删除确认流程清理合成文件，随后目录核对所有 `PR115-` 测试文件均不存在；设备返回原排序的书库首页，原继续阅读条目保持。资料批次执行 `python3 tools/check_handoff.py`（501 项）和 `git diff --check` 通过；本次后续提交仅记录验证结果，固件代码仍对应已审查和已测试的 `8add5b6`。下一步应先定位设备到官网清单的 HTTPS 建连超时，再补测实际腾讯云完整下载及取消；本轮不以临时镜像源替代正式路径，不认定 OTA 已验收。
+
+## 2026-10-18 · CI 额度优化与旧网站产物清理
+
+授权与范围：用户要求保留 GitHub Pro，实施已讨论的 CI 优化并保留必要的 PR 检查；付费预算由用户自行开启，拟设每月 10 美元。本批在原有干净工作区、`fix/ota-throughput-display` 分支、`8a76bbb` 基线上修改工作流及配套工具和资料，未修改固件源码、账户预算、付款方式或远端工作流，未提交、推送、合并、发布或刷写设备。
+
+变更：host 移除 push 触发，保留 PR 和手动入口；网站移除分支 push，main 仅对网站、发布说明、OTA 清单脚本及工作流依赖变更部署，保留 PR、Release 和手动入口。两个 PR 工作流均保留原检查名称，由共用的 `tools/ci_changes.py` 读取完整 Git 差异后选择耗时步骤，避免文档 PR 缺少检查结果。删除和重命名使用禁用 rename detection 的 NUL 分隔文件清单；差异读取失败时任务失败，新出现且未分类的路径默认执行完整 host 检查。轻量路径仍运行交接检查，路径选择自身增加 3 项必要回归，独立于 CTest 注册项。稳定运行规则已补入 `docs/environment.md`。
+
+执行与资源：同一 PR 更新取消旧运行，正式网站部署继续串行并保留过期提交判断、OTA 下载源比较及生产读回检查。固定 `ubuntu-24.04`，host 和网站超时分别为 20、15 分钟。保留 Python 3.12，使用镜像预装的 Clang、pkg-config 和 OpenSSL 开发文件；新增 ccache 并继续安装 SDL2、curl 开发文件。Debug 优化配置不变，sanitizer 使用 `-O1 -g`，保留断言、事件跟踪及 Linux ASan/UBSan/LSan 选项。GitHub 官方 `actions/cache@v5` 缓存摘要固定的字体／FreeType 下载输入与编译输出，不缓存测试结果；编译缓存由 CMake launcher 使用，编译器内容和参数参与命中判断，工作流中单份本地缓存上限为 256 MiB，未提高 GitHub 仓库缓存的付费容量上限。未新增固件任务、缓存或运行时资源。
+
+本地验证环境：macOS arm64、AppleClang 21.0.0、CMake 4.4.3、Python 3.14.7、Node 26.7.0；本地结果不替代 Ubuntu runner 上的 GCC／Clang、Python 3.12 和 Node 24 验证。actionlint 1.7.12 与 ccache 4.14.1 仅解压到忽略目录，下载包已按官方校验和或 GitHub 发布资产 SHA-256 核对，没有安装或更换全局工具链。
+
+验证命令与结果：`python3 -m unittest discover -s tests -p test_ci_changes.py -v` 为 3/3，覆盖文档、代码、网站、工作流、未知路径、混合提交、跨提交差异、删除／重命名、含换行文件名、缺失基线失败和无 Git 的手动运行；actionlint、YAML 与各 run 步骤的 `bash -n` 检查通过；主分支网站 paths 与共用 PR 路径集合一致，原 host／web job ID 保留。`python3 tools/setup_fonts.py` 对全部既有下载输入重新校验摘要通过，网站设置公开统计变量后 `npm run build` 通过。
+
+完整构建与测试：`build/ci-host` 使用 Debug 配置，`build/ci-sanitized` 使用与工作流一致的编译选项及事件跟踪；均由 ccache launcher 完成冷构建和 `--clean-first` 热缓存重编，`ctest -N` 均实际注册 25 项，包含 Node 传书页检查。完整 Debug CTest 25/25（43.98 秒），完整 `-O1` AppleClang ASan/UBSan CTest 25/25（39.65 秒）；未运行 LSan。生成编译选项中已核对 `-O1 -g`、`-UNDEBUG` 和事件跟踪定义，不存在 `-DNDEBUG`。本机链接器提示 OpenSSL dylib 的构建系统版本高于当前 deployment target，构建仍成功，未将结果记为零警告构建。
+
+单次本机对照：同一源码、样本与串行 CTest，使用 `caffeinate -i` 防止休眠，每种配置各 1 次；原无优化 sanitizer 完整 CTest 为 83.51 秒、app 为 74.54 秒，`-O1` 后分别为 39.65、28.93 秒，均 25/25。独立空编译缓存以 `CCACHE_MAXSIZE=256M` 测量，构建并行度为 2；Debug 冷／热重编为 13.451／1.997 秒，sanitizer 为 40.998／1.999 秒。两种配置首次构建分别产生 70 次 cache miss，各自热重编的 70 次调用均命中；最终缓存占用约 40 MB。测量未包含 GitHub runner 启动、apt、远端缓存传输和 job 分钟取整，不据此承诺月度费用或远端耗时。
+
+标准固件回归：复用已有 ESP-IDF 6.1（`fff9895c82d744c7237be8847347bdd1b07c6643`，保留既有本地修改）和 BSP／依赖锁，`sh tools/build_firmware.sh` 在允许组件管理器读取 sysctl 的环境通过。应用版本为 `0.2.0-beta.6+g8a76bbb.dirty`，BIN 为 3,536,208 字节，SHA-256 为 `edb2dcb5b7f1e0285899a2cf4ccc6d6fdba4467d379240a3797771f7f25d5cf5`；没有刷写或进行硬件验收。
+
+远端旧产物清理：先分页读取全部 239 个 artifact，确认名称均为 `pico-page-web`，仓库没有下载这些网站 artifact 的后续工作流；上传源为可重复生成的 `web/dist/`。按已同意的保留计划，仅删除创建于 2026-10-15 00:00（UTC+8）以前的 195 个网站包，共 3,477,883,259 字节。195 次删除均成功，分页读回确认清单 ID 均已不存在，剩余 44 个、855,414,301 字节；清理前为 4,333,297,560 字节。保留最近产物，未调用 Release 附件或 Cloudflare 部署删除接口。新工作流仅在通过过期提交判断的部署运行上传网站包，保留 3 天。
+
+证据位于忽略目录 `.local/ci-optimization/`：`baseline-results.json`、`cache-results.json`、`test-results.json` 和 `logs/` 保存配置、编译、CTest、缓存统计、字体校验、网站与固件构建日志；`artifacts-before.json`、`artifacts-cleanup.json`、逐项结果和 `artifacts-after.json` 保存清理清单与回查。`python3 tools/check_handoff.py` 为 501 项通过，`git diff --check` 通过。
+
+未测项与下一步：工作流尚未提交或推送，没有触发远端运行；Ubuntu 24.04 的完整 GCC／Clang 与 LSan、GitHub 缓存的冷／热传输、PR 自动取消及正式部署仍待远端验证。账户预算由用户自行处理。取得推送授权后再用实际 PR 核对上述行为，月度费用以完整计费周期的实际用量为准。
+
+## 2026-10-18 · CI 优化 PR 整理
+
+用户授权提交独立 PR。核对 OTA PR #115 已合并到 `main 5eea969`，该提交的源码树与本地验证基线 `8a76bbb` 完全相同，均为 `ed70197097b82e7f18e904c60a5a0f5d678e3832`。在原检出目录从最新 `origin/main` 建立 `chore/ci-cost-optimization`，保留本轮 6 个文件的改动；原 OTA 分支保持原提交，未创建 worktree。重新执行路径选择 3 项回归、actionlint、501 项交接检查及 diff 检查通过；未改固件源码，前一批完整 host、sanitizer、网站和固件构建证据仍见上述记录。提交和推送仅包含本轮 CI、路径工具及配套资料，PR 创建后核对当前 head 的远端检查。账户预算继续由用户管理，本批不合并或部署。
+
+## 2026-10-18 · CI PR #116 首轮远端检查与文档审查修正
+
+独立提交 `4f625e9` 已推送并创建 PR #116，目标为 main，未混入 OTA 源码改动。该提交只触发 host、web 各一次 pull_request 运行，无 push 重复运行。网站运行 `39100814110` 为 18 秒，构建及发布固件校验通过，产物上传和生产部署步骤按预期跳过。host 运行 `39100814116` 为 4 分 53 秒，Linux GCC Debug 与 Clang ASan/UBSan/LSan 各 25/25，完整 CTest 分别为 38.78、36.93 秒；sanitizer 的 app 为 33.25 秒，日志确认 detect_leaks=1。首次编译缓存和字体缓存均未命中，140 次编译全为 miss，两个缓存均已成功保存；sanitizer 冷构建耗时 140 秒，因此不认领冷缓存整条工作流已降至约 2.5 分钟。原始日志及步骤元数据保存在 `.local/ci-optimization/logs/remote-host.log` 和 `remote-*-run.json`。
+
+该提交的自动审查提出 1 项 P2：根 README 仍声称每次 push 跑 host，网站 README 仍声称每次构建上传 artifact。已同步两处现行说明，写清 PR 按路径检查、直接推 main 需手动补验、正式部署触发范围和网站产物仅在部署运行保留 3 天。此批只改文档，执行 `python3 tools/check_handoff.py`（502 项）与 `git diff --check` 通过，未重复本地 C++ 测试或固件构建。修正提交推送后再核对当前 head 的两项 CI、GitHub 缓存恢复和自动审查状态；不合并或部署。
+
+## 2026-10-18 · CI PR #116 部署过期判断修复
+
+提交 `6dcd4ae` 的 host、web CI 均通过，Linux Debug 与 ASan/UBSan/LSan 仍各 25/25。host 此轮为 219 秒，成功恢复首轮字体与编译缓存，新增 140 次编译调用中 138 次命中、2 次未命中；缓存统计保留了首轮计数，日志中的累计命中率不是本轮命中率。两轮使用不同 GitHub runner，耗时不作为稳定性能或计费承诺。旧提交 `10b0432` 的 host 运行已由并发配置自动取消，网站运行已在后续提交启动前完成。日志和步骤元数据位于 `.local/ci-optimization/logs/remote-host-warm.log` 与 `remote-host-warm-run.json`。
+
+自动审查另指出 1 项 P1：网站运行构建 A 时，main 若只增加文档或固件提交 B，路径过滤不会启动替代运行，但原来按 HEAD 是否等于 main 判断过期会放弃 A，导致有效网站或新发布固件无法部署。改为共用路径脚本直接比较 HEAD 与 FETCH_HEAD 的完整树差异，仅网站实际输入变化才让位给替代运行；PR 检查继续使用 merge-base 差异。同步修改部署注释和现行说明。另核对 GitHub 默认 Bash 不启用 pipefail，两个 Select checks 步骤显式使用 shell: bash，使 Git 差异读取失败不会被 tee 掩盖。
+
+扩展既有 3 项路径回归，覆盖旧构建面对后续无关提交和网站提交、缺失比较对象；原样提取网站过期判断及两个 PR 选择步骤，以本地 bare remote 验证无关 main 更新继续部署、网站输入变化设置 STALE、fetch 或比较失败中止，以及两个选择管道的失败传递。该补充脚本保存在忽略目录 `.local/ci-optimization/check_stale_gate.py`，不增加测试框架。3/3 回归、actionlint、502 项交接检查和 diff 检查通过。未修改 C/C++ 或固件配置，不重复本地固件和 C++ 测试；修正提交推送后核对当前 head 的远端 CI，正式部署不在本批执行。
+
+## 2026-10-18 · CI PR #116 部署说明补齐
+
+`8c6bfab` 的 host、web 检查均通过，Linux Debug 和 Clang ASan/UBSan/LSan 各 25/25，远端交接检查 502 项通过。该提交的自动审查没有新增代码问题，另指出网站 README 的独立「部署」章节仍保留每次 main 提交部署、其他分支自动构建及按提交号判断过期的旧说明；前次只同步了「持续集成」章节，遗漏此处。现已补齐部署触发条件、网站输入比较、排队替换和失败后的重跑说明，并同步「固件更新文件」中任意分支都有 artifact 的旧描述，明确历史产物可能包含旧固件。对根 README、网站 README、环境与镜像运维文档逐项检索相关触发、产物和过期说明，未改固件、工作流或脚本；502 项交接检查与 diff 检查通过。修正提交仅包含本段记录及网站说明，不合并或部署。

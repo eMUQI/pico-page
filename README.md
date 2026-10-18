@@ -170,7 +170,9 @@ python3 tools/check_handoff.py
 
 `ctest -N` 列出实际注册的测试。缺少字体资源或 Node 等可选依赖时，注册的测试会减少，这种情况下的全部通过不等于完整通过。
 
-CI 在每次推送和拉取请求时运行 host 测试、ASan/UBSan 测试和交接检查，配置见 [`.github/workflows/host.yml`](.github/workflows/host.yml)。网站由独立的 [`.github/workflows/web.yml`](.github/workflows/web.yml) 构建并保存静态产物，两项工作流均支持手动运行。CI 不构建固件，也不覆盖真机行为。
+CI 在拉取请求更新时按改动路径选择检查：代码和构建配置运行完整 host、ASan/UBSan/LSan 测试，仅文档或截图的改动保留交接检查，配置见 [`.github/workflows/host.yml`](.github/workflows/host.yml)。分支 push 和合并到 main 不再自动运行 host 检查，直接推送 main 的代码需要手动补验。
+
+网站由独立的 [`.github/workflows/web.yml`](.github/workflows/web.yml) 检查相关 PR，并在 main 的网站相关输入变更、发布 Release 或 main 上手动运行时部署。部署前比较最新 main 的网站输入，输入变化才让位给替代运行；通过该判断的部署运行保存静态产物，保留 3 天。两项工作流均支持手动运行，完整规则见[环境记录](docs/environment.md#github-actions)。CI 不构建固件，也不覆盖真机行为。
 
 开发时可以用桌面版在电脑上运行同一套阅读逻辑：`sh tools/run_host.sh`。桌面版不模拟墨水屏的波形、残影、触摸精度和耗电，不能代替真机验证，用法见[桌面运行接口](host/README.md)。
 
