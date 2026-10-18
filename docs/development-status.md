@@ -2,9 +2,11 @@
 
 ## 当前摘要（2026-10-18）
 
-OTA 超时恢复与同次下载内续传已有本地候选（2026-10-18）：30 秒读取空闲期限、至多 3 次重连及严格 Range/206 校验，保留 TLS、摘要、取消、预擦除及启动槽边界。仅供审阅，尚未发布或刷写；验证结果与限制见末尾「OTA 读取重试与会话内续传」。
+`0.3.0` 已获用户授权提交并发布（2026-10-18）：范围为 PR #120 的内置使用说明更新和 PR #121 的 OTA 读取重试与会话内续传。发布说明及版本文件齐备，本轮将从干净标签重新构建并验证附件与部署。第一台 Read Pico 仍装 release 配置候选 `0.3.0+g654625c.dirty`，仅写当前 `ota_1`，摘要、启动及单轮 40 秒启动与空闲检查通过；实体交互和 OTA 异常路径仍待验收。详见末尾「0.3.0 正式发布执行」。
 
-内置使用说明已更新为 12 屏（2026-10-18，本地候选）：补齐书签、页脚隐藏与固件更新，明确休眠仅电源短按取消及 K2 例外；互动示例与正文页脚的轮换顺序一致。Debug 与 ASan/UBSan 各 25/25、标准固件构建和 host 画布检查通过；未刷写。详情及未测项见末尾「内置使用说明更新」记录。
+OTA 超时恢复与同次下载内续传已通过 PR #121 合并（2026-10-18）：30 秒读取空闲期限、至多 3 次重连及严格 Range/206 校验，保留 TLS、摘要、取消、预擦除及启动槽边界。已安装于上述候选；正式发布状态及验证结果见本轮发布记录，异常路径限制见「OTA 读取重试与会话内续传」。
+
+内置使用说明已通过 PR #120 合并并更新为 12 屏（2026-10-18）：补齐书签、页脚隐藏与固件更新，明确休眠仅电源短按取消及 K2 例外；互动示例与正文页脚的轮换顺序一致。该批 Debug 与 ASan/UBSan 各 25/25、标准固件构建和 host 画布检查通过；未刷写。详情及未测项见末尾「内置使用说明更新」记录。
 
 `0.2.0-beta.7` 已于 2026-10-18 16:52（UTC+8）正式发布并设为 Latest，预发布标记关闭，标签 `v0.2.0-beta.7` 指向 `bf81d1f`。包含 PR #115–#118，发布说明已按用户要求移除「更新须知」。干净标签 release 构建、本机 Debug 与 AppleClang ASan/UBSan 各 25/25、标签 Linux Debug 与 Clang ASan/UBSan/LSan 各 25/25 及四附件读回通过。Release 事件运行 `39113125922` 自动完成腾讯云上传、清单及两个 BIN 的完整 HTTPS 比较、官网发布与线上核验；安装页和更新日志均显示 beta.7。本轮未刷写设备，完整 OTA 安装及回滚仍待验收。
 
@@ -7247,3 +7249,54 @@ PR #120 首轮 review 的两条 P2 均核实成立：满屏示例的隐藏页脚
 本地验证日志位于 `.local/ota-transport-20261018/`。新增 `firmware_resume` host 回归覆盖响应范围与长度、忽略 Range、重复/非法/32 位溢出边界、30 秒期限续期、3 次预算、取消预算和 20 分钟边界。完整 Debug 与 AppleClang ASan/UBSan 各 26/26 通过（实际注册 26 项）；`sh tools/build_firmware.sh` 在现有 ESP-IDF v6.1 环境构建通过，版本为 `0.2.0-beta.7+g79a521b.dirty`，之后仅完善 API 注释和交接记录。没有安装或修改工具链，保留原有 IDF 链接脚本补丁。504 项交接检查和 `git diff --check` 通过。host 链接器仍报告既有 OpenSSL/SDL 动态库目标 macOS 版本较新警告，未宣称零警告；本机 sanitizer 仅为 ASan/UBSan，不含 LSan。host 仅验证可隔离的协议与预算逻辑，不代表真实 TLS 重连、Wi-Fi 恢复、OTA 写入、取消清理、显示交错、实际吞吐或安装/回滚通过。
 
 用户随后要求实测；已构建 diagnostic 固件并核对应用摘要，但本机未检测到设备 USB 串口，未刷写或执行下载。诊断构建记录位于 `.local/ota-resume-device-20261018/`。用户再授权提交 PR；本批仅提交并推送上述 OTA 候选及配套资料，不发布、不合并、不修改服务器、不操作设备。真机异常路径及完整 OTA 验收仍待完成。
+
+
+## 2026-10-18 · 准备 0.2.0-beta.8
+
+用户要求准备下个版本，本轮仅完成本地候选与发布资料，不推送、不发布、不操作设备。通过 GitHub 只读查询核对线上最新版本为正式 Release `v0.2.0-beta.7`，PR #120 与 #121 均已合并且各自 host、web 检查通过；远端 main 为 `654625c42d330c7057e95b2f6b8a84d8d135de3c`。获取主线后确认其文件树与原功能分支一致，在当前检出创建本地 `release/0.2.0-beta.8` 分支。保留原有「安装原版 beta.6」未提交记录及未跟踪 `.wrangler/`，不纳入独立发布提交；没有创建或使用其他工作树。
+
+变更限于 `firmware/version.txt`、`docs/releases/0.2.0-beta.8.md`、版本说明和本记录：下个版本为 `0.2.0-beta.8`，范围为内置 12 屏使用说明、页脚互动示例及 OTA 读取重试与同次下载续传。发布说明沿用面向读者的「改进 / 修复 / 说明」结构，不加入「更新须知」或内部验收日志。本批不修改固件逻辑、依赖、配置默认值、服务器或网站源码，不增加测试；复用两项已合并变更的现有回归。执行上下文、内存和取消机制保持上述实现；本批无新增任务、缓冲或阻塞操作，也未测量运行性能及真机峰值资源。
+
+验证：重新配置并构建 host Debug 与 AppleClang ASan/UBSan，`ctest -N` 各实际注册 26 项，完整 CTest 各 26/26 通过；sanitizer 采用既有 `PICO_PAGE_HOST_TRACE_EVENTS=ON` 模式，不宣称 LSan 已通过。`npm run build --prefix web` 通过，生成 5 页。`python3 tools/check_handoff.py` 505 项与 `git diff --check` 通过。日志为 `/tmp/pico-beta8-{host,san}-{config,build,list,test}.log`、`/tmp/pico-beta8-web-build.log` 和 `/tmp/pico-beta8-handoff.log`。
+
+固件复用 EIM 的 ESP-IDF v6.1（`fff9895c`）、固定 BSP `5f3406d` 和锁定 IDF 6.1.0；保留本机原有 IDF 链接脚本修改及未跟踪 requirements 文件。命令为 `eim --log-file .local/eim-beta8.log --do-not-track true run "sh tools/build_firmware.sh release" v6.1`。首次沙箱配置因 `psutil/sysctl` 权限失败，随后同一入口在允许该系统调用的环境构建通过。生效配置为 ESP32-S3、16 MiB Flash、应用回滚与交叉签名证书验证开启，release 模式诊断及性能开关关闭。镜像版本 `0.2.0-beta.8+g654625c.dirty`，应用 3,524,064 字节，4 MiB 槽剩余 670,240 字节（约 16%），SHA-256 `5689e759f0531aed2886905cc04e82dc20d6058d6012fec0add6e7f18503e621`。构建后在完成本节资料的状态下再次执行同一入口以刷新来源记录；产物及 provenance 位于 `build/firmware-release/`，日志为 `/tmp/pico-beta8-firmware.log` 与 `/tmp/pico-beta8-firmware-final.log`。既有 Homebrew dylib 目标系统版本、测试畸形 ZIP 重名及 IDF Kconfig 布尔默认值提示保留，不宣称零警告或干净官方 SDK 复现。
+
+发布门禁：`python3 tools/project_version.py --check-release` 按预期拒绝当前有改动且没有匹配标签的工作区，日志为 `/tmp/pico-beta8-release-gate.log`。当前镜像只是 release 配置的开发候选，不是可发布附件；不生成或上传正式清单、应用、全量镜像及 provenance 四附件，不覆盖已发布标签。正式发布仍须单独授权，随后隔离既有未提交内容、提交本轮资料、从干净的匹配标签重新构建，执行发布门禁和四附件核验，并按现有流程核对腾讯云及官网部署。真实 TLS/Wi-Fi 中断后的续传、重连等待与续传中取消、范围异常、网络任务堆栈和内部 RAM、完整安装及回滚尚未在真机验收；本次没有刷写或增加这些证据。
+
+
+## 2026-10-18 · 调整下个版本为 0.3.0
+
+用户指定下个版本为 `0.3.0`，替代本轮原定的 `0.2.0-beta.8`。产品版本文件已同步，发布说明更名为 `docs/releases/0.3.0.md`，正文保持用户刚审阅的内容；本地分支更名为 `release/0.3.0`。版本说明和当前摘要同步更新，前一条 beta.8 准备与构建记录保留为历史证据，不代表 beta.8 已发布。原有 beta.6 安装记录及 `.wrangler/` 保留原样；没有提交、推送、创建标签、发布、修改服务器或刷写设备。
+
+本次只改版本元数据与配套资料，不新增运行逻辑、任务、内存、I/O 或测试。重新配置并构建 `build/host`，实际注册 26 项，完整 Debug CTest 26/26 通过；`npm run build --prefix web`、505 项交接检查及 `git diff --check` 通过。先前同一逻辑的 ASan/UBSan 26/26 记录保留，本批没有重复运行 sanitizer，不将旧镜像版本记为本次新证据。命令日志为 `/tmp/pico-v030-host-{config,build,list,test}.log`、`/tmp/pico-v030-web-build.log` 和 `/tmp/pico-v030-handoff.log`。
+
+固件继续使用上述已有 EIM、ESP-IDF v6.1 及 release 配置，通过 `eim --log-file .local/eim-v030.log --do-not-track true run "sh tools/build_firmware.sh release" v6.1` 构建并核对镜像版本为 `0.3.0+g654625c.dirty`，应用 3,524,064 字节，SHA-256 `49771b1a308d08f91d4eea2f675cef98f136b79d9cf034fcf7813d508ba09acd`。完成本节后再用同一入口刷新来源记录，日志为 `/tmp/pico-v030-firmware.log` 和 `/tmp/pico-v030-firmware-final.log`，最终产物与 provenance 仍在 `build/firmware-release/`。该镜像仅供本地候选验证，正式发布需从干净的 `v0.3.0` 标签重建并通过发布门禁；真实断网续传、取消、安装及回滚仍未执行，不因去掉 beta 后缀改变验收结论。
+
+
+## 2026-10-18 · 烧录 0.3.0 候选
+
+用户授权「烧录下」，本批直接使用前述已验证的 release 配置候选，不修改源码、配置、分区或重新构建。烧录前核对当前来源内容及 BIN、ELF、sdkconfig 与 provenance 的摘要一致，将应用和来源记录复制到忽略目录 `.local/v030-device-install-20261018/` 固定本次产物。镜像为 `0.3.0+g654625c.dirty`，来源 `654625c42d330c7057e95b2f6b8a84d8d135de3c`，3,524,064 字节，SHA-256 `49771b1a308d08f91d4eea2f675cef98f136b79d9cf034fcf7813d508ba09acd`；它是本地开发候选，不是已发布的 `0.3.0` 附件。
+
+串口枚举与 esptool MAC 均匹配第一台 Read Pico。设备原运行原版 `0.2.0-beta.6`，release 固件不回应诊断状态，未据此宣称保存或后台任务状态已核对；等待后执行已授权的复位。复用 ESP-IDF v6.1 Python 和 esptool 5.3.1，只读检查实际分区表及 otadata：两个 4 MiB 应用槽，`ota_0` 位于 `0x10000`、`ota_1` 位于 `0x410000`，有效记录为序号 4、VALID、CRC 正确，当前选择 `ota_1`。Secure Boot 与 Flash Encryption 均关闭。核对应用头的 `pico_page` 身份、当前版本和镜像尺寸后，仅向 `0x410000` 写应用。
+
+esptool 写入报告 `Hash of data verified.`，独立 `verify-flash` 报告 `Verification successful (digest matched).`；分区表和 otadata 写前写后逐字节一致。未写 bootloader、NVS、PHY 或工厂 VCOM/PMU 校准，未通过工具读写 TF 文件，也未做整片 Flash 备份或擦除。watchdog reset 后被动采集 15 秒启动日志，确认从 `0x410000` 启动、应用版本 `0.3.0+g654625c.dirty`、工厂 VCOM 读取和 TF 挂载成功；采集窗口未发现 panic、abort 或 brownout。既有 I²C GPIO 和 SD 输入延时警告保留，不作长期稳定性结论；串口句柄已关闭。
+
+执行脚本为上述忽略目录内的 `inspect.py` 与 `install.py`，原始分区、otadata、镜像、provenance、选择结果及写入、独立校验和启动日志同目录保存。仅追加本次安装状态和记录，交接与 diff 检查通过；不重复运行与本批无关的 host、sanitizer 或构建。设备留装本候选供用户试用；实体画面与按键、阅读进度恢复、真实断网续传及取消、完整 OTA 安装和回滚均未验收。未提交、推送或发布。
+
+
+## 2026-10-18 · 0.3.0 候选基础冒烟
+
+用户要求简单测试，本批保留设备上的 release 配置 `0.3.0+g654625c.dirty`，只进行一次重启和被动串口采集。串口枚举与 esptool MAC 再次匹配第一台 Read Pico；通过 `read-mac` 的 USB 复位及 watchdog reset 启动应用，未执行 Flash 写入、分区操作、TF 文件或设置修改。脚本为 `.local/v030-smoke-20261018/check.py`，原始证据为同目录 `reset.log`、`serial.log` 和 `summary.json`，串口句柄已关闭。
+
+重启后采集 40.15 秒：确认从 `ota_1`（`0x410000`）启动目标版本；8 MiB PSRAM 及 SRAM 自检通过，FCA9555 自检通过，PMU 与触摸控制器初始化完成，RTC 恢复系统时间，工厂 VCOM 读取及 TF 挂载成功。显示驱动初始化并完成一轮供电与断电。采集窗口只记录一次应用启动，没有 panic、abort、brownout、看门狗异常或 E 级日志；保留两个既有 I²C GPIO 警告及一个 SD 输入延时回退警告，不宣称零警告或长期运行稳定性。13 项日志断言通过，交接与 diff 检查通过。
+
+本轮没有新增或修改测试及固件逻辑，不重复构建、host 或 sanitizer。显示初始化和供电记录不能证明实体画面正确，触摸控制器就绪不能证明实体输入通过；实体翻页、阅读进度恢复、休眠唤醒、联网检查、断线续传、取消及完整安装回滚均未测。设备仍留装本候选，未提交、推送或发布。
+
+
+## 2026-10-18 · 0.3.0 正式发布执行
+
+用户明确授权「提交并发布 0.3.0」。发布范围保持刚审阅的说明，包含 PR #120 和 #121，不增加固件逻辑或测试。已核对远端 main 为 `654625c`，`v0.3.0` 标签及 Release 均不存在；仓库仍为私有，按原有渠道分发，不改变仓库可见性。此前未提交的 beta.6 安装记录和 `.wrangler/` 已单独保存为 stash `7f5d2fb994545010dfb30fc23b778dcd01c0bd48`，不纳入发布提交，完整本地快照位于 `.local/v030-release/`。本轮使用当前检出，不创建其他工作树。
+
+候选验证继承前述记录：完整 host Debug 与 AppleClang ASan/UBSan 各 26/26、网站与 release 配置构建通过；第一台 Read Pico 上的开发候选仅完成写入摘要、初始化及单轮 40.15 秒冒烟。正式产物须来自本轮干净匹配标签，执行发布门禁、Debug/ASan/UBSan 和 release 构建、清单与全量镜像校验；GitHub 草稿上传四附件后完整下载比较，再公开为正式 Release 并设为 Latest。Release 事件沿现有流程先更新腾讯云并读回校验，再更新官网；发布结果追加于后续记录，未通过的步骤不得按已完成报告。
+
+本轮不再刷写设备，设备仍留装上述开发候选；正式标签镜像、真实断网续传、取消、安装与回滚的真机行为仍未验收。本机保留既有 IDF 链接脚本改动及 Homebrew/IDF 构建提示，AppleClang sanitizer 不含 LSan；GitHub Linux 检查结果单独记录。许可分发资料的既有缺口继续由依赖审查记录跟踪，不将本轮四附件核验当作许可审查通过。准备提交前交接检查与 diff 检查通过；完整执行命令与原始证据保存在 `.local/v030-release/` 和 `/tmp/pico-v030-release-*` 日志。
