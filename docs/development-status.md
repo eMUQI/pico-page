@@ -2,7 +2,7 @@
 
 ## 当前摘要（2026-10-18）
 
-`0.3.0` 已获用户授权提交并发布（2026-10-18）：范围为 PR #120 的内置使用说明更新和 PR #121 的 OTA 读取重试与会话内续传。发布说明及版本文件齐备，本轮将从干净标签重新构建并验证附件与部署。第一台 Read Pico 仍装 release 配置候选 `0.3.0+g654625c.dirty`，仅写当前 `ota_1`，摘要、启动及单轮 40 秒启动与空闲检查通过；实体交互和 OTA 异常路径仍待验收。详见末尾「0.3.0 正式发布执行」。
+`0.3.0` 已于 2026-10-18 20:23（UTC+8）正式发布并设为 Latest，标签 `v0.3.0` 指向 `c30b447`，包含 PR #120 的内置使用说明更新和 PR #121 的 OTA 读取重试与会话内续传。干净标签 release 构建、本机 Debug 与 AppleClang ASan/UBSan 各 26/26、标签 Linux Debug 与 Clang ASan/UBSan/LSan 各 26/26，以及四附件完整下载比较通过。Release 事件运行 `39127111013` 已完成腾讯云镜像完整核对与官网自动部署，线上安装页及更新日志显示 0.3.0。设备仍装先前开发候选 `0.3.0+g654625c.dirty`，正式镜像未重新刷写；实体交互、断线续传与完整安装回滚仍待验收。详见末尾「0.3.0 发布结果」。
 
 OTA 超时恢复与同次下载内续传已通过 PR #121 合并（2026-10-18）：30 秒读取空闲期限、至多 3 次重连及严格 Range/206 校验，保留 TLS、摘要、取消、预擦除及启动槽边界。已安装于上述候选；正式发布状态及验证结果见本轮发布记录，异常路径限制见「OTA 读取重试与会话内续传」。
 
@@ -7300,3 +7300,17 @@ esptool 写入报告 `Hash of data verified.`，独立 `verify-flash` 报告 `Ve
 候选验证继承前述记录：完整 host Debug 与 AppleClang ASan/UBSan 各 26/26、网站与 release 配置构建通过；第一台 Read Pico 上的开发候选仅完成写入摘要、初始化及单轮 40.15 秒冒烟。正式产物须来自本轮干净匹配标签，执行发布门禁、Debug/ASan/UBSan 和 release 构建、清单与全量镜像校验；GitHub 草稿上传四附件后完整下载比较，再公开为正式 Release 并设为 Latest。Release 事件沿现有流程先更新腾讯云并读回校验，再更新官网；发布结果追加于后续记录，未通过的步骤不得按已完成报告。
 
 本轮不再刷写设备，设备仍留装上述开发候选；正式标签镜像、真实断网续传、取消、安装与回滚的真机行为仍未验收。本机保留既有 IDF 链接脚本改动及 Homebrew/IDF 构建提示，AppleClang sanitizer 不含 LSan；GitHub Linux 检查结果单独记录。许可分发资料的既有缺口继续由依赖审查记录跟踪，不将本轮四附件核验当作许可审查通过。准备提交前交接检查与 diff 检查通过；完整执行命令与原始证据保存在 `.local/v030-release/` 和 `/tmp/pico-v030-release-*` 日志。
+
+
+## 2026-10-18 · 0.3.0 发布结果
+
+用户授权的版本资料已提交并推送至 main，提交为 `c30b4470035a063d0b8bcb1eee00b6979079ddd2`，新标签 `v0.3.0` 指向该提交。发布前后执行 `python3 tools/project_version.py --check-release`，构建时工作区干净，release 镜像内版本为 `0.3.0`。重新配置并运行本机 Debug 和 AppleClang ASan/UBSan，实际注册各 26 项，完整 CTest 各 26/26；release 固件、网站构建、506 项交接检查和 diff 检查通过。标签 Host 运行 `39126729356` 成功，Linux Debug 与 Clang ASan/UBSan/LSan 各 26/26，既有工具与部署回归检查亦通过。没有修改依赖或工具链，本机 SDK 和构建警告限制仍沿用前文。
+
+清单通过 `tools/ota_manifest.py --image build/firmware-release/pico_page.bin --full --notes docs/releases/0.3.0.md --published 2026-10-18 --out build/release/0.3.0` 生成并用 `--check --expect-version 0.3.0` 核对；全量镜像中的应用与联网更新应用逐字节一致。应用 3,524,064 字节，SHA-256 `068852a2a27404420a836469288830c01d23da202ac16f1751a5aee212dfd42d`；全量镜像 3,589,600 字节，SHA-256 `95fd4d22c2ffdc721a9beb42646c44ea51fb47533ab726bf726b09cfb56b3395`。独立按标签 416 个源码文件计算来源摘要，与 provenance 的 `d10bfc7fd49a6856455f73b286fc4dac4331997702b49d87b3529f3124129d3d` 一致；`source_dirty=false`、`build_mode=release`。附件为清单、应用、全量镜像和 provenance 四项，草稿与正式附件均完整下载并与本地逐字节比较，GitHub 资产摘要一致；发布文案与用户审阅内容一致。
+
+Release 已于 2026-10-18 20:23（UTC+8）公开，名称为「Pico Page 0.3.0」，draft=false、prerelease=false，Latest 指向本版。Release 事件运行 `39127111013` 成功，按既有工作流先更新腾讯云、完整 HTTPS 读回清单和两个 BIN 并与部署副本比较，再部署 Cloudflare 并核对正式域名标记。官网及腾讯云清单的下载地址使用 `https://oc.wulu.zone/firmware/`，原 GitHub 附件清单不改。安装页与更新日志显示 0.3.0，后续独立读回详情保存在 `.local/v030-release/`，以完整成功记录为准，不把局部内容或超时计为完整校验。
+
+发布验证没有再操作设备，第一台 Read Pico 仍装先前 `0.3.0+g654625c.dirty` 开发候选；先前 40.15 秒冒烟不作为正式标签镜像的真机运行证据，实体画面、阅读进度恢复、断线续传、取消、完整安装及回滚均待验收。既有许可分发资料缺口继续跟踪。原有未提交 beta.6 安装记录及 `.wrangler/` 继续保存在 stash `7f5d2fb994545010dfb30fc23b778dcd01c0bd48`，不混入发布提交。正式构建与下载附件位于 `build/release/0.3.0/`；命令日志为 `/tmp/pico-v030-release-*`，远端运行日志、元数据、来源与线上比较记录位于 `.local/v030-release/`。
+
+
+本机独立线上核验：官网部署标记精确匹配 `c30b4470035a063d0b8bcb1eee00b6979079ddd2 39127111013 1`；官网清单、应用与全量镜像均与已验证部署副本逐字节一致，安装页和更新日志包含 0.3.0。腾讯云清单和全量镜像亦完整一致；应用请求返回 HTTP 200，但本机链路在 90 秒内仅收到 720,896 / 3,524,064 字节，已收到前缀一致，不能记作本机完整读回通过。腾讯云应用的完整 HTTPS 比较由上述 Release CI 实际执行并通过，不推断本机或设备下载耗时。分项结果为 `.local/v030-release/independent-readback-summary.json`，超时原始输出为 `public-verification.log`。最终交接与 diff 检查通过，发布结果记录另行提交，不改变发布标签、附件或设备。
