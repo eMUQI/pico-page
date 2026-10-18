@@ -72,7 +72,7 @@ GitHub 对 Release 事件使用标签所在提交中的工作流文件。标签�
 
 ## 固件更新文件
 
-设备从 `https://picopage.wulu.zone/firmware/manifest.json` 读取更新清单，再从 `https://oc.wulu.zone/firmware/` 下载清单指向的应用镜像；安装页另外使用官网提供的同一版本全量镜像（见「安装页」）。这些文件不放在仓库里：原文件来自 GitHub Release，部署副本只修改清单的 `url`，随 `pico-page-web` artifact 一起部署。`web/public/firmware/` 已被 Git 忽略。目前线上版本是 `0.2.0-beta.6`（2026-10-17 发布），初次因 GitHub Actions 不可用而手动部署；Actions 恢复后接入腾讯云与官网顺序自动部署，实际运行结果见开发状态。
+设备从 `https://picopage.wulu.zone/firmware/manifest.json` 读取更新清单，再从 `https://oc.wulu.zone/firmware/` 下载清单指向的应用镜像；安装页另外使用官网提供的同一版本全量镜像（见「安装页」）。这些文件不放在仓库里：原文件来自 GitHub Release，部署副本只修改清单的 `url`，随 `pico-page-web` artifact 一起部署。`web/public/firmware/` 已被 Git 忽略。当前发布版本以 GitHub Release 和线上清单为准。腾讯云与官网由工作流按顺序自动部署，实际发布与核验结果见开发状态。
 
 发布一个版本的步骤（创建 Release 需要项目所有者授权；Actions 可用时由发布事件触发部署，不可用时按上面的手动流程执行）：
 
