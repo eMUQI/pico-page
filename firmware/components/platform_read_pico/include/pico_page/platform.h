@@ -296,8 +296,8 @@ enum class FirmwareFailure {
     None,
     Cancelled,
     Network,     // No link, a failed connection or an interrupted transfer.
-    Server,      // The server answered with a status other than 200.
-    Mismatch,    // Length, SHA-256 or the image's own digest differs from the description.
+    Server,      // The server did not return 200 initially or 206 for a resumed request.
+    Mismatch,    // Range, length, SHA-256 or the image's own digest differs from the description.
     TooLarge,    // The image does not fit the update slot.
     WrongImage,  // Not an ESP32-S3 image of this project and version.
     Flash,       // The update slot, a buffer or a flash operation was unavailable.
@@ -315,8 +315,8 @@ struct FirmwareHooks {
     /** After each written block, with the number of bytes written so far. */
     void (*progress)(void* context, std::uint32_t written) = nullptr;
     /**
-     * true before and false after every flash write of at most 4 KiB, including its sector
-     * erase. The caller uses the pair to keep flash writes apart from panel updates.
+     * true before and false after each erase block (at most 64 KiB), write (at most 4 KiB),
+     * or final image verification. The caller keeps these operations apart from panel updates.
      */
     void (*flash)(void* context, bool begin) = nullptr;
     void* context = nullptr;
@@ -325,12 +325,14 @@ struct FirmwareHooks {
 /**
  * Streams one application image over HTTPS into the inactive OTA slot after connect_network(),
  * with certificate and server-name verification. Nothing is written until the first 288 bytes
- * name an ESP32-S3 image of this project with image.version. The slot is erased sector by
- * sector as data arrives. true means that the length and SHA-256 match and that the image in
+ * name an ESP32-S3 image of this project with image.version. The slot is pre-erased in bounded
+ * blocks before streaming writes. true means that the length and SHA-256 match and that the image in
  * the slot passed its own digest check; the boot slot is not changed. On any failure the
- * running firmware and the boot slot are untouched and the inactive slot is left unbootable.
- * Blocks its task for up to 10 s per read and 20 min in total; cancelled is sampled between
- * reads and writes and must outlive the call.
+ * running firmware and the boot slot are untouched; an incomplete inactive image is never selected.
+ * Reads tolerate 30 s without data. Up to three reconnects resume from bytes accepted by the OTA
+ * handle, with a shared 20 min deadline; no state survives cancellation or a new call. SDK connection
+ * steps may block for up to 10 s. cancelled is sampled between SDK steps and writes and must outlive
+ * the call, including cleanup after the display/network gate is released.
  */
 bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, FirmwareFailure& failure,
                        std::string& error, const std::atomic_bool* cancelled = nullptr);

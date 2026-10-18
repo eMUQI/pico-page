@@ -1,6 +1,7 @@
 #include "pico_page/platform.h"
 #include "pico_page/diagnostics.h"
 #include "rtc_clock.h"
+#include "firmware_resume.h"
 
 #include <algorithm>
 #include <cctype>
@@ -9,6 +10,7 @@
 #include <cstring>
 #include <ctime>
 #include <limits>
+#include <strings.h>
 
 #include "esp_app_desc.h"
 #include "esp_app_format.h"
@@ -155,6 +157,8 @@ void http_close(esp_http_client_handle_t client, bool destroy) {
     http_step([&] {
         esp_http_client_close(client);
         if (destroy) esp_http_client_cleanup(client);
+        // A new request must not consume prefetched body bytes from the previous offset.
+        else esp_http_client_clear_response_buffer(client);
         return true;
     }, false, std::numeric_limits<std::int64_t>::max(), nullptr);
 }
@@ -589,7 +593,15 @@ std::atomic<const esp_partition_t*> verified_slot{nullptr};
 constexpr std::size_t image_prefix = sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t);
 constexpr std::size_t firmware_block = 4096;
 constexpr std::size_t firmware_erase_block = 64 * 1024;
-constexpr std::int64_t firmware_deadline_us = 1'200'000'000;
+
+esp_err_t firmware_header(esp_http_client_event_t* event) {
+    if (event->event_id == HTTP_EVENT_ON_HEADER && event->header_key && event->header_value &&
+        strcasecmp(event->header_key, "Content-Range") == 0) {
+        auto& range = *static_cast<FirmwareRange*>(event->user_data);
+        range.header(std::string_view(event->header_value, strnlen(event->header_value, 64)));
+    }
+    return ESP_OK;
+}
 
 bool expected_image(const std::uint8_t* prefix, const std::string& version) {
     esp_image_header_t header;
@@ -639,6 +651,7 @@ bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, F
     // Flash writes take their data from internal RAM without an intermediate copy.
     auto* block = static_cast<std::uint8_t*>(heap_caps_malloc(firmware_block, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     if (!block) return stop(FirmwareFailure::Flash, "Download buffer", ESP_ERR_NO_MEM);
+    FirmwareRange range;
     esp_http_client_config_t configuration{};
     configuration.url = image.url.c_str();
     configuration.method = HTTP_METHOD_GET;
@@ -647,6 +660,8 @@ bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, F
     configuration.disable_auto_redirect = true;
     configuration.crt_bundle_attach = esp_crt_bundle_attach;
     configuration.buffer_size = firmware_block;
+    configuration.event_handler = firmware_header;
+    configuration.user_data = &range;
     PP_DIAGNOSTIC(
         wifi_ap_record_t ap{};
         wifi_ps_type_t ps = WIFI_PS_MIN_MODEM;
@@ -656,6 +671,12 @@ bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, F
     )
     auto* client = esp_http_client_init(&configuration);
     if (!client) { heap_caps_free(block); return stop(FirmwareFailure::Flash, "HTTP allocation", ESP_ERR_NO_MEM); }
+    const auto encoding = esp_http_client_set_header(client, "Accept-Encoding", "identity");
+    if (encoding != ESP_OK) {
+        http_close(client, true);
+        heap_caps_free(block);
+        return stop(FirmwareFailure::Flash, "Firmware request header", encoding);
+    }
     esp_ota_handle_t handle = 0;
     bool writing = false;
     std::uint32_t written = 0;
@@ -674,46 +695,96 @@ bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, F
         if (hooks.flash) hooks.flash(hooks.context, begin);
         PP_DIAGNOSTIC(if (begin) wait_us += esp_timer_get_time() - started;)
     };
-    const auto deadline = esp_timer_get_time() + firmware_deadline_us;
+    FirmwareRecovery recovery(esp_timer_get_time());
+    const auto deadline = recovery.deadline();
     const auto open_response = [&]() -> bool {
+        if (cancel_requested()) return false;
+        if (esp_timer_get_time() >= deadline) return stop(FirmwareFailure::Network, "Firmware download", ESP_ERR_TIMEOUT);
+        if (!station_connected()) {
+            xEventGroupClearBits(events, connection_failed);
+            if (!(xEventGroupGetBits(events) & associated)) {
+                const auto result = esp_wifi_connect();
+                if (result != ESP_OK) return stop(FirmwareFailure::Network, "Wi-Fi reconnect", result);
+            }
+            const auto until = recovery.read_deadline(esp_timer_get_time());
+            while (!station_connected() && esp_timer_get_time() < until) {
+                if (cancel_requested()) return false;
+                if (xEventGroupGetBits(events) & connection_failed) break;
+                vTaskDelay(pdMS_TO_TICKS(20));
+            }
+            if (cancel_requested()) return false;
+            if (!station_connected()) return stop(FirmwareFailure::Network, "Wi-Fi reconnect", ESP_ERR_TIMEOUT);
+        }
+        range = {};
+        if (written) {
+            char value[32];
+            std::snprintf(value, sizeof(value), "bytes=%lu-", static_cast<unsigned long>(written));
+            const auto result = esp_http_client_set_header(client, "Range", value);
+            if (result != ESP_OK) return stop(FirmwareFailure::Flash, "Firmware range header", result);
+        }
         PP_DIAGNOSTIC(const auto connecting = esp_timer_get_time();)
-        auto result = http_open(client, 0, esp_timer_get_time() + 10'000'000, cancelled);
+        auto result = http_open(client, 0, std::min(deadline, esp_timer_get_time() + 10'000'000), cancelled);
         PP_DIAGNOSTIC(connect_us += esp_timer_get_time() - connecting;)
         if (cancel_requested()) return false;
         if (result != ESP_OK) return stop(FirmwareFailure::Network, "HTTPS connection", result);
         PP_DIAGNOSTIC(const auto headers_started = esp_timer_get_time();)
         int status = 0;
-        const auto length = http_headers(client, status, esp_timer_get_time() + 10'000'000, cancelled);
+        const auto length = http_headers(client, status, std::min(deadline, esp_timer_get_time() + 10'000'000), cancelled);
         PP_DIAGNOSTIC(headers_us += esp_timer_get_time() - headers_started;)
         if (cancel_requested()) return false;
         if (length < 0) return stop(FirmwareFailure::Network, "HTTP response headers", step_error(length));
-        if (status != 200) return stop(FirmwareFailure::Server, "HTTP status");
-        if (length > 0 && length != static_cast<std::int64_t>(image.size))
-            return stop(FirmwareFailure::Mismatch, "Firmware length", ESP_ERR_INVALID_SIZE);
+        if (status != (written ? 206 : 200)) return stop(FirmwareFailure::Server, "HTTP status");
+        if (!range.accepts(status, length, written, image.size))
+            return stop(FirmwareFailure::Mismatch, "Firmware range or length", ESP_ERR_INVALID_SIZE);
         return true;
     };
+    const auto retry_response = [&]() -> bool {
+        const bool was_cancelled = cancel_requested();
+        if (written >= image.size || !recovery.retry(esp_timer_get_time(), was_cancelled)) return false;
+        http_close(client, false);
+        ESP_LOGW("pico_network", "Firmware reconnect %u/%u at byte %lu: %s", recovery.reconnects(),
+                 FirmwareRecovery::max_reconnects, static_cast<unsigned long>(written), error.c_str());
+        const auto until = std::min(deadline, esp_timer_get_time() + 250'000 * recovery.reconnects());
+        while (esp_timer_get_time() < until) {
+            if (cancel_requested()) return false;
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
+        return !cancel_requested() && esp_timer_get_time() < deadline;
+    };
     auto perform = [&]() -> bool {
-        if (!open_response()) return false;
         esp_err_t result;
         if (psa_hash_setup(&hash, PSA_ALG_SHA_256) != PSA_SUCCESS) return stop(FirmwareFailure::Flash, "Digest setup");
         std::size_t held = 0;
-        bool complete = false;
+        bool complete = false, response_open = false;
         while (!complete) {
             if (cancel_requested()) return false;
             if (esp_timer_get_time() >= deadline) return stop(FirmwareFailure::Network, "Firmware download", ESP_ERR_TIMEOUT);
+            if (!response_open) {
+                if (!open_response()) {
+                    if (failure != FirmwareFailure::Network || !retry_response()) return false;
+                    continue;
+                }
+                response_open = true;
+            }
             PP_DIAGNOSTIC(const auto reading = esp_timer_get_time();)
             const int count = http_step([&] {
                 return esp_http_client_read(client, reinterpret_cast<char*>(block) + held,
                                             static_cast<int>(firmware_block - held));
-            }, -ESP_ERR_HTTP_EAGAIN, std::min(deadline, esp_timer_get_time() + 10'000'000), cancelled);
+            }, -ESP_ERR_HTTP_EAGAIN, recovery.read_deadline(esp_timer_get_time()), cancelled);
             PP_DIAGNOSTIC(
                 const auto elapsed_read = esp_timer_get_time() - reading;
                 read_us += elapsed_read; read_max_us = std::max(read_max_us, elapsed_read); ++read_calls;
             )
             if (cancel_requested()) return false;
-            if (count < 0) return stop(FirmwareFailure::Network, "Firmware read", step_error(count));
+            if (count < 0 || (count == 0 && (!esp_http_client_is_complete_data_received(client) || written + held < image.size))) {
+                stop(FirmwareFailure::Network, count < 0 ? "Firmware read" : "Incomplete firmware", step_error(count));
+                if (!retry_response()) return false;
+                // Only bytes accepted by the OTA handle belong to the digest; discard an incomplete prefix.
+                held = 0;
+                response_open = false;
+                continue;
+            }
             if (count == 0) {
-                if (!esp_http_client_is_complete_data_received(client)) return stop(FirmwareFailure::Network, "Incomplete firmware");
                 complete = true;
             }
             held += static_cast<std::size_t>(count);
@@ -727,6 +798,7 @@ bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, F
                 // No firmware packets may arrive while erasure disables the Flash cache.
                 // The full transfer reconnects and revalidates its prefix after erasure.
                 http_close(client, false);
+                response_open = false;
                 if (cancel_requested()) return false;
                 flash(true);
                 PP_DIAGNOSTIC(const auto beginning = esp_timer_get_time();)
@@ -746,6 +818,7 @@ bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, F
                     // Let the application publish input and cancellation between erase blocks.
                     vTaskDelay(1);
                     if (cancel_requested()) return false;
+                    if (esp_timer_get_time() >= deadline) return stop(FirmwareFailure::Network, "Firmware download", ESP_ERR_TIMEOUT);
                     const auto length = std::min<std::size_t>(firmware_erase_block, erase_end - erased);
                     flash(true);
                     PP_DIAGNOSTIC(const auto erasing = esp_timer_get_time();)
@@ -759,7 +832,6 @@ bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, F
                     if (result != ESP_OK) return stop(FirmwareFailure::Flash, "Firmware erase", result);
                     erased += length;
                 }
-                if (cancel_requested() || !open_response()) return false;
                 held = 0;
                 complete = false;
                 continue;
@@ -824,7 +896,7 @@ bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, F
     if (writing) esp_ota_abort(handle);
     http_close(client, true);
     heap_caps_free(block);
-    if (okay) { failure = FirmwareFailure::None; verified_slot.store(slot); }
+    if (okay) { failure = FirmwareFailure::None; error.clear(); verified_slot.store(slot); }
     return okay;
 }
 

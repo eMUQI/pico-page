@@ -1,0 +1,73 @@
+#include "firmware_resume.h"
+
+#include <cassert>
+#include <cstdint>
+#include <iostream>
+#include <string>
+
+using pico_page::platform::FirmwareRange;
+using pico_page::platform::FirmwareRecovery;
+
+int main() {
+    FirmwareRange range;
+    assert(range.accepts(200, 8192, 0, 8192));
+    assert(range.accepts(200, 0, 0, 8192));
+    assert(!range.accepts(200, 8191, 0, 8192));
+    assert(!range.accepts(206, 8192, 0, 8192));
+    assert(!range.accepts(200, 4096, 4096, 8192));
+    assert(!range.accepts(206, 4096, 4096, 8192));
+
+    range.header("bytes 4096-8191/8192");
+    assert(range.valid && range.accepts(206, 4096, 4096, 8192));
+    assert(range.accepts(206, 0, 4096, 8192));
+    assert(!range.accepts(200, 4096, 4096, 8192));
+    assert(!range.accepts(206, -1, 4096, 8192));
+    assert(!range.accepts(206, 8192, 4096, 8192));
+    assert(!range.accepts(206, 4096, 4095, 8192));
+    assert(!range.accepts(206, 4096, 4096, 8193));
+    assert(!range.accepts(200, 8192, 0, 8192));
+    assert(!range.accepts(416, 0, 8192, 8192));
+    range.header("bytes 4096-8191/8192");
+    assert(!range.valid && !range.accepts(206, 4096, 4096, 8192));
+    range.header("bytes 4096-8191/8192");
+    assert(!range.valid);
+
+    // Refuse truncated ranges and foreign representations even if Content-Length matches.
+    for (const char* value : {"bytes 0-4095/8192", "bytes 4096-8190/8192", "bytes 4096-8191/8193"}) {
+        FirmwareRange response;
+        response.header(value);
+        assert(response.valid && !response.accepts(206, 4096, 4096, 8192));
+    }
+    for (const std::string value : {"", "bytes */8192", "bytes -1-8191/8192", "bytes 8192-8191/8192",
+             "bytes 4096-8192/8192", "bytes 4096-8191/0", "bytes 4294967296-4294967296/4294967297",
+             "bytes 4096-8191/42949672960", "bytes 4096-8191/8192 trailing", "bytes 4096-8191/8192\r\n",
+             "bytes 4096-8191/*", "bytes 4096 -8191/8192", "bytes 4096-8191/8192,0-1/8192"}) {
+        FirmwareRange response;
+        response.header(value);
+        assert(response.present && !response.valid && !response.accepts(206, 4096, 4096, 8192));
+    }
+    FirmwareRange oversized;
+    oversized.header(std::string(64, '1'));
+    assert(oversized.present && !oversized.valid);
+    FirmwareRange boundary;
+    boundary.header("bytes 4294967293-4294967294/4294967295");
+    assert(boundary.valid && boundary.accepts(206, 2, UINT32_MAX - 2, UINT32_MAX));
+
+    constexpr std::int64_t started = 1'000'000;
+    FirmwareRecovery recovery(started);
+    assert(recovery.read_deadline(started) == started + 30'000'000);
+    assert(recovery.read_deadline(started + 29'000'000) == started + 59'000'000);
+    assert(recovery.read_deadline(recovery.deadline() - 1) == recovery.deadline());
+    assert(!recovery.retry(started, true) && recovery.reconnects() == 0);
+    for (unsigned attempt = 1; attempt <= 3; ++attempt) {
+        assert(recovery.retry(started + attempt, false));
+        assert(recovery.reconnects() == attempt);
+        assert(recovery.read_deadline(started + attempt) <= recovery.deadline());
+    }
+    assert(!recovery.retry(started + 4, false) && recovery.reconnects() == 3);
+    FirmwareRecovery expired(started);
+    assert(!expired.retry(expired.deadline(), false) && expired.reconnects() == 0);
+    assert(!expired.retry(expired.deadline() + 1, false));
+    assert(expired.deadline() == started + 1'200'000'000);
+    std::cout << "Firmware resume response and recovery checks passed\n";
+}
