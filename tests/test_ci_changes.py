@@ -23,6 +23,7 @@ class CiChangesTest(unittest.TestCase):
             (['host/main.cpp', 'tests/app_test.cpp', 'CMakeLists.txt'], True, False),
             (['.github/workflows/host.yml', 'examples/settings.toml', 'handoff-manifest.json'], True, False),
             (['tools/ota_manifest.py'], True, True),
+            (['tools/deploy_firmware.py'], True, True),
             (['tools/ci_changes.py'], True, True),
             (['new-component/source.cpp', 'docs/releases/0.2.0.md'], True, True),
         ]

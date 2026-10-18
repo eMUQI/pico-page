@@ -6,6 +6,7 @@ on:
       - 'web/**'
       - 'docs/releases/**'
       - 'tools/ota_manifest.py'
+      - 'tools/deploy_firmware.py'
       - 'tools/ci_changes.py'
       - '.github/workflows/web.yml'
   pull_request:
@@ -25,7 +26,7 @@ concurrency:
 jobs:
   web:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: web
@@ -101,14 +102,35 @@ jobs:
           path: web/dist/
           if-no-files-found: error
           retention-days: 3
-      - name: Verify the OTA download origin
+      - name: Publish firmware to Tencent Cloud
+        if: env.DEPLOY == 'true' && env.STALE != 'true'
+        working-directory: ${{ github.workspace }}
+        env:
+          TENCENT_DEPLOY_KEY: ${{ secrets.TENCENT_DEPLOY_KEY }}
+          TENCENT_KNOWN_HOSTS: ${{ secrets.TENCENT_KNOWN_HOSTS }}
+        run: |
+          if [ ! -f web/dist/firmware/manifest.json ]; then exit 0; fi
+          test -n "$TENCENT_DEPLOY_KEY" && test -n "$TENCENT_KNOWN_HOSTS"
+          ssh_dir=$(mktemp -d)
+          trap 'rm -rf "$ssh_dir"' EXIT
+          printf '%s\n' "$TENCENT_DEPLOY_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$TENCENT_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          chmod 600 "$ssh_dir/key" "$ssh_dir/known_hosts"
+          (cd web/dist/firmware && tar -cf - manifest.json pico-page-*-read_pico-release*.bin) \
+            | ssh -C -F /dev/null -i "$ssh_dir/key" -o IdentitiesOnly=yes -o BatchMode=yes \
+                -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+                -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+                pico-deploy@oc.wulu.zone publish
+      - name: Verify the firmware download origin
         if: env.DEPLOY == 'true' && env.STALE != 'true'
         run: |
           if [ -f dist/firmware/manifest.json ]; then
-            url=$(python3 -c 'import json; print(json.load(open("dist/firmware/manifest.json"))["url"])')
-            status=$(curl -fsS --proto '=https' --max-time 300 "$url" -o "$RUNNER_TEMP/ota-origin.bin" -w '%{http_code}')
-            [ "$status" = 200 ]
-            cmp "$RUNNER_TEMP/ota-origin.bin" "dist/firmware/${url##*/}"
+            for file in dist/firmware/manifest.json dist/firmware/pico-page-*-read_pico-release*.bin; do
+              status=$(curl -fsS --proto '=https' --max-time 300 "https://oc.wulu.zone/firmware/${file##*/}" \
+                -o "$RUNNER_TEMP/ota-origin.bin" -w '%{http_code}')
+              [ "$status" = 200 ]
+              cmp "$RUNNER_TEMP/ota-origin.bin" "$file"
+            done
           fi
       # The deployment carries the firmware fetched above: devices install what it publishes.
       # deployment.txt identifies this run, so the check below can tell whether production serves it.
