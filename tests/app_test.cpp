@@ -1853,11 +1853,12 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
     }
 }
 
-static std::string update_manifest(const std::string& version, int progress_schema = update::progress_schema, const std::string& notes = "## 新增\\n- **书签**：可添加。") {
+static std::string update_manifest(const std::string& version, int progress_schema = update::progress_schema,
+                                   const std::string& notes = "## 新增\\n- **书签**：可添加。", int config_schema = update::config_schema) {
     return "{\"manifest\":1,\"board\":\"read_pico\",\"version\":\"" + version + "\",\"published_at\":\"2026-10-18\","
            "\"url\":\"https://picopage.wulu.zone/firmware/pico-page-" + version + "-read_pico-release.bin\",\"size\":2936012,"
            "\"sha256\":\"" + std::string(64, 'a') + "\",\"data_schema\":{\"progress\":" + std::to_string(progress_schema) +
-           ",\"config\":1},\"notes\":\"" + notes + "\"}";
+           ",\"config\":" + std::to_string(config_schema) + "},\"notes\":\"" + notes + "\"}";
 }
 // Firmware update: check, release notes, installation conditions, download, restart and the report on the next start.
 static void update_test(const fs::path& root) {
@@ -2030,20 +2031,62 @@ static void update_test(const fs::path& root) {
         ReaderApp app(root.string()); Driver driver{app};
         app.set_firmware_version("0.2.0-beta.9+g1234567.dirty"); app.set_battery(80);
         open_page(app, driver);
-        // The manifest on the card only describes the offer. Its address and digest are confirmed
-        // with the server first; an unchanged answer continues into the download.
+        // A cached development offer with a newer schema requires confirmation after server validation.
         const auto shown = *state().manifest;
         const auto unchanged = update_manifest(shown.version, shown.progress_schema);
         driver.tap(300, 1040); driver.present();
         auto confirm = app.take_update_request();
         assert(confirm && confirm->kind == UpdateOperation::Kind::Check);
         app.complete_update(confirm->id, UpdateFailure::None, 200, unchanged, ""); driver.present();
+        assert(!app.update_busy() && !app.take_update_request());
+        driver.tap(300, 1020); driver.present();
         auto download = app.take_update_request();
         assert(download && download->kind == UpdateOperation::Kind::Download && download->version == "0.2.0-beta.3" &&
                download->url == shown.url && download->sha256 == shown.sha256);
         app.complete_update(download->id, UpdateFailure::Cancelled, 0, "", ""); driver.present();
         assert(!app.update_busy());
     }
+    for (bool cached : {false, true}) {
+        for (int formats = 0; formats < 4; ++formats) {
+            const auto card = root / "schema-confirmation";
+            fs::remove_all(card);
+            write(card / "PicoPage/network.toml", provision::network_toml({{{"home", "password123"}, 0}}));
+            const auto body = update_manifest("0.4.0", update::progress_schema + (formats & 1), "",
+                                               update::config_schema + ((formats >> 1) & 1));
+            update::Manifest manifest;
+            std::string error;
+            assert(update::parse_manifest(body, manifest, error));
+            update::State saved;
+            saved.manifest = manifest;
+            write(card / "PicoPage/cache" / update::state_cache, update::encode_state(saved));
+            ReaderApp app(card.string()); Driver driver{app};
+            app.set_firmware_version("0.3.0+g1234567.dirty"); app.set_battery(80);
+            open_page(app, driver);
+            if (!cached) check(app, driver, 920, body);
+            driver.tap(300, 1040); driver.present();
+            if (cached) {
+                const auto request = app.take_update_request();
+                assert(request && request->kind == UpdateOperation::Kind::Check);
+                app.complete_update(request->id, UpdateFailure::None, 200, body, ""); driver.present();
+            }
+            if (formats) {
+                assert(!app.update_busy() && !app.take_update_request());
+                driver.key(Input::K2); assert(app.pending_frame()); driver.present();
+                assert(!app.update_busy() && !app.take_update_request());
+                driver.tap(300, 1130); driver.present();
+                assert(!app.update_busy() && !app.take_update_request());
+                driver.tap(300, 1040); driver.present();
+                assert(!app.update_busy() && !app.take_update_request());
+                driver.tap(300, 1020); driver.present();
+            }
+            const auto download = app.take_update_request();
+            assert(download && download->kind == UpdateOperation::Kind::Download && download->version == manifest.version &&
+                   download->url == manifest.url && download->sha256 == manifest.sha256);
+            app.complete_update(download->id, UpdateFailure::Cancelled, 0, "", ""); driver.present();
+            assert(!app.update_busy() && !app.take_update_request());
+        }
+    }
+    fs::remove_all(root / "schema-confirmation");
     {
         // A card whose cached manifest names another image never directs a download: the server's
         // answer replaces it and the user is asked again.

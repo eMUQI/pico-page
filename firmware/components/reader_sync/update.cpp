@@ -161,6 +161,10 @@ bool parse_manifest(const std::string& json, Manifest& manifest, std::string& er
     return false;
 }
 
+bool requires_schema_confirmation(const Manifest& manifest) {
+    return manifest.progress_schema > progress_schema || manifest.config_schema > config_schema;
+}
+
 Offer evaluate(const Manifest& manifest, std::string_view running, std::string_view skipped) {
     const auto order = compare_versions(manifest.version, running);
     const bool development = development_build(running) || !order;
@@ -169,8 +173,7 @@ Offer evaluate(const Manifest& manifest, std::string_view running, std::string_v
     if (manifest.progress_schema < progress_schema || manifest.config_schema < config_schema) return Offer::OlderSchema;
     if (manifest.version == skipped) return Offer::Skipped;
     if (development) return Offer::Development;
-    return manifest.progress_schema > progress_schema || manifest.config_schema > config_schema
-        ? Offer::NewerSchema : Offer::Newer;
+    return requires_schema_confirmation(manifest) ? Offer::NewerSchema : Offer::Newer;
 }
 
 std::vector<NoteBlock> parse_notes(const std::string& markdown) {

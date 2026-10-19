@@ -5136,7 +5136,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 if (confirming && !same) update_notice = "更新清单有变化，请确认后再安装。";
                 const auto offer = update_offer();
                 if (confirming && same && update_installable(offer) && update_block().empty()) {
-                    if (offer != update::Offer::NewerSchema) { update_begin(UpdateOperation::Kind::Download); return; }
+                    if (!update::requires_schema_confirmation(*update_state.manifest)) { update_begin(UpdateOperation::Kind::Download); return; }
                     update_page = UpdatePage::Schema;
                 }
             }
@@ -5190,7 +5190,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 update_confirming = update_waiting();
                 return true;
             }
-            if (offer != update::Offer::NewerSchema) { update_begin(UpdateOperation::Kind::Download); return true; }
+            if (!update::requires_schema_confirmation(*update_state.manifest)) { update_begin(UpdateOperation::Kind::Download); return true; }
             update_page = UpdatePage::Schema;
             break;
         case UpdateConfirm:

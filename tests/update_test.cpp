@@ -64,6 +64,15 @@ int main() {
     assert(update::evaluate(manifest, "0.2.0-beta.3+g1234567", "0.2.0-beta.2") == Offer::Skipped);
     assert(update::evaluate(manifest, "0.2.0-beta.3+g1234567", "0.2.0-beta.1") == Offer::Development);
     assert(update::evaluate(manifest, "unknown", "") == Offer::Development);
+    for (int formats = 0; formats < 4; ++formats) {
+        auto candidate = manifest;
+        candidate.progress_schema += formats & 1;
+        candidate.config_schema += (formats >> 1) & 1;
+        assert(update::requires_schema_confirmation(candidate) == (formats != 0));
+        assert(update::evaluate(candidate, "0.2.0-beta.1", "") == (formats ? Offer::NewerSchema : Offer::Newer));
+        assert(update::evaluate(candidate, "0.2.0-beta.3+g1234567", "") == Offer::Development);
+        assert(update::evaluate(candidate, "unknown", "") == Offer::Development);
+    }
     auto changed = manifest;
     changed.progress_schema = update::progress_schema + 1;
     assert(update::evaluate(changed, "0.2.0-beta.1", "") == Offer::NewerSchema);

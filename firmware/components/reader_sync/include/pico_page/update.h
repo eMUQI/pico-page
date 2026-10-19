@@ -61,12 +61,15 @@ struct Manifest {
  */
 bool parse_manifest(const std::string& json, Manifest& manifest, std::string& error);
 
+/** True when either data schema is newer; installation requires confirmation, including development offers. */
+bool requires_schema_confirmation(const Manifest& manifest);
+
 /** How a manifest relates to the running firmware. */
 enum class Offer {
     Current,       // The manifest is not newer; nothing to install.
     Newer,         // Installable after the caller's battery and activity checks.
     NewerSchema,   // As Newer, after the user accepts a data format change.
-    Development,   // The running build cannot be ordered; installing replaces it with the release.
+    Development,   // Replaces the running build with the release; schema confirmation is checked separately.
     Skipped,       // This version failed to start earlier and is withheld.
     TooLarge,      // The image does not fit an application slot.
     OlderSchema,   // The firmware writes an older data format than this one reads.
