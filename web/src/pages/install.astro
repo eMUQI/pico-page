@@ -3,6 +3,7 @@ import Site from "../layouts/Site.astro";
 import { firmware } from "../firmware.js";
 
 const steps = ["安装前确认", "连接并写入", "放入书和字体", "开始阅读"];
+const recovery = "找不到串口，或选择串口后无法连接、烧录时，请先唤醒设备并保持 USB 连接。仍无法连接时，在开机状态下快速短按电源键两次（间隔不超过 1.2 秒），再按住电源键至少 3 秒，进入烧录模式。松开后，重新点击「连接设备」并选择串口。";
 ---
 <Site title="安装固件 · Pico Page" description="在电脑版 Chrome 或 Edge 中，用 USB 线把 Pico Page 安装到 Read Pico，再放入书和字体。" current="install">
   <!-- TODO: 手动安装方法确定后恢复设计稿中的「完整安装文档与手动安装方法」链接。 -->
@@ -41,7 +42,8 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
               <div>
                 <h2>连接设备并写入</h2>
                 <p>用 USB 线连接电脑，点击「连接设备」，在浏览器弹窗里选择 Read Pico 的串口。写入期间请保持页面打开、电脑唤醒、数据线不动。</p>
-                <div class="flash" data-phase={firmware ? "idle" : "unreleased"} data-url={firmware?.url} data-sha256={firmware?.sha256}>
+                <p>设备正在进行 USB 文件传输时，请先在电脑上安全弹出 TF 卡，再在设备上退出传输并确认重启，然后连接安装。</p>
+                <div class="flash" data-phase={firmware ? "idle" : "unreleased"} data-url={firmware?.url} data-sha256={firmware?.sha256} data-recovery={recovery}>
                   <div class="flash-head">
                     <span class="flash-status" aria-live="polite"><span class="dot"></span><span data-el="status">{firmware ? "未连接" : "尚未开放"}</span></span>
                     {firmware && <span class="mono">Pico Page {firmware.version} · <a href={`/changelog/#v${firmware.version}`}>更新日志</a></span>}
@@ -50,7 +52,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
                     <div class="flash-body">
                       <p class="notice" data-el="error" role="alert" hidden></p>
                       <div data-panel="idle">
-                        <p data-el="hint">尚未连接。弹窗里没有设备时，按住电源键约 10 秒强制关机，松开后再按住 1 秒以上开机，再点「连接设备」；仍然没有时，换一根数据线或 USB 接口。</p>
+                        <p data-el="hint">尚未连接。{recovery}</p>
                         <button class="primary" type="button" data-el="connect">连接设备</button>
                       </div>
                       <div data-panel="connected" hidden>
@@ -58,8 +60,8 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
                           <div><dt>芯片</dt><dd>ESP32-S3 · 16 MiB 闪存</dd></div>
                           <div><dt>方式</dt><dd>整片覆盖写入</dd></div>
                         </dl>
-                        <p class="notice">设备闪存中的所有内容都会被清除，包括现有固件和设备内保存的 Wi‑Fi 等设置。回到官方系统的方法见第 1 步中的官方说明。</p>
-                        <label class="confirm"><input type="checkbox" data-el="confirm"><span>我确认连接的是 Read Pico。本页只能核对芯片型号和闪存容量；连接的是其他设备时，它的全部内容同样会被清除。</span></label>
+                        <p class="notice">安装会清除设备内部闪存，替换现有固件。TF 卡上的书籍、阅读进度和 Pico Page 设置（包括已保存的 Wi‑Fi）不受影响。其他固件保存在内部闪存中的设置会被清除。回到官方系统的方法见第 1 步中的官方说明。</p>
+                        <label class="confirm"><input type="checkbox" data-el="confirm"><span>我确认连接的是 Read Pico。本页只能核对芯片型号和闪存容量；连接的是其他设备时，它的内部闪存也会被清除。</span></label>
                         <div class="choices">
                           <button class="primary" type="button" data-el="install" disabled>安装 Pico Page</button>
                           <button class="secondary" type="button" data-el="disconnect">断开</button>
@@ -115,13 +117,14 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
           <aside>
             <div>
               <h3>已经在用 Pico Page？</h3>
-              <p>连接 Wi‑Fi 后可在设备上联网更新。也可以在这个页面重新安装。书、进度和设置保存在 TF 卡上，不受影响。</p>
+              <p>可在「设置 → 固件更新」中检查并安装新版本，条件与步骤见<a href="/docs/#update">联网更新说明</a>。也可以在这个页面重新安装。TF 卡上的书籍、进度和 Pico Page 设置（包括已保存的 Wi‑Fi）不受影响。</p>
             </div>
             <div>
               <h3>遇到问题</h3>
               <details>
-                <summary>弹窗里没有设备</summary>
-                <p>设备关机、休眠或没有响应时，电脑看不到它的串口：按住电源键约 10 秒强制关机，松开后再按住 1 秒以上开机，再点「连接设备」。仍然没有时，确认数据线支持数据传输，换一个 USB 接口；关闭占用串口的其他程序和浏览器标签。</p>
+                <summary>找不到串口，或有串口但无法连接</summary>
+                <p>休眠时串口可能仍可见，但无法连接或烧录。{recovery}</p>
+                <p>设备没有响应时，按住电源键约 10 秒强制关机，松开后再按住 1 秒以上开机，然后重试。仍无法连接时，确认数据线支持数据传输，换一个 USB 接口，并关闭占用串口的其他程序和浏览器标签。</p>
               </details>
               <details>
                 <summary>装过其他固件，还能装吗</summary>
@@ -129,7 +132,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
               </details>
               <details>
                 <summary>写入中断</summary>
-                <p>保持供电，重新连接并安装一次。</p>
+                <p>保持供电，重新连接并安装一次。无法连接时，按上方说明进入烧录模式，再重新选择串口。</p>
               </details>
               <details>
                 <summary>安装完成，屏幕没变化</summary>
@@ -147,7 +150,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
       // fetched when the visitor connects.
       const card = document.querySelector(".flash[data-url]");
       if (card) {
-        const { url, sha256 } = card.dataset;
+        const { url, sha256, recovery } = card.dataset;
         const el = (name) => card.querySelector(`[data-el="${name}"]`);
         const steps = document.querySelectorAll(".tracker li");
         const labels = { idle: "未连接", connected: "已连接", writing: "正在安装", done: "已完成" };
@@ -247,7 +250,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
           } catch (error) {
             console.error(error);
             await release();
-            show("idle", "没有连上设备。关闭占用串口的其他程序和浏览器标签，重新插拔数据线后再试。");
+            show("idle", `没有连上设备。关闭占用串口的其他程序和浏览器标签。${recovery}`);
           } finally {
             button.disabled = false;
             button.textContent = "连接设备";
@@ -259,12 +262,14 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
           show("writing");
           progress(0, "正在下载固件");
           let erasing = false;
+          let downloadFailure = "固件下载失败，尚未擦除或写入设备闪存。检查网络后重新连接再试。";
           try {
             const response = await fetch(url);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const image = new Uint8Array(await response.arrayBuffer());
             const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", image));
             if (Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("") !== sha256) {
+              downloadFailure = "固件文件校验未通过，尚未擦除或写入设备闪存。请重新连接并安装，以重新下载固件。";
               throw new Error("The downloaded image does not match the published digest");
             }
             erasing = true;
@@ -286,7 +291,7 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
             window.dispatchEvent(new CustomEvent("pico-page:analytics", { detail: "install_failure" }));
             console.error(error);
             await release();
-            show("idle", erasing ? "安装没有完成。保持供电，重新连接后再安装一次。" : "固件下载失败，设备没有改动。检查网络后重新连接再试。");
+            show("idle", erasing ? `安装没有完成。保持供电，重新连接后再安装一次。${recovery}` : downloadFailure);
           }
         }
 
