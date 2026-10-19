@@ -173,7 +173,7 @@ bool ContentJob::start() {
     const auto required_internal = 32U * 1024 + (content_requests ? 0 : content_stack_bytes);
     if ((request.kind == Kind::Pagination || request.kind == Kind::FontIdentity || request.kind == Kind::LibraryCovers ||
          request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite || request.kind == Kind::ContentCacheWrite ||
-         request.kind == Kind::SleepCover || request.kind == Kind::LockScreen) &&
+         request.kind == Kind::SleepCover || request.kind == Kind::LockScreen || request.kind == Kind::LockScreenPreview) &&
         heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < required_internal) {
         start_failure_ = StartFailure::InternalMemory;
         return false;
@@ -274,7 +274,7 @@ void ContentJob::run() {
     }
     if (request.kind == Kind::MapUpload || request.kind == Kind::MapDownload) { map_position(); return; }
     if (request.kind == Kind::SleepCover) { prepare_cover(); return; }
-    if (request.kind == Kind::LockScreenList || request.kind == Kind::LockScreen) { prepare_lock_screen(); return; }
+    if (request.kind == Kind::LockScreenList || request.kind == Kind::LockScreen || request.kind == Kind::LockScreenPreview) { prepare_lock_screen(); return; }
     if (request.kind == Kind::LibraryCovers) { library_covers(); return; }
     if (request.kind == Kind::Chapter) {
         load_chapter();
@@ -484,45 +484,83 @@ void ContentJob::prepare_lock_screen() {
             result.retryable_failure = true; result.error = "图片身份校验失败或已取消"; return;
         }
         const std::string cache = "lockscreens/current";
-        const auto header = "PPLOCK3\n" + identity + "\n" + result.lock_screen + "\n" + std::to_string(before.st_size) + "\n" +
+        const auto header = "PPLOCK4\n" + identity + "\n" + result.lock_screen + "\n" + std::to_string(before.st_size) + "\n" +
                             std::to_string(before.st_mtime) + "\n684x1216-fit\n";
         constexpr std::size_t count = 342 * 1216;
+        const auto canvas_available = [&] {
 #ifdef ESP_PLATFORM
-        if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2 * (count + header.size() + 32) + 256U * 1024 ||
-            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < count + header.size() + 32) {
-            result.retryable_failure = true;
-            result.error = "图片准备内存不足"; return;
-        }
+            const bool available = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= count + 256U * 1024 &&
+                                   heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >= count;
+#else
+            const bool available = !request.lock_canvas_limit_for_test || count <= request.lock_canvas_limit_for_test;
 #endif
-        {
-            std::string cached;
-            if (store.load_cache(cache, header.size() + count + 32, cached) == StoreStatus::Ok &&
-                cached.size() == header.size() + count + 32 && cached.compare(0, header.size(), header) == 0 &&
-                cached.compare(header.size() + count, 32, md5_hex(std::string_view(cached.data() + header.size(), count))) == 0) {
-                if (!request.lock_screen_prepare) {
-                    result.image = std::make_unique<graphics::Canvas>(684, 1216);
-                    std::memcpy(result.image->data(), cached.data() + header.size(), count);
-                }
+            if (!available) { result.retryable_failure = true; result.error = "图片准备内存不足"; }
+            return available;
+        };
+        std::string pixels;
+        bool alpha = false;
+        const auto admit = [&](std::size_t bytes) {
+            if (stop()) return false;
+#ifdef ESP_PLATFORM
+            return heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= bytes + count + 256U * 1024 &&
+                   heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >= bytes;
+#else
+            return !request.lock_cache_limit_for_test || bytes <= request.lock_cache_limit_for_test;
+#endif
+        };
+        if (store.load_cache(cache, header.size() + 4 * count + 33, pixels, admit) == StoreStatus::Ok &&
+            pixels.size() > header.size() && pixels.compare(0, header.size(), header) == 0) {
+            const char format = pixels[header.size()];
+            const auto bytes = format == 'A' ? 4 * count : count;
+            if ((format == 'A' || format == 'G') && pixels.size() == header.size() + 1 + bytes + 32 &&
+                pixels.compare(header.size() + 1 + bytes, 32,
+                    md5_hex(std::string_view(pixels.data() + header.size() + 1, bytes))) == 0) {
+                alpha = format == 'A';
+                pixels.erase(0, header.size() + 1); pixels.resize(bytes);
                 result.cache_finished = true;
             }
         }
         if (!result.cache_finished) {
+            // An unverified cache may belong to a larger previous image; source admission is independent.
+            std::string().swap(pixels);
 #ifdef ESP_PLATFORM
-            // The source size is bounded above; reserve both canvases and decoder headroom before reading it.
             const auto encoded_size = static_cast<std::size_t>(before.st_size);
             if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < encoded_size + 2 * count + 768U * 1024 ||
                 heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < std::max(encoded_size, count)) {
-                result.retryable_failure = true;
-                result.error = "图片准备内存不足"; return;
+                result.retryable_failure = true; result.error = "图片准备内存不足"; return;
             }
 #endif
             std::vector<std::uint8_t> encoded;
             if (stop() || store.read_lock_screen(result.lock_screen, encoded, stop) != StoreStatus::Ok) {
                 result.retryable_failure = true; result.error = "图片读取失败或已取消"; return;
             }
-            auto image = std::make_unique<graphics::Canvas>(684, 1216);
-            image->clear();
-            const bool rendered = graphics::render_image(*image, encoded, 0, 0, 684, 1216, result.error, false, stop);
+            // Alpha-capable PNGs retain coverage; opaque PNGs and JPEGs use the compact gray path.
+            bool layered = encoded.size() >= 33 && !std::memcmp(encoded.data(), "\x89PNG\r\n\x1a\n", 8) &&
+                           (encoded[25] == 4 || encoded[25] == 6);
+            if (!layered && encoded.size() >= 33 && !std::memcmp(encoded.data(), "\x89PNG\r\n\x1a\n", 8)) {
+                for (std::size_t at = 8; encoded.size() - at >= 12;) {
+                    const auto* p = encoded.data() + at;
+                    const std::uint32_t length = std::uint32_t(p[0]) << 24 | std::uint32_t(p[1]) << 16 |
+                                                 std::uint32_t(p[2]) << 8 | p[3];
+                    if (length > encoded.size() - at - 12) break;
+                    if (!std::memcmp(p + 4, "tRNS", 4)) { layered = true; break; }
+                    at += length + 12;
+                }
+            }
+#ifdef ESP_PLATFORM
+            if (layered && (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 4 * count + 768U * 1024 ||
+                            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 4 * count)) {
+                result.retryable_failure = true; result.error = "图片准备内存不足"; return;
+            }
+#endif
+            bool rendered;
+            if (layered) rendered = graphics::decode_png_layer(encoded, 684, 1216, pixels, alpha, result.error, stop);
+            else {
+                graphics::Canvas image;
+                rendered = graphics::render_image(image, encoded, 0, 0, 684, 1216, result.error, false, stop);
+                if (rendered) pixels.assign(reinterpret_cast<const char*>(image.data()), count);
+            }
+            std::vector<std::uint8_t>().swap(encoded);
             if (stop()) { result.error = "休眠图片准备已取消或超时"; return; }
             if (!rendered) {
                 if (result.error.find("allocation failed") != std::string::npos || result.error.find("memory") != std::string::npos) {
@@ -530,16 +568,36 @@ void ContentJob::prepare_lock_screen() {
                 }
                 result.error = "图片损坏、不支持或像素超限"; continue;
             }
-            std::vector<std::uint8_t>().swap(encoded);
+            if (layered && !alpha) {
+                if (!canvas_available()) return;
+                graphics::Canvas image;
+                for (int y = 0; y < 1216; y += 32) {
+                    if (stop()) { result.error = "休眠图片准备已取消"; return; }
+                    graphics::composite_image_layer(image, pixels, y, std::min(32, 1216 - y));
+                }
+                // Reuse the larger layer allocation instead of allocating another gray payload.
+                std::memcpy(pixels.data(), image.data(), count);
+                pixels.resize(count);
+            }
             if (stat(path.c_str(), &after) || before.st_size != after.st_size || before.st_mtime != after.st_mtime ||
                 sha256_file(path, stop) != identity || stop()) {
                 result.retryable_failure = true; result.error = "图片已改变，请重试"; return;
             }
-            auto bytes = header;
-            bytes.reserve(header.size() + count + 32);
-            bytes.append(reinterpret_cast<const char*>(image->data()), count);
-            bytes += md5_hex(std::string_view(bytes.data() + header.size(), count));
-            result.cache_finished = store.save_cache(cache, bytes) == StoreStatus::Ok;
+#ifdef ESP_PLATFORM
+            // Serialization may overlap the old payload with its replacement allocation.
+            if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < pixels.size() + header.size() + 33 + 256U * 1024 ||
+                heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < pixels.size() + header.size() + 33) {
+                result.retryable_failure = true; result.error = "图片准备内存不足"; return;
+            }
+#endif
+            const auto digest = md5_hex(pixels);
+            const auto payload_size = pixels.size();
+            std::string serialized;
+            serialized.reserve(header.size() + 1 + payload_size + 32);
+            serialized += header; serialized += alpha ? 'A' : 'G'; serialized += pixels; serialized += digest;
+            pixels = std::move(serialized);
+            result.cache_finished = store.save_cache(cache, pixels) == StoreStatus::Ok;
+            pixels.erase(0, header.size() + 1); pixels.resize(payload_size);
             if (!result.cache_finished) {
                 result.retryable_failure = true; result.error = "休眠图片缓存未保存，下次将重新准备";
 #ifdef ESP_PLATFORM
@@ -547,8 +605,19 @@ void ContentJob::prepare_lock_screen() {
 #endif
                 if (request.lock_screen_prepare) return;
             } else result.error.clear();
-            if (!request.lock_screen_prepare) result.image = std::move(image);
         } else result.error.clear();
+        if (!request.lock_screen_prepare) {
+            const bool reuse = request.sleep_overlay && request.lock_background;
+            if (!reuse && !canvas_available()) return;
+            result.image = reuse ?
+                std::make_unique<graphics::Canvas>(std::move(*request.lock_background)) : std::make_unique<graphics::Canvas>();
+            if (alpha) {
+                for (int y = 0; y < 1216; y += 32) {
+                    if (stop()) break;
+                    graphics::composite_image_layer(*result.image, pixels, y, std::min(32, 1216 - y));
+                }
+            } else std::memcpy(result.image->data(), pixels.data(), count);
+        }
         if (stop()) { result.image.reset(); result.error = "图片准备已取消"; return; }
         return;
     }

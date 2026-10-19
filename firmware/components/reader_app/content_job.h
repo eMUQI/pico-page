@@ -48,7 +48,7 @@ struct PaginationSession {
 /** A single job owns its parser and font, or borrows them from a PaginationSession. Only done() permits access to its result. */
 class ContentJob {
 public:
-    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks, LockScreenList, LockScreen, ContentCacheWrite };
+    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks, LockScreenList, LockScreen, ContentCacheWrite, LockScreenPreview };
     enum class Target { Start, End, Before, Anchor, Fragment };
     enum class StartFailure { None, InternalMemory, TaskCreate };
     /**
@@ -65,6 +65,10 @@ public:
     struct Request {
         std::string path, font;
         std::string sleep_image;
+        bool sleep_overlay = false;
+        /** Owned output initialized with the pre-sleep/preview frame. After enqueue only the worker
+         * may access it; no references to the application's live or in-flight canvas are retained. */
+        std::shared_ptr<graphics::Canvas> lock_background;
         /** LockScreen: the rotation image last presented but not yet recorded. The job records it
          * before choosing the next image; a restart before any such job repeats that image once. */
         std::string lock_screen_shown;
@@ -94,6 +98,12 @@ public:
         bool save_last_book = false, cover_crop = false, preview = false;
         /** LockScreen: prepare the disk cache without retaining a result canvas. */
         bool lock_screen_prepare = false;
+#ifndef ESP_PLATFORM
+        /** Host fault injection: reject lock-screen cache payloads above this size; zero disables it. */
+        std::size_t lock_cache_limit_for_test = 0;
+        /** Host fault injection: reject new lock-screen canvases above this size; zero disables it. */
+        std::size_t lock_canvas_limit_for_test = 0;
+#endif
         /** LockScreen: an absolute deadline shared by all rotation candidates; zero uses the default budget. */
         std::chrono::steady_clock::time_point lock_screen_deadline{};
         bool progressive = false;

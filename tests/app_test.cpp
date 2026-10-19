@@ -2,6 +2,7 @@
 #include "../firmware/components/reader_app/content_job.h"
 #include "../firmware/components/reader_app/help_content.h"
 #include "../firmware/components/reader_app/reading_footer.h"
+#include "image_fixtures.h"
 #include "pico_page/app.h"
 #include "pico_page/document.h"
 #include "pico_page/store.h"
@@ -1276,11 +1277,12 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
     assert(!valid_lock_screen_name("../outside.png") && !valid_lock_screen_name(".hidden.png"));
     assert(!valid_lock_screen_name(std::string("a\0.png", 6)));
     assert(store.read_lock_screen("link.png", encoded) == StoreStatus::UnsafePath);
-    auto run = [&](bool sleeping, const std::string& name = std::string(), const std::string& shown = std::string()) {
+    auto run = [&](bool sleeping, const std::string& name = std::string(), const std::string& shown = std::string(), bool overlay = false) {
         ContentJob::Request request;
         request.kind = ContentJob::Kind::LockScreen; request.root = root.string();
         request.sleep_image = name; request.lock_screen_prepare = !sleeping; request.preview = sleeping;
         request.lock_screen_shown = shown;
+        request.sleep_overlay = overlay;
         ContentJob job(std::move(request)); assert(job.start()); job.wait();
         return std::move(job.result);
     };
@@ -1335,6 +1337,132 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
     values.sleep_image = "02.PNG";
     assert(store.apply_settings(snapshot, values, false, detail) == StoreStatus::Ok);
     assert(store.load_settings().settings.sleep_image == "02.PNG");
+    assert(!store.load_settings().settings.sleep_overlay);
+    snapshot = store.settings_snapshot(); values = snapshot.config.settings; values.sleep_overlay = true;
+    assert(store.apply_settings(snapshot, values, false, detail) == StoreStatus::Ok && store.load_settings().settings.sleep_overlay);
+    snapshot = store.settings_snapshot(); values.sleep_overlay = false;
+    assert(store.apply_settings(snapshot, values, false, detail) == StoreStatus::Ok && !store.load_settings().settings.sleep_overlay);
+    {
+        write(root / "LockScreens/alpha.png", std::string(reinterpret_cast<const char*>(kRgbaPng), sizeof(kRgbaPng)));
+        write(root / "LockScreens/opaque.png", std::string(reinterpret_cast<const char*>(kOpaqueRgbaPng), sizeof(kOpaqueRgbaPng)));
+        assert(run(false, "alpha.png").cache_finished);
+        assert(fs::file_size(cache_path) > 512 * 1024);
+        {
+            ContentJob::Request blocked;
+            blocked.kind = ContentJob::Kind::LockScreen; blocked.root = root.string(); blocked.sleep_image = "alpha.png";
+            blocked.lock_canvas_limit_for_test = 342 * 1216 - 1;
+            const auto before = graphics::image_decode_count();
+            ContentJob refused(std::move(blocked)); assert(refused.start()); refused.wait();
+            assert(refused.result.cache_finished && refused.result.retryable_failure && !refused.result.image);
+            assert(!refused.result.error.empty() && graphics::image_decode_count() == before);
+        }
+        ContentJob::Request request;
+        request.kind = ContentJob::Kind::LockScreen; request.root = root.string();
+        request.sleep_image = "opaque.png"; request.lock_cache_limit_for_test = 512 * 1024;
+        const auto decoded = graphics::image_decode_count();
+        ContentJob job(std::move(request)); assert(job.start()); job.wait();
+        assert(job.result.image && job.result.cache_finished && job.result.error.empty());
+        assert(graphics::image_decode_count() == decoded + 1 && fs::file_size(cache_path) < 512 * 1024);
+        graphics::Canvas expected;
+        const std::vector<std::uint8_t> opaque(std::begin(kOpaqueRgbaPng), std::end(kOpaqueRgbaPng));
+        assert(graphics::render_image(expected, opaque, 0, 0, 684, 1216, detail));
+        assert(job.result.image->pixels() == expected.pixels());
+        const auto before_hot = graphics::image_decode_count();
+        auto hot = run(true, "opaque.png", "", true);
+        assert(hot.image && hot.image->pixels() == expected.pixels() && graphics::image_decode_count() == before_hot);
+        fs::remove(root / "LockScreens/alpha.png"); fs::remove(root / "LockScreens/opaque.png");
+    }
+    {
+        const auto overlay_root = root / "Overlay";
+        const std::vector<std::uint8_t> rgba(std::begin(kRgbaPng), std::end(kRgbaPng));
+        write(overlay_root / "LockScreens/01.png", std::string(reinterpret_cast<const char*>(rgba.data()), rgba.size()));
+        write(overlay_root / "PicoPage/settings.toml", "schema_version=1\n[power]\nsleep_screen='custom'\nsleep_image='01.png'\nsleep_overlay=true\n");
+        ReaderApp app(overlay_root.string(), "overlay", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        std::string layer, error; bool alpha = false;
+        assert(graphics::decode_png_layer(rgba, 684, 1216, layer, alpha, error) && alpha);
+        auto original = app.canvas();
+        assert(app.begin_sleep()); driver.present();
+        const auto feedback = app.canvas().pixels();
+        assert(!app.prepare_sleep() && app.sleep_pending());
+        const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (std::string(app.background_state()) == "sleep-cover") {
+            app.poll_background();
+            assert(std::chrono::steady_clock::now() < until);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(app.canvas().pixels() == feedback);
+        app.cancel_sleep(); driver.present();
+        assert(app.canvas().pixels() == original.pixels() && !app.sleep_pending());
+        assert(app.cache_usage().cover_pixels == 0);
+        ContentJob::delay_starts_for_test(ContentJob::Kind::LockScreen, std::chrono::milliseconds(100));
+        assert(app.begin_sleep()); driver.present();
+        assert(!app.prepare_sleep() && app.sleep_pending());
+        app.cancel_sleep(); driver.present();
+        while (std::string(app.background_state()) == "sleep-cover") {
+            app.poll_background();
+            assert(std::chrono::steady_clock::now() < until);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        ContentJob::delay_starts_for_test(ContentJob::Kind::LockScreen, std::chrono::milliseconds{});
+        assert(app.canvas().pixels() == original.pixels() && !app.sleep_pending() && app.cache_usage().cover_pixels == 0);
+        const auto decoded = graphics::image_decode_count();
+        auto expected = original;
+        assert(graphics::composite_image_layer(expected, layer, 0, 1216));
+        assert(sleep_frame(app)); driver.present();
+        assert(app.canvas().pixels() == expected.pixels() && graphics::image_decode_count() == decoded);
+        app.wake(); driver.present();
+        driver.tap(600, 50); driver.present(); driver.tap(340, 640); driver.present();
+        assert(app.view() == View::PowerSettings);
+        driver.tap(300, 610); driver.present();
+        assert(FileStore(overlay_root.string()).load_settings().settings.sleep_overlay);
+        ContentJob::fail_starts_for_test(ContentJob::Kind::LockScreenPreview, 1, ContentJob::StartFailure::TaskCreate);
+        driver.tap(480, 470); driver.present(); driver.complete_content();
+        assert(app.view() == View::PowerSettings && FileStore(overlay_root.string()).load_settings().settings.sleep_overlay);
+        driver.tap(480, 470); driver.present(); driver.complete_content();
+        assert(app.view() == View::LockScreenPreview);
+        driver.refresh(); driver.tap(300, 1140); driver.present();
+        assert(app.view() == View::PowerSettings);
+        driver.tap(300, 610); driver.present();
+        auto preview_expected = app.canvas();
+        assert(graphics::composite_image_layer(preview_expected, layer, 0, 1216));
+        const auto before_preview = graphics::image_decode_count();
+        driver.tap(480, 470); driver.present(); driver.complete_content();
+        assert(app.view() == View::LockScreenPreview && graphics::image_decode_count() == before_preview);
+        assert(std::equal(preview_expected.pixels().begin() + 120 * 342, preview_expected.pixels().begin() + 1048 * 342,
+                          app.canvas().pixels().begin() + 120 * 342));
+        driver.tap(300, 1140); driver.present(); driver.tap(150, 1120); driver.present();
+        assert(app.view() == View::Settings && FileStore(overlay_root.string()).load_settings().settings.sleep_overlay);
+        for (bool started : {false, true}) {
+            ReaderApp sleeping(overlay_root.string(), "preview-sleep", true, true); Driver sleep_driver{sleeping};
+            assert(sleeping.initialize()); sleep_driver.present();
+            sleep_driver.tap(600, 50); sleep_driver.present(); sleep_driver.tap(340, 640); sleep_driver.present();
+            ContentJob::delay_starts_for_test(ContentJob::Kind::LockScreenPreview, std::chrono::seconds(30));
+            sleep_driver.tap(480, 470); sleep_driver.present();
+            if (started) sleeping.poll_background();
+            assert(sleeping.view() == View::Loading && sleeping.content_busy());
+            assert(sleep_frame(sleeping)); sleep_driver.present();
+            sleeping.wake(); sleep_driver.present(); sleeping.poll_background();
+            assert(sleeping.view() == View::Settings && !sleeping.content_busy());
+            const auto returned = sleeping.canvas().pixels();
+            sleeping.poll_background();
+            assert(sleeping.view() == View::Settings && sleeping.canvas().pixels() == returned);
+            ContentJob::delay_starts_for_test(ContentJob::Kind::LockScreenPreview, std::chrono::milliseconds{});
+        }
+        fs::create_directories(overlay_root / "Books");
+        fs::copy_file(fixtures / "image-cover.epub", overlay_root / "Books/cover.epub");
+        FileStore overlay_store(overlay_root.string());
+        auto book_snapshot = overlay_store.settings_snapshot("Books/cover.epub");
+        auto book_values = book_snapshot.config.settings; book_values.sleep_overlay = false;
+        assert(overlay_store.apply_settings(book_snapshot, book_values, true, error) == StoreStatus::Invalid);
+        opened(app, "Books/cover.epub"); driver.present(); driver.complete_content();
+        original = app.canvas(); expected = original;
+        assert(graphics::composite_image_layer(expected, layer, 0, 1216));
+        assert(sleep_frame(app)); driver.present();
+        assert(app.canvas().pixels() == expected.pixels());
+        app.wake(); driver.present(); driver.complete_content();
+        assert(app.view() == View::Reading);
+    }
     assert(run(false, "02.PNG").cache_finished);
     {
         const auto rotating = root / "Rotation";

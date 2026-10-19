@@ -69,6 +69,26 @@ int main(int argc, char** argv) {
     Canvas canvas;
     std::string image_error;
     std::vector<std::uint8_t> rgba(std::begin(kRgbaPng), std::end(kRgbaPng));
+    {
+        std::string layer;
+        bool alpha = false;
+        assert(decode_png_layer(rgba, 4, 8, layer, alpha, image_error) && alpha && layer.size() == 64);
+        Canvas composited(4, 8); composited.clear(7);
+        assert(composite_image_layer(composited, layer, 0, 4));
+        assert(composited.pixel(0, 0) == 7 && composited.pixel(0, 2) == 0 && composited.pixel(3, 2) == 15);
+        assert(composited.pixel(0, 5) == 7);
+        assert(composite_image_layer(composited, layer, 4, 4));
+        assert(composited.pixel(0, 5) == 5 && composited.pixel(3, 5) == 7 && composited.pixel(0, 7) == 7);
+        const auto original = composited.pixels();
+        assert(!composite_image_layer(composited, layer, 7, 2) && composited.pixels() == original);
+        std::string half_alpha(2, '\0'); half_alpha[1] = static_cast<char>(128);
+        Canvas half(1, 1);
+        assert(composite_image_layer(half, half_alpha, 0, 1) && half.pixel(0, 0) == 7);
+        auto broken = rgba; broken.back() ^= 1;
+        assert(!decode_png_layer(broken, 4, 8, layer, alpha, image_error) && layer.empty());
+        assert(!decode_png_layer(rgba, 4, 8, layer, alpha, image_error, [] { return true; }) && layer.empty());
+        assert(!decode_png_layer(rgba, 685, 8, layer, alpha, image_error));
+    }
     canvas.clear(7);
     assert(render_image(canvas, rgba, 10, 20, 4, 4, image_error));
     assert(canvas.pixel(10, 20) == 0 && canvas.pixel(13, 20) == 15);

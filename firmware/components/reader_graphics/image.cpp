@@ -34,6 +34,9 @@ struct Raster {
     unsigned width = 0, height = 0, stride = 0;
     unsigned scaled_width = 0, scaled_height = 0, crop_x = 0, crop_y = 0;
     bool crop = false;
+    bool keep_alpha = false, has_alpha = false;
+    unsigned box_width = 0, box_height = 0;
+    std::string layer;
     std::unique_ptr<std::uint8_t, decltype(&std::free)> pixels{nullptr, &std::free};
     std::uint64_t samples = 0;
     bool done = false;
@@ -55,6 +58,12 @@ struct Raster {
             crop_x = (scaled_width - width) / 2; crop_y = (scaled_height - height) / 2;
         }
         stride = (width + 1) / 2;
+        if (keep_alpha) {
+            box_width = static_cast<unsigned>(box_w); box_height = static_cast<unsigned>(box_h);
+            layer.assign(std::size_t(box_width) * box_height * 2, '\0');
+            source(source_w, source_h);
+            return true;
+        }
         pixels.reset(static_cast<std::uint8_t*>(std::malloc(std::size_t(stride) * height)));
         if (!pixels) return false;
         std::memset(pixels.get(), 0xff, std::size_t(stride) * height);
@@ -81,11 +90,21 @@ struct Raster {
         if ((samples & 65535U) == 0) vTaskDelay(1);
 #endif
         if (x >= source_width || y >= source_height) return;
+        has_alpha = has_alpha || alpha != 255;
         // Each destination pixel samples its source coordinate; Adam7 updates are progressively refined.
         const unsigned left = columns[x], right = columns[std::min(x + w, source_width)];
         const unsigned top = rows[y], bottom = rows[std::min(y + h, source_height)];
         if (left == right || top == bottom) return;
         const unsigned luminance = (77U * rgb[0] + 150U * rgb[1] + 29U * rgb[2] + 128U) >> 8;
+        if (keep_alpha) {
+            const unsigned ox = (box_width - width) / 2, oy = (box_height - height) / 2;
+            for (unsigned row = top; row < bottom; ++row) for (unsigned col = left; col < right; ++col) {
+                const auto at = (std::size_t(row + oy) * box_width + col + ox) * 2;
+                layer[at] = static_cast<char>(luminance);
+                layer[at + 1] = static_cast<char>(alpha);
+            }
+            return;
+        }
         const unsigned blended = (luminance * alpha + 255U * (255U - alpha) + 127U) / 255U;
         const auto gray = static_cast<std::uint8_t>((blended * 15U + 127U) / 255U);
         for (unsigned row = top; row < bottom; ++row) for (unsigned col = left; col < right; ++col) {
@@ -243,6 +262,39 @@ bool jpeg(const std::vector<std::uint8_t>& input, int width, int height, Raster&
 } // namespace
 
 std::uint64_t image_decode_count() { return decode_count.load(std::memory_order_relaxed); }
+
+bool decode_png_layer(const std::vector<std::uint8_t>& encoded, int width, int height,
+                      std::string& layer, bool& has_alpha, std::string& error, const std::function<bool()>& stop) {
+    const StageTimer timer{"image_decode_layer", 0};
+    decode_count.fetch_add(1, std::memory_order_relaxed);
+    layer.clear(); has_alpha = false; error.clear();
+    if (stop && stop()) return fail(error, kImageCancelled);
+    if (width <= 0 || height <= 0 || width > 684 || height > 1216 ||
+        encoded.size() < 8 || encoded.size() > kEncodedLimit ||
+        std::memcmp(encoded.data(), "\x89PNG\r\n\x1a\n", 8)) return fail(error, "Invalid PNG layer input");
+    Raster raster;
+    raster.keep_alpha = true; raster.stop = &stop;
+    if (!png(encoded, width, height, raster, error)) return false;
+    if (raster.cancelled()) return fail(error, kImageCancelled);
+    has_alpha = raster.has_alpha;
+    layer = std::move(raster.layer);
+    return true;
+}
+
+bool composite_image_layer(Canvas& canvas, std::string_view layer, int first_row, int row_count) {
+    if (canvas.width() <= 0 || canvas.width() > 684 || canvas.height() <= 0 || canvas.height() > 1216 ||
+        layer.size() != std::size_t(canvas.width()) * canvas.height() * 2 ||
+        first_row < 0 || row_count < 0 || first_row > canvas.height() || row_count > canvas.height() - first_row) return false;
+    const auto* bytes = reinterpret_cast<const std::uint8_t*>(layer.data());
+    for (int y = first_row; y < first_row + row_count; ++y) for (int x = 0; x < canvas.width(); ++x) {
+        const auto at = (std::size_t(y) * canvas.width() + x) * 2;
+        const unsigned alpha = bytes[at + 1];
+        if (!alpha) continue;
+        const unsigned mixed = (bytes[at] * alpha + canvas.pixel(x, y) * 17U * (255U - alpha) + 127U) / 255U;
+        canvas.pixel(x, y, static_cast<std::uint8_t>((mixed * 15U + 127U) / 255U));
+    }
+    return true;
+}
 
 bool render_image(Canvas& canvas, const std::vector<std::uint8_t>& encoded,
                   int x, int y, int width, int height, std::string& error, bool crop, const std::function<bool()>& stop) {

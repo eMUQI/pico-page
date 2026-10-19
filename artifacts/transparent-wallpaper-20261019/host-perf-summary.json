@@ -1,0 +1,37 @@
+{
+  "milliseconds": {
+    "stage/wallpaper_cold_white": {
+      "n": 5,
+      "p50": 10.957,
+      "p95": 16.391,
+      "p99": 16.391,
+      "max": 16.391,
+      "logged_min_ms": [
+        0.0
+      ]
+    },
+    "stage/wallpaper_hot_overlay": {
+      "n": 5,
+      "p50": 6.336,
+      "p95": 6.479,
+      "p99": 6.479,
+      "max": 6.479,
+      "logged_min_ms": [
+        0.0
+      ]
+    },
+    "stage/wallpaper_hot_white": {
+      "n": 5,
+      "p50": 7.347,
+      "p95": 7.81,
+      "p99": 7.81,
+      "max": 7.81,
+      "logged_min_ms": [
+        0.0
+      ]
+    }
+  },
+  "minimum_bytes": {},
+  "overflow_log_lines": 0,
+  "maximum_reported_overflow_count": null
+}

@@ -103,6 +103,7 @@ struct ReaderSettings {
     int auto_sleep_minutes = 10;  // Global only; 0 disables idle sleep.
     std::string sleep_screen = "cover";  // Global only: cover, reading, simple or custom.
     std::string sleep_image;  // Global only; empty selects alphabetical rotation.
+    bool sleep_overlay = false;  // Global only; composite transparent PNGs over the pre-sleep frame.
 };
 
 struct ConfigDiagnostic {

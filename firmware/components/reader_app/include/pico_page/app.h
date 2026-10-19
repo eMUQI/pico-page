@@ -42,6 +42,7 @@ enum class View {
     TextEntry,
     PageEffects,
     LockScreens,
+    LockScreenPreview,
     About,
     Update
 };

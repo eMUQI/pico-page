@@ -1,0 +1,22 @@
+capture artifacts/transparent-wallpaper-20261019/reading-before-off.bmp
+sleep
+capture artifacts/transparent-wallpaper-20261019/sleep-off.bmp
+wake
+tap 342 500
+tap 50 50
+tap 600 50
+tap 340 640
+capture artifacts/transparent-wallpaper-20261019/power-off.bmp
+tap 300 610
+capture artifacts/transparent-wallpaper-20261019/power-on.bmp
+tap 480 470
+capture artifacts/transparent-wallpaper-20261019/preview-on.bmp
+tap 300 1140
+tap 500 1120
+tap 50 50
+open Books/Demo.txt
+capture artifacts/transparent-wallpaper-20261019/reading-before-on.bmp
+sleep
+capture artifacts/transparent-wallpaper-20261019/sleep-on.bmp
+wake
+capture artifacts/transparent-wallpaper-20261019/reading-after-on.bmp

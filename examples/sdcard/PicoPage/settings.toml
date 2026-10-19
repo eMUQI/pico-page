@@ -33,8 +33,12 @@ wifi_enabled = true
 [power]
 # Minutes without input before the device sleeps; 0 disables idle sleep. Range 0..240.
 auto_sleep_minutes = 10
-# Sleep screen: cover / reading / simple.
+# Sleep screen: cover / reading / simple / custom.
 sleep_screen = "cover"
+# Custom image basename; empty selects rotation.
+sleep_image = ""
+# Transparent PNGs preserve the pre-sleep frame when enabled.
+sleep_overlay = false
 
 # No input-remapping configuration in the first version.
 # K2 = ForceRefresh on every interactive page; use on-screen close/cancel controls.

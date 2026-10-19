@@ -144,6 +144,7 @@ const char *view_name(View view) {
     case View::About: return "about";
     case View::PowerSettings: return "power_settings";
     case View::LockScreens: return "lock_screens";
+    case View::LockScreenPreview: return "lock_screen_preview";
     case View::PowerMenu: return "power_menu";
     case View::PowerOff: return "power_off";
     case View::StorageSettings: return "storage_settings";

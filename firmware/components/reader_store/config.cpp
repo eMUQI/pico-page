@@ -69,7 +69,7 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
         !allowed_fields(toml_get(table, "display"), {"refresh_preset", "balanced_full_refresh_pages", "fast_full_refresh_pages"}, "display", diagnostic) ||
         !allowed_fields(toml_get(table, "library"), {"roots", "view", "sort", "folders"}, "library", diagnostic) ||
         !allowed_fields(toml_get(table, "network"), {"wifi_enabled"}, "network", diagnostic) ||
-        !allowed_fields(toml_get(table, "power"), {"auto_sleep_minutes", "sleep_screen", "sleep_image"}, "power", diagnostic)) return false;
+        !allowed_fields(toml_get(table, "power"), {"auto_sleep_minutes", "sleep_screen", "sleep_image", "sleep_overlay"}, "power", diagnostic)) return false;
 
     auto value = toml_seek(table, "reader.font");
     diagnostic.field = "reader.font";
@@ -139,6 +139,13 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
         diagnostic.detail = "expected cover, reading, simple or custom";
         if (!string_value(value, settings.sleep_screen) ||
             (settings.sleep_screen != "cover" && settings.sleep_screen != "reading" && settings.sleep_screen != "simple" && settings.sleep_screen != "custom")) return false;
+    }
+    value = toml_seek(table, "power.sleep_overlay");
+    if (value.type != TOML_UNKNOWN) {
+        diagnostic.field = "power.sleep_overlay";
+        diagnostic.detail = "expected a boolean";
+        if (value.type != TOML_BOOLEAN) return false;
+        settings.sleep_overlay = value.u.boolean;
     }
     value = toml_seek(table, "power.sleep_image");
     if (value.type != TOML_UNKNOWN) {
@@ -259,6 +266,7 @@ SettingValues setting_values(const ReaderSettings& values, bool global = false) 
         fields.emplace_back("power.auto_sleep_minutes", std::to_string(values.auto_sleep_minutes));
         fields.emplace_back("power.sleep_screen", quoted(values.sleep_screen));
         fields.emplace_back("power.sleep_image", quoted(values.sleep_image));
+        fields.emplace_back("power.sleep_overlay", values.sleep_overlay ? "true" : "false");
     }
     return fields;
 }
@@ -412,7 +420,8 @@ StoreStatus save_settings(const std::string& root, const SettingsSnapshot& snaps
                        values.library_sort != effective.library_sort ||
                        values.library_folders != effective.library_folders ||
                        values.wifi_enabled != effective.wifi_enabled ||
-                       values.auto_sleep_minutes != effective.auto_sleep_minutes || values.sleep_screen != effective.sleep_screen || values.sleep_image != effective.sleep_image))) {
+                       values.auto_sleep_minutes != effective.auto_sleep_minutes || values.sleep_screen != effective.sleep_screen || values.sleep_image != effective.sleep_image ||
+                       values.sleep_overlay != effective.sleep_overlay))) {
         error = "library.roots is read-only; library.view, library.sort, library.folders, power and network fields are global only";
         return StoreStatus::Invalid;
     }

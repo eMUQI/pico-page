@@ -172,6 +172,19 @@ bool render_image(Canvas& canvas, const std::vector<std::uint8_t>& encoded,
                   int x, int y, int width, int height, std::string& error, bool crop = false,
                   const std::function<bool()>& stop = {});
 
+/** Decode a centered, fitted PNG into interleaved 8-bit gray/alpha pairs. Padding is transparent.
+ * On failure, clears layer. has_alpha reports transparency in source pixels, excluding padding.
+ * Dimensions must be positive, at most 684 x 1216. The result owns no source or canvas references.
+ */
+bool decode_png_layer(const std::vector<std::uint8_t>& encoded, int width, int height,
+                      std::string& layer, bool& has_alpha, std::string& error,
+                      const std::function<bool()>& stop = {});
+
+/** Blend complete rows of a gray/alpha layer into an unpublished canvas. Returns false for
+ * invalid dimensions, payload or row bounds without modifying the canvas. Pixels use 0..15 gray.
+ */
+bool composite_image_layer(Canvas& canvas, std::string_view layer, int first_row, int row_count);
+
 /**
  * Draws text as a QR code centred in a size x size box at (x, y), black on white with a
  * four-module quiet zone and error correction level M. Returns false and leaves the canvas

@@ -153,7 +153,7 @@ enum Control {
     EntryClear, EntryMask, EntryDefault,
     WifiClock, WifiClockCancel,
     WifiSavedBase = 50100, WifiModeBase = 50200, WifiNearbyBase = 50300,
-    SleepCustom = 51000, SleepRotation, SleepChoose, SleepRefresh, LockScreenBase = 52000,
+    SleepCustom = 51000, SleepRotation, SleepChoose, SleepRefresh, SleepOverlay, SleepPreview, LockScreenBase = 52000,
     UpdateOpen = 53000, UpdateCheck, UpdateNotes, UpdateStart, UpdateConfirm, UpdateCancel,
     UpdateRetry, UpdateLater, UpdateRestart, UpdateDismiss,
     FontEntryBase = 54000, FontAccept = 54300, FontCancel
@@ -818,7 +818,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             return import_from_settings ? Origin::Settings : Origin::Library;
         case View::Settings: case View::WifiSettings: case View::PowerSettings: case View::StorageSettings:
         case View::InputSettings: case View::SyncSettings: case View::TextEntry: case View::LockScreens:
-        case View::About: case View::Update:
+        case View::About: case View::Update: case View::LockScreenPreview:
             return Origin::Settings;
         case View::Error: return error_origin;
         case View::Sleeping: return sleep_origin;
@@ -1225,6 +1225,10 @@ struct ReaderApp::Impl final : DisplayBackend {
                                          : "位置准备任务创建失败。请重新检查，本机位置未改动。";
                     draw_sync(); overlay(); return;
                 }
+                if (foreground_job->request.kind == ContentJob::Kind::LockScreenPreview) {
+                    foreground_job.reset(); content_loading = false;
+                    draw_power("预览任务无法启动，请稍后重试。"); overlay(); return;
+                }
                 if (foreground_job->request.progressive) {
                     foreground_job->result.error = "Image worker unavailable";
                     complete_inline_image(*foreground_job); foreground_job.reset(); return;
@@ -1254,6 +1258,17 @@ struct ReaderApp::Impl final : DisplayBackend {
             lock_screens = std::move(job->result.lock_screens);
             lock_screen_error = job->result.error;
             draw_lock_screens(); overlay(); return;
+        }
+        if (request.kind == ContentJob::Kind::LockScreenPreview) {
+            content_loading = false; custom_prepare_finished = false;
+            if (!job->result.image) { draw_power("图片无法预览，请检查图片或稍后重试。"); overlay(); return; }
+            canvas = std::move(*job->result.image);
+            view = View::LockScreenPreview; hits.clear();
+            canvas.fill_rect(0, 0, 684, 120, 15); header("休眠图片预览", Back, "休眠");
+            canvas.fill_rect(0, 1048, 684, 168, 15);
+            text(draft.sleep_overlay ? "透明区域以进入预览前画面为底。" : "透明区域显示为白色。", 36, 1054, 24, 612, 1);
+            button(Back, "返回", 24, 1104, 636, 88, true);
+            overlay(true); return;
         }
         if (request.kind == ContentJob::Kind::ImageViewer) {
             content_loading = false;
@@ -1358,7 +1373,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (request.kind == ContentJob::Kind::SleepCover) return;
         if (request.kind == ContentJob::Kind::LockScreen) {
             if (result.cursor_saved && request.lock_screen_shown == custom_rotation_shown) custom_rotation_shown.clear();
-            if (settings.sleep_screen != "custom" || request.sleep_image != settings.sleep_image) return;
+            if (settings.sleep_screen != "custom" || request.sleep_image != settings.sleep_image || request.sleep_overlay != settings.sleep_overlay) return;
             if (request.preview && custom_sleep_attempted && sleep_cover_deadline) {
                 custom_sleep_image = std::move(job->result.image);
                 custom_rotation_name = settings.sleep_image.empty() && custom_sleep_image ? result.lock_screen : "";
@@ -5407,6 +5422,24 @@ struct ReaderApp::Impl final : DisplayBackend {
         pending_content = std::move(request);
         loading("正在读取休眠图片");
     }
+    void preview_lock_screen() {
+#ifdef ESP_PLATFORM
+        if (draft.sleep_overlay && (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 342U * 1216 + 768U * 1024 ||
+            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 342U * 1216)) {
+            draw_power("预览内存不足，请稍后重试。"); overlay(); return;
+        }
+#endif
+        abandon_content();
+        if (counting_job) counting_job->cancel();
+        if (cover_job) cover_job->cancel();
+        ContentJob::Request request;
+        request.kind = ContentJob::Kind::LockScreenPreview; request.root = root;
+        request.sleep_image = draft.sleep_image; request.sleep_overlay = draft.sleep_overlay;
+        request.generation = foreground_generation;
+        if (draft.sleep_overlay) request.lock_background = std::make_shared<graphics::Canvas>(canvas);
+        pending_content = std::move(request);
+        loading("正在准备图片预览");
+    }
     void draw_lock_screens() {
         view = View::LockScreens;
         hits.clear(); canvas.clear(); header("自定义休眠图片", Back, "休眠");
@@ -5472,6 +5505,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         ContentJob::Request request;
         request.kind = ContentJob::Kind::LockScreen; request.root = root;
         request.sleep_image = settings.sleep_image; request.generation = counting_generation;
+        request.sleep_overlay = settings.sleep_overlay;
         request.lock_screen_prepare = !sleeping; request.preview = sleeping;
         request.lock_screen_shown = custom_rotation_shown;
         if (!sleeping) custom_retry_at = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -5482,13 +5516,24 @@ struct ReaderApp::Impl final : DisplayBackend {
             custom_notice_pending = false; custom_rotation_name.clear();
             if (std::chrono::steady_clock::now() >= *custom_sleep_deadline) { custom_notice = "休眠图片准备超时"; return; }
         }
+        if (sleeping && settings.sleep_overlay) {
+#ifdef ESP_PLATFORM
+            if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 342U * 1216 + 768U * 1024 ||
+                heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 342U * 1216) {
+                custom_notice = "图片准备内存不足"; return;
+            }
+#endif
+            request.lock_background = std::make_shared<graphics::Canvas>(canvas);
+            if (sleep_wait_footer && view == sleep_wait_view)
+                std::memcpy(request.lock_background->data() + 342 * footer_top, sleep_wait_footer.get(), kSleepWaitFooterBytes);
+        }
         counting_job = std::make_unique<ContentJob>(std::move(request));
         if (!counting_job->start()) {
             counting_job.reset();
             if (sleeping) custom_notice = "休眠图片任务无法启动";
         }
     }
-    void draw_power() {
+    void draw_power(const std::string& preview_notice = {}) {
         view = View::PowerSettings;
         hits.clear(); canvas.clear(); header("电源与休眠", Back, "设置");
         text("休眠画面", 36, 144, 24, 612, 3);
@@ -5497,16 +5542,19 @@ struct ReaderApp::Impl final : DisplayBackend {
         button(SleepSimple, "简洁屏保", 36, 308, 296, 92, draft.sleep_screen == "simple");
         button(SleepCustom, "自定义图片", 352, 308, 296, 92, draft.sleep_screen == "custom");
         if (draft.sleep_screen == "custom") {
-            button(SleepChoose, "选择图片 / 轮播", 36, 432, 612, 88);
-            text(draft.sleep_image.empty() ? "按文件名轮播" : draft.sleep_image, 36, 548, 24, 612, 3);
+            button(SleepChoose, "选择图片 / 轮播", 36, 432, 296, 88, false, 26);
+            button(SleepPreview, "预览", 352, 432, 296, 88, false, 26);
+            text(draft.sleep_image.empty() ? "按文件名轮播" : draft.sleep_image, 36, 536, 24, 612, 3);
+            button(SleepOverlay, draft.sleep_overlay ? "叠加当前画面：开" : "叠加当前画面：关", 36, 580, 612, 64, draft.sleep_overlay, 26);
         } else if (draft.sleep_screen == "cover") note("无可用封面时显示书名与作者。", 464);
         else if (draft.sleep_screen == "reading") note("保留当前正文，并显示休眠提示。", 464);
         else note("显示书名、阅读位置与唤醒提示。", 464);
-        text("自动休眠", 36, 636, 28, 612, 1, true);
-        button(SleepLess, "−", 36, 706, 120, 96);
-        center(draft.auto_sleep_minutes ? std::to_string(draft.auto_sleep_minutes) + " 分钟" : "关闭", 168, 728, 348, 34);
-        button(SleepMore, "+", 528, 706, 120, 96);
-        note("按电源键唤醒；保存失败时不进入休眠。", 856);
+        const int auto_top = draft.sleep_screen == "custom" ? 668 : 636;
+        text("自动休眠", 36, auto_top, 28, 612, 1, true);
+        button(SleepLess, "−", 36, auto_top + 70, 120, 96);
+        center(draft.auto_sleep_minutes ? std::to_string(draft.auto_sleep_minutes) + " 分钟" : "关闭", 168, auto_top + 92, 348, 34);
+        button(SleepMore, "+", 528, auto_top + 70, 120, 96);
+        note(preview_notice.empty() ? "按电源键唤醒；保存失败时不进入休眠。" : preview_notice, 856);
         button(PowerMenu, "关机 / 重启", 24, 952, 636, 96);
         button(Back, "取消", 24, 1080, 306, 96);
         button(PowerSave, "保存设置", 354, 1080, 306, 96, true);
@@ -6709,7 +6757,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 refresh_badge_config(); cancel_sync(); sync_status.clear(); draw_sync(); overlay(); return;
             }
         }
-        if (view == View::LockScreens) { draw_power(); overlay(); return; }
+        if (view == View::LockScreens || view == View::LockScreenPreview) { draw_power(); overlay(); return; }
         if (view == View::PowerMenu) { close_power_menu(); return; }
         if (view == View::Portal) return;
         if (view == View::BookManagement) { draw_details(); overlay(); return; }
@@ -6910,6 +6958,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (view == View::Update && update_control(id)) return;
         if (id == UpdateOpen) { update_open(); return; }
         if (id == SleepCustom) { draft.sleep_screen = "custom"; draw_power(); overlay(); return; }
+        if (id == SleepOverlay) { draft.sleep_overlay = !draft.sleep_overlay; draw_power(); overlay(); return; }
+        if (id == SleepPreview) { preview_lock_screen(); return; }
         if (id == SleepChoose || id == SleepRefresh) { list_lock_screens(); return; }
         if (id == SleepRotation) {
             draft.sleep_image.clear(); draft.sleep_screen = "custom"; draw_lock_screens(); overlay(); return;
@@ -7309,6 +7359,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             settings.auto_sleep_minutes = draft.auto_sleep_minutes;
             settings.sleep_screen = draft.sleep_screen;
             settings.sleep_image = draft.sleep_image;
+            settings.sleep_overlay = draft.sleep_overlay;
             custom_prepare_finished = custom_sleep_attempted = false;
             custom_notice.clear(); custom_notice_pending = false;
             custom_sleep_image.reset();
@@ -7612,7 +7663,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 link_return = confirmed_link_return;
                 sync_return = confirmed_sync_return;
                 if (kind == ContentJob::Kind::Chapter && sync_return) { recover_body(); return; }
-                if (kind == ContentJob::Kind::LockScreenList) draw_power();
+                if (kind == ContentJob::Kind::LockScreenList || kind == ContentJob::Kind::LockScreenPreview) draw_power();
                 else if (mapping) { sync_cancelled(false); draw_sync(); }
                 else if (preview) draw_tools();
                 else draw_library();
