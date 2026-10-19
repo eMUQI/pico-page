@@ -31,7 +31,7 @@ def publish(cos, directory):
                            Metadata={'x-cos-forbid-overwrite': 'true'})
         except Exception as error:
             # A repeat deployment may reuse identical images but cannot replace a published version.
-            if getattr(error, 'get_error_code', lambda: None)() != 'ObjectAlreadyExists':
+            if getattr(error, 'get_error_code', lambda: None)() != 'FileAlreadyExists':
                 raise
         response = cos.get_object(Bucket=BUCKET, Key=path.name)
         stream = response['Body'].get_raw_stream()

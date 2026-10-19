@@ -14,7 +14,7 @@ from test_ota_manifest import image, table, LAYOUT
 
 class ObjectExists(Exception):
     def get_error_code(self):
-        return 'ObjectAlreadyExists'
+        return 'FileAlreadyExists'
 
 
 class CosFixture:

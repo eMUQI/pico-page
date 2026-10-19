@@ -7435,3 +7435,6 @@ GitHub OIDC 提供商 `PicoPageGitHub` 已准备至最终审阅，issuer 为 Git
 本轮本机验证：`python3 -m unittest discover -s tests -p test_cos_guard.py` 5/5、`test_publish_cos.py` 2/2、`test_ci_changes.py` 3/3；`python3 tools/check_handoff.py` 511 项、`git diff --check` 通过。网站构建及清单原有校验的结果见前述候选记录；远端新网站文案合入后将重新构建。
 
 远端新增 main `3d81a2e`（PR #122 官网文案）已完整保留；合并只解决开发状态末尾的并行追加，未改写双方历史记录。合入后重新执行真实 0.3.0 清单校验、网站构建、交接和 diff 检查。
+
+
+首次真实网站运行 `39186345047` 在 COS 发布步骤失败，官网部署未执行。OIDC 身份交换与禁止覆盖条件已通过，COS 对既有同名对象返回实际错误码 `FileAlreadyExists`，本地此前按 `ObjectAlreadyExists` 判断，因而安全停止。依据实际返回修正为 `FileAlreadyExists` 并更新重复发布回归；仍须完整认证读回内容一致才继续，不忽略权限或其他错误，不覆盖既有对象。
