@@ -2980,6 +2980,74 @@ int main(int argc, char** argv) {
     write(card / "PicoPage/network.toml", "schema_version=2\n[[wifi]]\nssid=\"home\"\npassword=\"password\"\n");
     write(card / "PicoPage/sync.toml", sync_config);
     for (const bool async : {false, true}) {
+        const auto root = card / (async ? "SyncReturnAsync" : "SyncReturnSync");
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
+        write(root / "PicoPage/sync.toml", sync_config);
+        write(root / "PicoPage/network.toml", "schema_version=2\n[[wifi]]\nssid='home'\npassword='password'\n");
+        ReaderApp app(root.string(), "sync-return", true, async); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+        const auto has_return = [&] { return app.canvas().pixel(0, 102) == 1; };
+        const auto jump = [&](const std::string& pointer) {
+            driver.sync_view();
+            const auto request = driver.check_remote();
+            app.complete_network(request.id, 200, R"({"progress":")" + pointer + R"(","percentage":0.5})", "");
+            driver.present(); driver.complete_content();
+            driver.tap(500, 800); driver.present(); driver.complete_content();
+            assert(app.view() == View::Reading && has_return());
+        };
+        const std::string first = "/body[1]/DocFragment[1]/body[1]/h1[1]/text()[1].0";
+        const std::string middle = "/body[1]/DocFragment[2]/body[1]/p[2]/text()[1].200";
+        jump(middle);
+        jump(first);
+        const auto boundary = *app.saved_record();
+        driver.key(Input::K1);
+        assert(!app.pending_frame() && has_return() && *app.saved_record() == boundary);
+        driver.refresh();
+        driver.tap(100, 50); driver.present(); driver.complete_content();
+        assert(!has_return() && app.saved_record()->anchor.resource.find("chapter2") != std::string::npos);
+        jump(first);
+        if (async) {
+            const auto remote = *app.saved_record();
+            ContentJob::delay_starts_for_test(ContentJob::Kind::Chapter, std::chrono::milliseconds(5000));
+            driver.key(Input::K3); driver.present();
+            assert(app.view() == View::Loading && *app.saved_record() == remote);
+            ContentJob::delay_starts_for_test(ContentJob::Kind::Chapter, std::chrono::milliseconds{});
+            driver.tap(560, 1170); driver.present(); driver.complete_content();
+            assert(app.view() == View::Reading && has_return() && app.saved_record()->anchor == remote.anchor);
+        }
+        driver.key(Input::K3); driver.present(); driver.complete_content();
+        assert(!has_return() && app.saved_record()->anchor.resource.find("chapter2") != std::string::npos);
+        driver.key(Input::K1); driver.present(); driver.complete_content();
+        jump("/body[1]/DocFragment[2]/body[1]/h1[1]/text()[1].0");
+        driver.key(Input::K1); driver.present(); driver.complete_content();
+        assert(!has_return() && app.saved_record()->anchor.resource.find("chapter1") != std::string::npos);
+        for (int control = 0; control < 3; ++control) {
+            for (const bool forward : {false, true}) {
+                jump(middle);
+                const auto remote = *app.saved_record();
+                driver.refresh();
+                if (!control && forward) {
+                    driver.key(Input::K3);
+                    assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Body);
+                    app.complete_frame(false); driver.present();
+                    assert(app.view() == View::Error && *app.saved_record() == remote);
+                    driver.close(); driver.present(); driver.complete_content();
+                    assert(app.view() == View::Reading && has_return() && app.saved_record()->anchor == remote.anchor);
+                }
+                if (control == 0) driver.key(forward ? Input::K3 : Input::K1);
+                else if (control == 1) driver.tap(forward ? 600 : 60, 500);
+                else driver.swipe(forward);
+                driver.present(); driver.complete_content();
+                assert(app.view() == View::Reading && !has_return() && app.saved_record()->anchor != remote.anchor);
+                const auto turned = *app.saved_record();
+                driver.tap(342, 50); driver.present(); driver.complete_content();
+                assert(app.view() == View::Tools && *app.saved_record() == turned);
+                driver.close(); driver.present(); driver.complete_content();
+            }
+        }
+    }
+    for (const bool async : {false, true}) {
         const auto root = card / (async ? "WifiLifecycleAsync" : "WifiLifecycleSync");
         fs::create_directories(root / "Books");
         fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
@@ -3736,6 +3804,48 @@ int main(int argc, char** argv) {
         assert(app.take_usb_transfer_action() == UsbTransferAction::None);
         assert(*app.saved_record() == saved);
         fs::rename(detached, card);
+    }
+    {
+        const auto root = card / "TocTitles";
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "toc-titles.epub", root / "Books/book.epub");
+        ReaderApp app(root.string()); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+        const auto saved = *app.saved_record();
+        driver.tap(342, 500); driver.present(); driver.tap(68, 1150); driver.present();
+        graphics::Font font; assert(font.open_fallback() && font.size(28));
+        const auto metrics = font.metrics();
+        const int title_height = metrics.ascender + metrics.descender + 36;
+        const int row_height = std::max(92, title_height + 28);
+        graphics::Canvas expected;
+        const auto check_title = [&](int top, const std::u32string& first, const std::u32string& second) {
+            expected.clear();
+            const int baseline = top + (row_height - title_height) / 2 + metrics.ascender;
+            for (const auto& line : {std::pair{first, baseline}, std::pair{second, baseline + 36}}) {
+                int x = 36;
+                for (const auto scalar : line.first) {
+                    assert(font.draw(expected, scalar, x, line.second));
+                    x += font.advance(scalar);
+                }
+            }
+            for (int y = top; y < top + row_height - 2; ++y)
+                for (int x = 36; x < 492; ++x)
+                    if (app.canvas().pixel(x, y) != expected.pixel(x, y)) {
+                        std::cerr << "TOC title mismatch at " << x << ',' << y << " top=" << top
+                                  << " row=" << row_height << " metrics=" << metrics.ascender << ',' << metrics.descender
+                                  << " advances=" << font.advance(U'甲') << ',' << font.advance(U'）') << '\n';
+                        assert(false);
+                    }
+            for (int y = top + row_height - 12; y < top + row_height - 2; ++y)
+                for (int x = 36; x < 492; ++x) assert(app.canvas().pixel(x, y) == 15);
+        };
+        check_title(522 + 92, std::u32string(15, U'甲'), U"甲）？");
+        check_title(522 + 92 + row_height, std::u32string(16, U'乙'), std::u32string(15, U'乙') + U"…");
+        driver.refresh();
+        assert(*app.saved_record() == saved);
+        driver.key(Input::K3); driver.present();
+        driver.key(Input::K1); driver.present();
+        assert(app.view() == View::Contents && *app.saved_record() == saved);
     }
     {
         ReaderApp app(card.string()); Driver driver{app};

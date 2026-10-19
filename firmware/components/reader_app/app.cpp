@@ -567,6 +567,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     std::vector<Hit> hits, links;
     std::optional<Anchor> link_return, confirmed_link_return;
+    bool sync_return = false, confirmed_sync_return = false;
     // Recent page spans are isolated by spine item, part and return-bar geometry.
     struct PageBoundary {
         std::size_t chapter, start, end;
@@ -1692,23 +1693,46 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (hint.empty()) center(std::to_string(index + 1) + " / " + std::to_string(total), 205, footer_zone + 34, 274, 24, 3);
         else center(hint, 213, footer_zone + 36, 258, 22);
     }
-    void title_lines(const std::string &value, int x, int y, int width, int size, bool bold = false, int max_rows = 2,
-                     std::uint8_t gray = 1) {
+    /** Measures or draws the same bounded title layout, retaining closing punctuation with its preceding character. */
+    int title_lines(const std::string &value, int x, int y, int width, int size, bool bold = false, int max_rows = 2,
+                    std::uint8_t gray = 1, bool draw = true) {
         ui.size(size);
+        const auto metrics = ui.metrics();
         const auto scalars = decode_utf8(value);
-        int used = 0, row = 0;
-        const int baseline = y + ui.metrics().ascender;
-        for (std::size_t i = 0; i < scalars.size(); ++i) {
-            const int advance = ui.advance(scalars[i]), run = run_width(scalars, i);
-            if (used + advance > width || (used && row + 1 < max_rows && run <= width && used + run > width)) { ++row; used = 0; }
-            if (row == max_rows - 1 && i + 1 < scalars.size() && used + advance + ui.advance(U'…') > width) {
-                ui.draw(canvas, U'…', x + used, baseline + row * (size + 8), gray, bold);
-                break;
+        const auto closing = [](char32_t c) {
+            return std::u32string_view(U"，。！？、：；）】》」』〉’”﹐﹑﹒﹔﹕﹖﹗﹚﹜﹞｡､｣,.!?;:)]}").find(c) != std::u32string_view::npos;
+        };
+        std::size_t begin = 0;
+        int rows = 0;
+        for (; begin < scalars.size() && rows < max_rows; ++rows) {
+            std::size_t end = begin;
+            int used = 0;
+            while (end < scalars.size()) {
+                const int advance = ui.advance(scalars[end]), run = run_width(scalars, end);
+                if (end > begin && (used + advance > width ||
+                    (rows + 1 < max_rows && run <= width && used + run > width))) break;
+                if (used + advance > width) break;
+                used += advance;
+                ++end;
             }
-            if (row >= max_rows) break;
-            ui.draw(canvas, scalars[i], x + used, baseline + row * (size + 8), gray, bold);
-            used += advance;
+            const bool ellipsis = rows + 1 == max_rows && end < scalars.size();
+            if (ellipsis) {
+                const int mark = ui.advance(U'…');
+                while (end > begin && used + mark > width) used -= ui.advance(scalars[--end]);
+            } else if (end < scalars.size()) {
+                while (end > begin + 1 && closing(scalars[end])) --end;
+            }
+            int offset = 0;
+            const int baseline = y + metrics.ascender + rows * (size + 8);
+            for (auto i = begin; i < end; ++i) {
+                if (draw) ui.draw(canvas, scalars[i], x + offset, baseline, gray, bold);
+                offset += ui.advance(scalars[i]);
+            }
+            if (ellipsis && draw) ui.draw(canvas, U'…', x + offset, baseline, gray, bold);
+            if (ellipsis || end == begin) { ++rows; break; }
+            begin = end;
         }
+        return rows ? metrics.ascender + metrics.descender + (rows - 1) * (size + 8) : 0;
     }
     bool typography_changed() const {
         const auto &applied = edit_snapshot.config.settings;
@@ -2585,6 +2609,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         cancel_sync();
         link_return.reset();
         confirmed_link_return.reset();
+        sync_return = confirmed_sync_return = false;
         book_path = path;
         last_book = path;
         last_recorded.clear();
@@ -3398,9 +3423,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (message == kBuiltinFontNotice || message == kFallbackFontNotice || message == kWeightUnavailableNotice) message.clear();
         if (forward) {
             const auto next_offset = readable_offset(page.end);
-            if (next_offset < chapter.text.size())
+            if (next_offset < chapter.text.size()) {
+                expire_sync_return();
                 show_page(next_offset);
-            else if (!chapter.last_part) {
+            } else if (!chapter.last_part) {
+                expire_sync_return();
                 const auto next = chapter.part + 1;
                 if (async_content) { begin_chapter(chapter_index, next, ContentJob::Target::Start); return; }
                 change_part(chapter_index, [this, next] {
@@ -3410,6 +3437,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 auto next = chapter_index + 1;
                 while (next < document.spine().size() && !document.spine()[next].linear)
                     ++next;
+                if (next < document.spine().size()) expire_sync_return();
                 if (async_content && next < document.spine().size()) { begin_chapter(next, 0, ContentJob::Target::Start); return; }
                 if (next < document.spine().size() && load_chapter(next))
                     show_page(0);
@@ -3421,6 +3449,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         } else {
             if (offset == readable_offset(0)) {
                 if (chapter.part > 0) {
+                    expire_sync_return();
                     const auto previous = chapter.part - 1;
                     if (async_content) { begin_chapter(chapter_index, previous, ContentJob::Target::End); return; }
                     change_part(chapter_index, [this, previous] {
@@ -3435,6 +3464,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                     --previous_chapter;
                 if (!document.spine()[previous_chapter].linear)
                     return;
+                expire_sync_return();
                 if (async_content) { begin_chapter(previous_chapter, kLastChapterPart, ContentJob::Target::End); return; }
                 if (document.spine()[previous_chapter].bytes > announced_bytes) {
                     defer("正在排版…", [this, previous_chapter] {
@@ -3446,9 +3476,16 @@ struct ReaderApp::Impl final : DisplayBackend {
                     return;
                 turn_back_to(chapter.text.size());
             } else {
+                expire_sync_return();
                 turn_back_to(offset);
             }
         }
+    }
+    /** Removes the sync return bar from a turn candidate; failure restores the confirmed state. */
+    void expire_sync_return() {
+        if (!sync_return) return;
+        link_return.reset();
+        sync_return = false;
     }
     void draw_tools() {
         tools_save_pending = session.needs_save();
@@ -3587,8 +3624,12 @@ struct ReaderApp::Impl final : DisplayBackend {
         auto title_width = [&](std::size_t index) {
             return 456 - std::min<int>(toc[index].depth, 3) * 40 - (toc_parent(index) ? 88 : 0);
         };
+        auto title_height = [&](std::size_t index) {
+            return title_lines(toc[index].label, 0, 0, title_width(index), toc[index].depth ? 24 : 28,
+                               false, 2, 1, false);
+        };
         auto row_height = [&](std::size_t index) {
-            return std::max(92, std::min(wrapped(toc[index].label, 0, 0, title_width(index), 26, false), 80) + 24);
+            return std::max(92, title_height(index) + 28);
         };
         int used = 0;
         for (std::size_t i = 0; i < toc.size(); ++i) {
@@ -3614,11 +3655,13 @@ struct ReaderApp::Impl final : DisplayBackend {
             const bool selected = i == current, parent = toc_parent(i);
             const std::uint8_t ink = selected ? 15 : 1;
             if (selected) canvas.fill_rect(0, y, 684, h - 1, 1);
-            title_lines(item.label, 36 + indent, y + (h > 92 ? 14 : 28), title_width(i), item.depth ? 24 : 28, selected, 2, ink);
+            title_lines(item.label, 36 + indent, y + (h - title_height(i)) / 2, title_width(i), item.depth ? 24 : 28, selected, 2, ink);
             const int percent = toc_percent(i);
             const auto position = selected ? "当前 · " + book_percent() : percent < 0 ? std::string() : std::to_string(percent) + "%";
             const int right = parent ? 560 : 648, width = text_width(position, 22);
-            text(position, right - width, y + (h - 22) / 2 - 4, 22, width, selected ? 15 : 3);
+            const auto position_metrics = ui.metrics();
+            text(position, right - width, y + (h - position_metrics.ascender - position_metrics.descender) / 2,
+                 22, width, selected ? 15 : 3);
             if (parent) {
                 std::size_t count = 0;
                 for (auto j = i + 1; j < toc.size() && toc[j].depth > item.depth; ++j) ++count;
@@ -5801,6 +5844,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             session.open("", "", writer);
             document.close(); book_path.clear(); release(chapter); page = {};
             links.clear(); clear_page_history(); link_return.reset(); confirmed_link_return.reset();
+            sync_return = confirmed_sync_return = false;
             last_recorded.clear();
         }
         abandon_content(); foreground_job.reset(); stop_covers(); clear_prefetch();
@@ -6564,6 +6608,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             persist();
         cancel_sync();
         link_return = confirmed_link_return;
+        sync_return = confirmed_sync_return;
         message = detail;
         retry_path = retry;
         std::size_t split = std::string::npos, mark = 0;
@@ -7043,11 +7088,12 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (!link_return)
                 return;
             const auto target = *link_return;
-            if (async_content) { link_return.reset(); clear_page_history(); begin_seek(target); return; }
+            if (async_content) { link_return.reset(); sync_return = false; clear_page_history(); begin_seek(target); return; }
             std::uint32_t target_offset;
             if (!seek(target, target_offset, "原位置无法恢复"))
                 return;
             link_return.reset();
+            sync_return = false;
             clear_page_history();
             show_page(target_offset);
             return;
@@ -7374,7 +7420,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (async_content) {
                 const auto origin = session.visible_record();
                 cancel_sync();
-                if (origin) link_return = origin->anchor;
+                if (origin) { link_return = origin->anchor; sync_return = true; }
                 clear_page_history(); begin_seek(target); return;
             }
             std::uint32_t start;
@@ -7382,7 +7428,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 return;
             const auto origin = session.visible_record();
             cancel_sync();
-            if (origin) link_return = origin->anchor;
+            if (origin) { link_return = origin->anchor; sync_return = true; }
             clear_page_history();
             show_page(start);
             return;
@@ -7564,6 +7610,8 @@ struct ReaderApp::Impl final : DisplayBackend {
                 abandon_content();
                 if (kind == ContentJob::Kind::ImageViewer) { close_image_viewer(); return; }
                 link_return = confirmed_link_return;
+                sync_return = confirmed_sync_return;
+                if (kind == ContentJob::Kind::Chapter && sync_return) { recover_body(); return; }
                 if (kind == ContentJob::Kind::LockScreenList) draw_power();
                 else if (mapping) { sync_cancelled(false); draw_sync(); }
                 else if (preview) draw_tools();
@@ -7829,6 +7877,7 @@ void ReaderApp::complete_frame(bool success) {
     if (result && impl_->session.presented(*result)) {
         if (frame.purpose == FramePurpose::Body) impl_->remember_page();
         impl_->confirmed_link_return = impl_->link_return;
+        impl_->confirmed_sync_return = impl_->sync_return;
         impl_->save_failed = false;
         if (!impl_->async_content && !impl_->recent_save_failed && impl_->last_recorded != impl_->book_path) {
             std::string error;

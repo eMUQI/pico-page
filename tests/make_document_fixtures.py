@@ -64,6 +64,17 @@ def generate(directory: Path) -> None:
         '<ol><li><a href="chapter1.xhtml#mixed">内联文字</a></li>'
         '<li><a href="chapter1.xhtml#note">脚注位置</a></li></ol></li>')
     write_fixture(directory / "nested-toc.epub", entries)
+    titles = fixture_entries()
+    titles["EPUB/nav.xhtml"] = titles["EPUB/nav.xhtml"].replace(
+        '<li><a href="chapter2.xhtml">第二章</a></li>',
+        '<li><a href="chapter2.xhtml">' + '甲' * 16 + '）？</a></li>'
+        '<li><a href="chapter2.xhtml">' + '乙' * 60 + '</a></li>'
+        '<li><a href="chapter2.xhtml">短标题</a><ol><li><a href="chapter2.xhtml">' +
+        '甲' * 17 + '）</a></li></ol></li>'
+        '<li><a href="chapter2.xhtml">末尾一</a></li>'
+        '<li><a href="chapter2.xhtml">末尾二</a></li>'
+        '<li><a href="chapter2.xhtml">最后一项</a></li>')
+    write_fixture(directory / "toc-titles.epub", titles)
     ncx = fixture_entries()
     ncx["EPUB/package.opf"] = ncx["EPUB/package.opf"].replace('version="3.0"', 'version="2.0"').replace(
         '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>',
