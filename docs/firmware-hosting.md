@@ -2,7 +2,7 @@
 
 ## 当前范围
 
-正式下载正在由腾讯云轻量服务器切换至广州 COS：`https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com/`。桶采用单 AZ、标准存储和按量计费，只存放已发布、带版本号的 BIN；公有读私有写，对象继承桶 ACL，不设置匿名允许策略。未接入 CDN、全球加速或自定义域名。旧 `oc.wulu.zone` 镜像保留为人工恢复入口，不再由新工作流自动更新；正式上线结果以[开发状态](development-status.md)为准。
+正式下载已于 2026-10-19 由腾讯云轻量服务器切换至广州 COS：`https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com/`。桶采用单 AZ、标准存储和按量计费，只存放已发布、带版本号的 BIN；公有读私有写，对象继承桶 ACL，不设置匿名允许策略。未接入 CDN、全球加速或自定义域名。旧 `oc.wulu.zone` 镜像保留为人工恢复入口，不再由新工作流自动更新；正式上线结果以[开发状态](development-status.md)为准。
 
 设备仍从 `https://picopage.wulu.zone/firmware/manifest.json` 读取清单；官网部署副本只将 `url` 改为 COS 的应用镜像地址，保留版本、大小、SHA-256、数据格式和更新日志。固定清单入口不变，GitHub Release 原附件保留。安装页从清单同目录下载全量镜像，并在擦除前校验从发布附件计算的 SHA-256。网站页面、清单及网站内固件副本继续由 Cloudflare Pages 提供；设备与安装页选用 COS 地址，不自动切换回网站副本。
 
@@ -26,7 +26,7 @@ COS 的预算告警、资源包和异常流量检测不构成实时费用硬上�
 
 函数包采用 Python 3.10、Linux x86-64 依赖，版本固定于 `tools/cos-requirements.txt`。SDK 和传递依赖不进入固件或网站；应保留各包许可证、元数据和来源记录，禁止将本机 macOS 扩展装入 SCF。`crcmod` 使用其上游支持的纯 Python 回退。本地隔离逻辑回归通过；云端已完成依赖导入、凭据解析、实际监控查询与私有 ACL 写入；公开下载到封禁及正式配置恢复均已验证。首次成功调用 11,872 ms / 85.8125 MB，复用调用 106 ms / 75.4140625 MB，仅为少量观测，不构成长时间费用或可用性保证。上述测试没有执行设备 OTA 或刷写。
 
-发布接入由 `tools/publish_cos.py` 实现：复用发布校验器，只上传带版本号的 BIN，继承桶 ACL，使用服务端禁止覆盖请求头，完整认证读回一致后才允许后续网站部署；不会将桶重新公开。官网清单仍由 Pages 提供，COS 不需要可变的 `manifest.json`。上传身份采用独立 `PicoPageCosPublisher` 角色，经 GitHub OIDC 换取 15 分钟临时凭据；权限 `tools/cos-publisher-policy.json` 仅允许本桶项目 BIN 的读取和禁止覆盖上传，不含删除或 ACL 修改。仓库当前已启用不可变 OIDC 主体，实际前缀为 `repo:eMUQI@32332228/pico-page@1407034423`；信任条件必须限定该前缀的 main 和发布标签，不能使用旧的仅名称主体或允许 PR。`PicoPageGitHub` OIDC 提供商已创建并开启公钥自动轮转，最小上传策略 `PicoPageCosPublisherPolicy`（`290357331`）已保存；独立角色 `PicoPageCosPublisher`（`4611686018449703622`）已创建并只关联该策略，禁止控制台访问。最终信任策略已读回 main 与 v* 标签数组，见 `tools/cos-publisher-trust.json`。脚本请求的会话为 900 秒；控制台角色最大会话期限仍为默认 2 小时，不应将脚本请求时长误称为角色强制上限。真实 Actions 身份交换和上线结果见开发状态。
+发布接入由 `tools/publish_cos.py` 实现：复用发布校验器，只上传带版本号的 BIN，继承桶 ACL，使用服务端禁止覆盖请求头，完整认证读回一致后才允许后续网站部署；不会将桶重新公开。官网清单仍由 Pages 提供，COS 不需要可变的 `manifest.json`。上传身份采用独立 `PicoPageCosPublisher` 角色，经 GitHub OIDC 换取 15 分钟临时凭据；权限 `tools/cos-publisher-policy.json` 仅允许本桶项目 BIN 的读取和禁止覆盖上传，不含删除或 ACL 修改。仓库当前已启用不可变 OIDC 主体，实际前缀为 `repo:eMUQI@32332228/pico-page@1407034423`；信任条件必须限定该前缀的 main 和发布标签，不能使用旧的仅名称主体或允许 PR。`PicoPageGitHub` OIDC 提供商已创建并开启公钥自动轮转，最小上传策略 `PicoPageCosPublisherPolicy`（`290357331`）已保存；独立角色 `PicoPageCosPublisher`（`4611686018449703622`）已创建并只关联该策略，禁止控制台访问。最终信任策略已读回 main 与 v* 标签数组，见 `tools/cos-publisher-trust.json`。脚本请求的会话为 900 秒；控制台角色最大会话期限仍为默认 2 小时，不应将脚本请求时长误称为角色强制上限。真实 Actions 运行 `39186467623` 已通过身份交换、既有对象禁止覆盖重试、完整认证和匿名读回、Pages 发布及正式清单核对；详见开发状态。
 
 ## 自动部署
 
