@@ -7,6 +7,8 @@ on:
       - 'docs/releases/**'
       - 'tools/ota_manifest.py'
       - 'tools/deploy_firmware.py'
+      - 'tools/publish_cos.py'
+      - 'tools/cos-requirements.txt'
       - 'tools/ci_changes.py'
       - '.github/workflows/web.yml'
   pull_request:
@@ -27,6 +29,9 @@ jobs:
   web:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write
     defaults:
       run:
         working-directory: web
@@ -71,7 +76,7 @@ jobs:
             gh release download "$tag" --dir web/public/firmware \
               --pattern manifest.json --pattern 'pico-page-*-read_pico-release*.bin'
             python3 tools/ota_manifest.py --check web/public/firmware --expect-version "${tag#v}" \
-              --publish-base-url https://oc.wulu.zone/firmware/
+              --publish-base-url https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com/
           else
             python3 tools/ota_manifest.py --check web/public/firmware
           fi
@@ -102,31 +107,27 @@ jobs:
           path: web/dist/
           if-no-files-found: error
           retention-days: 3
-      - name: Publish firmware to Tencent Cloud
+      - name: Set up COS publication runtime
+        if: env.DEPLOY == 'true' && env.STALE != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: tools/cos-requirements.txt
+      - name: Publish firmware to Tencent COS
         if: env.DEPLOY == 'true' && env.STALE != 'true'
         working-directory: ${{ github.workspace }}
-        env:
-          TENCENT_DEPLOY_KEY: ${{ secrets.TENCENT_DEPLOY_KEY }}
-          TENCENT_KNOWN_HOSTS: ${{ secrets.TENCENT_KNOWN_HOSTS }}
         run: |
           if [ ! -f web/dist/firmware/manifest.json ]; then exit 0; fi
-          test -n "$TENCENT_DEPLOY_KEY" && test -n "$TENCENT_KNOWN_HOSTS"
-          ssh_dir=$(mktemp -d)
-          trap 'rm -rf "$ssh_dir"' EXIT
-          printf '%s\n' "$TENCENT_DEPLOY_KEY" > "$ssh_dir/key"
-          printf '%s\n' "$TENCENT_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
-          chmod 600 "$ssh_dir/key" "$ssh_dir/known_hosts"
-          (cd web/dist/firmware && tar -cf - manifest.json pico-page-*-read_pico-release*.bin) \
-            | ssh -C -F /dev/null -i "$ssh_dir/key" -o IdentitiesOnly=yes -o BatchMode=yes \
-                -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" \
-                -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
-                pico-deploy@oc.wulu.zone publish
+          python3 -m pip install -r tools/cos-requirements.txt
+          python3 tools/publish_cos.py web/dist/firmware
       - name: Verify the firmware download origin
         if: env.DEPLOY == 'true' && env.STALE != 'true'
         run: |
           if [ -f dist/firmware/manifest.json ]; then
-            for file in dist/firmware/manifest.json dist/firmware/pico-page-*-read_pico-release*.bin; do
-              status=$(curl -fsS --proto '=https' --max-time 300 "https://oc.wulu.zone/firmware/${file##*/}" \
+            base=https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com
+            for file in dist/firmware/pico-page-*-read_pico-release*.bin; do
+              status=$(curl -fsS --proto '=https' --max-time 300 --max-filesize 4300000 "$base/${file##*/}" \
                 -o "$RUNNER_TEMP/ota-origin.bin" -w '%{http_code}')
               [ "$status" = 200 ]
               cmp "$RUNNER_TEMP/ota-origin.bin" "$file"

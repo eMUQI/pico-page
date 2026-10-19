@@ -24,6 +24,7 @@ class CiChangesTest(unittest.TestCase):
             (['.github/workflows/host.yml', 'examples/settings.toml', 'handoff-manifest.json'], True, False),
             (['tools/ota_manifest.py'], True, True),
             (['tools/deploy_firmware.py'], True, True),
+            (['tools/publish_cos.py', 'tools/cos-requirements.txt'], True, True),
             (['tools/ci_changes.py'], True, True),
             (['new-component/source.cpp', 'docs/releases/0.2.0.md'], True, True),
         ]

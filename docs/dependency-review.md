@@ -145,3 +145,20 @@ GB18030 解码表的来源与复核（2026-10-07）：`firmware/components/reade
 ## 2026-10-11 · PMU RTC 接入
 
 RTC 沿用已锁定的 MindReset BSP `5f3406deec33304de8801046db583dec7c49e55b`，参考该提交的 PMU 演示、自检、驱动及协议文档；不新增第三方依赖。`read_pico_pmu`（Apache-2.0）构建副本新增 TIME_GET 响应长度与快照有效性校验，原件不变，补丁随源码保留；源码版权与许可证继续保留。实现和修改范围见 [BSP 审查](bsp-review.md#rtc-响应校验与接入2026-10-11)。未复制 PMU 工厂标定、自检时间来源或额外驱动。
+
+
+## 2026-10-19 · COS 部署与封禁候选的云端依赖
+
+仅用于云函数候选包及 GitHub Actions 上传步骤，不进入固件、host 或浏览器。版本固定于 `tools/cos-requirements.txt`，来自 PyPI 官方发行包；已读取 SDK 的请求、凭据、上传头映射和本次接口实现及发行包许可元数据。发行包没有提供可直接确认的上游源码 commit，不将 master 当作版本证据；当前记录以发行版本及本地完整函数包 SHA-256 为准，尚未云端部署。
+
+| 包 | 版本 | 许可 | 处理 |
+|---|---|---|---|
+| 腾讯云 COS Python SDK | 1.9.44 | MIT | 上游代码不改；HTTPS 验证开启；调用方增加禁止覆盖上传头 |
+| tencentcloud-sdk-python-common / monitor | 各 3.1.188 | Apache-2.0 | 上游代码不改；只包含本次 SDK 公共部分和监控模块 |
+| certifi | 2026.7.22 | MPL-2.0 | 保留证书数据、源码及许可，包内源码未修改 |
+| charset-normalizer / crcmod / six / urllib3 / xmltodict | 3.5.2 / 1.7 / 1.17.0 / 2.8.0 / 1.0.4 | MIT | 保留声明；crcmod 仅选用上游支持的纯 Python 实现及源包元数据 |
+| idna | 3.20 | BSD-3-Clause | 保留版权、条件和免责声明 |
+| pycryptodome | 4.0.1 | BSD-2-Clause AND Unlicense | 保留各组成部分声明，使用官方 manylinux x86-64 扩展 |
+| requests | 2.34.2 | Apache-2.0 | 上游代码不改，保留许可和元数据 |
+
+函数包保留各依赖的 LICENSE/声明及元数据。crcmod 的纯 Python 代码来自同版本上游发行包，保留其 LICENSE 和 PKG-INFO，不附带本机编译的 macOS 扩展或错误的平台轮子元数据；其上游 12 项测试已在此纯 Python 包上通过。依赖没有复制进仓库，完整 ZIP 及来源证据位于忽略目录 `.local/cos-protection-20261018/`；云端导入、原生库兼容及真实接口权限仍待验证。本记录不替代整项目许可审查。

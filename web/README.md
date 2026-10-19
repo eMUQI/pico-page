@@ -2,6 +2,8 @@
 
 Astro 静态站，用于介绍 Pico Page 的功能、限制和开发状态。
 
+固件下载采用广州 COS，费用告警、流量告警与每分钟自动封禁已部署并完成公开到封禁测试。官网和固定清单入口仍由 Cloudflare Pages 提供。访问权限、发布身份与故障恢复见[固件维护说明](../docs/firmware-hosting.md)；实际上线结果以[开发状态](../docs/development-status.md)为准。
+
 ```sh
 npm ci --prefix web --ignore-scripts
 npm run build --prefix web
@@ -27,7 +29,7 @@ npm run preview --prefix web
 
 [网站构建工作流](../.github/workflows/web.yml) 在拉取请求更新时保留检查结果，仅对网站目录、发布说明、OTA 清单脚本及工作流依赖的变更执行构建，与必要的 host 检查并行。分支 push 不重复执行；main 的相关输入变更、发布 Release 或手动运行触发构建，其中正式部署仅限 main 或 Release。使用 Node.js 24，按 `package-lock.json` 缓存 npm 下载，执行 `npm ci --ignore-scripts` 和 `npm run build`；构建失败时不上传产物。
 
-构建前，工作流把非草稿的发布列表写到 `web/public/firmware/releases.json`（见「更新日志」），并从 GitHub Release 取回已发布的固件：在非草稿的发布中选出版本最高的 `v<版本>` 标签，把它附带的 `manifest.json`、应用镜像和全量镜像（如果有）下载到 `web/public/firmware/`，再用 `python3 tools/ota_manifest.py --check` 核对清单与应用镜像逐项一致、版本与标签相同，全量镜像中的应用与应用镜像相同，不一致时工作流失败。校验通过后，`--publish-base-url https://oc.wulu.zone/firmware/` 只将部署副本的下载地址切到腾讯云，保留原发布附件；正式部署先通过受限 SSH 账号自动上传腾讯云，再完整读回清单、应用和全量镜像，与部署副本逐字节比较；上传或校验失败时停止，不发布官网。账号与密钥边界见[腾讯云固件下载](../docs/firmware-hosting.md#自动部署)。没有这样的发布时跳过下载。发布一个 Release 也会触发本工作流。
+构建前，工作流把非草稿的发布列表写到 `web/public/firmware/releases.json`（见「更新日志」），并从 GitHub Release 取回已发布的固件：在非草稿的发布中选出版本最高的 `v<版本>` 标签，把它附带的 `manifest.json`、应用镜像和全量镜像（如果有）下载到 `web/public/firmware/`，再用 `python3 tools/ota_manifest.py --check` 核对清单与应用镜像逐项一致、版本与标签相同，全量镜像中的应用与应用镜像相同，不一致时工作流失败。校验通过后，`--publish-base-url https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com/` 只将部署副本的下载地址切到腾讯云，保留原发布附件；正式部署通过 GitHub OIDC 取得 15 分钟临时发布身份，禁止覆盖上传版本 BIN，并完整认证读回及匿名 HTTPS 读回两个镜像，与发布附件逐字节比较；上传或校验失败时停止，不发布官网。角色与权限边界见[腾讯云固件下载](../docs/firmware-hosting.md#自动部署)。没有这样的发布时跳过下载。发布一个 Release 也会触发本工作流。
 
 部署前直接比较构建提交与最新 main 的网站输入：网站输入变化时让位给替代运行，仅文档或固件代码变化时继续当前部署；无法读取比较结果时停止。只有构建成功且通过该判断的正式部署运行，才保存 `web/dist/` 为 `pico-page-web` artifact，缺少产物时报错，保留 3 天。PR 检查和非 main 的手动构建不上传 artifact。下载并解压后得到静态站内容，可用于核对或手动部署；artifact 遵循仓库访问权限，不作为设备 OTA 下载地址。
 
@@ -51,7 +53,7 @@ GA 数据流需开启增强型衡量，统计页面访问、滚动、外链和�
 
 GitHub 对 Release 事件使用标签所在提交中的工作流文件。标签所在的提交若早于本部署流程，发布后不会自动部署，需要在 `main` 上手动运行一次工作流。
 
-腾讯云上传使用仓库密钥 `TENCENT_DEPLOY_KEY`、`TENCENT_KNOWN_HOSTS`，仅正式部署步骤读取。Cloudflare 部署使用仓库密钥 `CLOUDFLARE_API_TOKEN`（仅有 Cloudflare Pages 编辑权限）和 `CLOUDFLARE_ACCOUNT_ID`。wrangler 固定为 4.144.0，以 `--branch=main` 上传；Pages 项目的生产分支必须是 `main`，否则只会得到预览部署。
+COS 上传使用独立 `PicoPageCosPublisher` 角色和 GitHub OIDC，不保存腾讯云长期密钥；仅本仓库 main 和 v* 标签可换取身份，PR 不发布。角色无删除或 ACL 权限，上传必须携带禁止覆盖头。桶被封禁时匿名核验失败，流程停止，不会重新公开。Cloudflare 部署使用仓库密钥 `CLOUDFLARE_API_TOKEN`（仅有 Cloudflare Pages 编辑权限）和 `CLOUDFLARE_ACCOUNT_ID`。wrangler 固定为 4.144.0，以 `--branch=main` 上传；Pages 项目的生产分支必须是 `main`，否则只会得到预览部署。
 
 部署前工作流在产物中写入 `deployment.txt`（实际构建的网站提交、运行编号和重试次数）。部署后核对线上内容：`/deployment.txt` 须与本次写入的一致，证明正式域名提供的就是这次部署而不是预览或旧版本；更新清单地址在已发布固件时须与本次产物中的清单一致，未发布时须返回 404。每次请求最长 8 秒，约两分钟内不符则运行失败。核对失败不会撤回已经完成的部署：此时线上可能已经是新内容，需要到 Pages 项目中查看当前生产部署，必要时在那里回滚。首页、界面图、样式、字体与锁屏下载包仍需人工核对。
 
@@ -63,16 +65,16 @@ GitHub 对 Release 事件使用标签所在提交中的工作流文件。标签�
 
 1. 完成固件发布附件的生成和核验，将应用镜像、全量镜像、清单和来源记录发布到对应的 GitHub Release；未获得发布授权时停留在本地准备阶段。
 2. 备份 `web/public/firmware/`，将其替换为目标 Release 的清单和两个 BIN，避免混放不同版本的 BIN。重新从 Release 下载并逐字节比较，不直接使用旧构建目录中的附件。
-3. 先按[腾讯云固件下载](../docs/firmware-hosting.md)上传并完整读回目标版本，确认应用和全量镜像与原发布附件一致。在仓库根目录执行 `gh release list --repo eMUQI/pico-page --limit 100 --exclude-drafts --json tagName,publishedAt > web/public/firmware/releases.json`，让更新日志只列出已公开的版本；然后运行 `python3 tools/ota_manifest.py --check web/public/firmware --expect-version <版本> --publish-base-url https://oc.wulu.zone/firmware/`，校验原附件并只修改官网部署副本的下载地址。后续复验该副本时增加 `--base-url https://oc.wulu.zone/firmware/`；不要改写 GitHub 原附件。
+3. 在腾讯云 COS 控制台由管理员上传缺少的版本 BIN，不覆盖同名对象，不单独公开对象；已有同名对象必须与发布附件逐字节一致。按[腾讯云固件下载](../docs/firmware-hosting.md)完整读回目标版本，确认应用和全量镜像与原发布附件一致。在仓库根目录执行 `gh release list --repo eMUQI/pico-page --limit 100 --exclude-drafts --json tagName,publishedAt > web/public/firmware/releases.json`，让更新日志只列出已公开的版本；然后运行 `python3 tools/ota_manifest.py --check web/public/firmware --expect-version <版本> --publish-base-url https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com/`，校验原附件并只修改官网部署副本的下载地址。后续复验该副本时增加 `--base-url https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com/`；不要改写 GitHub 原附件。
 4. 执行 `npm ci --prefix web --ignore-scripts` 和 `PUBLIC_GA_MEASUREMENT_ID=G-S9XSC6V1KV npm run build --prefix web`。在 `web/dist/deployment.txt` 写入本次网站源码的完整 commit、`manual` 以及 UTC 时间，保留同内容的本地副本用于读回比较。
 5. 在已登录且具有 Pages 编辑权限的本机，用 `npx --yes wrangler@4.144.0 pages deploy web/dist --project-name=picopage --branch=main` 部署；只上传 `web/dist`。凭据通过本机登录或现有环境提供，不写入命令、仓库或日志。也可在现有 Pages 项目中创建生产部署并上传同一目录。参考 [Cloudflare Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/)。
-6. 独立读回正式域名的 `deployment.txt` 和清单，与本次本地文件逐字节比较；确认无查询参数的固定清单地址返回的 `url` 以 `https://oc.wulu.zone/firmware/` 开头。沿清单地址下载应用镜像，完整核对大小和 SHA-256；核对安装页的全量镜像地址指向腾讯云，带官网 Origin 下载并与附件逐字节比较，同时确认跨域响应头允许官网。用 `--base-url https://oc.wulu.zone/firmware/` 复验部署目录，核对安装页版本、更新日志、GA ID 和第三方模块能正常加载。失败时按上一节处理，不把「上传成功」记录为验收通过。
+6. 独立读回正式域名的 `deployment.txt` 和清单，与本次本地文件逐字节比较；确认无查询参数的固定清单地址返回的 `url` 以 `https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com/` 开头。沿清单地址下载应用镜像，完整核对大小和 SHA-256；核对安装页的全量镜像地址指向腾讯云，带官网 Origin 下载并与附件逐字节比较，同时确认跨域响应头允许官网。用 `--base-url https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com/` 复验部署目录，核对安装页版本、更新日志、GA ID 和第三方模块能正常加载。失败时按上一节处理，不把「上传成功」记录为验收通过。
 
-腾讯云镜像按[固件下载镜像](../docs/firmware-hosting.md)单独上传和校验。仅更新 `oc.wulu.zone` 不会改变设备固定的 `picopage.wulu.zone/firmware/manifest.json` 入口；GitHub Actions 不可用期间，不依赖 Release 事件自动完成上述步骤。
+腾讯云镜像按[固件下载镜像](../docs/firmware-hosting.md)单独上传和校验。仅上传 COS BIN 不会改变设备固定的 `picopage.wulu.zone/firmware/manifest.json` 入口；GitHub Actions 不可用期间，不依赖 Release 事件自动完成上述步骤。
 
 ## 固件更新文件
 
-设备从 `https://picopage.wulu.zone/firmware/manifest.json` 读取更新清单，再从 `https://oc.wulu.zone/firmware/` 下载清单指向的应用镜像；安装页也从腾讯云下载同一版本的全量镜像（见「安装页」），其 SHA-256 仍由构建时校验过的原附件计算，下载校验完成后才擦除和写入。腾讯云允许官网 `https://picopage.wulu.zone` 跨域读取文件；本地预览不在该跨域许可范围内。这些文件不放在仓库里：原文件来自 GitHub Release，部署副本只修改清单的 `url`，随 `pico-page-web` artifact 一起部署并保留官网副本。`web/public/firmware/` 已被 Git 忽略。当前发布版本以 GitHub Release 和线上清单为准。腾讯云与官网由工作流按顺序自动部署，实际发布与核验结果见开发状态。
+设备从 `https://picopage.wulu.zone/firmware/manifest.json` 读取更新清单，再从 `https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com/` 下载清单指向的应用镜像；安装页也从腾讯云下载同一版本的全量镜像（见「安装页」），其 SHA-256 仍由构建时校验过的原附件计算，下载校验完成后才擦除和写入。腾讯云允许官网 `https://picopage.wulu.zone` 跨域读取文件；本地预览不在该跨域许可范围内。这些文件不放在仓库里：原文件来自 GitHub Release，部署副本只修改清单的 `url`，随 `pico-page-web` artifact 一起部署并保留官网副本。`web/public/firmware/` 已被 Git 忽略。当前发布版本以 GitHub Release 和线上清单为准。腾讯云与官网由工作流按顺序自动部署，实际发布与核验结果见开发状态。
 
 发布一个版本的步骤（创建 Release 需要项目所有者授权；Actions 可用时由发布事件触发部署，不可用时按上面的手动流程执行）：
 

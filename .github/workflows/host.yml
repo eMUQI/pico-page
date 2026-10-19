@@ -22,6 +22,8 @@ jobs:
           python-version: '3.12'
       - run: python3 -m unittest discover -s tests -p test_ci_changes.py -v
       - run: python3 -m unittest discover -s tests -p test_deploy_firmware.py -v
+      - run: python3 -m unittest discover -s tests -p test_cos_guard.py -v
+      - run: python3 -m unittest discover -s tests -p test_publish_cos.py -v
       - name: Select checks
         id: changes
         shell: bash

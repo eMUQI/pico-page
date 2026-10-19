@@ -5,7 +5,8 @@ import os
 import subprocess
 
 
-WEB_FILES = {'.github/workflows/web.yml', 'tools/ota_manifest.py', 'tools/deploy_firmware.py', 'tools/ci_changes.py'}
+WEB_FILES = {'.github/workflows/web.yml', 'tools/ota_manifest.py', 'tools/deploy_firmware.py',
+             'tools/publish_cos.py', 'tools/cos-requirements.txt', 'tools/ci_changes.py'}
 
 
 def checks_for_paths(paths):
