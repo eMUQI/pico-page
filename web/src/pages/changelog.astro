@@ -52,7 +52,7 @@ const releases = readdirSync(directory).filter((name) => name.endsWith(".md")).m
 <Site title="更新日志 · Pico Page" description="Pico Page 各版本的更新日志。" current="changelog">
   <article class="changelog">
     <h1>更新日志</h1>
-    <p class="lead">同样的内容会在设备的「设置 → 固件更新」里显示。新版本在<a href="/install/">安装页</a>安装，已安装的设备可以联网更新。</p>
+    <p class="lead">同样的内容会在设备的「设置 → 固件更新」里显示。新版本可在<a href="/install/">安装页</a>安装，也可按<a href="/docs/#update">联网更新说明</a>在设备上更新。</p>
     {releases.length === 0 && <p class="notice">还没有发布的版本。</p>}
     {releases.map(({ version, date, blocks }) => (
       <section id={`v${version}`}>

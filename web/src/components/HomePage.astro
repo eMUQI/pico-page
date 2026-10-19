@@ -48,7 +48,7 @@ const lockscreens = [
       <li>
         <div class="step-head"><span class="numeral">1</span><span>电脑 · 浏览器</span></div>
         <h3>安装固件</h3>
-        <p>用 USB 线连接电脑，在浏览器中写入 Pico Page。整片覆盖安装，原厂系统或其他固件都可以直接装；启用了闪存加密或安全启动的设备除外。TF 卡上的书不受影响。</p>
+        <p>用 USB 线连接电脑，在浏览器中写入 Pico Page。整片覆盖安装，原厂系统或其他固件都可以直接装；启用了闪存加密或安全启动的设备除外。TF 卡上的书籍、阅读进度和 Pico Page 设置不受影响。</p>
         {firmware ? (
           <p class="outcome"><span class="muted">完成标志</span>　设备重启后显示书库。</p>
         ) : (
@@ -119,7 +119,7 @@ const lockscreens = [
   <section id="features" class="band">
     <p class="eyebrow">功能</p>
     <h2>书和进度，都由你保管。</h2>
-    <p class="lead muted">书籍、阅读进度与设置保存在 TF 卡上。连接电脑，就能查看、备份和整理。</p>
+    <p class="lead muted">书籍、阅读进度与设置保存在 TF 卡上。开启 USB 文件传输或使用读卡器，就能在电脑上查看、备份和整理。</p>
     <div class="features">
       <article>
         <h3>原书直接读</h3>
@@ -192,7 +192,7 @@ const lockscreens = [
     <ol class="numbered usage">
       <li><span>1</span><span>把 <code>LockScreens/</code> 复制到 TF 卡根目录，已有同名文件夹时合并。单张下载的 PNG 也放进这个文件夹。</span></li>
       <li><span>2</span><span>「设置 → 电源与休眠」选「自定义图片」，在「选择图片 / 轮播」中固定一张或选择轮播。</span></li>
-      <li><span>3</span><span>点击「保存设置」。0.2.0-beta.3 起，休眠会等待图片准备（0.2.0-beta.4 起，只有再按一次电源键才会取消等待）；更早版本请先让设备空闲片刻。</span></li>
+      <li><span>3</span><span>点击「保存设置」。0.2.0-beta.3 起，休眠会等待图片准备（0.2.0-beta.4 起，再短按一次电源键可取消等待，触摸和 K1/K2/K3 均忽略）；更早版本请先让设备空闲片刻。</span></li>
     </ol>
   </section>
 </Site>
