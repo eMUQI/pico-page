@@ -556,7 +556,8 @@ bool present(pico_page::ReaderApp &app) {
         const bool okay = pico_page::platform::present(
             app.canvas().data(), app.canvas().pixels().size(),
             app.pending_frame()->refresh == pico_page::RefreshIntent::FullClean, error, app.pending_frame()->region,
-            app.pending_frame()->changed_pixels_only);
+            app.pending_frame()->changed_pixels_only,
+            app.pending_frame()->purpose == pico_page::FramePurpose::Body);
         PP_DIAGNOSTIC(const auto frame_present_finished = esp_timer_get_time();)
         if (flash_lock) xSemaphoreGive(flash_lock);
         PP_DIAGNOSTIC(diag::end(measurement, okay ? diag::Outcome::Success : diag::Outcome::Failure);)

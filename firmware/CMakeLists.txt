@@ -23,6 +23,8 @@ endif()
 # Patch a build-local copy, preserving the verified upstream checkout.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_LIST_DIR}/patches/epdiy-row-phases.patch"
+    "${CMAKE_CURRENT_LIST_DIR}/patches/epdiy-footer-hold.patch"
+    "${CMAKE_CURRENT_LIST_DIR}/patches/epdiy-unchanged-pixels.h"
     "${CMAKE_CURRENT_LIST_DIR}/patches/read-pico-rtc-response.patch")
 set(READ_PICO_ADAPTED "${CMAKE_CURRENT_BINARY_DIR}/pico_bsp")
 file(REMOVE_RECURSE "${READ_PICO_ADAPTED}/read_pico")
@@ -50,6 +52,14 @@ if(NOT row_patch_result EQUAL 0)
     message(FATAL_ERROR "Cannot apply EPD row-phase patch")
 endif()
 list(APPEND EXTRA_COMPONENT_DIRS "${READ_PICO_ADAPTED}/epdiy")
+file(COPY "${CMAKE_CURRENT_LIST_DIR}/patches/epdiy-unchanged-pixels.h"
+    DESTINATION "${READ_PICO_ADAPTED}/epdiy/src/output_common")
+execute_process(COMMAND git apply --unsafe-paths
+    "${CMAKE_CURRENT_LIST_DIR}/patches/epdiy-footer-hold.patch"
+    WORKING_DIRECTORY "${READ_PICO_ADAPTED}/epdiy" RESULT_VARIABLE footer_patch_result)
+if(NOT footer_patch_result EQUAL 0)
+    message(FATAL_ERROR "Cannot apply EPD footer hold patch")
+endif()
 file(REMOVE_RECURSE "${READ_PICO_ADAPTED}/read_pico_pmu")
 file(COPY "${READ_PICO_SOURCE}/components/read_pico_pmu" DESTINATION "${READ_PICO_ADAPTED}")
 execute_process(COMMAND git apply --unsafe-paths

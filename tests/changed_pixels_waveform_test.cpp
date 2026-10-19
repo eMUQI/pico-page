@@ -1,5 +1,6 @@
 #include "pico_page/changed_pixels_waveform.h"
 #include "pico_page/ripple_schedule.h"
+#include "../firmware/patches/epdiy-unchanged-pixels.h"
 
 #include <algorithm>
 #include <array>
@@ -44,6 +45,34 @@ void exercise(std::size_t phases) {
 }
 }
 int main() {
+    // Exhaust all grayscale pairs in every output bit lane and at the footer boundary.
+    constexpr int native_width = 1216, footer_column = 1128;
+    std::array<std::uint8_t, native_width> difference{};
+    std::array<std::uint8_t, native_width / 4 + 1> drive{};
+    for (int pair = 0; pair < 256; ++pair) {
+        difference.fill(static_cast<std::uint8_t>(pair));
+        for (int first : {-1, 0, footer_column - 1, footer_column, native_width, native_width + 1}) {
+            drive.fill(0xFF);
+            epd_hold_unchanged_suffix(difference.data(), drive.data(), first, native_width);
+            for (int x = 0; x < native_width; ++x) {
+                const bool hold = first >= 0 && x >= first && (pair & 15) == (pair >> 4);
+                assert(((drive[x / 4] >> (2 * (x % 4))) & 3) == (hold ? 0 : 3));
+            }
+            assert(drive.back() == 0xFF);
+        }
+    }
+    // Mixed equal and changed neighbors retain their original phase drive actions.
+    for (int x = 0; x < native_width; ++x) difference[x] = x % 2 ? 0x77 : 0x37;
+    drive.fill(0xE4);
+    epd_hold_unchanged_suffix(difference.data(), drive.data(), footer_column, native_width);
+    for (int x = 0; x < native_width; ++x) {
+        const auto expected = x >= footer_column && x % 2 ? 0 : x % 4;
+        assert(((drive[x / 4] >> (2 * (x % 4))) & 3) == expected);
+    }
+    assert(drive.back() == 0xE4);
+    const auto unchanged_drive = drive;
+    epd_hold_unchanged_suffix(difference.data(), drive.data(), footer_column, native_width - 1);
+    assert(drive == unchanged_drive);
     for (int row = 0; row < 684; ++row) {
         int expected = 0;
         for (int tick = 0; tick < ripple_ticks; ++tick) {

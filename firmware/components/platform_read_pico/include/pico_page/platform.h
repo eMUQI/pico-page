@@ -70,12 +70,14 @@ bool stop_usb_storage(std::string& error);
  * region limits gray updates in portrait coordinates when the baseline is valid.
  * changed_pixels_only holds each equal old/new pixel during gray updates; clearing
  * and underrun recovery always ignore this mask and rebuild the full baseline.
+ * hold_unchanged_footer holds equal pixels at portrait y >= 1128 during body
+ * updates, including directional effects. Clearing and recovery ignore it.
  * A line-queue underrun with healthy power gets one full-clean retry before returning.
  * false means that the physical display state is no longer a valid baseline.
  */
 bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
              std::string& error, std::optional<RefreshRegion> region = std::nullopt,
-             bool changed_pixels_only = false);
+             bool changed_pixels_only = false, bool hold_unchanged_footer = false);
 
 /**
  * Serializes panel frames with network receive steps; callable from any task.

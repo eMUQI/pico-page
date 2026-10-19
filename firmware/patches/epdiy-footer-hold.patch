@@ -1,0 +1,84 @@
+--- a/src/epdiy.h
++++ b/src/epdiy.h
+@@ -554,6 +554,14 @@
+  */
+ void epd_set_line_phase_luts(const uint8_t* const* luts, const int8_t* rows, unsigned count);
+
++/**
++ * Hold equal old/new grayscale pixels from first_column to the native right edge
++ * during full-width S3 1ppB difference draws. Negative values disable the mask.
++ * Display owner only: set before a synchronous draw and disable after it returns,
++ * including on failure. Clearing and baseline recovery require a disabled mask.
++ */
++void epd_set_unchanged_pixel_hold(int first_column);
++
+ /** 最近一次 `epd_draw_base` 因上面的优化跳过的相位数。 */
+ int epd_last_leading_skip(void);
+
+--- a/src/render.c
++++ b/src/render.c
+@@ -42,10 +42,14 @@
+     } while (0)
+
+-static RenderContext_t render_context;
++static RenderContext_t render_context = {.unchanged_pixel_hold = -1};
+ /* Pico Page: bounded row-phase override adapted from kiikoread; single display owner. */
+ static const uint8_t* const* page_phase_luts;
+ static const int8_t* page_line_phase;
+ static unsigned page_phase_count;
++static int unchanged_pixel_hold = -1;
++void epd_set_unchanged_pixel_hold(int first_column) {
++    unchanged_pixel_hold = first_column;
++}
+ void epd_set_line_phase_luts(const uint8_t* const* luts, const int8_t* rows, unsigned count) {
+     page_phase_luts = luts;
+     page_line_phase = rows;
+@@ -256,6 +260,11 @@
+     if (page_phase_luts && (!(mode & MODE_PACKING_1PPB_DIFFERENCE) || frame_count != 1)) {
+         return EPD_DRAW_INVALID_PACKING_MODE;
+     }
++    if (unchanged_pixel_hold >= 0 &&
++        (!(mode & MODE_PACKING_1PPB_DIFFERENCE) || area.x != 0 || area.width != epd_width())) {
++        return EPD_DRAW_INVALID_PACKING_MODE;
++    }
++    render_context.unchanged_pixel_hold = unchanged_pixel_hold;
+     render_context.phase_luts = page_phase_luts;
+     render_context.line_phase = page_line_phase;
+     render_context.phase_count = page_phase_count;
+@@ -308,6 +317,7 @@
+
+     lcd_do_update(&render_context);
+     /* Producers have joined; the caller may now release borrowed phase tables. */
++    render_context.unchanged_pixel_hold = -1;
+     render_context.phase_luts = NULL;
+     render_context.line_phase = NULL;
+     render_context.phase_count = 0;
+--- a/src/output_common/render_context.h
++++ b/src/output_common/render_context.h
+@@ -71,6 +71,7 @@
+     const uint8_t* const* phase_luts;
+     const int8_t* line_phase;
+     unsigned phase_count;
++    int unchanged_pixel_hold;
+     /// LUT building function. Must not be NULL
+     lut_build_func_t lut_build_func;
+
+--- a/src/output_lcd/render_lcd.c
++++ b/src/output_lcd/render_lcd.c
+@@ -21,6 +21,7 @@
+ #include "../output_common/line_queue.h"
+ #include "../output_common/lut.h"
+ #include "../output_common/render_context.h"
++#include "../output_common/epdiy-unchanged-pixels.h"
+ #include "epd_board.h"
+ #include "epdiy.h"
+ #include "lcd_driver.h"
+@@ -287,5 +288,8 @@
+             ctx->lut_lookup_func(lp, buf, ctx->conversion_lut, ctx->display_width);
+         }
+
++        epd_hold_unchanged_suffix((const uint8_t*)lp, buf,
++                                  ctx->unchanged_pixel_hold, ctx->display_width);
++
+         // apply the line mask
+         epd_apply_line_mask_VE(buf, ctx->line_mask, ctx->display_width / 4);

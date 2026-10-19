@@ -642,7 +642,8 @@ bool release_card_for_usb(std::string& error) {
 }
 
 bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
-             std::string& error, std::optional<RefreshRegion> region, bool changed_pixels_only) {
+             std::string& error, std::optional<RefreshRegion> region, bool changed_pixels_only,
+             bool hold_unchanged_footer) {
     error.clear();
     if (!on_owner(error)) return false;
     if (!display_ready || packed == nullptr || size != framebuffer_bytes ||
@@ -682,6 +683,8 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
     epd_set_leading_skip(!clear && (page_waveform == PageWaveform::Gray16 ||
                                   page_waveform == PageWaveform::Gray8));
     EpdDrawError draw_result;
+    // In inverted portrait, footer rows map to native columns 1128 through 1215.
+    epd_set_unchanged_pixel_hold(hold_unchanged_footer && !clear ? 1128 : -1);
     // epd_hl_update_area applies EPD_ROT_INVERTED_PORTRAIT, matching copy_portrait.
     const auto update = [&] {
         if (region) return epd_hl_update_area(&display, MODE_GL16, status.temperature_c,
@@ -707,6 +710,7 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
     } else {
         draw_result = update();
     }
+    epd_set_unchanged_pixel_hold(-1);
     bool power_good = panel_status(status, error);
     if (draw_result == EPD_DRAW_EMPTY_LINE_QUEUE && power_good) {
         // The driver has joined its producers and detached scan callbacks before returning.
