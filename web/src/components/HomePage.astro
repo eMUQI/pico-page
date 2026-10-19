@@ -1,6 +1,7 @@
 ---
 import Site from "../layouts/Site.astro";
 import { firmware } from "../firmware.js";
+import { items as historicalSeals } from "../../public/downloads/historical-seals/manifest.json";
 
 const screens = [
   { id: "library", title: "书库", description: "书籍与文件夹，一目了然。列表和封面卡片，按习惯切换。", alt: "书库卡片视图，显示继续阅读入口和另外两本示例书" },
@@ -111,7 +112,7 @@ const lockscreens = [
           <li><span>2</span><span>打开一本书，轻点正文中部，在「排版」中选择该字体。</span></li>
         </ol>
         <p class="own">也可以放入自己的 TTF / OTF 字体，记得附上许可证。<a href="/downloads/LXGWWenKai-v1.520-OFL.txt">查看许可证</a></p>
-        <a class="more" href="#lockscreens"><span>另有 5 张锁屏图片，684 × 1216，可在休眠时显示。</span><span>查看锁屏 ↓</span></a>
+        <a class="more" href="#lockscreens"><span>另有阅读图文与古印锁屏，684 × 1216，可按喜好选择。</span><span>查看锁屏 ↓</span></a>
       </div>
     </div>
   </section>
@@ -194,6 +195,34 @@ const lockscreens = [
       <li><span>2</span><span>「设置 → 电源与休眠」选「自定义图片」，在「选择图片 / 轮播」中固定一张或选择轮播。</span></li>
       <li><span>3</span><span>点击「保存设置」。0.2.0-beta.3 起，休眠会等待图片准备（0.2.0-beta.4 起，再短按一次电源键可取消等待，触摸和 K1/K2/K3 均忽略）；更早版本请先让设备空闲片刻。</span></li>
     </ol>
+  </section>
+
+  <section id="historical-seals" class="band">
+    <div class="heading-row">
+      <div>
+        <p class="eyebrow">古印</p>
+        <h2>古印透明锁屏</h2>
+        <p class="note">清代篆刻 · 684 × 1216 · 透明 PNG</p>
+      </div>
+      <a class="primary" href="/downloads/PicoPage-Historical-Seals.zip" download>下载四张（ZIP） <span aria-hidden="true">↓</span></a>
+    </div>
+    <p class="footnote">印章位于画面右下，透明区域可保留阅读画面。在支持该功能的固件中，选择「电源与休眠 → 自定义图片」，开启「叠加当前画面」并保存。0.3.0 及更早版本不支持透明叠加。</p>
+    <div class="lockscreens seal-grid">
+      {historicalSeals.map((art) => (
+        <figure>
+          <a href={`/downloads/historical-seals/${art.file}`} aria-label={`查看完整透明 PNG：${art.title}`}>
+            <img src={`/downloads/historical-seals/${art.preview}`} width="320" height="320" alt={`${art.author}篆刻「${art.title}」的黑色印面预览`} loading="lazy" decoding="async">
+          </a>
+          <figcaption>
+            <strong>{art.title}</strong>
+            <p>{art.author} · {art.year} 年</p>
+            <p class="seal-source">图源：<a href={art.source_url}>{art.source_name}</a><br />{art.catalog_short}</p>
+            <a href={`/downloads/historical-seals/${art.file}`} download aria-label={`下载透明 PNG：${art.title}`}>下载 PNG <span aria-hidden="true">↓</span></a>
+          </figcaption>
+        </figure>
+      ))}
+    </div>
+    <p class="footnote">上方预览仅展示印面，下载文件保留完整透明画布。原作已进入公有领域，本批仅作印面忠实复制、透明化和尺寸整理。<a href="/downloads/historical-seals/SOURCES.txt">作者与图源</a> · <a href="/downloads/historical-seals/RIGHTS.txt">权利说明</a> · <a href="/downloads/historical-seals/README.txt">使用说明</a></p>
   </section>
 </Site>
 <style>
@@ -670,6 +699,24 @@ const lockscreens = [
     align-items: center;
     min-height: 32px;
     color: var(--muted);
+  }
+  .seal-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+  }
+  .seal-grid img {
+    background: #fff;
+  }
+  .seal-grid figcaption p {
+    margin: 4px 0;
+  }
+  .seal-grid .seal-source {
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .seal-grid .seal-source a {
+    display: inline;
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
   .usage {
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));

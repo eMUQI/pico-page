@@ -1,0 +1,174 @@
+{
+  "schema": 1,
+  "title": "古印透明锁屏",
+  "reviewed": "2026-10-19",
+  "selection": "用户确认的放大 20% 版本，与设备样张逐字节一致。",
+  "rights_basis": [
+    "https://www.ncac.gov.cn/xxfb/flfg/flfg_532/202103/t20210309_50530.html",
+    "https://www.tipo.gov.tw/tw/copyright/692-12013.html",
+    "https://www.copyright.gov/comp3/chap300/ch300-copyrightable-authorship.pdf"
+  ],
+  "source_site_open_license": null,
+  "items": [
+    {
+      "id": "01-reading-debt",
+      "file": "01-reading-debt.png",
+      "preview": "previews/01-reading-debt.png",
+      "title": "常欠讀書債",
+      "author": "徐三庚",
+      "year": "1867",
+      "source_name": "篆刻网 · 徐三庚印章图库",
+      "source_url": "https://www.mebag.com/index/3data/images/totermphoto/28-089-1.png",
+      "catalog": "《中國篆刻叢刊》第28卷，第89頁，第1方（28-089-1）",
+      "catalog_short": "《中國篆刻叢刊》28 卷，89 页，第 1 方",
+      "credit": {
+        "author": "徐三庚",
+        "author_life": "1826–1890",
+        "year": "1867",
+        "title": "常欠讀書債",
+        "source_name": "篆刻网 · 徐三庚印章图库",
+        "source_url": "https://www.mebag.com/index/3data/images/totermphoto/28-089-1.png",
+        "catalog": "《中國篆刻叢刊》第28卷，第89頁，第1方（28-089-1）",
+        "note": "白文印；圖庫款記為丁卯夏六月望。"
+      },
+      "canvas": [
+        684,
+        1216
+      ],
+      "mode": "RGBA",
+      "placement": [
+        400,
+        852,
+        228,
+        208
+      ],
+      "sha256": "f2bf898a3517163cb60dd8a5d3abacf6e616aa2eb3ed0a63d3adc5fdd187d6e6",
+      "bytes": 51477,
+      "input_fragment_sha256": "81b5c0b2726213f270afd1d960b50803f507797b7d7cdb62a0cb7fd933ec98ad",
+      "input_fragment_name": "debt-original.png",
+      "rights": "Public-domain original; faithful two-dimensional reproduction",
+      "rights_basis": "RIGHTS.txt",
+      "processing": "印面提取、黑色透明化、等比例缩放与画布定位；未重绘或补笔。"
+    },
+    {
+      "id": "02-unseen-books",
+      "file": "02-unseen-books.png",
+      "preview": "previews/02-unseen-books.png",
+      "title": "願讀人間未見書",
+      "author": "陳鍊",
+      "year": "1760",
+      "source_name": "西泠印社 · 沈慧兴论文图 13",
+      "source_url": "https://www.xlys.org.cn/wenku/www/202101/06092650u8mh.pdf",
+      "catalog": "沈慧興〈《王冰鐵印存》所見事關飛鴻堂藏印邊款及印蛻臆釋〉，印刷頁65（PDF第66頁），圖13；另著錄《中國篆刻叢刊》第10卷第75頁、《飛鴻堂印譜》上海古籍出版社1992年版第162頁。",
+      "catalog_short": "论文印刷页 65，图 13",
+      "credit": {
+        "author": "陳鍊",
+        "author_life": "1730–1775",
+        "year": "1760",
+        "title": "願讀人間未見書",
+        "source_name": "西泠印社 · 沈慧兴论文图 13",
+        "source_url": "https://www.xlys.org.cn/wenku/www/202101/06092650u8mh.pdf",
+        "catalog": "沈慧興〈《王冰鐵印存》所見事關飛鴻堂藏印邊款及印蛻臆釋〉，印刷頁65（PDF第66頁），圖13；另著錄《中國篆刻叢刊》第10卷第75頁、《飛鴻堂印譜》上海古籍出版社1992年版第162頁。",
+        "note": "朱文印；原印譜印面為近方形，未沿用商家截圖的長方形重製比例。論文指出所見印蛻為晚清至民國石印複製，非原鈐。PDF內嵌圖為1位黑白影像，頁面著色呈紅色。"
+      },
+      "canvas": [
+        684,
+        1216
+      ],
+      "mode": "RGBA",
+      "placement": [
+        410,
+        832,
+        218,
+        228
+      ],
+      "sha256": "bdab59b8146da99c345cc014da01f90dd7bc8c1fdf836862a82b77a70082b9fd",
+      "bytes": 47892,
+      "input_fragment_sha256": "7e1577c0e84b79673e239d0d5fb79ec3f9f05a9e61b420a6dc7d2401ee6db8cd",
+      "input_fragment_name": "xlys-p66-1-Im1.tiff",
+      "rights": "Public-domain original; faithful two-dimensional reproduction",
+      "rights_basis": "RIGHTS.txt",
+      "processing": "印面提取、黑色透明化、等比例缩放与画布定位；未重绘或补笔。"
+    },
+    {
+      "id": "03-buy-books",
+      "file": "03-buy-books.png",
+      "preview": "previews/03-buy-books.png",
+      "title": "日有一泉惟買書",
+      "author": "徐三庚",
+      "year": "1865",
+      "source_name": "篆刻网 · 徐三庚印章图库",
+      "source_url": "https://www.mebag.com/index/3data/images/totermphoto/28-069-2.png",
+      "catalog": "《中國篆刻叢刊》第28卷，第69頁，第2方（28-069-2）",
+      "catalog_short": "《中國篆刻叢刊》28 卷，69 页，第 2 方",
+      "credit": {
+        "author": "徐三庚",
+        "author_life": "1826–1890",
+        "year": "1865",
+        "title": "日有一泉惟買書",
+        "source_name": "篆刻网 · 徐三庚印章图库",
+        "source_url": "https://www.mebag.com/index/3data/images/totermphoto/28-069-2.png",
+        "catalog": "《中國篆刻叢刊》第28卷，第69頁，第2方（28-069-2）",
+        "note": "朱文印，保留橢圓形印面；圖庫款記為乙丑冬月。西泠印社介紹頁另有館藏原石照片，僅供核對。"
+      },
+      "canvas": [
+        684,
+        1216
+      ],
+      "mode": "RGBA",
+      "placement": [
+        376,
+        913,
+        252,
+        147
+      ],
+      "sha256": "2b40655011cdb533c8e06f686c3c5ce7f21e27d4a9e4379153ce38cb694e0b49",
+      "bytes": 32448,
+      "input_fragment_sha256": "29c0dab4bc28bbd1023bd6be2b0c2b93b833de9af301c2219878cc4003af8f27",
+      "input_fragment_name": "buy-original.png",
+      "rights": "Public-domain original; faithful two-dimensional reproduction",
+      "rights_basis": "RIGHTS.txt",
+      "processing": "印面提取、黑色透明化、等比例缩放与画布定位；未重绘或补笔。"
+    },
+    {
+      "id": "04-peach-study",
+      "file": "04-peach-study.png",
+      "preview": "previews/04-peach-study.png",
+      "title": "桃華書屋",
+      "author": "徐三庚",
+      "year": "1870",
+      "source_name": "篆刻网 · 徐三庚印章图库",
+      "source_url": "https://www.mebag.com/index/3data/images/totermphoto/28-125-1.png",
+      "catalog": "《中國篆刻叢刊》第28卷，第125頁，第1方（28-125-1）",
+      "catalog_short": "《中國篆刻叢刊》28 卷，125 页，第 1 方",
+      "credit": {
+        "author": "徐三庚",
+        "author_life": "1826–1890",
+        "year": "1870",
+        "title": "桃華書屋",
+        "source_name": "篆刻网 · 徐三庚印章图库",
+        "source_url": "https://www.mebag.com/index/3data/images/totermphoto/28-125-1.png",
+        "catalog": "《中國篆刻叢刊》第28卷，第125頁，第1方（28-125-1）",
+        "note": "白文印；圖庫釋文作「桃華書屋」，西泠印社介紹作「桃花書屋」。款記為庚午十月，為壽仙弟。"
+      },
+      "canvas": [
+        684,
+        1216
+      ],
+      "mode": "RGBA",
+      "placement": [
+        410,
+        833,
+        218,
+        227
+      ],
+      "sha256": "c5f4b2d2180e5179ab8a7ee4972a564aea176f74dd91014889f56bc7e9f6da56",
+      "bytes": 46343,
+      "input_fragment_sha256": "ee7ec678e339a06c169c60de627ad2c354b0728f5a9646b7923959c451283010",
+      "input_fragment_name": "peach-original.png",
+      "rights": "Public-domain original; faithful two-dimensional reproduction",
+      "rights_basis": "RIGHTS.txt",
+      "processing": "印面提取、黑色透明化、等比例缩放与画布定位；未重绘或补笔。"
+    }
+  ]
+}
