@@ -1,7 +1,8 @@
 ---
 import Site from "../layouts/Site.astro";
 import { firmware } from "../firmware.js";
-import { items as historicalSeals } from "../../public/downloads/historical-seals/manifest.json";
+// TODO: 透明锁屏叠加功能正式发布后恢复古印图集及数据导入。
+// import { items as historicalSeals } from "../../public/downloads/historical-seals/manifest.json";
 
 const screens = [
   { id: "library", title: "书库", description: "书籍与文件夹，一目了然。列表和封面卡片，按习惯切换。", alt: "书库卡片视图，显示继续阅读入口和另外两本示例书" },
@@ -112,7 +113,7 @@ const lockscreens = [
           <li><span>2</span><span>打开一本书，轻点正文中部，在「排版」中选择该字体。</span></li>
         </ol>
         <p class="own">也可以放入自己的 TTF / OTF 字体，记得附上许可证。<a href="/downloads/LXGWWenKai-v1.520-OFL.txt">查看许可证</a></p>
-        <a class="more" href="#lockscreens"><span>另有阅读图文与古印锁屏，684 × 1216，可按喜好选择。</span><span>查看锁屏 ↓</span></a>
+        <a class="more" href="#lockscreens"><span>另有阅读图文锁屏，684 × 1216，可按喜好选择。</span><span>查看锁屏 ↓</span></a>
       </div>
     </div>
   </section>
@@ -197,6 +198,7 @@ const lockscreens = [
     </ol>
   </section>
 
+  {/* TODO: 透明锁屏叠加功能正式发布后恢复古印图集。
   <section id="historical-seals" class="band">
     <div class="heading-row">
       <div>
@@ -224,6 +226,7 @@ const lockscreens = [
     </div>
     <p class="footnote">上方预览仅展示印面，下载文件保留完整透明画布。原作已进入公有领域，本批仅作印面忠实复制、透明化和尺寸整理。<a href="/downloads/historical-seals/SOURCES.txt">作者与图源</a> · <a href="/downloads/historical-seals/RIGHTS.txt">权利说明</a> · <a href="/downloads/historical-seals/README.txt">使用说明</a></p>
   </section>
+  */}
 </Site>
 <style>
   /* The sample holds only the characters that the .wenkai elements below set; see tools/setup_web_font_sample.py. */
