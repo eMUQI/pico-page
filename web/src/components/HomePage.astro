@@ -1,8 +1,7 @@
 ---
 import Site from "../layouts/Site.astro";
 import { firmware } from "../firmware.js";
-// TODO: 透明锁屏叠加功能正式发布后恢复古印图集及数据导入。
-// import { items as historicalSeals } from "../../public/downloads/historical-seals/manifest.json";
+import { items as transparentLockscreens } from "../../public/downloads/transparent-lockscreens/manifest.json";
 
 const screens = [
   { id: "library", title: "书库", description: "书籍与文件夹，一目了然。列表和封面卡片，按习惯切换。", alt: "书库卡片视图，显示继续阅读入口和另外两本示例书" },
@@ -113,7 +112,7 @@ const lockscreens = [
           <li><span>2</span><span>打开一本书，轻点正文中部，在「排版」中选择该字体。</span></li>
         </ol>
         <p class="own">也可以放入自己的 TTF / OTF 字体，记得附上许可证。<a href="/downloads/LXGWWenKai-v1.520-OFL.txt">查看许可证</a></p>
-        <a class="more" href="#lockscreens"><span>另有阅读图文锁屏，684 × 1216，可按喜好选择。</span><span>查看锁屏 ↓</span></a>
+        <a class="more" href="#lockscreens"><span>另有阅读图文、古印、现代文字印与植物锁屏，可按喜好选择。</span><span>查看锁屏 ↓</span></a>
       </div>
     </div>
   </section>
@@ -198,35 +197,35 @@ const lockscreens = [
     </ol>
   </section>
 
-  {/* TODO: 透明锁屏叠加功能正式发布后恢复古印图集。
-  <section id="historical-seals" class="band">
+  <section id="transparent-lockscreens" class="band">
+    <a id="historical-seals"></a>
     <div class="heading-row">
       <div>
-        <p class="eyebrow">古印</p>
-        <h2>古印透明锁屏</h2>
-        <p class="note">清代篆刻 · 684 × 1216 · 透明 PNG</p>
+        <p class="eyebrow">透明锁屏</p>
+        <h2>让一方印、一片叶陪你读。</h2>
+        <p class="note">三方古印 · 两张繁体现代印 · 三张植物线描 · 透明 PNG</p>
       </div>
-      <a class="primary" href="/downloads/PicoPage-Historical-Seals.zip" download>下载四张（ZIP） <span aria-hidden="true">↓</span></a>
+      <a class="primary" href="/downloads/PicoPage-Transparent-LockScreens.zip" download>下载八张（ZIP） <span aria-hidden="true">↓</span></a>
     </div>
-    <p class="footnote">印章位于画面右下，透明区域可保留阅读画面。在支持该功能的固件中，选择「电源与休眠 → 自定义图片」，开启「叠加当前画面」并保存。0.3.0 及更早版本不支持透明叠加。</p>
+    <p class="footnote">透明叠加需要支持「叠加当前画面」的固件；目前正式版 0.3.0 及更早版本不支持此功能。支持后，在「设置 → 电源与休眠」选择「自定义图片」，开启「叠加当前画面」并保存。</p>
+    <p class="footnote">印章采用放大后的右下内收位置。植物的叶片、花瓣与枝干主体为不透明白色，背景及枝叶间隙透明，正文不会透进主体。</p>
     <div class="lockscreens seal-grid">
-      {historicalSeals.map((art) => (
+      {transparentLockscreens.map((art) => (
         <figure>
-          <a href={`/downloads/historical-seals/${art.file}`} aria-label={`查看完整透明 PNG：${art.title}`}>
-            <img src={`/downloads/historical-seals/${art.preview}`} width="320" height="320" alt={`${art.author}篆刻「${art.title}」的黑色印面预览`} loading="lazy" decoding="async">
+          <a href={`/downloads/transparent-lockscreens/${art.file}`} aria-label={`查看完整透明 PNG：${art.title}`}>
+            <img src={`/downloads/transparent-lockscreens/${art.preview}`} width="320" height="320" alt={art.description} loading="lazy" decoding="async">
           </a>
           <figcaption>
             <strong>{art.title}</strong>
-            <p>{art.author} · {art.year} 年</p>
-            <p class="seal-source">图源：<a href={art.source_url}>{art.source_name}</a><br />{art.catalog_short}</p>
-            <a href={`/downloads/historical-seals/${art.file}`} download aria-label={`下载透明 PNG：${art.title}`}>下载 PNG <span aria-hidden="true">↓</span></a>
+            <p>{art.author}{"year" in art && ` · ${art.year} 年`}</p>
+            <p class="seal-source">来源：<a href={art.source_url}>{art.source_name}</a>{"catalog_short" in art && <><br />{art.catalog_short}</>}</p>
+            <a href={`/downloads/transparent-lockscreens/${art.file}`} download aria-label={`下载透明 PNG：${art.title}`}>下载 PNG <span aria-hidden="true">↓</span></a>
           </figcaption>
         </figure>
       ))}
     </div>
-    <p class="footnote">上方预览仅展示印面，下载文件保留完整透明画布。原作已进入公有领域，本批仅作印面忠实复制、透明化和尺寸整理。<a href="/downloads/historical-seals/SOURCES.txt">作者与图源</a> · <a href="/downloads/historical-seals/RIGHTS.txt">权利说明</a> · <a href="/downloads/historical-seals/README.txt">使用说明</a></p>
+    <p class="footnote">上方缩略图仅展示主体，下载文件保留完整透明画布。三方古印为公有领域原作的印面忠实复制；现代印由 Pico Page 设计排版，植物图由 Pico Page 使用 ImageGen 辅助制作。<a href="/downloads/transparent-lockscreens/SOURCES.txt">作者与来源</a> · <a href="/downloads/transparent-lockscreens/RIGHTS.txt">权利说明</a> · <a href="/downloads/transparent-lockscreens/FONT-OFL.txt">现代印字体许可</a> · <a href="/downloads/transparent-lockscreens/README.txt">使用说明</a></p>
   </section>
-  */}
 </Site>
 <style>
   /* The sample holds only the characters that the .wenkai elements below set; see tools/setup_web_font_sample.py. */

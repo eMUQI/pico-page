@@ -1,0 +1,74 @@
+Pico Page 透明锁屏 · 作者与图源
+更新：2026-10-20
+
+01-reading-debt.png
+作品：常欠讀書債
+作者：徐三庚，1867 年
+来源：篆刻网 · 徐三庚印章图库
+https://www.mebag.com/index/3data/images/totermphoto/28-089-1.png
+著录：《中國篆刻叢刊》第28卷，第89頁，第1方（28-089-1）
+说明：白文印；圖庫款記為丁卯夏六月望。
+保留印面字形，黑色透明化、等比例放大及右下内收定位。
+PNG SHA-256：0e8321f742b20dc9cf5bcd599a652c055ae302b5dbae45c4843baea42ea68eb2
+
+02-unseen-books.png
+作品：願讀人間未見書
+作者：陳鍊，1760 年
+来源：西泠印社 · 沈慧兴论文图 13
+https://www.xlys.org.cn/wenku/www/202101/06092650u8mh.pdf
+著录：沈慧興〈《王冰鐵印存》所見事關飛鴻堂藏印邊款及印蛻臆釋〉，印刷頁65（PDF第66頁），圖13；另著錄《中國篆刻叢刊》第10卷第75頁、《飛鴻堂印譜》上海古籍出版社1992年版第162頁。
+说明：朱文印；原印譜印面為近方形，未沿用商家截圖的長方形重製比例。論文指出所見印蛻為晚清至民國石印複製，非原鈐。PDF內嵌圖為1位黑白影像，頁面著色呈紅色。
+保留印面字形，黑色透明化、等比例放大及右下内收定位。
+PNG SHA-256：7df70d6713e5516859ad435c761060f61cdbc2d5f908c03d231287013d7c0829
+
+03-peach-study.png
+作品：桃華書屋
+作者：徐三庚，1870 年
+来源：篆刻网 · 徐三庚印章图库
+https://www.mebag.com/index/3data/images/totermphoto/28-125-1.png
+著录：《中國篆刻叢刊》第28卷，第125頁，第1方（28-125-1）
+说明：白文印；圖庫釋文作「桃華書屋」，西泠印社介紹作「桃花書屋」。款記為庚午十月，為壽仙弟。
+保留印面字形，黑色透明化、等比例放大及右下内收定位。
+PNG SHA-256：306b830272067e5756f70cbc43db143b42e430719eddeeab0391c9d1357b7db8
+
+04-reading-here.png
+作品：讀到這裡
+作者：Pico Page
+来源：Pico Page 设计排版
+https://picopage.wulu.zone/#transparent-lockscreens
+字体：Noto Serif CJK SC；SIL Open Font License 1.1，见 FONT-OFL.txt
+
+PNG SHA-256：d09a6edb91672009fa4fae238dc709a8e2382e0fb3e0bbb55178d5e303c7e52c
+
+05-next-time.png
+作品：下次繼續
+作者：Pico Page
+来源：Pico Page 设计排版
+https://picopage.wulu.zone/#transparent-lockscreens
+字体：Noto Serif CJK SC；SIL Open Font License 1.1，见 FONT-OFL.txt
+
+PNG SHA-256：9666329481567e8257a98fa36df5f174f8b9de9887636c99fa96cea138265ede
+
+06-ginkgo.png
+作品：银杏扇叶
+作者：Pico Page
+来源：Pico Page · ImageGen 辅助制作
+https://picopage.wulu.zone/#transparent-lockscreens
+叶片、花瓣和枝干主体为不透明白色，外部与枝叶间隙透明。
+PNG SHA-256：0450b166982ca463daddf501d9c793c372825399452d2954cc62e8fa49fee3a1
+
+07-bamboo.png
+作品：疏竹
+作者：Pico Page
+来源：Pico Page · ImageGen 辅助制作
+https://picopage.wulu.zone/#transparent-lockscreens
+叶片、花瓣和枝干主体为不透明白色，外部与枝叶间隙透明。
+PNG SHA-256：eef6522a44beb89ea334d35f1bb174dd56da1b7a16aa0256086945204273a3e4
+
+08-osmanthus.png
+作品：桂花一枝
+作者：Pico Page
+来源：Pico Page · ImageGen 辅助制作
+https://picopage.wulu.zone/#transparent-lockscreens
+叶片、花瓣和枝干主体为不透明白色，外部与枝叶间隙透明。
+PNG SHA-256：8539b7fe73542b08db5d3f7ce26b2f9cf43174c5055ad3e111027ec2824d50b3
