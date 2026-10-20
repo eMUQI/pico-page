@@ -4,9 +4,12 @@ extern "C" {
 }
 #include "image_fixtures.h"
 
+#include <algorithm>
 #include <cassert>
 #include <fstream>
 #include <iostream>
+#include <iterator>
+#include <utility>
 
 using namespace pico_page::graphics;
 
@@ -108,6 +111,39 @@ int main(int argc, char** argv) {
     assert(canvas.pixel(10, 23) == 5 && canvas.pixel(11, 23) == 15);
     assert(canvas.pixel(9, 20) == 7 && canvas.pixel(12, 20) == 7);
     std::vector<std::uint8_t> adam7(std::begin(kAdam7Png), std::end(kAdam7Png));
+    for (const auto& source : {rgba, adam7, std::vector<std::uint8_t>(std::begin(kOpaqueRgbaPng), std::end(kOpaqueRgbaPng)),
+                               std::vector<std::uint8_t>(std::begin(kGray16Png), std::end(kGray16Png))}) {
+        for (const auto& dimensions : {std::pair{1, 1}, std::pair{3, 7}, std::pair{17, 13}, std::pair{684, 1216}}) {
+            const auto w = dimensions.first, h = dimensions.second;
+            std::string expected, actual(std::size_t(w) * h * 2, '\0');
+            std::vector<unsigned char> visits(std::size_t(w) * h);
+            bool old_alpha = false, new_alpha = false;
+            ImageBox bounds{};
+            assert(decode_png_layer(source, w, h, expected, old_alpha, image_error));
+            auto read = [&](std::size_t at, char* bytes, std::size_t size) {
+                assert(size <= 4096 && at <= source.size() && size <= source.size() - at);
+                std::copy_n(source.data() + at, size, bytes); return true;
+            };
+            auto paint = [&](int x, int y, int width, int height, std::uint8_t gray, std::uint8_t alpha) {
+                for (int py = y; py < y + height; ++py) for (int px = x; px < x + width; ++px) {
+                    assert(px >= 0 && px < w && py >= 0 && py < h);
+                    const auto at = std::size_t(py) * w + px;
+                    assert(++visits[at] == 1);
+                    actual[at * 2] = static_cast<char>(gray); actual[at * 2 + 1] = static_cast<char>(alpha);
+                }
+            };
+            assert(decode_png_stream(source.size(), read, w, h, paint, bounds, new_alpha, image_error));
+            assert(old_alpha == new_alpha && expected == actual);
+            unsigned checks = 0;
+            assert(!decode_png_stream(source.size(), read, w, h, paint, bounds, new_alpha, image_error,
+                                       [&] { return ++checks == 2; }));
+            assert(image_error == kImageCancelled);
+            assert(!decode_png_stream(source.size(), [&](std::size_t at, char* bytes, std::size_t size) {
+                return at != 8 && read(at, bytes, size);
+            }, w, h, paint, bounds, new_alpha, image_error));
+            assert(image_error == "PNG read failed");
+        }
+    }
     assert(render_image(canvas, adam7, 10, 20, 4, 4, image_error));
     assert(canvas.pixel(10, 20) == 0 && canvas.pixel(13, 20) == 15);
     assert(canvas.pixel(10, 23) == 5 && canvas.pixel(13, 23) == 15);

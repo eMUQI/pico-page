@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <array>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -41,6 +42,7 @@ struct Raster {
     std::uint64_t samples = 0;
     bool done = false;
     const std::function<bool()>* stop = nullptr;
+    const std::function<void(int, int, int, int, std::uint8_t, std::uint8_t)>* paint = nullptr;
     bool cancelled() const { return stop && *stop && (*stop)(); }
     // Destination edge of every source column and row; sample() runs once per source pixel.
     std::vector<std::uint16_t> columns, rows;
@@ -58,6 +60,11 @@ struct Raster {
             crop_x = (scaled_width - width) / 2; crop_y = (scaled_height - height) / 2;
         }
         stride = (width + 1) / 2;
+        if (paint) {
+            box_width = static_cast<unsigned>(box_w); box_height = static_cast<unsigned>(box_h);
+            source(source_w, source_h);
+            return true;
+        }
         if (keep_alpha) {
             box_width = static_cast<unsigned>(box_w); box_height = static_cast<unsigned>(box_h);
             layer.assign(std::size_t(box_width) * box_height * 2, '\0');
@@ -91,6 +98,16 @@ struct Raster {
 #endif
         if (x >= source_width || y >= source_height) return;
         has_alpha = has_alpha || alpha != 255;
+        if (paint) {
+            // Adam7 visits each real source pixel once. Expanded preview rectangles would blend twice.
+            const auto left = columns[x], right = columns[x + 1], top = rows[y], bottom = rows[y + 1];
+            if (left != right && top != bottom) {
+                const auto gray = static_cast<std::uint8_t>((77U * rgb[0] + 150U * rgb[1] + 29U * rgb[2] + 128U) >> 8);
+                (*paint)(left + (box_width - width) / 2, top + (box_height - height) / 2,
+                         right - left, bottom - top, gray, static_cast<std::uint8_t>(alpha));
+            }
+            return;
+        }
         // Each destination pixel samples its source coordinate; Adam7 updates are progressively refined.
         const unsigned left = columns[x], right = columns[std::min(x + w, source_width)];
         const unsigned top = rows[y], bottom = rows[std::min(y + h, source_height)];
@@ -278,6 +295,72 @@ bool decode_png_layer(const std::vector<std::uint8_t>& encoded, int width, int h
     if (raster.cancelled()) return fail(error, kImageCancelled);
     has_alpha = raster.has_alpha;
     layer = std::move(raster.layer);
+    return true;
+}
+
+bool decode_png_stream(std::size_t size,
+                       const std::function<bool(std::size_t, char*, std::size_t)>& read,
+                       int width, int height,
+                       const std::function<void(int, int, int, int, std::uint8_t, std::uint8_t)>& paint,
+                       ImageBox& painted, bool& has_alpha, std::string& error, const std::function<bool()>& stop) {
+    const StageTimer timer{"image_decode_stream", 0};
+    decode_count.fetch_add(1, std::memory_order_relaxed);
+    has_alpha = false; painted = {}; error.clear();
+    if (stop && stop()) return fail(error, kImageCancelled);
+    if (!read || !paint || width <= 0 || height <= 0 || width > 684 || height > 1216 ||
+        size < 33 || size > kEncodedLimit) return fail(error, "Invalid PNG stream input");
+    std::array<std::uint8_t, 33> header{};
+    if (!read(0, reinterpret_cast<char*>(header.data()), header.size())) return fail(error, "PNG read failed");
+    if (std::memcmp(header.data(), "\x89PNG\r\n\x1a\n", 8) || be32(header.data() + 8) != 13 ||
+        std::memcmp(header.data() + 12, "IHDR", 4) || header[28] > 1) return fail(error, "Invalid PNG header");
+    const auto sw = be32(header.data() + 16), sh = be32(header.data() + 20);
+    if (!dimensions(sw, sh)) return fail(error, "PNG exceeds 4096-pixel side or 8-megapixel limit");
+    bool ended = false;
+    for (std::size_t at = 8; at < size;) {
+        if (stop && stop()) return fail(error, kImageCancelled);
+        if (size - at < 12) return fail(error, "Truncated PNG chunk");
+        if (!read(at, reinterpret_cast<char*>(header.data()), 8)) return fail(error, "PNG read failed");
+        const auto length = be32(header.data());
+        const auto* type = header.data() + 4;
+        if (length > size - at - 12) return fail(error, "Truncated PNG data");
+        if (!(type[0] & 32) && std::memcmp(type, "IHDR", 4) && std::memcmp(type, "PLTE", 4) &&
+            std::memcmp(type, "IDAT", 4) && std::memcmp(type, "IEND", 4))
+            return fail(error, "Unsupported critical PNG chunk");
+        if (!std::memcmp(type, "IEND", 4)) {
+            if (length || at + 12 != size) return fail(error, "Invalid PNG end marker");
+            ended = true;
+        }
+        at += 12 + length;
+    }
+    if (!ended) return fail(error, "Missing PNG end marker");
+    Raster raster; raster.stop = &stop; raster.paint = &paint;
+    if (!raster.create(sw, sh, width, height)) return fail(error, "Image canvas allocation failed");
+    painted.x = (width - raster.width) / 2; painted.y = (height - raster.height) / 2;
+    painted.width = raster.width; painted.height = raster.height;
+    std::unique_ptr<pngle_t, decltype(&pngle_destroy)> decoder(pngle_new(), &pngle_destroy);
+    if (!decoder) return fail(error, "PNG decoder allocation failed");
+    pngle_set_user_data(decoder.get(), &raster);
+    pngle_set_draw_callback(decoder.get(), [](pngle_t* png, std::uint32_t x, std::uint32_t y,
+                                             std::uint32_t w, std::uint32_t h, const std::uint8_t rgba[4]) {
+        static_cast<Raster*>(pngle_get_user_data(png))->sample(x, y, w, h, rgba, rgba[3]);
+    });
+    pngle_set_done_callback(decoder.get(), [](pngle_t* png) { static_cast<Raster*>(pngle_get_user_data(png))->done = true; });
+    std::array<char, 4096> input{};
+    std::size_t at = 0, buffered = 0;
+    while (at < size || buffered) {
+        if (stop && stop()) return fail(error, kImageCancelled);
+        const auto count = std::min(input.size() - buffered, size - at);
+        if (count && !read(at, input.data() + buffered, count)) return fail(error, "PNG read failed");
+        at += count; buffered += count;
+        const int consumed = pngle_feed(decoder.get(), input.data(), buffered);
+        if (consumed < 0) return fail(error, std::string("PNG decode failed: ") + pngle_error(decoder.get()));
+        if (!consumed) return fail(error, "Truncated PNG stream");
+        buffered -= static_cast<std::size_t>(consumed);
+        std::memmove(input.data(), input.data() + consumed, buffered);
+    }
+    if (stop && stop()) return fail(error, kImageCancelled);
+    if (!raster.done || raster.samples != std::uint64_t(sw) * sh) return fail(error, "PNG pixel stream is incomplete");
+    has_alpha = raster.has_alpha;
     return true;
 }
 

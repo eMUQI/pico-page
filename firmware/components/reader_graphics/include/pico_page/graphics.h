@@ -180,6 +180,19 @@ bool decode_png_layer(const std::vector<std::uint8_t>& encoded, int width, int h
                       std::string& layer, bool& has_alpha, std::string& error,
                       const std::function<bool()>& stop = {});
 
+/** Streams a fitted PNG without an encoded-file or full-layer allocation.
+ * read supplies exact bounded byte ranges. paint receives final, disjoint destination rectangles
+ * and 8-bit gray/alpha; Adam7 preview blocks are excluded. Padding receives no callbacks.
+ * painted returns the centered image bounds; has_alpha excludes padding. All callbacks are
+ * synchronous. Failure/cancellation may follow paint calls: discard unpublished output.
+ */
+bool decode_png_stream(std::size_t size,
+                       const std::function<bool(std::size_t, char*, std::size_t)>& read,
+                       int width, int height,
+                       const std::function<void(int, int, int, int, std::uint8_t, std::uint8_t)>& paint,
+                       ImageBox& painted, bool& has_alpha, std::string& error,
+                       const std::function<bool()>& stop = {});
+
 /** Blend complete rows of a gray/alpha layer into an unpublished canvas. Returns false for
  * invalid dimensions, payload or row bounds without modifying the canvas. Pixels use 0..15 gray.
  */

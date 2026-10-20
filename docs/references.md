@@ -72,4 +72,14 @@ OpenAI 官方：`https://developers.openai.com/codex/guides/agents-md/` 本次�
 
 KOReader 的 [移植说明](https://github.com/koreader/koreader/blob/master/doc/Porting.md) 建议中间格式接近输出格式；[BlitBuffer](https://github.com/koreader/koreader-base/blob/master/ffi/blitbuffer.lua) 同时支持 4 位、8 位灰度和带透明度的 `Color8A`／`TYPE_BB8A`。带透明度的中间表示有用途，但不是整屏复制和重复拼接的理由；其 Linux 平台、缓冲管理和内存预算不能直接当作 ESP32-S3 的实测依据。本次未复制 KOReader 代码或引入其 GPL／AGPL 组件，未验证其全部图片路径。
 
-本批先借鉴「分段写入，避免整图拼接」消除已经复现的缓存提交副本，保留当前 PNG 解码、透明精度、缓存格式及取消所有权。后续本地实现已将热缓存改为 1,368 字节行缓冲：先完整校验，再从同一打开文件逐行读取并直接合成，保留连续 alpha 与现有混合公式，第二遍失败或取消丢弃独占输出。冷 PNG 解码直接合成及仅存有效图层边界仍为候选；涉及缩放、Adam7 渐进覆盖、透明边缘、缓存校验与取消边界，需要另行验证，不以外部固件的代码或示例替代真机验收。
+本批先借鉴「分段写入，避免整图拼接」消除已经复现的缓存提交副本，保留当前 PNG 解码、透明精度、缓存格式及取消所有权。后续本地实现已将热缓存改为 1,368 字节行缓冲：先完整校验，再从同一打开文件逐行读取并直接合成，保留连续 alpha 与现有混合公式，第二遍失败或取消丢弃独占输出。截至该批记录，冷 PNG 解码直接合成及仅存有效图层边界仍为候选；涉及缩放、Adam7 渐进覆盖、透明边缘、缓存校验与取消边界，需要另行验证，不以外部固件的代码或示例替代真机验收。
+
+## 透明锁屏冷解码补充（2026-10-20）
+
+本轮检查 CrossPoint `ad24aea85c1f9b1a4b2b2e0719ec0dd39020a6b4`，相关 PNG 与休眠文件同上述已核对版本一致；行缓冲值得采用，但重复解码、阈值透明度和拒绝交错 PNG 不符合本项目既有行为。KOReader 的 [screensaver](https://github.com/koreader/koreader/blob/master/frontend/ui/screensaver.lua)、[ImageWidget](https://github.com/koreader/koreader/blob/master/frontend/ui/widget/imagewidget.lua) 与 [RenderImage](https://github.com/koreader/koreader/blob/master/frontend/ui/renderimage.lua) 支持透明图片及连续 Alpha，但常规路径仍读取完整编码文件和图像缓冲，不能据此推断 ESP32-S3 上的峰值更低。
+
+用户指定的 [read-pico-reader](https://github.com/wegooo-cell/read-pico-reader) 核对至 `2087afda444b17fb320562fc31ab9424b661e946`。[book_cover.c](https://github.com/wegooo-cell/read-pico-reader/blob/2087afda444b17fb320562fc31ab9424b661e946/main/book/book_cover.c) 使用 libpng 从文件读行、双行插值，拒绝交错 PNG；[book_lock_bookmark.c](https://github.com/wegooo-cell/read-pico-reader/blob/2087afda444b17fb320562fc31ab9424b661e946/main/book/book_lock_bookmark.c) 仍分配适配尺寸的灰度和 Alpha 整层，并直接叠加当前帧，另含自动去白及阴影。它减少输入缓冲但没有消除整层峰值；普通壁纸缓存与透明书封路径不同，不能把普通壁纸命中当作透明锁屏免解码。根许可为分文件混合规则，前者标注 Apache-2.0，后者标注 `LicenseRef-Kiikoread-Personal-Study-1.0`；本项目未复制其实现。
+
+本次采用文件分块读取的通用思路，继续使用已有 pngle，独立实现最终采样直接合成与行缓冲临时缓存。保留现有精度、Adam7、取消恢复、画布所有权和单张缓存，不引入 libpng、新任务或外部代码。取舍是以有界 TF 随机读写承接交错行重访，须测量慢卡冷路径；内存预算不再随编码文件大小或整屏透明层增加。热缓存仍免解码，缓存失败仍能显示本次输出。来源代码观察、host 像素验证和真机耗时分别记录，不据其他固件的实现宣称其稳定性更高。
+
+同机压力测试再次复现内容 worker 在 EPUB 解压／XML 解析期间触发 IDLE0。核对乐鑫文档 MCP 和本机 IDF v6.1 的 [Task Priorities](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/api-guides/performance/speed.html#task-priorities)：持续计算任务需要阻塞让步，单纯 `taskYIELD()` 不保证低优先级空闲任务得到运行。修正现有解析块及分页页边界，不增加任务、不关闭或延长看门狗，也不主动代替空闲任务喂狗。

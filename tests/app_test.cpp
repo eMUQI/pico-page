@@ -22,6 +22,8 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <fcntl.h>
+#include <sys/resource.h>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -1345,6 +1347,22 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
     {
         write(root / "LockScreens/alpha.png", std::string(reinterpret_cast<const char*>(kRgbaPng), sizeof(kRgbaPng)));
         write(root / "LockScreens/opaque.png", std::string(reinterpret_cast<const char*>(kOpaqueRgbaPng), sizeof(kOpaqueRgbaPng)));
+        {
+            // Reading retains other card handles; PNG preparation must need at most two additional files.
+            assert(store.clear_cache() == StoreStatus::Ok);
+            struct rlimit original{}, limited{};
+            assert(getrlimit(RLIMIT_NOFILE, &original) == 0);
+            limited = original; limited.rlim_cur = std::min<rlim_t>(original.rlim_cur, 64);
+            assert(setrlimit(RLIMIT_NOFILE, &limited) == 0);
+            std::vector<int> held;
+            for (int fd; (fd = ::open("/dev/null", O_RDONLY)) >= 0;) held.push_back(fd);
+            assert(held.size() >= 2);
+            for (int n = 0; n < 2; ++n) { ::close(held.back()); held.pop_back(); }
+            const auto prepared = run(false, "alpha.png");
+            assert(setrlimit(RLIMIT_NOFILE, &original) == 0);
+            for (int fd : held) ::close(fd);
+            assert(prepared.cache_finished && !prepared.image && prepared.error.empty());
+        }
         assert(run(false, "alpha.png").cache_finished);
         assert(fs::file_size(cache_path) > 512 * 1024);
         {
@@ -1431,7 +1449,52 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         const auto before_hot = graphics::image_decode_count();
         auto hot = run(true, "opaque.png", "", true);
         assert(hot.image && hot.image->pixels() == expected.pixels() && graphics::image_decode_count() == before_hot);
+        fs::remove(cache_path);
+        assert(run(false, "opaque.png").cache_finished);
+        hot = run(true, "opaque.png", "", true);
+        assert(hot.image && hot.image->pixels() == expected.pixels() && fs::file_size(cache_path) < 512 * 1024);
         fs::remove(root / "LockScreens/alpha.png"); fs::remove(root / "LockScreens/opaque.png");
+    }
+    {
+        // Interlaced row revisits must preserve final alpha, never blend a progressive preview twice.
+        const std::vector<std::uint8_t> source(std::begin(kAdam7Png), std::end(kAdam7Png));
+        write(root / "LockScreens/adam7.png", std::string(source.begin(), source.end()));
+        std::string layer; bool alpha = false;
+        assert(graphics::decode_png_layer(source, 684, 1216, layer, alpha, detail) && alpha);
+        for (bool cold : {true, false}) {
+            ContentJob::Request request;
+            request.kind = ContentJob::Kind::LockScreen; request.root = root.string();
+            request.sleep_image = "adam7.png"; request.sleep_overlay = true;
+            request.lock_background = std::make_shared<graphics::Canvas>();
+            for (int y = 0; y < 1216; ++y) for (int x = 0; x < 684; ++x)
+                request.lock_background->pixel(x, y, static_cast<std::uint8_t>((x + y) % 16));
+            auto expected = *request.lock_background;
+            assert(graphics::composite_image_layer(expected, layer, 0, 1216));
+            const auto decoded = graphics::image_decode_count();
+            ContentJob job(std::move(request)); assert(job.start()); job.wait();
+            assert(job.result.image && job.result.cache_finished && job.result.image->pixels() == expected.pixels());
+            assert(graphics::image_decode_count() == decoded + (cold ? 1 : 0));
+        }
+        fs::remove(root / "LockScreens/adam7.png");
+    }
+    {
+        // A late PNG checksum error must not consume or contaminate the base for the next rotation image.
+        const auto rotation_root = root / "DamagedRotation";
+        const std::vector<std::uint8_t> source(std::begin(kRgbaPng), std::end(kRgbaPng));
+        std::string broken(source.begin(), source.end()); broken.back() ^= 1;
+        write(rotation_root / "LockScreens/01-broken.png", broken);
+        write(rotation_root / "LockScreens/02.png", std::string(source.begin(), source.end()));
+        ContentJob::Request request;
+        request.kind = ContentJob::Kind::LockScreen; request.root = rotation_root.string(); request.sleep_overlay = true;
+        request.lock_background = std::make_shared<graphics::Canvas>();
+        request.lock_background->clear(7);
+        auto expected = *request.lock_background;
+        std::string layer; bool alpha = false;
+        assert(graphics::decode_png_layer(source, 684, 1216, layer, alpha, detail));
+        assert(graphics::composite_image_layer(expected, layer, 0, 1216));
+        ContentJob job(std::move(request)); assert(job.start()); job.wait();
+        assert(job.result.image && job.result.cache_finished && job.result.lock_screen == "02.png");
+        assert(job.result.image->pixels() == expected.pixels());
     }
     {
         const auto overlay_root = root / "Overlay";

@@ -1092,6 +1092,69 @@ bool CacheReader::rewind() {
     offset_ = 0;
     return true;
 }
+bool CacheReader::read_at(std::size_t offset, char* bytes, std::size_t size) {
+    if (offset > size_ || size > size_ - offset ||
+        lseek(fd_, static_cast<off_t>(offset), SEEK_SET) != static_cast<off_t>(offset)) return false;
+    offset_ = offset;
+    return read(bytes, size);
+}
+
+CacheWriter::~CacheWriter() {
+    if (fd_ >= 0) close(fd_);
+    if (!committed_) unlink((root_ + "/" + path_ + ".tmp").c_str());
+}
+bool CacheWriter::write(std::size_t offset, std::string_view bytes) {
+    if (failed_ || fd_ < 0 || offset > limit_ || bytes.size() > limit_ - offset ||
+        lseek(fd_, static_cast<off_t>(offset), SEEK_SET) != static_cast<off_t>(offset)) {
+        failed_ = true; return false;
+    }
+    for (std::size_t at = 0; at < bytes.size();) {
+        const auto count = ::write(fd_, bytes.data() + at, bytes.size() - at);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) { failed_ = true; return false; }
+        at += static_cast<std::size_t>(count);
+    }
+    return true;
+}
+bool CacheWriter::read(std::size_t offset, char* bytes, std::size_t size) {
+    if (failed_ || fd_ < 0 || offset > limit_ || size > limit_ - offset || (size && !bytes) ||
+        lseek(fd_, static_cast<off_t>(offset), SEEK_SET) != static_cast<off_t>(offset)) {
+        failed_ = true; return false;
+    }
+    for (std::size_t at = 0; at < size;) {
+        const auto count = ::read(fd_, bytes + at, size - at);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) { failed_ = true; return false; }
+        at += static_cast<std::size_t>(count);
+    }
+    return true;
+}
+bool CacheWriter::commit(std::size_t size) {
+    struct stat info{};
+    if (failed_ || fd_ < 0 || size > limit_ || fstat(fd_, &info) || info.st_size < 0 ||
+        static_cast<std::uint64_t>(info.st_size) < size ||
+        ftruncate(fd_, static_cast<off_t>(size)) || fsync(fd_)) { failed_ = true; return false; }
+    const int closed = close(fd_); fd_ = -1;
+    if (closed != 0) { failed_ = true; return false; }
+    committed_ = publish(root_, path_ + ".tmp", path_);
+    return committed_;
+}
+StoreStatus FileStore::begin_cache(const std::string& name, std::size_t limit,
+                                  std::unique_ptr<CacheWriter>& writer) const {
+    writer.reset();
+    const auto path = "PicoPage/cache/" + name, temporary = path + ".tmp";
+    if (!store_internal::relative_path(path) || limit > 2U * 1024 * 1024) return StoreStatus::Invalid;
+    if (!resource_parents(root_, path)) return StoreStatus::IoError;
+    const auto safe = store_internal::safe_path(root_, temporary);
+    if (safe != StoreStatus::Ok && safe != StoreStatus::Missing) return safe;
+    const auto full = root_ + "/" + temporary;
+    if (safe == StoreStatus::Ok && unlink(full.c_str())) return StoreStatus::IoError;
+    const int fd = open_no_follow(full, O_RDWR | O_CREAT | O_EXCL);
+    if (fd < 0) return StoreStatus::IoError;
+    writer.reset(new (std::nothrow) CacheWriter(fd, root_, path, limit));
+    if (!writer) { close(fd); unlink(full.c_str()); return StoreStatus::IoError; }
+    return StoreStatus::Ok;
+}
 StoreStatus FileStore::open_cache(const std::string& name, std::size_t limit,
                                  std::unique_ptr<CacheReader>& reader) const {
     reader.reset();
@@ -1308,6 +1371,21 @@ StoreStatus FileStore::read_lock_screen(const std::string& name, std::vector<std
         at += count;
     }
     if (fgetc(file.get()) != EOF || ferror(file.get())) { bytes.clear(); return StoreStatus::ExternalChange; }
+    return StoreStatus::Ok;
+}
+StoreStatus FileStore::open_lock_screen(const std::string& name, std::unique_ptr<CacheReader>& reader) const {
+    reader.reset();
+    if (!valid_lock_screen_name(name)) return StoreStatus::Invalid;
+    const auto path = "LockScreens/" + name;
+    const auto safe = store_internal::safe_path(root_, path);
+    if (safe != StoreStatus::Ok) return safe;
+    const int fd = open_no_follow(root_ + "/" + path, O_RDONLY);
+    if (fd < 0) return StoreStatus::IoError;
+    struct stat info{};
+    if (fstat(fd, &info) || !S_ISREG(info.st_mode) || info.st_size <= 0 ||
+        static_cast<std::uint64_t>(info.st_size) > lock_screen_limit) { close(fd); return StoreStatus::Invalid; }
+    reader.reset(new (std::nothrow) CacheReader(fd, static_cast<std::size_t>(info.st_size)));
+    if (!reader) { close(fd); return StoreStatus::IoError; }
     return StoreStatus::Ok;
 }
 std::string FileStore::last_lock_screen() const {

@@ -330,7 +330,8 @@ void ContentJob::run() {
         // Yield between small batches so font verification can also advance while reading.
         if (result.starts.size() >= 8) return;
 #ifdef ESP_PLATFORM
-        taskYIELD();
+        // A ready worker must block to give the lower-priority idle task CPU time.
+        vTaskDelay(1);
 #endif
     }
 }
@@ -462,6 +463,130 @@ bool read_lock_screen_cache(CacheReader& reader, const std::string& header, grap
            digest.finish() == std::string_view(expected.data(), expected.size()) && reader.rewind();
 }
 
+namespace {
+// Only the temporary cache holds full gray/alpha coverage. Adam7 revisits rows, never final pixels.
+bool stream_lock_png(FileStore& store, std::unique_ptr<CacheReader>& source, const std::string& header,
+                     graphics::Canvas* image, bool& alpha, bool& cached, std::string& error,
+                     const std::function<bool()>& stop, const std::function<bool()>& unchanged) {
+    constexpr std::size_t stride = 684 * 2, height = 1216;
+    std::unique_ptr<CacheWriter> writer;
+    store.begin_cache("lockscreens/current", header.size() + 1 + stride * height + 32, writer);
+    const auto base = header.size() + 1;
+    if (writer && !writer->write(0, header + 'A')) writer.reset();
+    std::array<char, stride> row{};
+    std::array<bool, height> written{};
+    int row_y = -1, row_height = 0, painted_y = -1;
+    const auto flush = [&] {
+        if (!writer || row_y < 0) return;
+        for (int y = row_y; y < row_y + row_height; ++y) {
+            if (stop() || !writer->write(base + std::size_t(y) * stride, {row.data(), row.size()})) {
+                writer.reset(); return;
+            }
+            written[y] = true;
+        }
+    };
+    graphics::ImageBox bounds{};
+    const bool decoded = graphics::decode_png_stream(source->size(),
+        [&](std::size_t offset, char* bytes, std::size_t size) { return source->read_at(offset, bytes, size); },
+        684, 1216,
+        [&](int x, int y, int w, int h, std::uint8_t gray, std::uint8_t coverage) {
+            if (painted_y != y && stop()) return;
+            painted_y = y;
+            if (writer) {
+                if (row_y != y) {
+                    flush();
+                    row_y = y; row_height = h; row.fill(0);
+                    if (writer && written[y] && !writer->read(base + std::size_t(y) * stride, row.data(), row.size()))
+                        writer.reset();
+                }
+                for (int col = x; col < x + w; ++col) {
+                    row[col * 2] = static_cast<char>(gray);
+                    row[col * 2 + 1] = static_cast<char>(coverage);
+                }
+            }
+            if (image && coverage) {
+                for (int py = y; py < y + h; ++py) for (int px = x; px < x + w; ++px) {
+                    const unsigned mixed = (gray * coverage + image->pixel(px, py) * 17U * (255U - coverage) + 127U) / 255U;
+                    image->pixel(px, py, static_cast<std::uint8_t>((mixed * 15U + 127U) / 255U));
+                }
+            }
+        }, bounds, alpha, error, stop);
+    if (!decoded) return false;
+    flush();
+    // The card permits eight open files. Release the decoder's handle before reopening for SHA-256.
+    source.reset();
+    if (stop()) { error = "休眠图片准备已取消或超时"; return false; }
+    if (!unchanged()) { error = stop() ? "休眠图片准备已取消或超时" : "图片已改变或无法校验，请重试"; return false; }
+    // Opaque sources retain white fitted margins even when overlay is enabled.
+    if (image && !alpha) {
+        image->fill_rect(0, 0, 684, bounds.y, 15);
+        image->fill_rect(0, bounds.y + bounds.height, 684, 1216 - bounds.y - bounds.height, 15);
+        image->fill_rect(0, bounds.y, bounds.x, bounds.height, 15);
+        image->fill_rect(bounds.x + bounds.width, bounds.y, 684 - bounds.x - bounds.width, bounds.height, 15);
+    }
+    Md5Digest digest;
+    constexpr std::size_t gray_stride = 342;
+    const bool use_canvas = !alpha && image;
+    if (use_canvas) {
+        // The completed opaque canvas already has the cache's exact 4-bit representation.
+        const auto size = image->pixels().size();
+        for (std::size_t offset = 0; writer && offset < size; offset += 16U * 1024) {
+            if (stop()) { error = "休眠图片准备已取消或超时"; return false; }
+            const std::string_view bytes(reinterpret_cast<const char*>(image->data()) + offset,
+                                          std::min<std::size_t>(16U * 1024, size - offset));
+            if (!digest.update(bytes) || !writer->write(base + offset, bytes)) writer.reset();
+        }
+    }
+    // Batch the readback to avoid one seek/read/write sequence per row on FAT.
+    constexpr std::size_t batch_rows = 8;
+    std::unique_ptr<char[]> batch;
+    if (writer && !use_canvas) {
+        batch.reset(new (std::nothrow) char[stride * batch_rows]);
+        if (!batch) writer.reset();
+    }
+    for (std::size_t y = 0; writer && !use_canvas && y < height; y += batch_rows) {
+        if (stop()) { error = "休眠图片准备已取消或超时"; return false; }
+        const auto rows = std::min(batch_rows, height - y);
+        std::memset(batch.get(), 0, rows * stride);
+        for (std::size_t first = 0; writer && first < rows;) {
+            const bool present = written[y + first];
+            auto end = first + 1;
+            while (end < rows && written[y + end] == present) ++end;
+            if (present) {
+                if (!writer->read(base + (y + first) * stride, batch.get() + first * stride, (end - first) * stride))
+                    writer.reset();
+            } else if (alpha && !writer->write(base + (y + first) * stride,
+                                               {batch.get() + first * stride, (end - first) * stride})) writer.reset();
+            first = end;
+        }
+        if (!writer) break;
+        if (!alpha) {
+            // Compact forward in place; output bytes always precede unread gray/alpha pairs.
+            for (std::size_t x = 0; x < 684 * rows; x += 2) {
+                const auto quantize = [&](std::size_t col) {
+                    const unsigned g = static_cast<unsigned char>(batch[col * 2]);
+                    const unsigned a = static_cast<unsigned char>(batch[col * 2 + 1]);
+                    const unsigned mixed = (g * a + 255U * (255U - a) + 127U) / 255U;
+                    return (mixed * 15U + 127U) / 255U;
+                };
+                batch[x / 2] = static_cast<char>(quantize(x) | (quantize(x + 1) << 4));
+            }
+        }
+        const auto output_stride = alpha ? stride : gray_stride;
+        const std::string_view bytes(batch.get(), rows * output_stride);
+        if (!digest.update(bytes) ||
+            (!alpha && !writer->write(base + y * output_stride, bytes))) writer.reset();
+    }
+    const auto payload = (alpha ? stride : gray_stride) * height;
+    const auto sum = digest.finish();
+    cached = writer && sum.size() == 32 && !stop() && writer->write(0, header + (alpha ? 'A' : 'G')) &&
+             writer->write(base + payload, sum) && writer->commit(base + payload + sum.size());
+    if (stop()) { error = "休眠图片准备已取消或超时"; return false; }
+    error = cached ? "" : "休眠图片缓存未保存，下次将重新准备";
+    return true;
+}
+} // namespace
+
 void ContentJob::prepare_lock_screen() {
     const StageTimer timer{"lock_screen_prepare"};
     const auto deadline = request.lock_screen_deadline == std::chrono::steady_clock::time_point{} ?
@@ -504,8 +629,8 @@ void ContentJob::prepare_lock_screen() {
         if (stat(path.c_str(), &before)) {
             result.error = "图片不可读"; result.retryable_failure = true; return;
         }
-        if (!S_ISREG(before.st_mode) || before.st_size <= 0 || before.st_size > 2 * 1024 * 1024) {
-            result.error = "图片为空或超过 2 MiB"; continue;
+        if (!S_ISREG(before.st_mode) || before.st_size < 8 || before.st_size > 2 * 1024 * 1024) {
+            result.error = "图片不完整或超过 2 MiB"; continue;
         }
         const auto identity = sha256_file(path, stop);
         if (identity.empty() || stop()) {
@@ -525,11 +650,12 @@ void ContentJob::prepare_lock_screen() {
             if (!available) { result.retryable_failure = true; result.error = "图片准备内存不足"; }
             return available;
         };
-        const auto prepare_canvas = [&] {
+        const auto prepare_canvas = [&](bool preserve_background = false) {
             const bool reuse = request.sleep_overlay && request.lock_background;
-            if (!reuse && !canvas_available()) return false;
-            result.image = reuse ?
-                std::make_unique<graphics::Canvas>(std::move(*request.lock_background)) : std::make_unique<graphics::Canvas>();
+            if ((!reuse || preserve_background) && !canvas_available()) return false;
+            if (!reuse) result.image = std::make_unique<graphics::Canvas>();
+            else if (preserve_background) result.image = std::make_unique<graphics::Canvas>(*request.lock_background);
+            else result.image = std::make_unique<graphics::Canvas>(std::move(*request.lock_background));
             return true;
         };
         std::string pixels;
@@ -562,6 +688,55 @@ void ContentJob::prepare_lock_screen() {
         if (!cached) {
             if (stop()) { result.error = "休眠图片准备已取消或超时"; return; }
             alpha = false;
+            std::unique_ptr<CacheReader> source;
+            std::array<char, 8> signature{};
+            if (store.open_lock_screen(result.lock_screen, source) != StoreStatus::Ok ||
+                source->size() != static_cast<std::size_t>(before.st_size) ||
+                !source->read(signature.data(), signature.size())) {
+                result.retryable_failure = true; result.error = "图片读取失败或已改变"; return;
+            }
+            if (!std::memcmp(signature.data(), "\x89PNG\r\n\x1a\n", 8)) {
+                // A damaged PNG can fail after painting; rotation needs an unchanged base for its next candidate.
+                const bool preserve_background = attempts > 1 && request.sleep_overlay && request.lock_background;
+#ifdef ESP_PLATFORM
+                // Stream input, decoder state, source-coordinate maps and cache rows retain a fixed reserve.
+                const auto output_bytes = request.lock_screen_prepare ||
+                    (request.sleep_overlay && request.lock_background && !preserve_background) ? 0U : count;
+                if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < output_bytes + 768U * 1024 ||
+                    heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 128U * 1024) {
+                    result.retryable_failure = true; result.error = "图片准备内存不足"; return;
+                }
+#endif
+                if (!request.lock_screen_prepare && !prepare_canvas(preserve_background)) return;
+                const auto unchanged = [&] {
+                    return !stat(path.c_str(), &after) && before.st_size == after.st_size &&
+                        before.st_mtime == after.st_mtime && sha256_file(path, stop) == identity && !stop();
+                };
+                const bool rendered = stream_lock_png(store, source, header, result.image.get(), alpha,
+                                                       result.cache_finished, result.error, stop, unchanged);
+                if (!rendered) {
+                    result.image.reset();
+                    if (result.error.find("allocation") != std::string::npos ||
+                        result.error.find("memory") != std::string::npos) {
+                        result.retryable_failure = true; result.error = "图片准备内存不足"; return;
+                    }
+                    if (stop() || result.error.find("read") != std::string::npos ||
+                        result.error == "图片已改变或无法校验，请重试") {
+                        result.retryable_failure = true; return;
+                    }
+                    result.error = "图片损坏、不支持或像素超限"; continue;
+                }
+                result.retryable_failure = !result.cache_finished;
+#ifdef ESP_PLATFORM
+                ESP_LOGI("content_worker", "Lock screen ready: source=stream alpha=%d cached=%d prepare=%d overlay=%d free=%u largest=%u stack_free=%u",
+                    alpha, result.cache_finished, request.lock_screen_prepare, request.sleep_overlay,
+                    static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+                    static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)),
+                    static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+#endif
+                return;
+            }
+            source.reset();
 #ifdef ESP_PLATFORM
             const auto encoded_size = static_cast<std::size_t>(before.st_size);
             if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < encoded_size + 2 * count + 768U * 1024 ||
@@ -573,33 +748,8 @@ void ContentJob::prepare_lock_screen() {
             if (stop() || store.read_lock_screen(result.lock_screen, encoded, stop) != StoreStatus::Ok) {
                 result.retryable_failure = true; result.error = "图片读取失败或已取消"; return;
             }
-            // Alpha-capable PNGs retain coverage; opaque PNGs and JPEGs use the compact gray path.
-            bool layered = encoded.size() >= 33 && !std::memcmp(encoded.data(), "\x89PNG\r\n\x1a\n", 8) &&
-                           (encoded[25] == 4 || encoded[25] == 6);
-            if (!layered && encoded.size() >= 33 && !std::memcmp(encoded.data(), "\x89PNG\r\n\x1a\n", 8)) {
-                for (std::size_t at = 8; encoded.size() - at >= 12;) {
-                    const auto* p = encoded.data() + at;
-                    const std::uint32_t length = std::uint32_t(p[0]) << 24 | std::uint32_t(p[1]) << 16 |
-                                                 std::uint32_t(p[2]) << 8 | p[3];
-                    if (length > encoded.size() - at - 12) break;
-                    if (!std::memcmp(p + 4, "tRNS", 4)) { layered = true; break; }
-                    at += length + 12;
-                }
-            }
-#ifdef ESP_PLATFORM
-            if (layered && (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 4 * count + 768U * 1024 ||
-                            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 4 * count)) {
-                ESP_LOGW("content_worker", "Lock screen memory rejected: stage=layer_decode free=%u largest=%u required=%u block=%u prepare=%d overlay=%d",
-                    static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
-                    static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)),
-                    static_cast<unsigned>(4 * count + 768U * 1024), static_cast<unsigned>(4 * count),
-                    request.lock_screen_prepare, request.sleep_overlay);
-                result.retryable_failure = true; result.error = "图片准备内存不足"; return;
-            }
-#endif
             bool rendered;
-            if (layered) rendered = graphics::decode_png_layer(encoded, 684, 1216, pixels, alpha, result.error, stop);
-            else {
+            {
                 graphics::Canvas image;
                 rendered = graphics::render_image(image, encoded, 0, 0, 684, 1216, result.error, false, stop);
                 if (rendered) pixels.assign(reinterpret_cast<const char*>(image.data()), count);
@@ -611,17 +761,6 @@ void ContentJob::prepare_lock_screen() {
                     result.retryable_failure = true; result.error = "图片准备内存不足"; return;
                 }
                 result.error = "图片损坏、不支持或像素超限"; continue;
-            }
-            if (layered && !alpha) {
-                if (!canvas_available()) return;
-                graphics::Canvas image;
-                for (int y = 0; y < 1216; y += 32) {
-                    if (stop()) { result.error = "休眠图片准备已取消"; return; }
-                    graphics::composite_image_layer(image, pixels, y, std::min(32, 1216 - y));
-                }
-                // Reuse the larger layer allocation instead of allocating another gray payload.
-                std::memcpy(pixels.data(), image.data(), count);
-                pixels.resize(count);
             }
             if (stat(path.c_str(), &after) || before.st_size != after.st_size || before.st_mtime != after.st_mtime ||
                 sha256_file(path, stop) != identity || stop()) {
@@ -639,20 +778,16 @@ void ContentJob::prepare_lock_screen() {
         } else result.error.clear();
         if (!cached && !request.lock_screen_prepare) {
             if (!prepare_canvas()) return;
-            if (alpha) {
-                for (int y = 0; y < 1216; y += 32) {
-                    if (stop()) break;
-                    graphics::composite_image_layer(*result.image, pixels, y, std::min(32, 1216 - y));
-                }
-            } else std::memcpy(result.image->data(), pixels.data(), count);
+            std::memcpy(result.image->data(), pixels.data(), count);
         }
         if (stop()) { result.image.reset(); result.error = "图片准备已取消"; return; }
 #ifdef ESP_PLATFORM
-        ESP_LOGI("content_worker", "Lock screen ready: source=%s alpha=%d cached=%d prepare=%d overlay=%d payload=%u cache_ms=%lld free=%u largest=%u",
+        ESP_LOGI("content_worker", "Lock screen ready: source=%s alpha=%d cached=%d prepare=%d overlay=%d payload=%u cache_ms=%lld free=%u largest=%u stack_free=%u",
             cached ? "cache" : "decode", alpha, result.cache_finished, request.lock_screen_prepare, request.sleep_overlay,
             static_cast<unsigned>(alpha ? 4 * count : count), static_cast<long long>(cache_ms),
             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
-            static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
+            static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)),
+            static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
 #endif
         return;
     }

@@ -18,6 +18,8 @@
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
 #include "esp_random.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "psa/crypto.h"
 #else
 #include <openssl/evp.h>
@@ -815,10 +817,20 @@ struct EpubDocument::Impl {
             ZipTiming& timing;
             const std::function<bool()>& stop;
             bool cancelled = false;
+#ifdef ESP_PLATFORM
+            TickType_t yielded_at = xTaskGetTickCount();
+#endif
         } feed{xml, timing, stop};
         const bool extracted = mz_zip_reader_extract_to_callback(&zip, entry->member, [](void* opaque, mz_uint64, const void* data, std::size_t count) -> std::size_t {
             auto& feed = *static_cast<Feed*>(opaque);
             for (std::size_t offset = 0; offset < count;) {
+#ifdef ESP_PLATFORM
+                // Cached ZIP reads can remain CPU-bound; periodic blocking admits the lower-priority idle task.
+                if (xTaskGetTickCount() - feed.yielded_at >= pdMS_TO_TICKS(20)) {
+                    vTaskDelay(1);
+                    feed.yielded_at = xTaskGetTickCount();
+                }
+#endif
                 feed.timing.checkpoint();
                 if (feed.stop && feed.stop()) {
                     feed.cancelled = true;

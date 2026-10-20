@@ -160,6 +160,8 @@ public:
     std::size_t size() const { return size_; }
     /** Reads exactly size bytes into caller-owned storage; false on bounds, truncation or I/O failure. */
     bool read(char* bytes, std::size_t size);
+    /** Reads a bounded range on the same file without allocating a payload buffer. */
+    bool read_at(std::size_t offset, char* bytes, std::size_t size);
     /** Returns to byte zero on the same open file; refuses a changed length. */
     bool rewind();
 private:
@@ -167,6 +169,29 @@ private:
     CacheReader(int fd, std::size_t size) : fd_(fd), size_(size) {}
     int fd_;
     std::size_t size_, offset_ = 0;
+};
+
+/** Single-owner temporary cache. Range writes never touch the published entry.
+ * Release before card handoff; destruction discards an uncommitted temporary file.
+ * A failed operation prevents publication. Callers initialize every published byte.
+ */
+class CacheWriter {
+public:
+    ~CacheWriter();
+    CacheWriter(const CacheWriter&) = delete;
+    CacheWriter& operator=(const CacheWriter&) = delete;
+    bool write(std::size_t offset, std::string_view bytes);
+    bool read(std::size_t offset, char* bytes, std::size_t size);
+    /** Truncates to size, syncs and publishes. A failed publication may leave a cache missing. */
+    bool commit(std::size_t size);
+private:
+    friend class FileStore;
+    CacheWriter(int fd, std::string root, std::string path, std::size_t limit)
+        : fd_(fd), root_(std::move(root)), path_(std::move(path)), limit_(limit) {}
+    int fd_;
+    std::string root_, path_;
+    std::size_t limit_;
+    bool failed_ = false, committed_ = false;
 };
 
 /**
@@ -307,6 +332,8 @@ public:
     /** Reads at most 2 MiB, checking cancellation between bounded chunks. */
     StoreStatus read_lock_screen(const std::string& name, std::vector<std::uint8_t>& bytes,
                                  const std::function<bool()>& stop = {}) const;
+    /** Opens a validated lock-screen source, bounded to 2 MiB, without loading its bytes. */
+    StoreStatus open_lock_screen(const std::string& name, std::unique_ptr<CacheReader>& reader) const;
     std::string last_lock_screen() const;
     StoreStatus save_lock_screen(const std::string& name) const;
 
@@ -320,6 +347,9 @@ public:
      */
     StoreStatus open_cache(const std::string& name, std::size_t limit,
                            std::unique_ptr<CacheReader>& reader) const;
+    /** Creates a bounded random-access temporary cache for streamed image conversion. */
+    StoreStatus begin_cache(const std::string& name, std::size_t limit,
+                            std::unique_ptr<CacheWriter>& writer) const;
 
     /**
      * Replaces a rebuildable file below PicoPage/cache, creating parent directories.

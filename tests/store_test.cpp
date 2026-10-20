@@ -546,6 +546,27 @@ int main() {
     }
     assert(store.save_cache("lockscreens/current", "", "header", "tail") == StoreStatus::Ok);
     assert(get(lock_cache) == "headertail");
+    {
+        std::unique_ptr<CacheWriter> writer;
+        assert(store.begin_cache("lockscreens/current", 32, writer) == StoreStatus::Ok);
+        assert(writer->write(0, "head........tail"));
+        assert(writer->write(4, "payload"));
+        char part[7]{};
+        assert(writer->read(4, part, sizeof(part)) && std::string(part, sizeof(part)) == "payload");
+        writer.reset();
+        assert(get(lock_cache) == "headertail" && !fs::exists(lock_cache.string() + ".tmp"));
+        assert(store.begin_cache("lockscreens/current", 32, writer) == StoreStatus::Ok);
+        assert(writer->write(0, "new entry"));
+        assert(!writer->write(31, "too long") && !writer->commit(9));
+        writer.reset();
+        assert(get(lock_cache) == "headertail");
+        assert(store.begin_cache("lockscreens/current", 32, writer) == StoreStatus::Ok);
+        assert(writer->write(0, "payload trailing"));
+        assert(writer->commit(7));
+        writer.reset();
+        assert(get(lock_cache) == "payload");
+        assert(store.begin_cache("../escape", 32, writer) != StoreStatus::Ok && !writer);
+    }
     assert(store.save_cache("../outside/keep", cache_payload, "prefix", "suffix") == StoreStatus::UnsafePath);
     put(root / "PicoPage/cache/books/one/layout", "disposable");
     put(root / "outside/keep", "keep");
