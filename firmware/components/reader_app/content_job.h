@@ -181,9 +181,19 @@ public:
 #endif
     bool started() const { return started_; }
     void cancel() { cancelled_.store(true, std::memory_order_relaxed); }
-    /** Requests a cooperative Chapter pause; true acknowledges a checkpoint. Cancellation releases it. */
-    bool pause() { pause_requested_.store(true, std::memory_order_release); return paused_.load(std::memory_order_acquire); }
-    void resume() { pause_requested_.store(false, std::memory_order_release); }
+    /** Requests a cooperative Chapter or Pagination pause; true acknowledges a checkpoint. Cancellation releases it. */
+    bool pause() {
+        auto generation = pause_generation_.load(std::memory_order_relaxed);
+        if (!(generation & 1U)) {
+            ++generation;
+            pause_generation_.store(generation, std::memory_order_release);
+        }
+        return paused_generation_.load(std::memory_order_acquire) == generation;
+    }
+    void resume() {
+        const auto generation = pause_generation_.load(std::memory_order_relaxed);
+        if (generation & 1U) pause_generation_.store(generation + 1, std::memory_order_release);
+    }
     bool done() const { return done_.load(std::memory_order_acquire); }
     void wait();
     const Request request;
@@ -203,7 +213,8 @@ private:
     void load_chapter();
     void library_covers();
     std::atomic<bool> cancelled_{false}, done_{false};
-    std::atomic<bool> pause_requested_{false}, paused_{false};
+    // Only the owner changes requests; each odd generation requires a fresh worker acknowledgement.
+    std::atomic<std::uint32_t> pause_generation_{0}, paused_generation_{0};
     bool started_ = false;
     StartFailure start_failure_ = StartFailure::None;
 #ifndef ESP_PLATFORM

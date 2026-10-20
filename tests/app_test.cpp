@@ -139,6 +139,10 @@ struct Driver {
         // A finished background commit may queue a further frame, as in the firmware loop.
         while (app.pending_frame()) {
             while (app.pending_frame()) {
+                while (!app.prepare_frame()) {
+                    assert(std::chrono::steady_clock::now() < deadline);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
                 if (frame_observer) frame_observer(*app.pending_frame());
                 app.complete_frame(true);
             }
@@ -1579,13 +1583,27 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         auto book_snapshot = overlay_store.settings_snapshot("Books/cover.epub");
         auto book_values = book_snapshot.config.settings; book_values.sleep_overlay = false;
         assert(overlay_store.apply_settings(book_snapshot, book_values, true, error) == StoreStatus::Invalid);
+        app.set_battery(75, true);
         opened(app, "Books/cover.epub"); driver.present(); driver.complete_content();
         original = app.canvas(); expected = original;
+        const auto reading_device = footer_pixels(app, 540, 684);
+        assert(std::any_of(reading_device.begin(), reading_device.end(), [](auto pixel) { return pixel != 15; }));
+        expected.fill_rect(0, 1128, 684, 88, 15);
         assert(graphics::composite_image_layer(expected, layer, 0, 1216));
+        assert(app.begin_sleep()); driver.present();
+        assert(!app.prepare_sleep() && app.sleep_pending());
+        app.cancel_sleep(); driver.present();
+        const auto cancelled_until = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (std::string(app.background_state()) == "sleep-cover") {
+            app.poll_background();
+            assert(std::chrono::steady_clock::now() < cancelled_until);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        assert(app.canvas().pixels() == original.pixels() && !app.sleep_pending());
         assert(sleep_frame(app)); driver.present();
         assert(app.canvas().pixels() == expected.pixels());
         app.wake(); driver.present(); driver.complete_content();
-        assert(app.view() == View::Reading);
+        assert(app.view() == View::Reading && footer_pixels(app, 540, 684) == reading_device);
     }
     assert(run(false, "02.PNG").cache_finished);
     {
@@ -4520,25 +4538,37 @@ int main(int argc, char** argv) {
         assert(cached.text == original.text && read(cache) == data);
         assert(!load_content(store, doc, 0, cached, error, ChapterLoad::Reading, 2, [] { return true; }));
         assert(error == kChapterCancelled && cached.text.empty());
+        for (const auto kind : {ContentJob::Kind::Chapter, ContentJob::Kind::Pagination})
         for (bool cancel : {false, true}) {
             ContentJob::Request request;
-            request.kind = ContentJob::Kind::Chapter; request.root = card.string();
+            request.kind = kind; request.root = card.string();
             request.path = (fixtures / "multi-part.epub").string(); request.identity = doc.metadata();
             request.chapter = 0; request.part = 2; request.target = ContentJob::Target::Start;
+            ContentJob::delay_starts_for_test(kind, std::chrono::milliseconds(100));
             ContentJob job(std::move(request));
             assert(!job.pause() && job.start());
+            ContentJob::delay_starts_for_test(kind, std::chrono::milliseconds{});
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
             while (!job.pause()) {
                 assert(!job.done() && std::chrono::steady_clock::now() < deadline);
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
             assert(!job.done());
+            job.resume();
+            // A new pause must not accept the preceding frame's acknowledgement.
+            while (!job.pause()) {
+                assert(!job.done() && std::chrono::steady_clock::now() < deadline);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
             if (cancel) job.cancel(); else job.resume();
             while (!job.done()) {
                 assert(std::chrono::steady_clock::now() < deadline);
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
-            assert(cancel ? job.result.chapter.text.empty() : job.result.chapter.text == original.text);
+            if (kind == ContentJob::Kind::Chapter)
+                assert(cancel ? job.result.chapter.text.empty() : job.result.chapter.text == original.text);
+            else
+                assert(cancel ? job.result.starts.empty() : !job.result.starts.empty());
         }
     }
     {

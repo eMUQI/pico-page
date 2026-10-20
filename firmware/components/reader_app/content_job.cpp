@@ -229,7 +229,7 @@ void ContentJob::execute() {
 void ContentJob::run() {
 #endif
     result.offset = request.offset;
-    const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
+    const auto stop = [this] { return checkpoint(); };
     if (request.kind == Kind::ContentCacheWrite) {
         result.cache_finished = save_content_cache(FileStore(request.root), request.content_cache, stop);
         return;
@@ -333,6 +333,7 @@ void ContentJob::run() {
         // A ready worker must block to give the lower-priority idle task CPU time.
         vTaskDelay(1);
 #endif
+        if (checkpoint()) return;
     }
 }
 std::string image_cache_key(const std::string& book_id, const std::string& resource, const graphics::LayoutSpec& spec) {
@@ -884,15 +885,16 @@ void ContentJob::open_book() {
     result.file_size = after.st_size; result.file_modified = after.st_mtime; result.file_inode = after.st_ino;
 }
 bool ContentJob::checkpoint() {
-    while (pause_requested_.load(std::memory_order_acquire) && !cancelled_.load(std::memory_order_relaxed)) {
-        paused_.store(true, std::memory_order_release);
+    while (!cancelled_.load(std::memory_order_relaxed)) {
+        const auto generation = pause_generation_.load(std::memory_order_acquire);
+        if (!(generation & 1U)) break;
+        paused_generation_.store(generation, std::memory_order_release);
 #ifdef ESP_PLATFORM
         vTaskDelay(1);
 #else
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
 #endif
     }
-    paused_.store(false, std::memory_order_release);
     return cancelled_.load(std::memory_order_relaxed);
 }
 void ContentJob::load_chapter() {

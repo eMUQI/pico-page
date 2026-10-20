@@ -185,6 +185,8 @@ class ReaderApp {
     /** The canvas must remain immutable until complete_frame is called. */
     const graphics::Canvas &canvas() const;
     const std::optional<Frame> &pending_frame() const;
+    /** Poll before panel scanning; false defers the frame until parsing acknowledges its pause. */
+    bool prepare_frame();
     void complete_frame(bool success);
     View view() const;
     const std::string &status() const;

@@ -5530,7 +5530,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             }
 #endif
             request.lock_background = std::make_shared<graphics::Canvas>(canvas);
-            if (sleep_wait_footer && view == sleep_wait_view)
+            if (view == View::Reading)
+                request.lock_background->fill_rect(0, footer_top, 684, 1216 - footer_top, 15);
+            else if (sleep_wait_footer && view == sleep_wait_view)
                 std::memcpy(request.lock_background->data() + 342 * footer_top, sleep_wait_footer.get(), kSleepWaitFooterBytes);
         }
         counting_job = std::make_unique<ContentJob>(std::move(request));
@@ -7909,12 +7911,25 @@ const graphics::Canvas &ReaderApp::canvas() const {
 const std::optional<Frame> &ReaderApp::pending_frame() const {
     return impl_->pending;
 }
+bool ReaderApp::prepare_frame() {
+    if (!impl_->pending) return true;
+    const auto paused = [](const std::unique_ptr<ContentJob>& job) {
+        return !job || !job->started() || job->done() ||
+            (job->request.kind != ContentJob::Kind::Pagination &&
+             job->request.kind != ContentJob::Kind::Chapter) || job->pause();
+    };
+    const bool foreground = paused(impl_->foreground_job);
+    const bool background = paused(impl_->counting_job);
+    return foreground && background;
+}
 void ReaderApp::complete_frame(bool success) {
     if (!impl_->pending)
         return;
     const auto frame = *impl_->pending;
     const auto result = impl_->display.finish(frame.token, success);
     impl_->pending.reset();
+    if (impl_->foreground_job) impl_->foreground_job->resume();
+    if (impl_->counting_job) impl_->counting_job->resume();
     if (impl_->view == View::Sleeping && !impl_->custom_rotation_name.empty()) {
         // Only a presented image advances the rotation.
         if (success) impl_->custom_rotation_shown = impl_->custom_rotation_name;

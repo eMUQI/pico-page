@@ -529,6 +529,7 @@ bool present(pico_page::ReaderApp &app) {
         ~Release() { gate.finish_display(); }
     } release{gate};
     while (app.pending_frame()) {
+        if (!app.prepare_frame()) return true;
         ++presentation_sequence;
         std::string error;
         using pico_page::platform::PageWaveform;
@@ -672,6 +673,7 @@ extern "C" void app_main() {
         }
     };
     const auto sleep_now = [&] {
+        if (app->pending_frame()) return false;
         const bool ready = app->prepare_sleep();
         if (!ready && app->sleep_pending()) return false;
         if (ready && present(*app)) {
