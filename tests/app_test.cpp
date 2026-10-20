@@ -1348,6 +1348,67 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         assert(run(false, "alpha.png").cache_finished);
         assert(fs::file_size(cache_path) > 512 * 1024);
         {
+            const auto cache_bytes = read(cache_path);
+            const auto header = cache_bytes.substr(0, cache_bytes.size() - 684U * 1216 * 2 - 33);
+            std::unique_ptr<CacheReader> reader;
+            assert(store.open_cache("lockscreens/current", cache_bytes.size(), reader) == StoreStatus::Ok);
+            bool alpha = false;
+            unsigned checks = 0;
+            assert(!read_lock_screen_cache(*reader, header, nullptr, alpha, [&] { return ++checks == 4; }));
+            assert(read_lock_screen_cache(*reader, header, nullptr, alpha, {}) && alpha);
+            graphics::Canvas output; output.clear(7);
+            checks = 0;
+            assert(!read_lock_screen_cache(*reader, header, &output, alpha, [&] { return ++checks == 4; }));
+            reader.reset();
+            std::string layer; bool source_alpha = false;
+            const std::vector<std::uint8_t> source(std::begin(kRgbaPng), std::end(kRgbaPng));
+            assert(graphics::decode_png_layer(source, 684, 1216, layer, source_alpha, detail));
+            graphics::Canvas expected; expected.clear(7);
+            assert(graphics::composite_image_layer(expected, layer, 0, 1216));
+            const auto check_overlay = [&](bool cold) {
+                ContentJob::Request request;
+                request.kind = ContentJob::Kind::LockScreen; request.root = root.string(); request.sleep_image = "alpha.png";
+                request.sleep_overlay = true; request.lock_background = std::make_shared<graphics::Canvas>();
+                request.lock_background->clear(7); request.lock_cache_limit_for_test = 684 * 2;
+                const auto* storage = request.lock_background->data();
+                const auto decoded = graphics::image_decode_count();
+                ContentJob job(std::move(request)); assert(job.start()); job.wait();
+                assert(job.result.image && job.result.cache_finished && job.result.error.empty());
+                assert(job.result.image->data() == storage && job.result.image->pixels() == expected.pixels());
+                assert(graphics::image_decode_count() == decoded + (cold ? 1 : 0));
+            };
+            check_overlay(false);
+            for (bool truncated : {false, true}) {
+                ContentJob::Request request;
+                request.kind = ContentJob::Kind::LockScreen; request.root = root.string(); request.sleep_image = "alpha.png";
+                request.sleep_overlay = true; request.lock_background = std::make_shared<graphics::Canvas>();
+                request.lock_background->clear(7);
+                request.lock_cache_validated_for_test = [&] {
+                    auto changed = cache_bytes;
+                    if (truncated) changed.resize(changed.size() - 1);
+                    else changed.back() ^= 1;
+                    write(cache_path, changed);
+                };
+                const auto decoded = graphics::image_decode_count();
+                ContentJob failed(std::move(request)); assert(failed.start()); failed.wait();
+                assert(!failed.result.image && !failed.result.cache_finished && failed.result.retryable_failure);
+                assert(failed.result.error.find("缓存读取失败") != std::string::npos);
+                assert(graphics::image_decode_count() == decoded);
+                write(cache_path, cache_bytes);
+            }
+            for (int failure = 0; failure < 5; ++failure) {
+                auto damaged = cache_bytes;
+                if (failure == 0) damaged[header.size() + 10000] ^= 1;
+                if (failure == 1) damaged.back() ^= 1;
+                if (failure == 2) damaged.resize(damaged.size() - 9);
+                if (failure == 3) damaged[header.size()] = 'Z';
+                if (failure == 4) damaged[0] = 'X';
+                write(cache_path, damaged);
+                check_overlay(true);
+            }
+            check_overlay(false);
+        }
+        {
             ContentJob::Request blocked;
             blocked.kind = ContentJob::Kind::LockScreen; blocked.root = root.string(); blocked.sleep_image = "alpha.png";
             blocked.lock_canvas_limit_for_test = 342 * 1216 - 1;
@@ -1688,15 +1749,25 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         assert(app.status().find("未保存") == std::string::npos && app.status().find("简洁屏保") == std::string::npos);
         assert(FileStore(blocked.string()).last_lock_screen().empty());
     }
-    {
-        const auto blocked = root / "CacheFailure";
-        write(blocked / "LockScreens/01.png", png);
+    for (bool overlay : {false, true}) {
+        const auto blocked = root / (overlay ? "AlphaCacheFailure" : "CacheFailure");
+        const std::string source = overlay ? std::string(reinterpret_cast<const char*>(kRgbaPng), sizeof(kRgbaPng)) : png;
+        write(blocked / "LockScreens/01.png", source);
         write(blocked / "PicoPage/cache/lockscreens", "blocked");
         ContentJob::Request request;
         request.kind = ContentJob::Kind::LockScreen; request.root = blocked.string(); request.preview = true;
+        request.sleep_overlay = overlay;
+        if (overlay) request.lock_background = std::make_shared<graphics::Canvas>();
         ContentJob job(request); assert(job.start()); job.wait();
         assert(job.result.image && !job.result.cache_finished && job.result.retryable_failure);
         assert(job.result.error.find("缓存未保存") != std::string::npos);
+        if (overlay) {
+            std::string layer; bool alpha = false;
+            assert(graphics::decode_png_layer(std::vector<std::uint8_t>(source.begin(), source.end()), 684, 1216, layer, alpha, detail) && alpha);
+            graphics::Canvas expected;
+            assert(graphics::composite_image_layer(expected, layer, 0, 1216));
+            assert(job.result.image->pixels() == expected.pixels());
+        }
         request.lock_screen_deadline = std::chrono::steady_clock::now() - std::chrono::milliseconds(1);
         const auto decoded = graphics::image_decode_count();
         ContentJob expired(request); assert(expired.start()); expired.wait();

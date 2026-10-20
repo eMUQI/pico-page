@@ -7,6 +7,7 @@
 #include "pico_page/store.h"
 #include <cstring>
 #include <algorithm>
+#include <array>
 #include <utility>
 #ifdef ESP_PLATFORM
 #include "freertos/FreeRTOS.h"
@@ -434,6 +435,33 @@ void ContentJob::map_position() {
     result.percentage = (static_cast<double>(index) +
         (source.text.empty() ? 0. : static_cast<double>(offset) / source.text.size())) / document.spine().size();
 }
+bool read_lock_screen_cache(CacheReader& reader, const std::string& header, graphics::Canvas* image,
+                            bool& alpha, const std::function<bool()>& stop) {
+    if ((stop && stop()) || (image && (image->width() != 684 || image->height() != 1216)) ||
+        !reader.rewind()) return false;
+    std::string prefix(header.size() + 1, '\0');
+    if (!reader.read(prefix.data(), prefix.size()) || prefix.compare(0, header.size(), header) != 0) return false;
+    const char format = prefix.back();
+    if (format != 'A' && format != 'G') return false;
+    const std::size_t stride = format == 'A' ? 684 * 2 : 342;
+    if (reader.size() != prefix.size() + stride * 1216 + 32) return false;
+    alpha = format == 'A';
+    Md5Digest digest;
+    std::array<char, 684 * 2> row;
+    for (int y = 0; y < 1216; ++y) {
+        if ((stop && stop()) || !reader.read(row.data(), stride)) return false;
+        const std::string_view bytes(row.data(), stride);
+        if (!digest.update(bytes)) return false;
+        if (image) {
+            if (alpha) graphics::composite_image_rows(*image, bytes, y, 1);
+            else std::memcpy(image->data() + std::size_t(y) * stride, row.data(), stride);
+        }
+    }
+    std::array<char, 32> expected;
+    return (!stop || !stop()) && reader.read(expected.data(), expected.size()) &&
+           digest.finish() == std::string_view(expected.data(), expected.size()) && reader.rewind();
+}
+
 void ContentJob::prepare_lock_screen() {
     const StageTimer timer{"lock_screen_prepare"};
     const auto deadline = request.lock_screen_deadline == std::chrono::steady_clock::time_point{} ?
@@ -497,32 +525,43 @@ void ContentJob::prepare_lock_screen() {
             if (!available) { result.retryable_failure = true; result.error = "图片准备内存不足"; }
             return available;
         };
+        const auto prepare_canvas = [&] {
+            const bool reuse = request.sleep_overlay && request.lock_background;
+            if (!reuse && !canvas_available()) return false;
+            result.image = reuse ?
+                std::make_unique<graphics::Canvas>(std::move(*request.lock_background)) : std::make_unique<graphics::Canvas>();
+            return true;
+        };
         std::string pixels;
         bool alpha = false;
-        const auto admit = [&](std::size_t bytes) {
-            if (stop()) return false;
-#ifdef ESP_PLATFORM
-            return heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= bytes + count + 256U * 1024 &&
-                   heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >= bytes;
-#else
-            return !request.lock_cache_limit_for_test || bytes <= request.lock_cache_limit_for_test;
+        bool cache_available = true;
+#ifndef ESP_PLATFORM
+        cache_available = !request.lock_cache_limit_for_test || request.lock_cache_limit_for_test >= 684 * 2;
 #endif
-        };
-        if (store.load_cache(cache, header.size() + 4 * count + 33, pixels, admit) == StoreStatus::Ok &&
-            pixels.size() > header.size() && pixels.compare(0, header.size(), header) == 0) {
-            const char format = pixels[header.size()];
-            const auto bytes = format == 'A' ? 4 * count : count;
-            if ((format == 'A' || format == 'G') && pixels.size() == header.size() + 1 + bytes + 32 &&
-                pixels.compare(header.size() + 1 + bytes, 32,
-                    md5_hex(std::string_view(pixels.data() + header.size() + 1, bytes))) == 0) {
-                alpha = format == 'A';
-                pixels.erase(0, header.size() + 1); pixels.resize(bytes);
-                result.cache_finished = true;
+        const auto cache_started = std::chrono::steady_clock::now();
+        std::unique_ptr<CacheReader> reader;
+        if (cache_available && store.open_cache(cache, header.size() + 4 * count + 33, reader) == StoreStatus::Ok) {
+            result.cache_finished = read_lock_screen_cache(*reader, header, nullptr, alpha, stop);
+        }
+        const bool cached = result.cache_finished;
+        if (cached && !request.lock_screen_prepare) {
+#ifndef ESP_PLATFORM
+            if (request.lock_cache_validated_for_test) request.lock_cache_validated_for_test();
+#endif
+            // Validate before moving the background; the second pass also verifies every consumed byte.
+            if (!prepare_canvas()) return;
+            if (!read_lock_screen_cache(*reader, header, result.image.get(), alpha, stop)) {
+                result.image.reset(); result.cache_finished = false; result.retryable_failure = true;
+                result.error = stop() ? "图片准备已取消" : "休眠图片缓存读取失败，请重试";
+                return;
             }
         }
-        if (!result.cache_finished) {
-            // An unverified cache may belong to a larger previous image; source admission is independent.
-            std::string().swap(pixels);
+        reader.reset();
+        [[maybe_unused]] const auto cache_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - cache_started).count();
+        if (!cached) {
+            if (stop()) { result.error = "休眠图片准备已取消或超时"; return; }
+            alpha = false;
 #ifdef ESP_PLATFORM
             const auto encoded_size = static_cast<std::size_t>(before.st_size);
             if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < encoded_size + 2 * count + 768U * 1024 ||
@@ -550,6 +589,11 @@ void ContentJob::prepare_lock_screen() {
 #ifdef ESP_PLATFORM
             if (layered && (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 4 * count + 768U * 1024 ||
                             heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 4 * count)) {
+                ESP_LOGW("content_worker", "Lock screen memory rejected: stage=layer_decode free=%u largest=%u required=%u block=%u prepare=%d overlay=%d",
+                    static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+                    static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)),
+                    static_cast<unsigned>(4 * count + 768U * 1024), static_cast<unsigned>(4 * count),
+                    request.lock_screen_prepare, request.sleep_overlay);
                 result.retryable_failure = true; result.error = "图片准备内存不足"; return;
             }
 #endif
@@ -583,21 +627,8 @@ void ContentJob::prepare_lock_screen() {
                 sha256_file(path, stop) != identity || stop()) {
                 result.retryable_failure = true; result.error = "图片已改变，请重试"; return;
             }
-#ifdef ESP_PLATFORM
-            // Serialization may overlap the old payload with its replacement allocation.
-            if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < pixels.size() + header.size() + 33 + 256U * 1024 ||
-                heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < pixels.size() + header.size() + 33) {
-                result.retryable_failure = true; result.error = "图片准备内存不足"; return;
-            }
-#endif
             const auto digest = md5_hex(pixels);
-            const auto payload_size = pixels.size();
-            std::string serialized;
-            serialized.reserve(header.size() + 1 + payload_size + 32);
-            serialized += header; serialized += alpha ? 'A' : 'G'; serialized += pixels; serialized += digest;
-            pixels = std::move(serialized);
-            result.cache_finished = store.save_cache(cache, pixels) == StoreStatus::Ok;
-            pixels.erase(0, header.size() + 1); pixels.resize(payload_size);
+            result.cache_finished = store.save_cache(cache, pixels, header + (alpha ? 'A' : 'G'), digest) == StoreStatus::Ok;
             if (!result.cache_finished) {
                 result.retryable_failure = true; result.error = "休眠图片缓存未保存，下次将重新准备";
 #ifdef ESP_PLATFORM
@@ -606,11 +637,8 @@ void ContentJob::prepare_lock_screen() {
                 if (request.lock_screen_prepare) return;
             } else result.error.clear();
         } else result.error.clear();
-        if (!request.lock_screen_prepare) {
-            const bool reuse = request.sleep_overlay && request.lock_background;
-            if (!reuse && !canvas_available()) return;
-            result.image = reuse ?
-                std::make_unique<graphics::Canvas>(std::move(*request.lock_background)) : std::make_unique<graphics::Canvas>();
+        if (!cached && !request.lock_screen_prepare) {
+            if (!prepare_canvas()) return;
             if (alpha) {
                 for (int y = 0; y < 1216; y += 32) {
                     if (stop()) break;
@@ -619,6 +647,13 @@ void ContentJob::prepare_lock_screen() {
             } else std::memcpy(result.image->data(), pixels.data(), count);
         }
         if (stop()) { result.image.reset(); result.error = "图片准备已取消"; return; }
+#ifdef ESP_PLATFORM
+        ESP_LOGI("content_worker", "Lock screen ready: source=%s alpha=%d cached=%d prepare=%d overlay=%d payload=%u cache_ms=%lld free=%u largest=%u",
+            cached ? "cache" : "decode", alpha, result.cache_finished, request.lock_screen_prepare, request.sleep_overlay,
+            static_cast<unsigned>(alpha ? 4 * count : count), static_cast<long long>(cache_ms),
+            static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+            static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
+#endif
         return;
     }
     if (request.sleep_image.empty()) result.error = "轮播图片均不可用：" + result.error;

@@ -124,6 +124,20 @@ private:
 /** Lowercase hexadecimal MD5 of bytes; empty when the digest backend fails. */
 std::string md5_hex(std::string_view bytes);
 
+/** Single-owner incremental MD5. Updates retain no input references; finish consumes the digest.
+ * update returns false and finish returns empty on backend failure or use after finish.
+ */
+class Md5Digest {
+public:
+    Md5Digest();
+    ~Md5Digest();
+    bool update(std::string_view bytes);
+    std::string finish();
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
 /** Frees all memory held by a chapter; assigning an empty chapter may keep string capacity. */
 void release(Chapter& chapter);
 

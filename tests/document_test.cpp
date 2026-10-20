@@ -18,6 +18,14 @@ extern "C" void* __wrap_calloc(std::size_t count, std::size_t size) {
 #endif
 
 int main(int argc, char** argv) {
+    {
+        Md5Digest digest;
+        assert(digest.update("a") && digest.update("bc"));
+        assert(digest.finish() == "900150983cd24fb0d6963f7d28e17f72");
+        assert(!digest.update("d") && digest.finish().empty());
+        Md5Digest empty;
+        assert(empty.finish() == "d41d8cd98f00b204e9800998ecf8427e");
+    }
     assert(argc >= 2);
     std::string error;
     EpubDocument book;

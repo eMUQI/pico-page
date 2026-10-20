@@ -1372,6 +1372,12 @@ struct ReaderApp::Impl final : DisplayBackend {
         // The lock screen reads the cover cache itself; a failed or cancelled attempt falls back to the title.
         if (request.kind == ContentJob::Kind::SleepCover) return;
         if (request.kind == ContentJob::Kind::LockScreen) {
+#ifdef ESP_PLATFORM
+            if (!result.error.empty())
+                ESP_LOGW("reader_app", "Lock screen result: prepare=%d overlay=%d cached=%d image=%d retryable=%d error=%s",
+                    request.lock_screen_prepare, request.sleep_overlay, result.cache_finished,
+                    !!result.image, result.retryable_failure, result.error.c_str());
+#endif
             if (result.cursor_saved && request.lock_screen_shown == custom_rotation_shown) custom_rotation_shown.clear();
             if (settings.sleep_screen != "custom" || request.sleep_image != settings.sleep_image || request.sleep_overlay != settings.sleep_overlay) return;
             if (request.preview && custom_sleep_attempted && sleep_cover_deadline) {

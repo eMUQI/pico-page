@@ -285,9 +285,17 @@ bool composite_image_layer(Canvas& canvas, std::string_view layer, int first_row
     if (canvas.width() <= 0 || canvas.width() > 684 || canvas.height() <= 0 || canvas.height() > 1216 ||
         layer.size() != std::size_t(canvas.width()) * canvas.height() * 2 ||
         first_row < 0 || row_count < 0 || first_row > canvas.height() || row_count > canvas.height() - first_row) return false;
-    const auto* bytes = reinterpret_cast<const std::uint8_t*>(layer.data());
+    const auto stride = std::size_t(canvas.width()) * 2;
+    return composite_image_rows(canvas, layer.substr(first_row * stride, row_count * stride), first_row, row_count);
+}
+
+bool composite_image_rows(Canvas& canvas, std::string_view rows, int first_row, int row_count) {
+    if (canvas.width() <= 0 || canvas.width() > 684 || canvas.height() <= 0 || canvas.height() > 1216 ||
+        first_row < 0 || row_count < 0 || first_row > canvas.height() || row_count > canvas.height() - first_row ||
+        rows.size() != std::size_t(canvas.width()) * row_count * 2) return false;
+    const auto* bytes = reinterpret_cast<const std::uint8_t*>(rows.data());
     for (int y = first_row; y < first_row + row_count; ++y) for (int x = 0; x < canvas.width(); ++x) {
-        const auto at = (std::size_t(y) * canvas.width() + x) * 2;
+        const auto at = (std::size_t(y - first_row) * canvas.width() + x) * 2;
         const unsigned alpha = bytes[at + 1];
         if (!alpha) continue;
         const unsigned mixed = (bytes[at] * alpha + canvas.pixel(x, y) * 17U * (255U - alpha) + 127U) / 255U;

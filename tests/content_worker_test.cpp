@@ -201,10 +201,19 @@ int main(int argc, char** argv) {
         assert(pico_page::graphics::image_decode_count() == before_cold + 1);
         assert(!fs::exists(root / "PicoPage/data/last-lock-screen.txt"));
         psram_free = 1024 * 1024;
-        ContentJob refused_warm_custom(custom); assert(refused_warm_custom.start()); finish(refused_warm_custom);
-        assert(!refused_warm_custom.result.image && refused_warm_custom.result.retryable_failure);
-        assert(pico_page::graphics::image_decode_count() == before_cold + 1);
+        ContentJob warm_custom(custom); assert(warm_custom.start()); finish(warm_custom);
+        assert(warm_custom.result.image && warm_custom.result.cache_finished && !warm_custom.result.retryable_failure);
+        assert(warm_custom.result.image->pixels() == cold_custom.result.image->pixels());
+        for (bool fragmented : {false, true}) {
+            psram_free = fragmented ? 4 * 1024 * 1024 : 342 * 1216 + 256 * 1024 - 1;
+            psram_largest = fragmented ? 342 * 1216 - 1 : 3 * 1024 * 1024;
+            ContentJob refused_warm_custom(custom); assert(refused_warm_custom.start()); finish(refused_warm_custom);
+            assert(!refused_warm_custom.result.image && refused_warm_custom.result.cache_finished &&
+                   refused_warm_custom.result.retryable_failure);
+            assert(pico_page::graphics::image_decode_count() == before_cold + 1);
+        }
         psram_free = 4 * 1024 * 1024;
+        psram_largest = 3 * 1024 * 1024;
         custom.lock_screen_deadline = std::chrono::steady_clock::now() - std::chrono::milliseconds(1);
         ContentJob expired_custom(custom); assert(expired_custom.start()); finish(expired_custom);
         assert(!expired_custom.result.image && expired_custom.result.retryable_failure);

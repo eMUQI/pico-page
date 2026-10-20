@@ -29,6 +29,13 @@ graphics::Page plan_content(graphics::Font& font, const Chapter& source, std::si
 
 std::string image_cache_key(const std::string& book_id, const std::string& resource, const graphics::LayoutSpec& spec);
 
+/** Reads and checks one PPLOCK4 cache using a single row buffer. A null image only validates.
+ * A supplied canvas must be unpublished and 684 x 1216; discard it on failure or cancellation.
+ * Each call rewinds the same reader and validates header, length and payload digest.
+ */
+bool read_lock_screen_cache(CacheReader& reader, const std::string& header, graphics::Canvas* image,
+                            bool& alpha, const std::function<bool()>& stop);
+
 /**
  * Open book, body font and loaded chapter part shared by the pagination jobs of one counting
  * session, so that a job does not repeat the preparation of the previous one.
@@ -99,8 +106,10 @@ public:
         /** LockScreen: prepare the disk cache without retaining a result canvas. */
         bool lock_screen_prepare = false;
 #ifndef ESP_PLATFORM
-        /** Host fault injection: reject lock-screen cache payloads above this size; zero disables it. */
+        /** Host fault injection: reject lock-screen cache row buffers above this size; zero disables it. */
         std::size_t lock_cache_limit_for_test = 0;
+        /** Host fault injection after validation, before cached rows are composed. */
+        std::function<void()> lock_cache_validated_for_test;
         /** Host fault injection: reject new lock-screen canvases above this size; zero disables it. */
         std::size_t lock_canvas_limit_for_test = 0;
 #endif

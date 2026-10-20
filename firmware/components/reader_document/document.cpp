@@ -1337,6 +1337,22 @@ std::string md5_hex(std::string_view bytes) {
     return md5.finish(digest) ? digest : std::string();
 }
 
+struct Md5Digest::Impl {
+    Hash hash{true};
+    bool finished = false;
+};
+Md5Digest::Md5Digest() : impl_(std::make_unique<Impl>()) {}
+Md5Digest::~Md5Digest() = default;
+bool Md5Digest::update(std::string_view bytes) {
+    return !impl_->finished && impl_->hash.update(reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size());
+}
+std::string Md5Digest::finish() {
+    if (impl_->finished) return {};
+    impl_->finished = true;
+    std::string value;
+    return impl_->hash.finish(value) ? value : std::string();
+}
+
 void release(Chapter& chapter) {
     // Assigning an empty value may keep the capacity of the strings; swapping hands the buffers
     // to a temporary that frees them.

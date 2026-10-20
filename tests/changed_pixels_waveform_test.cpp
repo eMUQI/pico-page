@@ -10,6 +10,17 @@
 
 using namespace pico_page::platform;
 namespace {
+void hold_suffix(const std::uint8_t* difference, std::uint8_t* drive, int first, int width) {
+    std::array<std::uint8_t, 1216 / 4 + 1> mask;
+    mask.fill(0xA5);
+    const int bytes = epd_build_unchanged_suffix_mask(difference, mask.data(), first, width);
+    assert(bytes >= 0 && bytes <= 1216 / 4 && bytes % 16 == 0);
+    assert(std::all_of(mask.begin() + bytes, mask.end(), [](auto value) { return value == 0xA5; }));
+    if (!bytes) return;
+    const int offset = first / 64 * 16;
+    assert(offset % 16 == 0 && offset + bytes == width / 4);
+    for (int i = 0; i < bytes; ++i) drive[offset + i] &= mask[i];
+}
 unsigned get(const std::uint8_t* lut, std::size_t phase, unsigned to, unsigned from) {
     return (lut[phase * 64 + to * 4 + from / 4] >> (6 - 2 * (from % 4))) & 3;
 }
@@ -51,9 +62,10 @@ int main() {
     std::array<std::uint8_t, native_width / 4 + 1> drive{};
     for (int pair = 0; pair < 256; ++pair) {
         difference.fill(static_cast<std::uint8_t>(pair));
-        for (int first : {-1, 0, footer_column - 1, footer_column, native_width, native_width + 1}) {
+        for (int first : {-1, 0, 1, 63, 64, 65, footer_column - 1, footer_column,
+                          footer_column + 1, native_width - 1, native_width, native_width + 1}) {
             drive.fill(0xFF);
-            epd_hold_unchanged_suffix(difference.data(), drive.data(), first, native_width);
+            hold_suffix(difference.data(), drive.data(), first, native_width);
             for (int x = 0; x < native_width; ++x) {
                 const bool hold = first >= 0 && x >= first && (pair & 15) == (pair >> 4);
                 assert(((drive[x / 4] >> (2 * (x % 4))) & 3) == (hold ? 0 : 3));
@@ -64,15 +76,34 @@ int main() {
     // Mixed equal and changed neighbors retain their original phase drive actions.
     for (int x = 0; x < native_width; ++x) difference[x] = x % 2 ? 0x77 : 0x37;
     drive.fill(0xE4);
-    epd_hold_unchanged_suffix(difference.data(), drive.data(), footer_column, native_width);
+    hold_suffix(difference.data(), drive.data(), footer_column, native_width);
     for (int x = 0; x < native_width; ++x) {
         const auto expected = x >= footer_column && x % 2 ? 0 : x % 4;
         assert(((drive[x / 4] >> (2 * (x % 4))) & 3) == expected);
     }
     assert(drive.back() == 0xE4);
     const auto unchanged_drive = drive;
-    epd_hold_unchanged_suffix(difference.data(), drive.data(), footer_column, native_width - 1);
-    assert(drive == unchanged_drive);
+    for (int invalid_width : {0, -64, native_width - 1, native_width - 4}) {
+        hold_suffix(difference.data(), drive.data(), footer_column, invalid_width);
+        assert(drive == unchanged_drive);
+    }
+    // One immutable mask applies to every phase, independently of its drive actions.
+    std::array<std::uint8_t, 32 + 1> mask;
+    mask.fill(0xA5);
+    assert(epd_build_unchanged_suffix_mask(difference.data(), mask.data(), footer_column, native_width) == 32);
+    assert(mask.back() == 0xA5);
+    const auto saved_mask = mask;
+    for (int phase = 0; phase < 37; ++phase) {
+        drive.fill(static_cast<std::uint8_t>(phase * 7));
+        const auto original = drive;
+        for (int i = 0; i < 32; ++i) drive[272 + i] &= mask[i];
+        for (int x = 0; x < native_width; ++x) {
+            const unsigned expected = x >= footer_column && x % 2 ? 0 :
+                (original[x / 4] >> (2 * (x % 4))) & 3u;
+            assert(((drive[x / 4] >> (2 * (x % 4))) & 3u) == expected);
+        }
+        assert(drive.back() == original.back() && mask == saved_mask);
+    }
     for (int row = 0; row < 684; ++row) {
         int expected = 0;
         for (int tick = 0; tick < ripple_ticks; ++tick) {

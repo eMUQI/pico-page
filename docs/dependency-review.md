@@ -166,3 +166,5 @@ RTC 沿用已锁定的 MindReset BSP `5f3406deec33304de8801046db583dec7c49e55b`�
 ## 2026-10-19 · 正文翻页页脚逐像素保持
 
 复用固定 BSP `5f3406deec33304de8801046db583dec7c49e55b` 的 epdiy（LGPL-3.0-or-later）、E0470 波形组件及现有逐行相位路径。核对 `output_common/lut.c` 的 1ppB 差分编码、S3 VE 输出位序、`render_context.c` 的列掩码和 `output_lcd/render_lcd.c` 的行队列提交点后，自行实现页脚相同像素的驱动位清零；未复制新的第三方代码或新增依赖。`firmware/patches/epdiy-footer-hold.patch` 在既有欠载与逐行相位补丁之后应用，辅助头 `epdiy-unchanged-pixels.h` 复制到构建副本的 `src/output_common/`；原始 BSP 不变。辅助头与补丁沿用 epdiy 的 LGPL-3.0-or-later 义务，公开分发时保留许可证、原文件署名和可对应的修改源码。Gray16、Gray8 及水波纹使用原表，原子性和失败恢复仍由现有显示所有者负责。
+
+同日欠载修正将比较移到扫描前，生成 16 字节对齐的紧凑后缀掩码，扫描期间复用固定 BSP `src/diff.S` 中的 `epd_apply_line_mask_VE`；该函数按 16 字节分组执行向量与操作。掩码在单次逻辑更新内借给同步生产者，所有绘制汇合后由显示所有者释放；水波纹各拍复用同一差分图和掩码。临时掩码使用 PSRAM，分配失败时跳过可选保持。没有新增外部来源、第三方代码复制或许可变化。

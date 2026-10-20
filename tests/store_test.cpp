@@ -499,6 +499,54 @@ int main() {
 
     put(sidecar / "prepared/map", "required");
     put(sidecar / "cover.png", "manual");
+    const std::string cache_payload("gray\0alpha", 10);
+    assert(store.save_cache("lockscreens/current", cache_payload, "PPLOCK4\nA", "digest") == StoreStatus::Ok);
+    const auto cache_contents = std::string("PPLOCK4\nA") + cache_payload + "digest";
+    const auto lock_cache = root / "PicoPage/cache/lockscreens/current";
+    assert(get(lock_cache) == cache_contents);
+    {
+        std::unique_ptr<CacheReader> reader;
+        assert(store.open_cache("lockscreens/current", cache_contents.size() - 1, reader) == StoreStatus::Invalid && !reader);
+        assert(store.open_cache("../outside", 100, reader) == StoreStatus::UnsafePath && !reader);
+        assert(store.open_cache("missing", 100, reader) == StoreStatus::Missing && !reader);
+        assert(store.open_cache("lockscreens/current", cache_contents.size(), reader) == StoreStatus::Ok);
+        assert(reader->size() == cache_contents.size() && reader->read(nullptr, 0));
+        std::string bytes(reader->size(), '\0');
+        assert(!reader->read(bytes.data(), bytes.size() + 1));
+        assert(reader->read(bytes.data(), 4) && reader->read(bytes.data() + 4, bytes.size() - 4));
+        assert(bytes == cache_contents && !reader->read(bytes.data(), 1));
+        assert(store.save_cache("lockscreens/current", "replacement") == StoreStatus::Ok);
+        assert(reader->rewind() && reader->read(bytes.data(), bytes.size()) && bytes == cache_contents);
+        reader.reset();
+        assert(store.open_cache("lockscreens/current", 100, reader) == StoreStatus::Ok);
+        assert(reader->read(bytes.data(), 4));
+        fs::resize_file(lock_cache, 5);
+        assert(!reader->read(bytes.data(), 2) && !reader->rewind());
+        reader.reset();
+        assert(store.save_cache("lockscreens/current", cache_payload, "PPLOCK4\nA", "digest") == StoreStatus::Ok);
+    }
+    fs::create_directory(lock_cache.string() + ".tmp");
+    assert(store.save_cache("lockscreens/current", "replacement", "prefix", "suffix") == StoreStatus::IoError);
+    assert(get(lock_cache) == cache_contents);
+    fs::remove(lock_cache.string() + ".tmp");
+    // Fail within each segment without publishing a partial cache over the old entry.
+    for (rlim_t limit : {2, 6, 16}) {
+        const auto child = fork();
+        assert(child >= 0);
+        if (!child) {
+            std::signal(SIGXFSZ, SIG_IGN);
+            const rlimit bound{limit, limit};
+            assert(setrlimit(RLIMIT_FSIZE, &bound) == 0);
+            assert(store.save_cache("lockscreens/current", cache_payload, "head", "tail") == StoreStatus::IoError);
+            _exit(0);
+        }
+        int status = 0;
+        assert(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0);
+        assert(get(lock_cache) == cache_contents);
+    }
+    assert(store.save_cache("lockscreens/current", "", "header", "tail") == StoreStatus::Ok);
+    assert(get(lock_cache) == "headertail");
+    assert(store.save_cache("../outside/keep", cache_payload, "prefix", "suffix") == StoreStatus::UnsafePath);
     put(root / "PicoPage/cache/books/one/layout", "disposable");
     put(root / "outside/keep", "keep");
     fs::create_directory_symlink(root / "outside", root / "PicoPage/cache/external");

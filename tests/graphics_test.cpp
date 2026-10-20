@@ -79,6 +79,14 @@ int main(int argc, char** argv) {
         assert(composited.pixel(0, 5) == 7);
         assert(composite_image_layer(composited, layer, 4, 4));
         assert(composited.pixel(0, 5) == 5 && composited.pixel(3, 5) == 7 && composited.pixel(0, 7) == 7);
+        Canvas streamed(4, 8); streamed.clear(7);
+        for (int y = 0; y < 8; ++y)
+            assert(composite_image_rows(streamed, std::string_view(layer).substr(y * 8, 8), y, 1));
+        assert(streamed.pixels() == composited.pixels());
+        const auto streamed_pixels = streamed.pixels();
+        assert(!composite_image_rows(streamed, std::string_view(layer).substr(0, 7), 2, 1));
+        assert(!composite_image_rows(streamed, std::string_view(layer).substr(0, 8), 8, 1));
+        assert(streamed.pixels() == streamed_pixels);
         const auto original = composited.pixels();
         assert(!composite_image_layer(composited, layer, 7, 2) && composited.pixels() == original);
         std::string half_alpha(2, '\0'); half_alpha[1] = static_cast<char>(128);

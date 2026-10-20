@@ -406,7 +406,8 @@ ProgressResult read_progress(const std::string& root, const std::string& path,
     return result;
 }
 
-bool write_synced(const std::string& root, const std::string& path, const std::string& bytes) {
+bool write_synced(const std::string& root, const std::string& path, const std::string& bytes,
+                  std::string_view prefix = {}, std::string_view suffix = {}) {
     const auto safe = store_internal::safe_path(root, path);
     if (safe != StoreStatus::Ok && safe != StoreStatus::Missing) return false;
     const auto full = root + "/" + path;
@@ -414,15 +415,17 @@ bool write_synced(const std::string& root, const std::string& path, const std::s
     if (safe == StoreStatus::Ok && unlink(full.c_str()) != 0) return false;
     const int fd = open_no_follow(full, O_WRONLY | O_CREAT | O_EXCL);
     if (fd < 0) return false;
-    std::size_t written = 0;
-    while (written < bytes.size()) {
-        const auto count = write(fd, bytes.data() + written, bytes.size() - written);
-        if (count < 0 && errno == EINTR) continue;
-        if (count <= 0) {
-            close(fd);
-            return false;
+    for (const std::string_view part : {prefix, std::string_view(bytes), suffix}) {
+        std::size_t written = 0;
+        while (written < part.size()) {
+            const auto count = write(fd, part.data() + written, part.size() - written);
+            if (count < 0 && errno == EINTR) continue;
+            if (count <= 0) {
+                close(fd);
+                return false;
+            }
+            written += static_cast<std::size_t>(count);
         }
-        written += static_cast<std::size_t>(count);
     }
     const bool synced = fsync(fd) == 0;
     return close(fd) == 0 && synced;
@@ -1069,6 +1072,44 @@ StoreStatus FileStore::load_cache(const std::string& name, std::size_t limit, st
     return store_internal::read_file(root_, "PicoPage/cache/" + name, limit, bytes, admit);
 }
 
+CacheReader::~CacheReader() { close(fd_); }
+bool CacheReader::read(char* bytes, std::size_t size) {
+    if (size > size_ - offset_ || (size && !bytes)) return false;
+    std::size_t filled = 0;
+    while (filled < size) {
+        const auto count = ::read(fd_, bytes + filled, size - filled);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) return false;
+        filled += static_cast<std::size_t>(count);
+        offset_ += static_cast<std::size_t>(count);
+    }
+    return true;
+}
+bool CacheReader::rewind() {
+    struct stat info{};
+    if (fstat(fd_, &info) != 0 || info.st_size < 0 ||
+        static_cast<std::uint64_t>(info.st_size) != size_ || lseek(fd_, 0, SEEK_SET) != 0) return false;
+    offset_ = 0;
+    return true;
+}
+StoreStatus FileStore::open_cache(const std::string& name, std::size_t limit,
+                                 std::unique_ptr<CacheReader>& reader) const {
+    reader.reset();
+    const auto path = "PicoPage/cache/" + name;
+    const auto safe = store_internal::safe_path(root_, path);
+    if (safe != StoreStatus::Ok) return safe;
+    const int fd = open_no_follow(root_ + "/" + path, O_RDONLY);
+    if (fd < 0) return errno == ENOENT ? StoreStatus::Missing : StoreStatus::IoError;
+    struct stat info{};
+    if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode)) { close(fd); return StoreStatus::IoError; }
+    if (info.st_size < 0 || static_cast<std::uint64_t>(info.st_size) > limit) {
+        close(fd); return StoreStatus::Invalid;
+    }
+    reader.reset(new (std::nothrow) CacheReader(fd, static_cast<std::size_t>(info.st_size)));
+    if (!reader) { close(fd); return StoreStatus::IoError; }
+    return StoreStatus::Ok;
+}
+
 StoreStatus FileStore::save_private(const std::string& name, const std::string& bytes,
                                     std::string& error) const {
     error.clear();
@@ -1093,10 +1134,11 @@ StoreStatus FileStore::remove_private(const std::string& name) const {
     return unlink((root_ + "/" + path).c_str()) == 0 && sync_directory(root_ + "/PicoPage") ? StoreStatus::Ok : StoreStatus::IoError;
 }
 
-StoreStatus FileStore::save_cache(const std::string& name, const std::string& bytes) const {
+StoreStatus FileStore::save_cache(const std::string& name, const std::string& bytes,
+                                 std::string_view prefix, std::string_view suffix) const {
     const auto path = "PicoPage/cache/" + name;
     if (!store_internal::relative_path(path)) return StoreStatus::UnsafePath;
-    return resource_parents(root_, path) && write_synced(root_, path + ".tmp", bytes) &&
+    return resource_parents(root_, path) && write_synced(root_, path + ".tmp", bytes, prefix, suffix) &&
            publish(root_, path + ".tmp", path) ? StoreStatus::Ok : StoreStatus::IoError;
 }
 

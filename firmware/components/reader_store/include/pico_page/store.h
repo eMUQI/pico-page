@@ -7,6 +7,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace pico_page {
@@ -148,6 +149,24 @@ private:
     int fd_;
     bool terminal_ = false;
     bool owns_temporary_ = true;
+};
+
+/** A single-owner bounded cache reader. Release it before cache cleanup or card handoff. */
+class CacheReader {
+public:
+    ~CacheReader();
+    CacheReader(const CacheReader&) = delete;
+    CacheReader& operator=(const CacheReader&) = delete;
+    std::size_t size() const { return size_; }
+    /** Reads exactly size bytes into caller-owned storage; false on bounds, truncation or I/O failure. */
+    bool read(char* bytes, std::size_t size);
+    /** Returns to byte zero on the same open file; refuses a changed length. */
+    bool rewind();
+private:
+    friend class FileStore;
+    CacheReader(int fd, std::size_t size) : fd_(fd), size_(size) {}
+    int fd_;
+    std::size_t size_, offset_ = 0;
 };
 
 /**
@@ -296,11 +315,20 @@ public:
     StoreStatus load_cache(const std::string& name, std::size_t limit, std::string& bytes,
                            const std::function<bool(std::size_t)>& admit = {}) const;
 
+    /** Opens a regular rebuildable file without loading its payload; rejects lengths above limit.
+     * On failure reader is empty. The caller validates the bytes and serializes card access.
+     */
+    StoreStatus open_cache(const std::string& name, std::size_t limit,
+                           std::unique_ptr<CacheReader>& reader) const;
+
     /**
      * Replaces a rebuildable file below PicoPage/cache, creating parent directories.
      * An interrupted call may leave the entry missing; it never holds user data.
+     * Prefix, payload and suffix are written in order without concatenation.
+     * All input buffers are borrowed until this synchronous call returns.
      */
-    StoreStatus save_cache(const std::string& name, const std::string& bytes) const;
+    StoreStatus save_cache(const std::string& name, const std::string& bytes,
+                           std::string_view prefix = {}, std::string_view suffix = {}) const;
 
 private:
     std::string root_;

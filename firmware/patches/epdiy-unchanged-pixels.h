@@ -2,21 +2,27 @@
 #pragma once
 
 #include <stdint.h>
+#include <string.h>
 
 /**
- * Suppress equal grayscale transitions in a native-column suffix after S3 VE
- * LUT conversion. Input contains one (to, from) nibble pair per pixel; output
- * contains four two-bit drive actions per byte, first pixel in bits 1:0.
- * Buffers must cover width input bytes and width / 4 output bytes and must be
- * disjoint; width must be divisible by four. A negative first_column or invalid
- * width disables masking. No allocation occurs.
+ * Build a phase-independent drive mask before LCD scanning starts. Input contains
+ * one (to, from) nibble pair per pixel. The compact output begins at the preceding
+ * 64-pixel boundary so its offset and length are aligned for the S3 vector mask.
+ * Each pixel uses two bits, first pixel in bits 1:0; equal suffix pixels become
+ * zero and all other bits remain one. Buffers must be disjoint and cover width
+ * input bytes and the returned output length. Width must be divisible by 64.
+ * Invalid geometry returns zero without writing output. No allocation occurs.
  */
-static inline void epd_hold_unchanged_suffix(const uint8_t* difference, uint8_t* output,
-                                             int first_column, int width) {
-    if (first_column < 0 || first_column >= width || width % 4 != 0) return;
+static inline int epd_build_unchanged_suffix_mask(const uint8_t* difference, uint8_t* mask,
+                                                 int first_column, int width) {
+    if (first_column < 0 || first_column >= width || width % 64 != 0) return 0;
+    const int first_pixel = first_column / 64 * 64;
+    const int bytes = (width - first_pixel) / 4;
+    memset(mask, 0xFF, bytes);
     for (int x = first_column; x < width; ++x) {
         const uint8_t pixel = difference[x];
         if ((pixel & 15u) == (pixel >> 4))
-            output[x / 4] &= (uint8_t)~(3u << (2 * (x % 4)));
+            mask[(x - first_pixel) / 4] &= (uint8_t)~(3u << (2 * (x % 4)));
     }
+    return bytes;
 }

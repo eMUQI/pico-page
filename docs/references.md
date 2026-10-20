@@ -65,3 +65,11 @@ OpenAI 官方：`https://developers.openai.com/codex/guides/agents-md/` 本次�
 ## 自定义休眠图片实现参考（2026-10-11）
 
 参考 [KOReader screensaver.lua](https://github.com/koreader/koreader/blob/master/frontend/ui/screensaver.lua) 的有界图片列表、按文件名轮播与不可用回退思路；未复制代码。本项目限定根目录 PNG/JPEG，复用现有内容 worker 和图形解码器，清醒时预转换、休眠只读缓存，不引入 KOReader 的 Lua UI 或渲染依赖。内存门槛同时检查总余量与最大连续块，依据 [ESP-IDF ESP32-S3 堆分配说明](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/api-reference/system/mem_alloc.html)，沿用已安装 IDF 6.1 的能力堆接口；不新增任务、栈或 DMA 路径。
+
+## 透明锁屏的内存与分段处理（2026-10-19）
+
+核对 CrossPoint 官方 `develop` 的完整提交 `ad971c8ac03c9765e3835b3b54ee56f0b0332abe`：[PNG 转换器](https://github.com/crosspoint-reader/crosspoint-reader/blob/ad971c8ac03c9765e3835b3b54ee56f0b0332abe/lib/Epub/Epub/converters/PngToFramebufferConverter.cpp) 按源行分配灰度／透明度缓冲，逐行写帧缓冲，普通图片缓存使用单行 band 顺序落盘；开启透明保持时不创建该缓存。[透明休眠路径](https://github.com/crosspoint-reader/crosspoint-reader/blob/ad971c8ac03c9765e3835b3b54ee56f0b0332abe/src/activities/boot_sleep/SleepActivity.cpp) 按灰阶平面重复解码，透明度使用 4×4 有序阈值决定像素覆盖。其低峰值以重复解码和不同透明度处理换取，不能直接替代本项目的连续透明度混合、16 级输出及热缓存免解码约定。项目根许可证为 MIT；本次只研究实现思路，未复制源码、替换解码器或新增依赖。
+
+KOReader 的 [移植说明](https://github.com/koreader/koreader/blob/master/doc/Porting.md) 建议中间格式接近输出格式；[BlitBuffer](https://github.com/koreader/koreader-base/blob/master/ffi/blitbuffer.lua) 同时支持 4 位、8 位灰度和带透明度的 `Color8A`／`TYPE_BB8A`。带透明度的中间表示有用途，但不是整屏复制和重复拼接的理由；其 Linux 平台、缓冲管理和内存预算不能直接当作 ESP32-S3 的实测依据。本次未复制 KOReader 代码或引入其 GPL／AGPL 组件，未验证其全部图片路径。
+
+本批先借鉴「分段写入，避免整图拼接」消除已经复现的缓存提交副本，保留当前 PNG 解码、透明精度、缓存格式及取消所有权。后续本地实现已将热缓存改为 1,368 字节行缓冲：先完整校验，再从同一打开文件逐行读取并直接合成，保留连续 alpha 与现有混合公式，第二遍失败或取消丢弃独占输出。冷 PNG 解码直接合成及仅存有效图层边界仍为候选；涉及缩放、Adam7 渐进覆盖、透明边缘、缓存校验与取消边界，需要另行验证，不以外部固件的代码或示例替代真机验收。

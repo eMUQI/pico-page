@@ -185,6 +185,11 @@ bool decode_png_layer(const std::vector<std::uint8_t>& encoded, int width, int h
  */
 bool composite_image_layer(Canvas& canvas, std::string_view layer, int first_row, int row_count);
 
+/** Blends row_count gray/alpha rows starting at first_row. Unlike a full layer, rows contains
+ * only those rows. Invalid dimensions, payload or bounds leave the canvas unchanged.
+ */
+bool composite_image_rows(Canvas& canvas, std::string_view rows, int first_row, int row_count);
+
 /**
  * Draws text as a QR code centred in a size x size box at (x, y), black on white with a
  * four-module quiet zone and error correction level M. Returns false and leaves the canvas
