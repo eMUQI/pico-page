@@ -2,6 +2,7 @@
 """Publish verified firmware images to COS with short-lived GitHub OIDC credentials."""
 import argparse
 import json
+import logging
 import os
 from pathlib import Path
 import sys
@@ -114,6 +115,11 @@ def github_credentials():
 
 def main():
     from qcloud_cos import CosConfig, CosS3Client
+
+    # SDK ERROR records retain transport causes; signed request headers are logged only at DEBUG.
+    logger = logging.getLogger('qcloud_cos.cos_client')
+    logger.setLevel(logging.ERROR)
+    logger.addHandler(logging.StreamHandler())
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('directory', type=Path)
