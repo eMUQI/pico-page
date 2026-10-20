@@ -27,17 +27,23 @@ def publish(cos, directory):
         raise ValueError('Firmware manifest is required')
     for path in sorted(directory.glob('*.bin')):
         data = path.read_bytes()
-        print('Uploading COS firmware ' + path.name, flush=True)
+        print('Checking authenticated COS firmware ' + path.name, flush=True)
         try:
-            cos.put_object(Bucket=BUCKET, Key=path.name, Body=data, EnableMD5=True,
-                           ContentType='application/octet-stream',
-                           Metadata={'x-cos-forbid-overwrite': 'true'})
+            response = cos.get_object(Bucket=BUCKET, Key=path.name)
         except Exception as error:
-            # A repeat deployment may reuse identical images but cannot replace a published version.
-            if getattr(error, 'get_error_code', lambda: None)() != 'FileAlreadyExists':
+            if getattr(error, 'get_error_code', lambda: None)() != 'NoSuchKey':
                 raise
+            print('Uploading COS firmware ' + path.name, flush=True)
+            try:
+                cos.put_object(Bucket=BUCKET, Key=path.name, Body=data, EnableMD5=True,
+                               ContentType='application/octet-stream',
+                               Metadata={'x-cos-forbid-overwrite': 'true'})
+            except Exception as error:
+                # A concurrent publisher may create the same immutable object after the missing-object check.
+                if getattr(error, 'get_error_code', lambda: None)() != 'FileAlreadyExists':
+                    raise
+            response = cos.get_object(Bucket=BUCKET, Key=path.name)
         print('Verifying authenticated COS firmware ' + path.name, flush=True)
-        response = cos.get_object(Bucket=BUCKET, Key=path.name)
         stream = response['Body'].get_raw_stream()
         try:
             if stream.read(len(data) + 1) != data:
@@ -131,4 +137,8 @@ if __name__ == '__main__':
         code = getattr(error, 'get_error_code', lambda: None)() or type(error).__name__
         if error.__context__ is not None:
             code += ': ' + type(error.__context__).__name__
+            for reason in ('CERTIFICATE_VERIFY_FAILED', 'UNEXPECTED_EOF_WHILE_READING',
+                           'EOF occurred in violation of protocol', 'TLSV1_ALERT_PROTOCOL_VERSION'):
+                if reason in str(error.__context__):
+                    code += ': ' + reason
         sys.exit('COS publication failed: ' + code)

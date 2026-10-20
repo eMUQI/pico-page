@@ -19,6 +19,11 @@ class ObjectExists(Exception):
         return 'FileAlreadyExists'
 
 
+class ObjectMissing(Exception):
+    def get_error_code(self):
+        return 'NoSuchKey'
+
+
 class CosFixture:
     def __init__(self):
         self.files = {}
@@ -31,6 +36,8 @@ class CosFixture:
         self.files[request['Key']] = request['Body']
 
     def get_object(self, **request):
+        if request['Key'] not in self.files:
+            raise ObjectMissing()
         class Body:
             def get_raw_stream(self):
                 return io.BytesIO(self.data)
@@ -56,6 +63,7 @@ class PublishCosTests(unittest.TestCase):
             for _ in range(2):
                 self.assertEqual(publish_cos.publish(cos, root), '0.2.0-beta.2')
             self.assertEqual(set(cos.files), {p.name for p in root.glob('*.bin')})
+            self.assertEqual(len(cos.puts), 2)
             for request in cos.puts:
                 self.assertNotIn('ACL', request)
                 self.assertEqual(request['Metadata'], {'x-cos-forbid-overwrite': 'true'})
@@ -64,6 +72,11 @@ class PublishCosTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'differs'):
                 publish_cos.publish(cos, root)
             self.assertEqual(cos.files, saved)
+            self.assertEqual(len(cos.puts), 2)
+            with patch.object(cos, 'get_object', side_effect=RuntimeError('read failed')):
+                with self.assertRaisesRegex(RuntimeError, 'read failed'):
+                    publish_cos.publish(cos, root)
+            self.assertEqual(len(cos.puts), 2)
 
     def test_invalid_release_is_rejected_before_upload(self):
         with tempfile.TemporaryDirectory() as directory:
