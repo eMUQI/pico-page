@@ -114,25 +114,13 @@ jobs:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: tools/cos-requirements.txt
-      - name: Publish firmware to Tencent COS
+      - name: Publish and verify firmware to Tencent COS
         if: env.DEPLOY == 'true' && env.STALE != 'true'
         working-directory: ${{ github.workspace }}
         run: |
           if [ ! -f web/dist/firmware/manifest.json ]; then exit 0; fi
           python3 -m pip install -r tools/cos-requirements.txt
           python3 tools/publish_cos.py web/dist/firmware
-      - name: Verify the firmware download origin
-        if: env.DEPLOY == 'true' && env.STALE != 'true'
-        run: |
-          if [ -f dist/firmware/manifest.json ]; then
-            base=https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com
-            for file in dist/firmware/pico-page-*-read_pico-release*.bin; do
-              status=$(curl -fsS --proto '=https' --max-time 300 --max-filesize 4300000 "$base/${file##*/}" \
-                -o "$RUNNER_TEMP/ota-origin.bin" -w '%{http_code}')
-              [ "$status" = 200 ]
-              cmp "$RUNNER_TEMP/ota-origin.bin" "$file"
-            done
-          fi
       # The deployment carries the firmware fetched above: devices install what it publishes.
       # deployment.txt identifies this run, so the check below can tell whether production serves it.
       - name: Deploy to Cloudflare Pages

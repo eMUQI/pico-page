@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -13,6 +14,7 @@ import ota_manifest
 BUCKET = 'pico-page-firmware-test-1258873179'
 REGION = 'ap-guangzhou'
 ORIGIN = f'https://{BUCKET}.cos.{REGION}.myqcloud.com/'
+SITE = 'https://picopage.wulu.zone/firmware/'
 PROVIDER = 'PicoPageGitHub'
 AUDIENCE = 'pico-page-cos'
 ROLE_ARN = 'qcs::cam::uin/100009571345:roleName/PicoPageCosPublisher'
@@ -41,6 +43,37 @@ def publish(cos, directory):
         finally:
             stream.close()
     return version
+
+
+def verify_public(directory):
+    """Verify public COS bytes; permit HTTP 403 only when all deployed firmware stays identical."""
+    def compare(base, path):
+        request = urllib.request.Request(base + path.name, headers={
+            'User-Agent': 'PicoPage deployment verification/1.0'})
+        expected = path.read_bytes()
+        with urllib.request.urlopen(request, timeout=30) as response:
+            if response.status != 200 or response.read(len(expected) + 1) != expected:
+                raise ValueError('Public firmware differs from the release: ' + path.name)
+
+    images = sorted(directory.glob('*.bin'))
+    try:
+        for path in images:
+            compare(ORIGIN, path)
+    except urllib.error.HTTPError as error:
+        if error.code != 403:
+            raise
+        error.close()
+        # A closed download origin must not prevent page updates that preserve published firmware.
+        manifest = json.loads((directory / 'manifest.json').read_text(encoding='utf-8'))
+        if not (directory / ota_manifest.full_name(manifest['version'])).is_file():
+            raise ValueError('Unchanged firmware verification requires the full-flash image')
+        compare(SITE, directory / 'manifest.json')
+        for path in images:
+            compare(SITE, path)
+        print('::warning::COS public downloads return HTTP 403. Only unchanged firmware was '
+              'verified against production; download access remains blocked.', flush=True)
+        return 'unchanged'
+    return 'public'
 
 
 def github_credentials():
@@ -85,6 +118,7 @@ def main():
                                   SecretKey=credential['TmpSecretKey'], Token=credential['Token'],
                                   Scheme='https', Timeout=30, VerifySSL=True), retry=0)
     print('Published COS firmware ' + publish(client, args.directory))
+    print('Firmware download verification: ' + verify_public(args.directory))
 
 
 if __name__ == '__main__':
