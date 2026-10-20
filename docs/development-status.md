@@ -8232,3 +8232,12 @@ main 的网站运行 `39443071267` 再次在 COS 发布步骤失败，错误仍�
 主线运行 `39444111499` 已成功完成旧 0.3.0 镜像复用、认证与公开读回及官网部署，证明先读回路径可用；但 Release 运行 `39444455049` 的两次尝试在新 0.4.0 全量镜像 PUT 约 30 秒后均返回 `CosClientError: ConnectionError`，新对象仍为 404，官网清单未切换。旧对象复用通过不足以证明首次上传可用，也不足以确认旧 SSL 失败的唯一原因。
 
 本批只为 SDK 的 `qcloud_cos.cos_client` 启用 ERROR 处理器，保留其被默认 NullHandler 隐藏的底层传输异常；未启用会记录签名请求头的 DEBUG 日志，不改变上传、时限、鉴权、覆盖保护或 TLS 校验。原发布回归、交接与 diff 检查通过。后续以真实传输错误定位和完成新固件部署，当前仅 GitHub Release 发布完成，不将官网或设备更新记为可用。
+
+
+## 2026-10-20 · COS 新镜像文件流上传修复
+
+运行 `39445224066` 的 SDK ERROR 栈明确落在 `ssl.sendall`／`_sslobj.write`，根因为发送请求正文时 `TimeoutError: The write operation timed out`，不是证书校验错误。此前将整个约 3.6 MB 镜像作为 bytes 交给 requests，整块发送共用一次 30 秒写入时限；身份交换与认证 GET 已通过。
+
+核对锁定 COS SDK 的 `put_object`、`get_content_md5` 与 `to_bytes`：原生接受可 seek 的文件流，MD5 计算后恢复偏移，保持文件流交给 HTTP 客户端。上传改用 `with path.open('rb')`，由客户端分块发送，成功或异常后关闭文件；没有延长超时、增加重试、引入分片 API、扩大云权限或降低验证。已有认证读回比较仍使用已核验镜像 bytes，覆盖和公开下载规则不变。
+
+扩展既有上传 fixture 以读取文件流，并确认调用结束后文件已关闭；`python3 -m unittest discover -s tests -p test_publish_cos.py -v` 3/3、交接与 diff 检查通过，无新增测试目标或固件改动。权威发布维护说明同步先读回复用及文件流规则。远端首次上传、完整读回和官网 0.4.0 切换仍须以接下来运行和独立核验确认。

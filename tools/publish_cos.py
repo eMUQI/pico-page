@@ -36,9 +36,11 @@ def publish(cos, directory):
                 raise
             print('Uploading COS firmware ' + path.name, flush=True)
             try:
-                cos.put_object(Bucket=BUCKET, Key=path.name, Body=data, EnableMD5=True,
-                               ContentType='application/octet-stream',
-                               Metadata={'x-cos-forbid-overwrite': 'true'})
+                # A file body is sent in chunks instead of one image-sized socket write.
+                with path.open('rb') as body:
+                    cos.put_object(Bucket=BUCKET, Key=path.name, Body=body, EnableMD5=True,
+                                   ContentType='application/octet-stream',
+                                   Metadata={'x-cos-forbid-overwrite': 'true'})
             except Exception as error:
                 # A concurrent publisher may create the same immutable object after the missing-object check.
                 if getattr(error, 'get_error_code', lambda: None)() != 'FileAlreadyExists':

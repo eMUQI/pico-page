@@ -33,7 +33,7 @@ class CosFixture:
         self.puts.append(request)
         if request['Key'] in self.files:
             raise ObjectExists()
-        self.files[request['Key']] = request['Body']
+        self.files[request['Key']] = request['Body'].read()
 
     def get_object(self, **request):
         if request['Key'] not in self.files:
@@ -67,6 +67,7 @@ class PublishCosTests(unittest.TestCase):
             for request in cos.puts:
                 self.assertNotIn('ACL', request)
                 self.assertEqual(request['Metadata'], {'x-cos-forbid-overwrite': 'true'})
+                self.assertTrue(request['Body'].closed)
             saved = dict(cos.files)
             self.prepare(root, image(size=8192))
             with self.assertRaisesRegex(ValueError, 'differs'):
