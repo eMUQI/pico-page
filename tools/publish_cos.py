@@ -133,7 +133,8 @@ def main():
     credential = github_credentials()
     client = CosS3Client(CosConfig(Region=REGION, SecretId=credential['TmpSecretId'],
                                   SecretKey=credential['TmpSecretKey'], Token=credential['Token'],
-                                  Scheme='https', Timeout=30, VerifySSL=True), retry=0)
+                                  Scheme='https', Timeout=30, VerifySSL=True,
+                                  EnableOldDomain=False, EnableInternalDomain=False), retry=0)
     print('Published COS firmware ' + publish(client, args.directory))
     print('Firmware download verification: ' + verify_public(args.directory))
 

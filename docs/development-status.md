@@ -8241,3 +8241,10 @@ main 的网站运行 `39443071267` 再次在 COS 发布步骤失败，错误仍�
 核对锁定 COS SDK 的 `put_object`、`get_content_md5` 与 `to_bytes`：原生接受可 seek 的文件流，MD5 计算后恢复偏移，保持文件流交给 HTTP 客户端。上传改用 `with path.open('rb')`，由客户端分块发送，成功或异常后关闭文件；没有延长超时、增加重试、引入分片 API、扩大云权限或降低验证。已有认证读回比较仍使用已核验镜像 bytes，覆盖和公开下载规则不变。
 
 扩展既有上传 fixture 以读取文件流，并确认调用结束后文件已关闭；`python3 -m unittest discover -s tests -p test_publish_cos.py -v` 3/3、交接与 diff 检查通过，无新增测试目标或固件改动。权威发布维护说明同步先读回复用及文件流规则。远端首次上传、完整读回和官网 0.4.0 切换仍须以接下来运行和独立核验确认。
+
+
+## 2026-10-20 · COS 新公网域名上传路径
+
+文件流运行 `39445773332` 的新镜像 PUT 已持续约 305 秒，最终由 COS 返回 `UserNetworkTooSlow`；此前单块写入的本地 30 秒异常不再是这次失败结果，新对象未创建，官网仍为 0.3.0。该结果说明仍有跨境上传链路问题，不把文件流调整描述为完整恢复。备用浏览器只读检查响应耗时较长，本批没有通过浏览器修改云端内容。
+
+核对腾讯云官方「关于 COS 发布新域名 tencentcos.cn 的通知」（https://cloud.tencent.com/document/product/436/67768）及锁定 SDK 的 `EnableOldDomain`／`EnableInternalDomain` 分支后，认证上传和读回改用 `EnableOldDomain=False, EnableInternalDomain=False`，仅选择同地域同桶的官方新公网域名，不启用全球加速、内网功能或新云权限；公开下载清单仍使用原 myqcloud.com 地址并独立校验。TLS、超时、禁止覆盖和完整读回要求保留。既有发布回归 3/3、交接和 diff 检查通过；新访问路径是否恢复上传以远端实际结果为准。
