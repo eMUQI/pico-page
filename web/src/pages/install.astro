@@ -43,7 +43,7 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
                 <h2>连接设备并写入</h2>
                 <p>用 USB 线连接电脑，点击「连接设备」，在浏览器弹窗里选择 Read Pico 的串口。写入期间请保持页面打开、电脑唤醒、数据线不动。</p>
                 <p>设备正在进行 USB 文件传输时，请先在电脑上安全弹出 TF 卡，再在设备上退出传输并确认重启，然后连接安装。</p>
-                <div class="flash" data-phase={firmware ? "idle" : "unreleased"} data-url={firmware?.url} data-sha256={firmware?.sha256} data-recovery={recovery}>
+                <div class="flash" data-phase={firmware ? "idle" : "unreleased"} data-url={firmware?.url} data-version={firmware?.version} data-sha256={firmware?.sha256}>
                   <div class="flash-head">
                     <span class="flash-status" aria-live="polite"><span class="dot"></span><span data-el="status">{firmware ? "未连接" : "尚未开放"}</span></span>
                     {firmware && <span class="mono">Pico Page {firmware.version} · <a href={`/changelog/#v${firmware.version}`}>更新日志</a></span>}
@@ -51,6 +51,28 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
                   {firmware ? (
                     <div class="flash-body">
                       <p class="notice" data-el="error" role="alert" hidden></p>
+                      <div data-panel="failed" hidden>
+                        <div class="failure-message" role="alert" aria-atomic="true">
+                          <h3 data-el="failure-title"></h3>
+                          <p data-el="failure-message"></p>
+                          <p class="error-code">错误码：<span class="mono" data-el="failure-code"></span></p>
+                        </div>
+                        <button class="primary" type="button" data-el="retry">重新连接并重试</button>
+                        <div class="diagnostics" data-el="diagnostics" hidden>
+                          <div class="diagnostic-actions">
+                            <button class="secondary" type="button" data-el="copy-diagnostics">复制错误信息</button>
+                            <span data-el="copy-status" role="status"></span>
+                          </div>
+                          <details data-el="diagnostic-details">
+                            <summary>查看详情</summary>
+                            <textarea data-el="diagnostic-text" aria-label="错误详情" readonly rows="10" spellcheck="false"></textarea>
+                          </details>
+                        </div>
+                        <details data-el="connection-help" hidden>
+                          <summary>无法连接设备？</summary>
+                          <p>{recovery}</p>
+                        </details>
+                      </div>
                       <div data-panel="idle">
                         <p data-el="hint">尚未连接。{recovery}</p>
                         <button class="primary" type="button" data-el="connect">连接设备</button>
@@ -150,17 +172,23 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
       // fetched when the visitor connects.
       const card = document.querySelector(".flash[data-url]");
       if (card) {
-        const { url, sha256, recovery } = card.dataset;
+        const { url, version, sha256 } = card.dataset;
         const el = (name) => card.querySelector(`[data-el="${name}"]`);
         const steps = document.querySelectorAll(".tracker li");
-        const labels = { idle: "未连接", connected: "已连接", writing: "正在安装", done: "已完成" };
+        const labels = { idle: "未连接", connected: "已连接", writing: "正在安装", done: "已完成", failed: "安装未完成" };
         let transport, loader, md5;
 
-        function show(phase, error = "") {
+        function show(phase, error = "", diagnostic = "") {
           card.dataset.phase = phase;
           el("status").textContent = labels[phase];
           el("error").textContent = error;
           el("error").hidden = !error;
+          el("diagnostics").hidden = !diagnostic;
+          el("diagnostic-text").value = diagnostic;
+          el("diagnostic-details").open = false;
+          el("copy-status").textContent = "";
+          el("connection-help").hidden = true;
+          el("connection-help").open = false;
           el("confirm").checked = false;
           el("install").disabled = true;
           card.querySelectorAll("[data-panel]").forEach((panel) => (panel.hidden = panel.dataset.panel !== phase));
@@ -171,6 +199,44 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
             else step.removeAttribute("aria-current");
           });
         }
+
+        function showFailure({ title, message, code, diagnostic, status = "安装未完成" }) {
+          show("failed", "", diagnostic);
+          el("status").textContent = status;
+          el("failure-title").textContent = title;
+          el("failure-message").textContent = message;
+          el("failure-code").textContent = code;
+          el("connection-help").hidden = !["CONNECT_FAILED", "FLASH_FAILED"].includes(code);
+          el("retry").disabled = !("serial" in navigator);
+        }
+
+        function diagnosticInfo(code, stage, error, details = {}) {
+          // Version and request identifiers locate the resource without sharing its download URL.
+          return Object.entries({
+            "诊断格式": "Pico Page installer v1",
+            "错误码": code,
+            "失败阶段": stage,
+            "时间（UTC）": new Date().toISOString(),
+            "固件版本": version,
+            "异常类型": error?.name || "未知",
+            ...details,
+            "浏览器": navigator.userAgent,
+          }).map(([key, value]) => `${key}: ${value}`).join("\n");
+        }
+
+        el("copy-diagnostics").addEventListener("click", async () => {
+          const report = el("diagnostic-text").value;
+          try {
+            await navigator.clipboard.writeText(report);
+            if (el("diagnostic-text").value === report) el("copy-status").textContent = "已复制";
+          } catch {
+            if (el("diagnostic-text").value !== report) return;
+            el("diagnostic-details").open = true;
+            el("diagnostic-text").focus();
+            el("diagnostic-text").select();
+            el("copy-status").textContent = "请在下方手动复制";
+          }
+        });
 
         function progress(percent, stage) {
           el("stage").textContent = stage;
@@ -206,7 +272,7 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
           return clean;
         }
 
-        async function connect() {
+        async function connect(button) {
           window.dispatchEvent(new CustomEvent("pico-page:analytics", { detail: "device_connect" }));
           let port;
           try {
@@ -214,7 +280,7 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
           } catch {
             return; // The visitor closed the chooser.
           }
-          const button = el("connect");
+          const buttonLabel = button.textContent;
           button.disabled = true;
           button.textContent = "正在连接…";
           try {
@@ -250,10 +316,16 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
           } catch (error) {
             console.error(error);
             await release();
-            show("idle", `没有连上设备。关闭占用串口的其他程序和浏览器标签。${recovery}`);
+            showFailure({
+              title: "未能连接设备",
+              message: "请关闭占用串口的其他程序或浏览器标签，再试一次。本次尚未擦除或写入设备闪存。",
+              code: "CONNECT_FAILED",
+              diagnostic: diagnosticInfo("CONNECT_FAILED", "连接设备", error),
+              status: "连接未完成",
+            });
           } finally {
             button.disabled = false;
-            button.textContent = "连接设备";
+            button.textContent = buttonLabel;
           }
         }
 
@@ -262,16 +334,60 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
           show("writing");
           progress(0, "正在下载固件");
           let erasing = false;
-          let downloadFailure = "固件下载失败，尚未擦除或写入设备闪存。检查网络后重新连接再试。";
+          let stage = "请求固件", code = "DOWNLOAD_UNREACHABLE";
+          let title = "暂时无法下载固件";
+          let failure = "请稍后重试；若仍失败，请检查网络连接。";
+          const started = performance.now();
+          const details = { "HTTP 状态": "未取得响应（连接失败或浏览器不允许读取响应）" };
           try {
             const response = await fetch(url);
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            details["HTTP 状态"] = response.status;
+            // These identifiers are available only when the server exposes them through CORS.
+            for (const header of ["x-cos-request-id", "x-oss-request-id", "x-request-id", "cf-ray"]) {
+              const value = response.headers.get(header);
+              if (value && /^[\w.-]{1,128}$/.test(value)) details[header] = value;
+            }
+            if (!response.ok) {
+              code = `DOWNLOAD_HTTP_${response.status}`;
+              if (response.status === 401 || response.status === 403) {
+                title = "下载请求被拒绝";
+                failure = "请稍后重试。";
+              } else if (response.status === 429) {
+                title = "下载请求过于频繁";
+                failure = "请稍后重试，避免连续点击安装。";
+              } else if (response.status === 404) {
+                title = "未找到固件文件";
+                failure = "请刷新页面后重试。";
+              } else if (response.status >= 500) {
+                title = "下载服务暂不可用";
+                failure = "请稍后重试。";
+              } else {
+                title = "固件下载未成功";
+                failure = "请稍后重试。";
+              }
+              throw new Error(`HTTP ${response.status}`);
+            }
+            stage = "接收固件";
+            code = "DOWNLOAD_INTERRUPTED";
+            title = "固件下载中断";
+            failure = "请稍后重试。";
             const image = new Uint8Array(await response.arrayBuffer());
+            details["已接收字节数"] = image.byteLength;
+            stage = "校验固件";
+            code = "VERIFY_FAILED";
+            title = "未能完成固件校验";
+            failure = "请刷新页面后重试。";
             const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", image));
-            if (Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("") !== sha256) {
-              downloadFailure = "固件文件校验未通过，尚未擦除或写入设备闪存。请重新连接并安装，以重新下载固件。";
+            details["预期 SHA-256"] = sha256;
+            details["实际 SHA-256"] = Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+            if (details["实际 SHA-256"] !== sha256) {
+              code = "VERIFY_MISMATCH";
+              title = "固件校验未通过";
+              failure = "请重新连接并重试。";
               throw new Error("The downloaded image does not match the published digest");
             }
+            stage = "擦除、写入或设备校验";
+            code = "FLASH_FAILED";
             erasing = true;
             progress(0, "正在擦除整片闪存");
             await loader.writeFlash({
@@ -290,12 +406,21 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
           } catch (error) {
             window.dispatchEvent(new CustomEvent("pico-page:analytics", { detail: "install_failure" }));
             console.error(error);
+            details["耗时（毫秒）"] = Math.round(performance.now() - started);
+            details["已进入擦写流程"] = erasing ? "是" : "否";
+            const diagnostic = diagnosticInfo(code, stage, error, details);
             await release();
-            show("idle", erasing ? `安装没有完成。保持供电，重新连接后再安装一次。${recovery}` : downloadFailure);
+            showFailure({
+              title: erasing ? "安装未完成" : title,
+              message: erasing ? "请保持供电，重新连接后再安装一次。" : `${failure}本次尚未擦除或写入设备闪存。`,
+              code, diagnostic,
+              status: erasing ? "安装未完成" : stage === "校验固件" ? "校验未完成" : "下载未完成",
+            });
           }
         }
 
-        el("connect").addEventListener("click", connect);
+        el("connect").addEventListener("click", () => connect(el("connect")));
+        el("retry").addEventListener("click", () => connect(el("retry")));
         el("install").addEventListener("click", install);
         el("confirm").addEventListener("change", () => (el("install").disabled = !el("confirm").checked));
         el("disconnect").addEventListener("click", async () => {
@@ -476,6 +601,77 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
   }
   .flash-body {
     padding: 22px 18px 20px;
+  }
+  .failure-message {
+    display: grid;
+    gap: 16px;
+  }
+  .failure-message h3 {
+    font-size: 22px;
+    line-height: 1.4;
+  }
+  .flash .error-code {
+    font-size: 13px;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+  [data-el="retry"] {
+    background: var(--accent);
+  }
+  [data-el="retry"]:hover {
+    background: var(--ink);
+  }
+  .diagnostics {
+    position: relative;
+  }
+  .diagnostics details {
+    padding: 0;
+    border: 0;
+  }
+  .diagnostic-actions {
+    position: absolute;
+    inset: 0 110px auto 0;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .diagnostic-actions button {
+    flex-shrink: 0;
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .diagnostics summary {
+    width: max-content;
+    margin-left: auto;
+    min-height: 48px;
+    align-content: center;
+    color: var(--accent);
+    cursor: pointer;
+  }
+  .diagnostics textarea {
+    width: 100%;
+    margin-top: 12px;
+    padding: 10px;
+    box-sizing: border-box;
+    font: 12px/1.6 monospace;
+    resize: vertical;
+  }
+  .diagnostics [role="status"] {
+    font-size: 13px;
+    color: var(--accent);
+  }
+  @media (max-width: 600px) {
+    .flash-head {
+      flex-wrap: wrap;
+    }
+    .diagnostic-actions {
+      position: static;
+      flex-wrap: wrap;
+    }
+    .diagnostics summary {
+      margin-left: 0;
+    }
   }
   .flash p {
     margin: 0;

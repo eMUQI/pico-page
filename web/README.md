@@ -2,10 +2,11 @@
 
 Astro 静态站，用于介绍 Pico Page 的功能、限制和开发状态。
 
-固件下载采用广州 COS，费用告警、流量告警与每分钟自动封禁已部署并完成公开到封禁测试。官网和固定清单入口仍由 Cloudflare Pages 提供。访问权限、发布身份与故障恢复见[固件维护说明](../docs/firmware-hosting.md)；实际上线结果以[开发状态](../docs/development-status.md)为准。
+固件下载采用广州 COS，官网和固定清单入口由 Cloudflare Pages 提供。费用与流量告警保留；自动封禁定时器已于 2026-10-20 暂停，暂停期间没有该函数提供的自动流量封禁。访问权限、发布身份与故障恢复见[固件维护说明](../docs/firmware-hosting.md)；实际上线结果以[开发状态](../docs/development-status.md)为准。
 
 ```sh
 npm ci --prefix web --ignore-scripts
+npm test --prefix web
 npm run build --prefix web
 npm run preview --prefix web
 ```
@@ -25,9 +26,29 @@ npm run preview --prefix web
 
 网站文案面向读者。验证状态、验收标准和开发注意事项写在根目录 README 和 `docs/` 中。
 
+## 安装失败反馈
+
+安装页在连接异常、下载或安装失败后显示独立错误面板：顶部保留固件版本，正文依次显示失败原因、设备是否已进入擦写和可截图的错误码；主操作为「重新连接并重试」，下方提供「复制错误信息」及默认折叠的「查看详情」。重试只重新建立连接，仍须重新勾选设备确认后才能开始下载和写入。取消串口选择保留原错误信息。下载或校验失败不展示电源键和烧录模式说明；连接或擦写失败才提供折叠的恢复说明。
+
+自动复制不可用时展开并选中文本，允许手动复制。反馈包含错误码、失败阶段、UTC 时间、固件版本、异常类型和浏览器信息；下载流程另含可取得的 HTTP 状态、请求 ID、耗时、接收字节数与摘要，以及是否已进入擦写流程。详情和复制内容不包含固件下载 URL、域名、路径或签名参数，不复制原始异常消息，不自动上传。版本和请求 ID 用于定位后台资源；这不是下载鉴权措施，浏览器仍需通过真实地址获取固件。
+
+| 错误码 | 排查入口 |
+|---|---|
+| `CONNECT_FAILED` | 浏览器烧录依赖加载、串口连接或设备检查阶段 |
+| `DOWNLOAD_HTTP_401` / `DOWNLOAD_HTTP_403` | 下载请求被拒绝；结合时间及请求 ID 检查权限与服务规则，不能仅凭状态码认定防护误拦截 |
+| `DOWNLOAD_HTTP_429` | 请求过多；检查服务端限流规则 |
+| `DOWNLOAD_HTTP_404` | 安装页指定版本的文件是否存在 |
+| 其他 `DOWNLOAD_HTTP_<状态码>` | 按实际 HTTP 状态检查下载服务；5xx 提示服务暂不可用 |
+| `DOWNLOAD_UNREACHABLE` | 未取得可读取的响应；检查网络、TLS 和 CORS，不能据此判断桶权限或流量保护状态 |
+| `DOWNLOAD_INTERRUPTED` | 已取得响应，但读取完整文件失败 |
+| `VERIFY_FAILED` / `VERIFY_MISMATCH` | 浏览器摘要计算失败，或下载内容与页面中的 SHA-256 不符 |
+| `FLASH_FAILED` | 已进入擦除、写入或设备校验流程，按恢复说明重新连接；不能宣称设备尚未擦除 |
+
+请求 ID 仅在响应允许 CORS 且相应头已通过 `Access-Control-Expose-Headers` 暴露时可读取；缺失不代表服务未收到请求。当前读取 `x-cos-request-id`、`x-oss-request-id`、`x-request-id` 和 `cf-ray`，不为采集诊断增加网络请求。下载和 SHA-256 校验通过后才调用整片擦写，HTTP 错误页或返回 200 的验证页面均不能通过固件摘要校验。`npm test` 执行页面原有脚本，模拟下载响应与擦写接口，检查下载、校验、擦写失败分支、地址排除、复制回退、取消重连及重新确认后的成功流程，不连接真实设备。
+
 ## 持续集成
 
-[网站构建工作流](../.github/workflows/web.yml) 在拉取请求更新时保留检查结果，仅对网站目录、发布说明、OTA 清单脚本及工作流依赖的变更执行构建，与必要的 host 检查并行。分支 push 不重复执行；main 的相关输入变更、发布 Release 或手动运行触发构建，其中正式部署仅限 main 或 Release。使用 Node.js 24，按 `package-lock.json` 缓存 npm 下载，执行 `npm ci --ignore-scripts` 和 `npm run build`；构建失败时不上传产物。
+[网站构建工作流](../.github/workflows/web.yml) 在拉取请求更新时保留检查结果，仅对网站目录、发布说明、OTA 清单脚本及工作流依赖的变更执行构建，与必要的 host 检查并行。分支 push 不重复执行；main 的相关输入变更、发布 Release 或手动运行触发构建，其中正式部署仅限 main 或 Release。使用 Node.js 24，按 `package-lock.json` 缓存 npm 下载，依次执行 `npm ci --ignore-scripts`、`npm test` 和 `npm run build`；测试或构建失败时不上传产物。
 
 构建前，工作流把非草稿的发布列表写到 `web/public/firmware/releases.json`（见「更新日志」），并从 GitHub Release 取回已发布的固件：在非草稿的发布中选出版本最高的 `v<版本>` 标签，把它附带的 `manifest.json`、应用镜像和全量镜像（如果有）下载到 `web/public/firmware/`，再用 `python3 tools/ota_manifest.py --check` 核对清单与应用镜像逐项一致、版本与标签相同，全量镜像中的应用与应用镜像相同，不一致时工作流失败。校验通过后，`--publish-base-url https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com/` 只将部署副本的下载地址切到腾讯云，保留原发布附件；正式部署通过 GitHub OIDC 取得 15 分钟临时发布身份，禁止覆盖上传版本 BIN，并完整认证读回及匿名 HTTPS 读回两个镜像，与发布附件逐字节比较；上传、认证读回或内容校验失败时停止。COS 匿名下载返回 HTTP 403 时，仅在候选清单和全部 BIN 均与官网现有副本逐字节一致的情况下，允许继续更新静态页面并明确告警；固件变化或其他下载错误仍停止。此分支不恢复公开权限、不切换下载地址，也不证明下载可用。角色与权限边界见[腾讯云固件下载](../docs/firmware-hosting.md#自动部署)。没有这样的发布时跳过下载。发布一个 Release 也会触发本工作流。
 
