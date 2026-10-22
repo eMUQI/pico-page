@@ -204,6 +204,7 @@ struct Xml {
     std::function<void()> boundary;
     std::function<void()> complex_markup;
     bool foreign_namespace = false;
+    bool source_utf8 = false;
     std::string error;
     unsigned depth = 0;
     std::size_t nodes = 0, bytes = 0;
@@ -218,6 +219,17 @@ struct Xml {
 #endif
         XML_SetHashSalt(parser, salt ? salt : 1);
         XML_SetUserData(parser, this);
+        XML_SetXmlDeclHandler(parser, [](void* opaque, const char*, const char* encoding, int) {
+            auto& x = *static_cast<Xml*>(opaque);
+            if (!encoding) return;
+            const auto matches = [encoding](const char* expected) {
+                std::size_t i = 0;
+                for (; expected[i]; ++i)
+                    if (std::tolower(static_cast<unsigned char>(encoding[i])) != expected[i]) return false;
+                return encoding[i] == '\0';
+            };
+            x.source_utf8 = x.source_utf8 && (matches("utf-8") || matches("utf8") || matches("us-ascii"));
+        });
         XML_SetElementHandler(parser, [](void* opaque, const char* name, const char** attrs) {
             auto& x = *static_cast<Xml*>(opaque);
             if (++x.depth > 64 || ++x.nodes > kMaxNodes) { x.stop("XML structure limit exceeded"); return; }
@@ -279,6 +291,11 @@ struct Xml {
     ~Xml() { if (parser) XML_ParserFree(parser); }
     void stop(const std::string& message) { if (error.empty()) error = message; if (parser) XML_StopParser(parser, XML_FALSE); }
     bool feed(const char* value, std::size_t count, bool final) {
+        if (!bytes && count >= 4) {
+            source_utf8 = true;
+            for (std::size_t i = 0; i < 4; ++i)
+                if (value[i] == '\0' || static_cast<unsigned char>(value[i]) >= 0xfe) source_utf8 = false;
+        }
         bytes += count;
         if (!error.empty() || !parser) return false;
         if (bytes > kMaxXmlBytes) { stop("XML byte limit exceeded"); return false; }
@@ -321,12 +338,15 @@ void warn(Chapter& chapter, const std::string& value) {
     if (std::find(chapter.warnings.begin(), chapter.warnings.end(), value) == chapter.warnings.end()) chapter.warnings.push_back(value);
 }
 
+constexpr std::size_t kKoreaderTextSplitScalars = 8192;
+
 struct ChapterParser {
     struct Frame {
         std::string name, path;
         std::map<std::string, unsigned> children;
         unsigned text_index = 0;
         std::uint32_t source_offset = 0;
+        std::size_t mapping_source_length = 0;
         bool in_text = false, hidden = false, body = false, pre = false, block = false, has_child = false;
         std::size_t css = std::numeric_limits<std::size_t>::max();
         BlockKind kind = BlockKind::Paragraph;
@@ -420,6 +440,7 @@ struct ChapterParser {
         auto css = std::move(chapter.css_sources);
         auto warnings = std::move(chapter.warnings);
         const bool plain = chapter.plain_dom;
+        const bool long_source = chapter.long_source_node;
         if (!chapter.text.empty() && chapter.text.back() == U'\n') chapter.text.pop_back();
         chapter.part = part;
         chapter.last_part = last;
@@ -429,6 +450,7 @@ struct ChapterParser {
         chapter.css_sources = std::move(css);
         chapter.warnings = std::move(warnings);
         chapter.plain_dom = plain;
+        chapter.long_source_node = long_source;
         captured = true;
     }
     /**
@@ -660,7 +682,23 @@ struct ChapterParser {
         const bool new_node = !frame.in_text;
         const bool first_child = !frame.has_child;
         frame.has_child = true;
-        if (new_node) { ++frame.text_index; frame.source_offset = 0; frame.in_text = true; }
+        if (new_node) { ++frame.text_index; frame.source_offset = 0; frame.mapping_source_length = 0; frame.in_text = true; }
+        if (keep_mapping && frame.body && !chapter.long_source_node) {
+            // CREngine splits at 8192 source scalars before entity expansion and whitespace
+            // folding. Count the original event, including entity spelling and CRLF; when
+            // Expat does not expose it, its byte count is a conservative upper bound.
+            const int count = XML_GetCurrentByteCount(xml.parser);
+            int offset = 0, available = 0;
+            const char* context = XML_GetInputContext(xml.parser, &offset, &available);
+            std::size_t length = count > 0 ? static_cast<std::size_t>(count) : kKoreaderTextSplitScalars;
+            if (xml.source_utf8 && context && count > 0 && length < 4 * kKoreaderTextSplitScalars &&
+                offset >= 0 && offset <= available && count <= available - offset) {
+                for (int i = 0; i < count; ++i)
+                    if ((static_cast<unsigned char>(context[offset + i]) & 0xc0) == 0x80) --length;
+            }
+            frame.mapping_source_length = std::min(kKoreaderTextSplitScalars, frame.mapping_source_length + length);
+            if (frame.mapping_source_length >= kKoreaderTextSplitScalars) chapter.long_source_node = true;
+        }
         std::u32string scalars;
         if (!decode(bytes, size, scalars)) { xml.stop("Invalid UTF-8 XML text"); return; }
         source_count += static_cast<std::uint32_t>(scalars.size());
@@ -1432,6 +1470,7 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
         chapter.css_sources = std::move(parser.chapter.css_sources);
         chapter.warnings = std::move(parser.chapter.warnings);
         chapter.plain_dom = parser.chapter.plain_dom;
+        chapter.long_source_node = parser.chapter.long_source_node;
     }
     // A chapter kept for reading gives back the unused part of its reservation.
     if (detail == ChapterLoad::Reading && chapter.text.capacity() - chapter.text.size() > 4096 &&

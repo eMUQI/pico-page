@@ -63,6 +63,8 @@ bool upload_confirmed(int http_status, std::string& error);
  * profile, for example one that holds a table. No position in that part is mapped.
  */
 inline constexpr char kUnsupportedStructure[] = "This chapter contains an unsupported KOReader DOM structure";
+/** The XHTML resource contains source text at CREngine's split threshold; both directions refuse exact mapping. */
+inline constexpr char kLongSourceNode[] = "This chapter requires KOReader source text splitting";
 /**
  * Error of to_xpointer and from_xpointer for an image position in a chapter whose CSS holds a
  * "display: none" declaration. Selectors are not resolved, so the image may have no position in

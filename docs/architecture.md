@@ -140,3 +140,7 @@ Display 提供意图（翻页/UI/图片/手动清理/恢复）而不是把波形
 `firmware/main` 组装；`firmware/components` 放当前所需组件；`host` 复用纯逻辑；`tools` 预处理/开发工具；`tests` 合成样本、对照、故障注入与真机步骤。第三方代码锁版本并留许可/修改记录。只有完成可运行实现与对应测试，模块才算交付。阶段见 [milestones.md](milestones.md)，具体门槛见 [acceptance.md](acceptance.md)。硬件与外部项目线索见 [references.md](references.md)，旧架构来源见 archive。
 
 后台 EPUB 解压输出按 4,096 字节喂给 XML 解析器；设备分支在块边界检查自上次让步是否已经过 20 ms，达到后阻塞一个调度 tick，再检查取消。后台分页在页边界同样阻塞一个 tick，避免连续 CPU 计算饿死低优先级空闲任务。该检查点不限制单次解压、XML 调用或 TF I/O 的墙钟耗时，保留原看门狗配置与所有权规则。
+
+## 阅读应用的源码组织
+
+`reader_app/app.cpp` 保留公开 API 与部分应用协调，`app_impl.h` 定义唯一的 `ReaderApp::Impl` 状态及共享内联辅助函数。实现按书库、正文、内容任务、绘图、书签与目录、设置、Wi-Fi、同步、固件更新、传输、电源和输入分到 `app_*.cpp`；这些是同一组件的翻译单元，不是新增任务或状态所有者。host 与固件共用同一份源文件列表。

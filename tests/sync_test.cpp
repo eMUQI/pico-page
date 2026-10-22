@@ -16,6 +16,34 @@ int main(int argc, char** argv) {
     assert(document.open(argv[1], error));
     assert(document.load_chapter(0, chapter, error));
     assert(chapter.plain_dom);
+    for (const auto name : {"short", "boundary", "long", "spaces", "entities", "crlf", "parts", "utf16"}) {
+        EpubDocument book;
+        Chapter source, reading;
+        const auto path = std::filesystem::path(argv[1]).parent_path() / (std::string("mapping-node-") + name + ".epub");
+        assert(book.open(path.string(), error));
+        for (std::uint32_t part = 0;; ++part) {
+            assert(book.load_chapter(0, source, error, ChapterLoad::Mapping, part));
+            assert(book.load_chapter(0, reading, error, ChapterLoad::Reading, part));
+            assert(source.text == reading.text && source.last_part == reading.last_part);
+            const bool refused = std::string(name) != "short";
+            assert(source.long_source_node == refused);
+            Anchor anchor, recovered;
+            assert(source.anchor_at(0, anchor));
+            for (const int version : {20240114, 20260812}) {
+                assert(sync::to_xpointer(book, source, anchor, version, pointer, error) == !refused);
+                if (refused) assert(pointer.empty() && error == sync::kLongSourceNode);
+                const std::string prefix = "/body[1]/DocFragment[1]/body[1]/p[1]/text()[";
+                assert(sync::from_xpointer(book, prefix + "1].0", version, recovered, error) == !refused);
+                if (refused) {
+                    assert(recovered == Anchor{} && error == sync::kLongSourceNode);
+                    // A later engine text node must not resolve to the source sibling after em.
+                    assert(!sync::from_xpointer(book, prefix + "2].0", version, recovered, error));
+                    assert(recovered == Anchor{});
+                }
+            }
+            if (source.last_part) break;
+        }
+    }
     const Anchor emoji{chapter.resource, "/html[1]/body[1]/p[1]/em[1]/text()[1]", 3};
     const Anchor leading{chapter.resource, "/html[1]/body[1]/p[1]/text()[1]", 2};
     // These expected paths and normalized text offsets were exported by the pinned CREngine.

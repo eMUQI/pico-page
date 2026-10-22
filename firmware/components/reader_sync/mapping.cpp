@@ -118,6 +118,7 @@ CssProfile css_profile(const Chapter& chapter) {
 }
 
 bool mapping_profile(const Chapter& chapter, CssProfile& css, std::string& error) {
+    if (chapter.long_source_node) { error = kLongSourceNode; return false; }
     if (!chapter.plain_dom) { error = kUnsupportedStructure; return false; }
     if (chapter.split_node) { error = "This chapter part divides a text node"; return false; }
     css = css_profile(chapter);

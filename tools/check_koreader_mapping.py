@@ -79,7 +79,8 @@ target_link_libraries(koreader_mapping_probe PRIVATE reader_sync reference_creng
     # Image and rule placements that the base fixture does not contain.
     fixtures = LOCAL / "koreader-fixtures"
     run(sys.executable, str(ROOT / "tests/make_document_fixtures.py"), str(fixtures))
-    for book in [fixture, fixtures / "image-mapping.epub", *args.book]:
+    for book in [fixture, fixtures / "image-mapping.epub",
+                 *sorted(fixtures.glob("mapping-node-*.epub")), *args.book]:
         print(f"Reference comparison: {book}", flush=True)
         run(str(probe / "build/koreader_mapping_probe"), str(book.resolve()),
             str(LOCAL / "card/Fonts/LXGWWenKai-Regular.ttf"), str(args.sample_step))

@@ -1,14 +1,26 @@
+set(app_sources
+    app.cpp
+    app_bookmarks.cpp
+    app_content.cpp
+    app_drawing.cpp
+    app_input.cpp
+    app_library.cpp
+    app_power.cpp
+    app_reading.cpp
+    app_settings.cpp
+    app_sync.cpp
+    app_transfer.cpp
+    app_update.cpp
+    app_wifi.cpp
+    content_cache.cpp content_job.cpp page_cache.cpp)
+
 if(ESP_PLATFORM)
-    idf_component_register(SRCS app.cpp content_cache.cpp content_job.cpp page_cache.cpp INCLUDE_DIRS include REQUIRES reader_core reader_store reader_document reader_graphics reader_sync
+    idf_component_register(SRCS ${app_sources} INCLUDE_DIRS include REQUIRES reader_core reader_store reader_document reader_graphics reader_sync
         PRIV_REQUIRES esp_app_format)
     target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_17)
-    # The linker places an object's literal pools ahead of all of its code, and an Xtensa L32R
-    # reaches at most 256 KiB back. app.cpp exceeds that span, so its literals stay next to each
-    # function instead.
-    set_source_files_properties(app.cpp PROPERTIES COMPILE_OPTIONS -mtext-section-literals)
 else()
     find_package(Threads REQUIRED)
-    add_library(reader_app app.cpp content_cache.cpp content_job.cpp page_cache.cpp)
+    add_library(reader_app ${app_sources})
     target_include_directories(reader_app PUBLIC include)
     target_link_libraries(reader_app PUBLIC reader_core reader_store reader_document reader_graphics reader_sync Threads::Threads)
     target_compile_features(reader_app PUBLIC cxx_std_17)

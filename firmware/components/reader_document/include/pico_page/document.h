@@ -81,6 +81,7 @@ struct Chapter {
     std::uint32_t part = 0;      // Position of this part within the spine item.
     bool last_part = true;       // False when a later part holds more text.
     bool split_node = false;     // The part begins or ends inside a text node; position mapping is refused.
+    bool long_source_node = false;  // Mapping-only: source text may be split into multiple CREngine nodes.
     std::u32string text;
     std::vector<TextBlock> blocks;
     std::vector<TextRun> runs;

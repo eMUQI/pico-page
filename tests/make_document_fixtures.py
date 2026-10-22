@@ -14,6 +14,16 @@ def generate(directory: Path) -> None:
     (directory / "invalid.txt").write_bytes(b"valid\xffinvalid")
     (directory / "gb18030.txt").write_bytes(("甲" * 24575 + "😀\ue587" + "乙" * 500 + "\r\n末尾").encode("gb18030"))
     write_fixture(directory / "valid.epub")
+    for name, text in (("short", "甲" * 8191), ("boundary", "甲" * 8192),
+                       ("long", "甲" * 20000), ("spaces", "word " * 2000),
+                       ("entities", "&#x7532;" * 1100), ("crlf", "a\r\n" * 3000),
+                       ("parts", "甲" * 130000), ("utf16", "\u8080" * 9000)):
+        entries = fixture_entries()
+        entries["EPUB/chapter1.xhtml"] = ('<html xmlns="http://www.w3.org/1999/xhtml"><body><p>' +
+            text + '<em>内联</em>尾部</p><p>后续正文。</p></body></html>')
+        if name == "utf16":
+            entries["EPUB/chapter1.xhtml"] = entries["EPUB/chapter1.xhtml"].encode("utf-16")
+        write_fixture(directory / ("mapping-node-" + name + ".epub"), entries)
     for kind, package in (("empty", "<wrong/>"), ("paired", "<wrong></wrong>"),
                           ("attribute", '<package id="' + 'x' * 8193 + '"/>')):
         invalid = fixture_entries()

@@ -2279,11 +2279,28 @@ static void update_test(const fs::path& root) {
     {
         // With Wi-Fi switched off the page leads to the switch instead of a check that cannot start.
         write(root / "PicoPage/settings.toml", "schema_version=1\n[network]\nwifi_enabled=false\n");
-        ReaderApp app(root.string()); Driver driver{app};
-        app.set_firmware_version("0.2.0-beta.3"); app.set_battery(80);
-        open_page(app, driver);
-        driver.tap(300, 1130); driver.present();
-        assert(app.view() == View::WifiSettings && !app.update_busy());
+        {
+            ReaderApp app(root.string()); Driver driver{app};
+            app.set_firmware_version("0.2.0-beta.3"); app.set_battery(80);
+            open_page(app, driver);
+            driver.tap(300, 1130); driver.present();
+            assert(app.view() == View::WifiSettings && !app.update_busy());
+        }
+        for (const bool configured : {true, false}) {
+            if (!configured) {
+                fs::remove(root / "PicoPage/settings.toml");
+                fs::remove(root / "PicoPage/network.toml");
+            }
+            for (const bool notes : {false, true}) {
+                ReaderApp app(root.string()); Driver driver{app};
+                app.set_firmware_version("0.2.0-beta.1"); app.set_battery(80);
+                open_page(app, driver);
+                if (notes) { driver.tap(300, 760); driver.present(); assert(app.view() == View::Update); }
+                driver.tap(300, 1040); driver.present();
+                assert(app.view() == View::WifiSettings && !app.update_busy() && !app.take_update_request());
+            }
+        }
+        write(root / "PicoPage/network.toml", provision::network_toml({{{"home", "password123"}, 0}}));
         fs::remove(root / "PicoPage/settings.toml");
     }
     {
