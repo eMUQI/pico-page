@@ -148,6 +148,32 @@ int main(int argc, char** argv) {
         cover.cache_name = "covers/sleep"; cover.cache_header = "PPCOVER2\nprobe\n";
         cover.layout.width = 684; cover.layout.height = 1040; cover.cover_crop = true;
         fs::copy_file(argv[1], cover.path);
+        {
+            pico_page::graphics::Canvas pixels;
+            pixels.clear(6);
+            pico_page::FileStore store(root.string());
+            assert(pico_page::write_body_image_cache(store, "images/gray-v1/memory", pixels, {}));
+            ContentJob::Request body;
+            body.kind = ContentJob::Kind::Image; body.root = root.string();
+            body.cache_name = "images/gray-v1/memory"; body.layout.height = 1216;
+            body.page.images.push_back({0, 0, 0, 684, 1216, "EPUB/cover.png"});
+            const auto decoded = pico_page::graphics::image_decode_count();
+            psram_free = 342 * 1216 + 256 * 1024; psram_largest = 342 * 1216;
+            ContentJob hot(body); assert(hot.start()); finish(hot);
+            assert(hot.result.error.empty() && hot.result.image && hot.result.image->pixels() == pixels.pixels());
+            for (bool fragmented : {false, true}) {
+                psram_free = 342 * 1216 + 256 * 1024 - (fragmented ? 0 : 1);
+                psram_largest = 342 * 1216 - (fragmented ? 1 : 0);
+                ContentJob refused(body); assert(refused.start()); finish(refused);
+                assert(!refused.result.error.empty() && !refused.result.image);
+            }
+            psram_free = 342 * 1216 + 256 * 1024; psram_largest = 342 * 1216;
+            assert(store.save_cache(body.cache_name, "invalid") == pico_page::StoreStatus::Ok);
+            ContentJob cold_refused(body); assert(cold_refused.start()); finish(cold_refused);
+            assert(!cold_refused.result.error.empty() && !cold_refused.result.image);
+            assert(pico_page::graphics::image_decode_count() == decoded);
+            psram_free = 4 * 1024 * 1024; psram_largest = 3 * 1024 * 1024;
+        }
         fs::create_directories(root / "LockScreens");
         std::ofstream(root / "LockScreens/test.png", std::ios::binary) << "invalid image";
         ContentJob::Request custom;

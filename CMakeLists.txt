@@ -103,6 +103,11 @@ add_executable(pico_page host/main.cpp)
 target_link_libraries(pico_page PRIVATE reader_app PkgConfig::SDL2 CURL::libcurl)
 target_compile_options(pico_page PRIVATE -Wall -Wextra -Werror)
 
+add_executable(image_cache_bench EXCLUDE_FROM_ALL tools/image_cache_bench.cpp)
+add_dependencies(image_cache_bench document_fixtures_target)
+target_link_libraries(image_cache_bench PRIVATE reader_app)
+target_compile_options(image_cache_bench PRIVATE -Wall -Wextra -Werror)
+
 add_executable(app_test tests/app_test.cpp)
 add_dependencies(app_test document_fixtures_target)
 target_link_libraries(app_test PRIVATE reader_app)

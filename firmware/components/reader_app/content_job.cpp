@@ -340,6 +340,40 @@ std::string image_cache_key(const std::string& book_id, const std::string& resou
     return "images/gray-v1/" + book_id + "/" + md5_hex(resource + ":" + std::to_string(spec.left) + ":" +
         std::to_string(spec.top) + ":" + std::to_string(spec.width) + ":" + std::to_string(spec.height));
 }
+bool read_body_image_cache(CacheReader& reader, graphics::Canvas& image, const std::function<bool()>& stop) {
+    const auto size = image.pixels().size();
+    if (image.width() != 684 || image.height() != 1216 || reader.size() != size + 32) return false;
+    Md5Digest digest;
+    for (std::size_t at = 0; at < size;) {
+        const auto count = std::min<std::size_t>(16 * 1024, size - at);
+        auto* bytes = reinterpret_cast<char*>(image.data() + at);
+        if ((stop && stop()) || !reader.read(bytes, count) || !digest.update({bytes, count})) return false;
+        at += count;
+    }
+    std::array<char, 32> expected;
+    return (!stop || !stop()) && reader.read(expected.data(), expected.size()) &&
+           digest.finish() == std::string_view(expected.data(), expected.size()) && (!stop || !stop());
+}
+
+bool write_body_image_cache(const FileStore& store, const std::string& name, const graphics::Canvas& image,
+                            const std::function<bool()>& stop) {
+    if (image.width() != 684 || image.height() != 1216 || (stop && stop())) return false;
+    const auto size = image.pixels().size();
+    std::unique_ptr<CacheWriter> writer;
+    if (store.begin_cache(name, size + 32, writer) != StoreStatus::Ok) return false;
+    Md5Digest digest;
+    for (std::size_t at = 0; at < size;) {
+        const auto count = std::min<std::size_t>(16 * 1024, size - at);
+        const std::string_view bytes(reinterpret_cast<const char*>(image.data() + at), count);
+        if ((stop && stop()) || !digest.update(bytes) || !writer->write(at, bytes)) return false;
+        at += count;
+    }
+    const auto checksum = digest.finish();
+    if (checksum.size() != 32 || (stop && stop()) || !writer->write(size, checksum)) return false;
+    const StageTimer commit_timer{"image_cache_commit", 0};
+    return (!stop || !stop()) && writer->commit(size + checksum.size());
+}
+
 void ContentJob::render_image() {
     const StageTimer timer{"image_worker", 0};
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
@@ -351,27 +385,17 @@ void ContentJob::render_image() {
     if (cacheable) {
         const StageTimer cache_timer{"image_cache_read", 0};
 #ifdef ESP_PLATFORM
-        // Cache bytes and the result canvas coexist; decoding has a separate, larger budget.
-        if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2 * (size + 32) + 256U * 1024 ||
-            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < size + 33) {
+        // Cache reads retain only the result canvas; cold decoding has a separate, larger budget.
+        if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < size + 256U * 1024 ||
+            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < size) {
             result.error = "Image preparation memory unavailable"; return;
         }
 #endif
-        std::string cached;
-        if (store.load_cache(request.cache_name, size + 32, cached) == StoreStatus::Ok && cached.size() == size + 32) {
-            const auto checksum = cached.substr(size);
-            cached.resize(size);
-            if (md5_hex(cached) == checksum) {
-                if (stop()) return;
-#ifdef ESP_PLATFORM
-                if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < size) {
-                    result.error = "Image preparation memory unavailable"; return;
-                }
-#endif
-                result.image = std::make_unique<graphics::Canvas>();
-                std::memcpy(result.image->data(), cached.data(), size);
-                return;
-            }
+        std::unique_ptr<CacheReader> reader;
+        if (store.open_cache(request.cache_name, size + 32, reader) == StoreStatus::Ok && reader->size() == size + 32) {
+            result.image = std::make_unique<graphics::Canvas>();
+            if (read_body_image_cache(*reader, *result.image, stop)) return;
+            result.image.reset();
         }
     }
     if (stop()) return;
@@ -404,11 +428,7 @@ void ContentJob::render_image() {
     if (stop()) return;
     if (cacheable && result.failed_images.empty()) {
         const StageTimer cache_timer{"image_cache_write", 0};
-        std::string pixels(reinterpret_cast<const char*>(result.image->data()), result.image->pixels().size());
-        pixels += md5_hex(pixels);
-        if (stop()) return;
-        const StageTimer commit_timer{"image_cache_commit", 0};
-        store.save_cache(request.cache_name, pixels);
+        write_body_image_cache(store, request.cache_name, *result.image, stop);
     }
 }
 void ContentJob::map_position() {

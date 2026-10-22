@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <csignal>
 #include <thread>
 #include <cassert>
 #include <cstdlib>
@@ -2468,11 +2469,97 @@ static void return_origin_test(const fs::path& root, const fs::path& fixtures, b
         assert(std::equal(library_pixels.begin(), library_pixels.begin() + 1120 * app.canvas().stride(), app.canvas().pixels().begin()));
 }
 
+static void body_image_cache_checks(const fs::path& root, const fs::path& fixtures) {
+    fs::create_directories(root);
+    FileStore store(root.string());
+    const std::string name = "images/gray-v1/regression";
+    const auto path = root / "PicoPage/cache" / name;
+    graphics::Canvas original, readback;
+    for (std::size_t i = 0; i < original.pixels().size(); ++i)
+        original.data()[i] = static_cast<std::uint8_t>(i * 37);
+    const std::string pixels(reinterpret_cast<const char*>(original.data()), original.pixels().size());
+    const auto legacy = pixels + md5_hex(pixels);
+    assert(store.save_cache(name, legacy) == StoreStatus::Ok);
+    const auto read = [&](const std::function<bool()>& stop = {}) {
+        std::unique_ptr<CacheReader> reader;
+        assert(store.open_cache(name, legacy.size(), reader) == StoreStatus::Ok);
+        return read_body_image_cache(*reader, readback, stop);
+    };
+    assert(read() && readback.pixels() == original.pixels());
+    readback.clear(7);
+    bool cancel_after_payload = false;
+    assert(!read([&] {
+        if (cancel_after_payload) return true;
+        // Request cancellation immediately after the final pre-digest check reports no cancellation.
+        cancel_after_payload = readback.pixels() == original.pixels();
+        return false;
+    }));
+    assert(cancel_after_payload && readback.pixels() == original.pixels());
+    unsigned checks = 0;
+    assert(!read([&] { return ++checks == 3; }));
+    checks = 0;
+    assert(!read([&] {
+        if (++checks == 2) fs::resize_file(path, 16 * 1024);
+        return false;
+    }));
+    assert(write_body_image_cache(store, name, original, {}));
+    std::string saved;
+    assert(store.load_cache(name, legacy.size(), saved) == StoreStatus::Ok && saved == legacy);
+    for (bool damage_digest : {false, true}) {
+        auto damaged = legacy;
+        damaged[damage_digest ? damaged.size() - 1 : 0] ^= 1;
+        assert(store.save_cache(name, damaged) == StoreStatus::Ok && !read());
+    }
+    assert(store.save_cache(name, legacy.substr(0, legacy.size() - 1)) == StoreStatus::Ok && !read());
+    assert(store.save_cache(name, legacy) == StoreStatus::Ok);
+    original.clear(7);
+    checks = 0;
+    assert(!write_body_image_cache(store, name, original, [&] { return ++checks == 3; }));
+    assert(!fs::exists(path.string() + ".tmp"));
+    assert(store.load_cache(name, legacy.size(), saved) == StoreStatus::Ok && saved == legacy);
+    struct rlimit previous{};
+    assert(getrlimit(RLIMIT_FSIZE, &previous) == 0);
+    auto limited = previous; limited.rlim_cur = 16 * 1024;
+    const auto handler = std::signal(SIGXFSZ, SIG_IGN);
+    assert(handler != SIG_ERR && setrlimit(RLIMIT_FSIZE, &limited) == 0);
+    const bool written = write_body_image_cache(store, name, original, {});
+    assert(setrlimit(RLIMIT_FSIZE, &previous) == 0);
+    std::signal(SIGXFSZ, handler);
+    assert(!written && !fs::exists(path.string() + ".tmp"));
+    assert(store.load_cache(name, legacy.size(), saved) == StoreStatus::Ok && saved == legacy);
+
+    ContentJob::Request request;
+    request.kind = ContentJob::Kind::Image; request.root = root.string(); request.cache_name = name;
+    request.path = (fixtures / "image-cover.epub").string();
+    EpubDocument document; std::string error;
+    assert(document.open(request.path, error)); request.identity = document.metadata();
+    request.layout.width = 684; request.layout.height = 1216;
+    request.page.images.push_back({0, 0, 0, 684, 1216, "EPUB/cover.png"});
+    fs::remove(path);
+    ContentJob cold(request); assert(cold.start()); cold.wait();
+    assert(cold.result.error.empty() && cold.result.image && cold.result.failed_images.empty());
+    const auto decoded = graphics::image_decode_count();
+    auto unavailable = request; unavailable.path = (root / "missing.epub").string();
+    ContentJob hot(unavailable); assert(hot.start()); hot.wait();
+    assert(hot.result.image && hot.result.image->pixels() == cold.result.image->pixels());
+    assert(graphics::image_decode_count() == decoded && hot.result.error.empty());
+    assert(store.load_cache(name, legacy.size(), saved) == StoreStatus::Ok);
+    saved[0] ^= 1;
+    assert(store.save_cache(name, saved) == StoreStatus::Ok);
+    fs::create_directory(path.string() + ".tmp");
+    ContentJob fallback(request); assert(fallback.start()); fallback.wait();
+    assert(fallback.result.error.empty() && fallback.result.failed_images.empty() && fallback.result.image);
+    assert(fallback.result.image->pixels() == cold.result.image->pixels());
+    assert(graphics::image_decode_count() == decoded + 1);
+    fs::remove(path.string() + ".tmp");
+}
+
 int main(int argc, char** argv) {
     assert(argc == 3 || argc == 4);
     char temporary[] = "/tmp/pico-app-XXXXXX";
     const char* directory = mkdtemp(temporary); assert(directory);
     const fs::path card(directory), fixtures(argv[1]);
+    body_image_cache_checks(card / "body-image-cache", fixtures);
     bool tested_origin = false;
     for (bool async : {false, true})
         for (const std::string scenario : {"first-frame", "management", "details", "settings", "invalid-settings", "screen", "reading",

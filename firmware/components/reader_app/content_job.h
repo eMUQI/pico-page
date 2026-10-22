@@ -29,6 +29,18 @@ graphics::Page plan_content(graphics::Font& font, const Chapter& source, std::si
 
 std::string image_cache_key(const std::string& book_id, const std::string& resource, const graphics::LayoutSpec& spec);
 
+/** Reads gray-v1 pixels directly into an unpublished 684 x 1216 canvas and verifies the digest.
+ * Returns false on invalid data, I/O failure or cancellation; the caller must discard the canvas.
+ * The single-owner reader must be positioned at byte zero.
+ */
+bool read_body_image_cache(CacheReader& reader, graphics::Canvas& image, const std::function<bool()>& stop);
+/** Writes gray-v1 pixels without copying the canvas. False leaves the prepared image usable.
+ * Checks cancellation between bounded writes; the final synchronized publication is not interruptible.
+ * The caller owns the canvas and storage until this call returns.
+ */
+bool write_body_image_cache(const FileStore& store, const std::string& name, const graphics::Canvas& image,
+                            const std::function<bool()>& stop);
+
 /** Reads and checks one PPLOCK4 cache using a single row buffer. A null image only validates.
  * A supplied canvas must be unpublished and 684 x 1216; discard it on failure or cancellation.
  * Each call rewinds the same reader and validates header, length and payload digest.
