@@ -442,20 +442,8 @@ void ContentJob::map_position() {
         return;
     }
     if (!request.record) { result.error = "Saved record unavailable"; return; }
-    Chapter source;
-    std::size_t index;
-    std::uint32_t offset = 0;
-    const auto& anchor = request.record->anchor;
-    if (!document.chapter_index_for(anchor.resource, index) ||
-        !document.find_chapter_part(index, source, result.error, ChapterLoad::Mapping,
-            [&](const Chapter& part) { return part.offset_for(anchor, offset); }, stop) ||
-        !sync::to_xpointer(document, source, anchor, request.dom_version, result.xpointer, result.error)) {
-        if (result.error.empty()) result.error = "Saved position cannot be mapped";
-        return;
-    }
-    if (stop()) { result.error = kChapterCancelled; return; }
-    result.percentage = (static_cast<double>(index) +
-        (source.text.empty() ? 0. : static_cast<double>(offset) / source.text.size())) / document.spine().size();
+    sync::map_upload_position(document, request.record->anchor, request.dom_version,
+                              result.xpointer, result.percentage, result.error, stop);
 }
 bool read_lock_screen_cache(CacheReader& reader, const std::string& header, graphics::Canvas* image,
                             bool& alpha, const std::function<bool()>& stop) {

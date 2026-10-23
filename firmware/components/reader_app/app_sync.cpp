@@ -253,27 +253,14 @@ void ReaderApp::Impl::upload() {
     const auto record = *session.saved_record();
     if (async_content) { begin_mapping(ContentJob::Kind::MapUpload); return; }
     std::string xpointer;
-    Chapter source;
-    std::size_t index;
-    const auto holds = [&](const Chapter &part) {
-        std::uint32_t ignored;
-        return part.offset_for(record.anchor, ignored);
-    };
-    if (!document.chapter_index_for(record.anchor.resource, index) ||
-        !find_content(store, document, index, source, detail, ChapterLoad::Mapping, holds) ||
-        !sync::to_xpointer(document, source, record.anchor, sync_config.dom_version, xpointer,
-                           detail)) {
+    double percent = 0;
+    if (!sync::map_upload_position(document, record.anchor, sync_config.dom_version,
+                                   xpointer, percent, detail)) {
         upload_mapping_failed(detail);
         draw_sync();
         overlay();
         return;
     }
-    std::uint32_t scalar = 0;
-    source.offset_for(record.anchor, scalar);
-    const double percent =
-        (static_cast<double>(index) +
-         (source.text.empty() ? 0. : static_cast<double>(scalar) / source.text.size())) /
-        document.spine().size();
     send_upload(record, xpointer, percent);
 }
 

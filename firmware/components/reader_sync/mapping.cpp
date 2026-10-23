@@ -197,6 +197,27 @@ bool to_xpointer(const EpubDocument& document, const Chapter& chapter, const Anc
     return true;
 }
 
+bool map_upload_position(EpubDocument& document, const Anchor& anchor, int dom_version,
+                         std::string& xpointer, double& percentage, std::string& error,
+                         const std::function<bool()>& stop) {
+    xpointer.clear(); percentage = 0; error.clear();
+    if (stop && stop()) { error = kChapterCancelled; return false; }
+    Chapter source;
+    std::size_t index;
+    std::uint32_t offset = 0;
+    if (!document.chapter_index_for(anchor.resource, index) ||
+        !document.find_chapter_part(index, source, error, ChapterLoad::Mapping,
+            [&](const Chapter& part) { return part.offset_for(anchor, offset); }, stop) ||
+        !to_xpointer(document, source, anchor, dom_version, xpointer, error)) {
+        if (error.empty()) error = "Saved position cannot be mapped";
+        return false;
+    }
+    if (stop && stop()) { xpointer.clear(); error = kChapterCancelled; return false; }
+    percentage = (static_cast<double>(index) +
+        (source.text.empty() ? 0. : static_cast<double>(offset) / source.text.size())) / document.spine().size();
+    return true;
+}
+
 bool from_xpointer(EpubDocument& document, const std::string& xpointer, int dom_version,
                    Anchor& anchor, std::string& error, const std::function<bool()>& stop, PartPosition* place) {
     anchor = {};

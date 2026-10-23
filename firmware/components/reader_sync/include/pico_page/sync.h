@@ -81,6 +81,16 @@ inline constexpr char kUnresolvedVisibility[] = "Image visibility requires a res
 bool to_xpointer(const EpubDocument& document, const Chapter& chapter, const Anchor& anchor,
                  int dom_version, std::string& xpointer, std::string& error);
 /**
+ * Maps an upload anchor by reading its source part from an already opened document.
+ * The caller exclusively owns document during this call; no cache or progress is written.
+ * percentage is a display estimate, never a locator. On failure or cancellation, xpointer
+ * is empty, percentage is zero, and error describes the cause. stop is checked while reading
+ * and after mapping; an individual file operation or mapping call may still block.
+ */
+bool map_upload_position(EpubDocument& document, const Anchor& anchor, int dom_version,
+                         std::string& xpointer, double& percentage, std::string& error,
+                         const std::function<bool()>& stop = {});
+/**
  * A reading-text position inside one spine item. Unlike an Anchor it can be ordered against
  * another position of the same item without loading the chapter.
  */

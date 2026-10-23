@@ -48,8 +48,10 @@ int main(int argc, char** argv) {
     const Anchor leading{chapter.resource, "/html[1]/body[1]/p[1]/text()[1]", 2};
     // These expected paths and normalized text offsets were exported by the pinned CREngine.
     for (int version : {20240114, 20260812}) {
-        assert(sync::to_xpointer(document, chapter, emoji, version, pointer, error));
+        double percentage = -1;
+        assert(sync::map_upload_position(document, emoji, version, pointer, percentage, error));
         assert(pointer == "/body[1]/DocFragment[1]/body[1]/p[1]/em[1]/text()[1].3");
+        assert(percentage >= 0 && percentage <= 1 && error.empty());
         Anchor recovered;
         assert(sync::from_xpointer(document, pointer, version, recovered, error));
         assert(recovered == emoji);
@@ -67,6 +69,18 @@ int main(int argc, char** argv) {
         assert(sync::from_xpointer(document, "/body/DocFragment[2]/body/p[2]/text().114", version, recovered, error));
         assert(recovered.resource == document.spine()[1].resource && recovered.offset == 114);
         assert(!sync::from_xpointer(document, "/body/DocFragment[99]/body/p/text().0", version, recovered, error));
+    }
+    {
+        // Rejected uploads must not expose outputs retained from a previous successful mapping.
+        double percentage = 1;
+        pointer = "stale";
+        assert(!sync::map_upload_position(document, {"missing.xhtml", emoji.node, emoji.offset},
+                                          20260812, pointer, percentage, error));
+        assert(pointer.empty() && percentage == 0 && error == "Saved position cannot be mapped");
+        pointer = "stale"; percentage = 1;
+        assert(!sync::map_upload_position(document, emoji, 20260812, pointer, percentage, error,
+                                          [] { return true; }));
+        assert(pointer.empty() && percentage == 0 && error == kChapterCancelled);
     }
     chapter.plain_dom = false;
     assert(!sync::to_xpointer(document, chapter, emoji, 20260812, pointer, error));
