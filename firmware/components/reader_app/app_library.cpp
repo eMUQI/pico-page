@@ -89,13 +89,7 @@ void ReaderApp::Impl::describe(Entry &entry) {
     if (entry.described) return;
     entry.described = true;
     if (entry.directory) {
-        int books = 0;
-        if (DIR *dir = opendir((root + "/" + entry.path).c_str())) {
-            while (const auto *item = readdir(dir))
-                if (item->d_name[0] != '.' && book_name(item->d_name)) ++books;
-            closedir(dir);
-        }
-        entry.status = "文件夹 · " + std::to_string(books) + " 本";
+        entry.status = "文件夹";
         return;
     }
     entry.status = recalled_position(entry.path).second;
