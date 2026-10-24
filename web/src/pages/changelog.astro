@@ -6,7 +6,7 @@ import Site from "../layouts/Site.astro";
 // them to devices and this page renders the same files.
 const directory = "../docs/releases";
 
-// Order of docs/versioning.md: X.Y.Z-beta.N before X.Y.Z-rc.N before X.Y.Z.
+// Order of docs/development/versioning.md: X.Y.Z-beta.N before X.Y.Z-rc.N before X.Y.Z.
 function order(version) {
   const [core, stage = ""] = version.split("-");
   const [name, number = "0"] = stage.split(".");

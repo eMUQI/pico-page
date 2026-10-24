@@ -4,7 +4,7 @@
 
 Pico Page 是为 Read Pico 墨水屏阅读器开发的阅读固件。把 EPUB、TXT 放进 TF 卡即可离线阅读，也可以与 KOReader 接续同一本 EPUB 的阅读位置。
 
-[官网](https://picopage.wulu.zone/) · [安装固件](https://picopage.wulu.zone/install/) · [使用指南](docs/runtime.md) · [更新日志](https://picopage.wulu.zone/changelog/) · [文档导航](docs/README.md)
+[官网](https://picopage.wulu.zone/) · [安装固件](https://picopage.wulu.zone/install/) · [使用指南](docs/user/runtime.md) · [更新日志](https://picopage.wulu.zone/changelog/) · [文档导航](docs/README.md)
 
 <p align="center">
   <img src="web/public/assets/screens/library.webp" width="220" alt="书库：继续阅读与封面卡片">
@@ -43,7 +43,7 @@ TF 卡/
 
 内置字体包含 3,500 个常用汉字，未覆盖的字符会显示为方框，建议添加完整中文字体。设备不支持 TF 卡热插拔，取出或插入后需要重启。
 
-已经安装 Pico Page 时，可在「设置 → 固件更新」中检查更新；条件与步骤见[固件更新](docs/runtime.md#固件更新)。设备中的「设置 → 使用说明」可离线查看。
+已经安装 Pico Page 时，可在「设置 → 固件更新」中检查更新；条件与步骤见[固件更新](docs/user/runtime.md#固件更新)。设备中的「设置 → 使用说明」可离线查看。
 
 ## 按键与触摸
 
@@ -60,10 +60,10 @@ K2 在所有可交互页面只全刷，不关闭面板、不确认或取消操�
 
 ## 使用边界
 
-- KOReader 接续要求两端使用内容完全相同的原始 EPUB 和同一同步账户。仅在位置能精确映射时提供接续，不按百分比猜测；TXT 和本地书签不参与同步。详见[操作步骤](docs/runtime.md#与-koreader-接续位置)和[兼容范围](docs/sync-runtime.md)。
+- KOReader 接续要求两端使用内容完全相同的原始 EPUB 和同一同步账户。仅在位置能精确映射时提供接续，不按百分比猜测；TXT 和本地书签不参与同步。详见[操作步骤](docs/user/runtime.md#与-koreader-接续位置)和[兼容范围](docs/development/sync-runtime.md)。
 - EPUB 使用统一正文排版，不完整还原原书样式；表格、复杂 SVG、复杂 CSS、复杂文字塑形和双向文字不在完整支持范围内。TXT 不支持 UTF-16。
-- 暂不支持 PDF、批注、高亮、词典、插件、阅读统计和多主题。自定义按键、蓝牙翻页等计划见[路线图](docs/roadmap.md)，不代表当前可用。
-- 移动或备份书籍时，请一并保留原书旁的 `<完整文件名>.picopage/` 目录；它保存这本书的进度、书签和设置。完整备份方法见[文件与备份](docs/runtime.md#文件与备份)。
+- 暂不支持 PDF、批注、高亮、词典、插件、阅读统计和多主题。自定义按键、蓝牙翻页等计划见[路线图](docs/planning/roadmap.md)，不代表当前可用。
+- 移动或备份书籍时，请一并保留原书旁的 `<完整文件名>.picopage/` 目录；它保存这本书的进度、书签和设置。完整备份方法见[文件与备份](docs/user/runtime.md#文件与备份)。
 
 ## 构建固件
 
@@ -78,7 +78,7 @@ sh tools/build_firmware.sh
 
 ## 开发与参与
 
-固件使用 C++，阅读逻辑由设备和桌面程序共用：UI 负责交互，session 管理阅读位置，display 管理面板刷新，store 管理文件提交。架构与边界见[架构说明](docs/architecture.md)。
+固件使用 C++，阅读逻辑由设备和桌面程序共用：UI 负责交互，session 管理阅读位置，display 管理面板刷新，store 管理文件提交。架构与边界见[架构说明](docs/development/architecture.md)。
 
 | 路径 | 内容 |
 |---|---|
@@ -87,12 +87,12 @@ sh tools/build_firmware.sh
 | `tools/`、`examples/` | 构建与诊断脚本、TF 卡配置示例 |
 | `web/`、`docs/` | 官网、使用文档、设计决定和验证记录 |
 
-桌面程序可通过 `sh tools/run_host.sh` 启动，用法见[桌面开发指南](host/README.md)。提交改动前阅读 [AGENTS.md](AGENTS.md)，按改动范围执行[测试](tests/README.md)与[验收检查](docs/acceptance.md)。桌面运行、自动测试和固件构建均不能代替真机验证。
+桌面程序可通过 `sh tools/run_host.sh` 启动，用法见[桌面开发指南](host/README.md)。提交改动前阅读 [AGENTS.md](AGENTS.md)，按改动范围执行[测试](tests/README.md)与[验收检查](docs/development/acceptance.md)。桌面运行、自动测试和固件构建均不能代替真机验证。
 
-欢迎通过 [Issues](https://github.com/eMUQI/pico-page/issues) 报告问题。请提供固件版本、操作步骤、预期结果和实际结果；排版或同步问题可附不含私人内容的最小样本。不要上传账户凭据、个人 EPUB、完整 Flash 备份或未经检查的日志。功能取舍见[产品决定](docs/decisions.md)。
+欢迎通过 [Issues](https://github.com/eMUQI/pico-page/issues) 报告问题。请提供固件版本、操作步骤、预期结果和实际结果；排版或同步问题可附不含私人内容的最小样本。不要上传账户凭据、个人 EPUB、完整 Flash 备份或未经检查的日志。功能取舍见[产品决定](docs/planning/decisions.md)。
 
 ## 致谢与许可证
 
-感谢 [Read Pico](https://github.com/MindReset/read_pico_firmware) 的硬件与 BSP、[ESP-IDF](https://github.com/espressif/esp-idf)、epdiy，以及提供解析、字体和图像处理能力的第三方项目；也感谢 KOReader/CREngine、CrossPoint 等阅读器项目的公开资料。具体采用、修改与仅供研究的范围见[依赖审查](docs/dependency-review.md)和[调研参考](docs/references.md)。
+感谢 [Read Pico](https://github.com/MindReset/read_pico_firmware) 的硬件与 BSP、[ESP-IDF](https://github.com/espressif/esp-idf)、epdiy，以及提供解析、字体和图像处理能力的第三方项目；也感谢 KOReader/CREngine、CrossPoint 等阅读器项目的公开资料。具体采用、修改与仅供研究的范围见[依赖审查](docs/development/dependency-review.md)和[调研参考](docs/planning/references.md)。
 
-**项目总许可证尚未选定，目前不宣称按某一开源许可证授权。** 第三方组件分别保留其许可证和声明，例如 epdiy 使用 LGPL-3.0-or-later，随附字体使用 OFL 1.1；这些许可不代表整个项目的许可。来源、固定版本及待完成的分发核对见[依赖审查](docs/dependency-review.md)与 [BSP 审查](docs/bsp-review.md)。
+**项目总许可证尚未选定，目前不宣称按某一开源许可证授权。** 第三方组件分别保留其许可证和声明，例如 epdiy 使用 LGPL-3.0-or-later，随附字体使用 OFL 1.1；这些许可不代表整个项目的许可。来源、固定版本及待完成的分发核对见[依赖审查](docs/development/dependency-review.md)与 [BSP 审查](docs/development/bsp-review.md)。

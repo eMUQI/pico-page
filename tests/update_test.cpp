@@ -15,7 +15,7 @@ static std::string manifest_json(const std::string& version, const std::string& 
 }
 
 int main() {
-    // The order given in docs/versioning.md; build metadata takes no part in it.
+    // The order given in docs/development/versioning.md; build metadata takes no part in it.
     const char* ascending[] = {"0.2.0-beta.1", "0.2.0-beta.2", "0.2.0-beta.10", "0.2.0-rc.1", "0.2.0", "0.2.1",
                                "0.3.0-beta.1", "0.10.0", "1.0.0"};
     for (std::size_t i = 0; i < std::size(ascending); ++i)

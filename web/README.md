@@ -2,7 +2,7 @@
 
 Astro 静态站，用于介绍 Pico Page 的功能、限制和开发状态。
 
-固件下载采用广州 COS，官网和固定清单入口由 Cloudflare Pages 提供。费用与流量告警保留；自动封禁定时器已于 2026-10-20 暂停，暂停期间没有该函数提供的自动流量封禁。访问权限、发布身份与故障恢复见[固件维护说明](../docs/firmware-hosting.md)；实际上线结果以[开发状态](../docs/development-status.md)为准。
+固件下载采用广州 COS，官网和固定清单入口由 Cloudflare Pages 提供。费用与流量告警保留；自动封禁定时器已于 2026-10-20 暂停，暂停期间没有该函数提供的自动流量封禁。访问权限、发布身份与故障恢复见[固件维护说明](../docs/development/firmware-hosting.md)；实际上线结果以[开发状态](../docs/development-status.md)为准。
 
 ```sh
 npm ci --prefix web --ignore-scripts
@@ -50,7 +50,7 @@ npm run preview --prefix web
 
 [网站构建工作流](../.github/workflows/web.yml) 在拉取请求更新时保留检查结果，仅对网站目录、发布说明、OTA 清单脚本及工作流依赖的变更执行构建，与必要的 host 检查并行。分支 push 不重复执行；main 的相关输入变更、发布 Release 或手动运行触发构建，其中正式部署仅限 main 或 Release。使用 Node.js 24，按 `package-lock.json` 缓存 npm 下载，依次执行 `npm ci --ignore-scripts`、`npm test` 和 `npm run build`；测试或构建失败时不上传产物。
 
-构建前，工作流把非草稿的发布列表写到 `web/public/firmware/releases.json`（见「更新日志」），并从 GitHub Release 取回已发布的固件：在非草稿的发布中选出版本最高的 `v<版本>` 标签，把它附带的 `manifest.json`、应用镜像和全量镜像（如果有）下载到 `web/public/firmware/`，再用 `python3 tools/ota_manifest.py --check` 核对清单与应用镜像逐项一致、版本与标签相同，全量镜像中的应用与应用镜像相同，不一致时工作流失败。校验通过后，`--publish-base-url https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com/` 只将部署副本的下载地址切到腾讯云，保留原发布附件；正式部署通过 GitHub OIDC 取得 15 分钟临时发布身份，禁止覆盖上传版本 BIN，并完整认证读回及匿名 HTTPS 读回两个镜像，与发布附件逐字节比较；上传、认证读回或内容校验失败时停止。COS 匿名下载返回 HTTP 403 时，仅在候选清单和全部 BIN 均与官网现有副本逐字节一致的情况下，允许继续更新静态页面并明确告警；固件变化或其他下载错误仍停止。此分支不恢复公开权限、不切换下载地址，也不证明下载可用。角色与权限边界见[腾讯云固件下载](../docs/firmware-hosting.md#自动部署)。没有这样的发布时跳过下载。发布一个 Release 也会触发本工作流。
+构建前，工作流把非草稿的发布列表写到 `web/public/firmware/releases.json`（见「更新日志」），并从 GitHub Release 取回已发布的固件：在非草稿的发布中选出版本最高的 `v<版本>` 标签，把它附带的 `manifest.json`、应用镜像和全量镜像（如果有）下载到 `web/public/firmware/`，再用 `python3 tools/ota_manifest.py --check` 核对清单与应用镜像逐项一致、版本与标签相同，全量镜像中的应用与应用镜像相同，不一致时工作流失败。校验通过后，`--publish-base-url https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com/` 只将部署副本的下载地址切到腾讯云，保留原发布附件；正式部署通过 GitHub OIDC 取得 15 分钟临时发布身份，禁止覆盖上传版本 BIN，并完整认证读回及匿名 HTTPS 读回两个镜像，与发布附件逐字节比较；上传、认证读回或内容校验失败时停止。COS 匿名下载返回 HTTP 403 时，仅在候选清单和全部 BIN 均与官网现有副本逐字节一致的情况下，允许继续更新静态页面并明确告警；固件变化或其他下载错误仍停止。此分支不恢复公开权限、不切换下载地址，也不证明下载可用。角色与权限边界见[腾讯云固件下载](../docs/development/firmware-hosting.md#自动部署)。没有这样的发布时跳过下载。发布一个 Release 也会触发本工作流。
 
 部署前直接比较构建提交与最新 main 的网站输入：网站输入变化时让位给替代运行，仅文档或固件代码变化时继续当前部署；无法读取比较结果时停止。只有构建成功且通过该判断的正式部署运行，才保存 `web/dist/` 为 `pico-page-web` artifact，缺少产物时报错，保留 3 天。PR 检查和非 main 的手动构建不上传 artifact。下载并解压后得到静态站内容，可用于核对或手动部署；artifact 遵循仓库访问权限，不作为设备 OTA 下载地址。
 
@@ -86,12 +86,12 @@ COS 上传使用独立 `PicoPageCosPublisher` 角色和 GitHub OIDC，不保存�
 
 1. 完成固件发布附件的生成和核验，将应用镜像、全量镜像、清单和来源记录发布到对应的 GitHub Release；未获得发布授权时停留在本地准备阶段。
 2. 备份 `web/public/firmware/`，将其替换为目标 Release 的清单和两个 BIN，避免混放不同版本的 BIN。重新从 Release 下载并逐字节比较，不直接使用旧构建目录中的附件。
-3. 在腾讯云 COS 控制台由管理员上传缺少的版本 BIN，不覆盖同名对象，不单独公开对象；已有同名对象必须与发布附件逐字节一致。按[腾讯云固件下载](../docs/firmware-hosting.md)完整读回目标版本，确认应用和全量镜像与原发布附件一致。在仓库根目录执行 `gh release list --repo eMUQI/pico-page --limit 100 --exclude-drafts --json tagName,publishedAt > web/public/firmware/releases.json`，让更新日志只列出已公开的版本；然后运行 `python3 tools/ota_manifest.py --check web/public/firmware --expect-version <版本> --publish-base-url https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com/`，校验原附件并只修改官网部署副本的下载地址。后续复验该副本时增加 `--base-url https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com/`；不要改写 GitHub 原附件。
+3. 在腾讯云 COS 控制台由管理员上传缺少的版本 BIN，不覆盖同名对象，不单独公开对象；已有同名对象必须与发布附件逐字节一致。按[腾讯云固件下载](../docs/development/firmware-hosting.md)完整读回目标版本，确认应用和全量镜像与原发布附件一致。在仓库根目录执行 `gh release list --repo eMUQI/pico-page --limit 100 --exclude-drafts --json tagName,publishedAt > web/public/firmware/releases.json`，让更新日志只列出已公开的版本；然后运行 `python3 tools/ota_manifest.py --check web/public/firmware --expect-version <版本> --publish-base-url https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com/`，校验原附件并只修改官网部署副本的下载地址。后续复验该副本时增加 `--base-url https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com/`；不要改写 GitHub 原附件。
 4. 执行 `npm ci --prefix web --ignore-scripts` 和 `PUBLIC_GA_MEASUREMENT_ID=G-S9XSC6V1KV npm run build --prefix web`。在 `web/dist/deployment.txt` 写入本次网站源码的完整 commit、`manual` 以及 UTC 时间，保留同内容的本地副本用于读回比较。
 5. 在已登录且具有 Pages 编辑权限的本机，用 `npx --yes wrangler@4.144.0 pages deploy web/dist --project-name=picopage --branch=main` 部署；只上传 `web/dist`。凭据通过本机登录或现有环境提供，不写入命令、仓库或日志。也可在现有 Pages 项目中创建生产部署并上传同一目录。参考 [Cloudflare Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/)。
 6. 独立读回正式域名的 `deployment.txt` 和清单，与本次本地文件逐字节比较；确认无查询参数的固定清单地址返回的 `url` 以 `https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com/` 开头。沿清单地址下载应用镜像，完整核对大小和 SHA-256；核对安装页的全量镜像地址指向腾讯云，带官网 Origin 下载并与附件逐字节比较，同时确认跨域响应头允许官网。用 `--base-url https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com/` 复验部署目录，核对安装页版本、更新日志、GA ID 和第三方模块能正常加载。失败时按上一节处理，不把「上传成功」记录为验收通过。
 
-腾讯云镜像按[固件下载镜像](../docs/firmware-hosting.md)单独上传和校验。仅上传 COS BIN 不会改变设备固定的 `picopage.wulu.zone/firmware/manifest.json` 入口；GitHub Actions 不可用期间，不依赖 Release 事件自动完成上述步骤。
+腾讯云镜像按[固件下载镜像](../docs/development/firmware-hosting.md)单独上传和校验。仅上传 COS BIN 不会改变设备固定的 `picopage.wulu.zone/firmware/manifest.json` 入口；GitHub Actions 不可用期间，不依赖 Release 事件自动完成上述步骤。
 
 ## 固件更新文件
 
@@ -117,9 +117,9 @@ COS 上传使用独立 `PicoPageCosPublisher` 角色和 GitHub OIDC，不保存�
 - 清单在第 2 步由带标签的源码生成，其中的数据格式版本取自该版本的源码；工作流核对原附件后只修改部署副本的 `url`，不重建镜像、不修改版本、摘要、数据格式或更新日志。
 - 设备只有一个更新通道，取版本最高的发布，预发布也算在内。撤回一个版本时删除该 Release 或改为草稿，然后在 `main` 上手动运行工作流重新部署。
 - 仅部署候选运行生成 artifact，包含该次构建取回的最高版本固件；历史产物可能包含旧版本，手动部署前须重新核对当前发布、清单和镜像。
-- 发布说明不超过 8 KiB，写法见 [版本管理](../docs/versioning.md)。
+- 发布说明不超过 8 KiB，写法见 [版本管理](../docs/development/versioning.md)。
 - `src/pages/404.astro` 使不存在的地址返回 404。设备据此区分「还没有发布固件」和清单读取失败；删除这个页面后，Cloudflare Pages 会对未知地址返回首页和 200。
-- 设备不验证发布者签名，能发布 Release、部署网站或控制该域名的人可以向设备提供任意固件，见 [功能路线图](../docs/roadmap.md) R11 的安全说明。
+- 设备不验证发布者签名，能发布 Release、部署网站或控制该域名的人可以向设备提供任意固件，见 [设备更新安全说明](../docs/development/platform-runtime.md#安全说明)。
 
 ## 资源下载
 
@@ -159,7 +159,7 @@ COS 上传使用独立 `PicoPageCosPublisher` 角色和 GitHub OIDC，不保存�
 
 首页用霞鹜文楷显示三处示例文字（字体名、「读自己的书，接着读下去。」和缺字对比）。网站不从 jsDelivr 加载完整的 webfont，改用自托管的子集 `public/assets/fonts/PicoPageWenKaiSample.woff`（29 个字符，7,800 字节，SHA-256 `3271897152ad0e74103bf300aa15ee4365f96f23337063fc2c664de19d77eeb3`）。
 
-- 生成：`.local/font-tools/bin/python tools/setup_web_font_sample.py`，使用 fonttools 4.60.1（环境的建立方法见 [图形运行时](../docs/graphics-runtime.md)）。脚本先核对源文件是锁定的 v1.520，再只保留脚本中 `TEXT` 列出的字符。修改首页这三处文字时，同步修改 `TEXT` 并重新生成；不在子集里的字符会落到本机楷体。
+- 生成：`.local/font-tools/bin/python tools/setup_web_font_sample.py`，使用 fonttools 4.60.1（环境的建立方法见 [图形运行时](../docs/development/graphics-runtime.md)）。脚本先核对源文件是锁定的 v1.520，再只保留脚本中 `TEXT` 列出的字符。修改首页这三处文字时，同步修改 `TEXT` 并重新生成；不在子集里的字符会落到本机楷体。
 - 许可：已阅读 v1.520 的 `OFL.txt` 和字体的版权字段。上游没有声明 Reserved Font Name；子集属于修改版本，仍主动改名为 `Pico Page WenKai Sample`。字体内保留版权（LXGW、The Klee Project Authors）、OFL 1.1 许可说明和许可地址，子集继续按 OFL 1.1 分发；许可证全文在 `public/downloads/LXGWWenKai-v1.520-OFL.txt`，首页同一节有链接。
 - `tools/check_handoff.py` 只允许仓库中出现固件内置子集和这个文件两个字体文件。
 
@@ -191,8 +191,8 @@ COS 上传使用独立 `PicoPageCosPublisher` 角色和 GitHub OIDC，不保存�
 发布前事项：
 
 1. 已完成（2026-10-12）：全量镜像由 `tools/ota_manifest.py --full` 生成并核对，随 Release 发布，由网站构建工作流取回，见「固件更新文件」。`0.2.0-beta.1` 按此流程发布。
-2. 已确认（2026-10-12，[决定](../docs/decisions.md) D41）：电脑安装采用整片覆盖，根目录 README、[功能路线图](../docs/roadmap.md) R11 和 [版本管理](../docs/versioning.md) 已同步。
-3. 真机验证（未完成，见 [验收](../docs/acceptance.md) INST02、INST03）：在装过其他固件的设备上完成一次浏览器安装，核对启动、面板显示（官方文档写明 VCOM 保存在 PMU 中，不在闪存里）、联网更新的槽切换与回滚，以及擦除 NVS 后的 Wi-Fi 行为。目前没有保留出厂系统的设备可供验证。本页的安装流程只用模拟的串口和烧录库检查过，没有连接过设备。
+2. 已确认（2026-10-12，[决定](../docs/planning/decisions.md) D41）：电脑安装采用整片覆盖，根目录 README、[功能路线图](../docs/planning/roadmap.md) R11 和 [版本管理](../docs/development/versioning.md) 已同步。
+3. 真机验证（未完成，见 [验收](../docs/development/acceptance.md) INST02、INST03）：在装过其他固件的设备上完成一次浏览器安装，核对启动、面板显示（官方文档写明 VCOM 保存在 PMU 中，不在闪存里）、联网更新的槽切换与回滚，以及擦除 NVS 后的 Wi-Fi 行为。目前没有保留出厂系统的设备可供验证。本页的安装流程只用模拟的串口和烧录库检查过，没有连接过设备。
 4. 连接恢复说明（2026-10-19 更新）：休眠时串口可能仍可见，但无法连接或烧录，先唤醒再连接。仍无法连接时，提示在开机状态下短按电源键两次（间隔不超过 1.2 秒），再长按至少 3 秒，由 PMU 让芯片进入烧录模式，随后重新选择串口。方法取自锁定 BSP `5f3406d` 的 `components/read_pico_pmu/docs/llms-full_zh_cn.md`；这个组合尚未在本次任务中实机验证。设备没有响应、安装后屏幕没有变化或复位失败时，仍提示按住电源键约 10 秒强制关机，再按住至少 1 秒开机。USB 文件传输必须先由电脑安全弹出，再在设备退出并重启。安装页明确区分内部闪存与 TF 卡：Pico Page 的 Wi-Fi 配置在 TF 卡上，重新安装保留；镜像摘要不一致单独提示校验未通过，仍在擦除前停止。
 5. 线上核对（2026-10-12 已做一次）：Cloudflare Rocket Loader 把安装页的模块脚本改写为由它加载。用无头 Chrome 打开线上安装页，以一个无法打开的模拟串口点击「连接设备」，页面加载了 `esptool-js` 和 `spark-md5` 并显示连接失败的提示，说明模块脚本和按需加载在改写后仍然执行。这不是真机连接。
 
@@ -237,13 +237,13 @@ COS 上传使用独立 `PicoPageCosPublisher` 角色和 GitHub OIDC，不保存�
 
 ## 使用文档
 
-`/docs/` 是面向读者的使用文档，单页，各节的锚点为 `#start`、`#controls`、`#typography`、`#transfer`、`#files`、`#sync`、`#power`、`#limits`、`#faq`。没有对应的设计稿，版式沿用共用样式。仓库保持私有，文档页是读者唯一能看到的说明。
+`/docs/` 是面向读者的单页使用文档，章节和锚点在页面源码中维护，版式沿用共用样式。仓库保持私有，文档页是读者唯一能看到的说明。
 
-内容取自根目录 README 的「功能」「使用」、[Wi-Fi 传书](../docs/wifi-transfer.md)、[USB 文件传输](../docs/usb-storage-runtime.md)、[存储](../docs/storage.md)和设备内置说明 `firmware/components/reader_app/help_content.h`，控件名称按 `app.cpp` 核对。只写用法和限制，不写验收状态和实现细节。这些来源或界面文案变化时同步修改本页。
+官网使用文档在 `src/pages/docs.astro` 独立维护，仓库指南在 [docs/user/runtime.md](../docs/user/runtime.md)，设备帮助在 `firmware/components/reader_app/help_content.h`。三处目前没有自动同步；只在用户可见操作或限制改变时核对受影响的内容。官网只写用法和限制，实现细节与验收状态引用开发文档。
 
 - 没有全量镜像时，页首显示「网页安装尚未开放」；判断与安装页相同。三个页面都不写「固件尚未发布」：联网更新的固件可以先于全量镜像发布，两者不是一回事。
 - 没有「安装」一节，只链接到安装页。手动安装方法尚未确定，见「安装页」的发布前事项。
-- 没有写固件更新、Wi‑Fi 连接方式等设置的细节，设备内置说明已覆盖其中一部分；发布前按最终固件补充。
+- 页面章节以 `src/pages/docs.astro` 为准，不在本说明重复维护功能列表；发布前核对页面与该版本固件一致。
 
 ## 更新日志
 
@@ -252,7 +252,7 @@ COS 上传使用独立 `PicoPageCosPublisher` 角色和 GitHub OIDC，不保存�
 - 内容直接读取 `docs/releases/<版本>.md`，与随清单发到设备上的更新日志是同一份文件，不另外维护。页面按设备支持的 Markdown 子集渲染：标题、列表、段落、`**粗体**` 和反引号，链接只保留文字。
 - 网站构建工作流把非草稿的发布列表（标签和发布时间）写到 `web/public/firmware/releases.json`，随网站发布。有这份列表时，页面只显示已经发布的版本，并显示发布日期（按北京时间取日期）；说明文件先于发布合并时不会提前出现在页面上。本地构建没有这份列表，显示全部说明文件，不带日期。
 - 发布一个版本不需要为这一页做额外的事：Release 触发的构建会取到新的发布列表。
-- `0.2.0-beta.1` 和 `0.2.0-beta.2` 的说明在发布后删去了「已知问题」和「兼容性」两节（2026-10-13 用户确认，写法见 [版本管理](../docs/versioning.md)）。这两个版本已发布的清单不改，设备上显示的仍是发布时的原文，与本页不同。
+- `0.2.0-beta.1` 和 `0.2.0-beta.2` 的说明在发布后删去了「已知问题」和「兼容性」两节（2026-10-13 用户确认，写法见 [版本管理](../docs/development/versioning.md)）。这两个版本已发布的清单不改，设备上显示的仍是发布时的原文，与本页不同。
 
 ## 发布前设计稿
 

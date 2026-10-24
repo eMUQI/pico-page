@@ -179,7 +179,7 @@ def verify_full(full, application):
 def newest_release(releases):
     """Tag of the highest released version among `gh release list --json tagName,isDraft` entries.
 
-    Only tags of the form v<release version> count. Order follows docs/versioning.md:
+    Only tags of the form v<release version> count. Order follows docs/development/versioning.md:
     X.Y.Z-beta.N before X.Y.Z-rc.N before X.Y.Z. None when no such release exists.
     """
     def order(tag):

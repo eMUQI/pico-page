@@ -2,7 +2,7 @@
 """Regenerate the compact GB18030 decoder tables from Python's standard codec.
 
 The checked-in table was reproduced byte for byte with CPython 3.14.7; its SHA-256 and the
-license review are in docs/dependency-review.md. Update that record when the output changes.
+license review are in docs/development/dependency-review.md. Update that record when the output changes.
 """
 
 from pathlib import Path
