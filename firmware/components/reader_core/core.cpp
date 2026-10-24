@@ -16,6 +16,7 @@ Action MapInput(Context context, Input input) {
 }
 
 bool InputRouter::accept(InputEvent event) {
+    if (event.phase == Phase::Move) return false;
     if (event.phase != Phase::Begin) {
         if (active_ == event.sequence) active_.reset();
         return false;

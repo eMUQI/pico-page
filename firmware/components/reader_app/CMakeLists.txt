@@ -3,6 +3,7 @@ set(app_sources
     app_bookmarks.cpp
     app_content.cpp
     app_drawing.cpp
+    app_dictionary.cpp
     app_input.cpp
     app_library.cpp
     app_power.cpp
@@ -12,17 +13,17 @@ set(app_sources
     app_transfer.cpp
     app_update.cpp
     app_wifi.cpp
-    content_cache.cpp content_job.cpp page_cache.cpp)
+    content_cache.cpp content_job.cpp dictionary_job.cpp page_cache.cpp)
 
 if(ESP_PLATFORM)
-    idf_component_register(SRCS ${app_sources} INCLUDE_DIRS include REQUIRES reader_core reader_store reader_document reader_graphics reader_sync
+    idf_component_register(SRCS ${app_sources} INCLUDE_DIRS include REQUIRES reader_core reader_store reader_document reader_dictionary reader_graphics reader_sync
         PRIV_REQUIRES esp_app_format)
     target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_17)
 else()
     find_package(Threads REQUIRED)
     add_library(reader_app ${app_sources})
     target_include_directories(reader_app PUBLIC include)
-    target_link_libraries(reader_app PUBLIC reader_core reader_store reader_document reader_graphics reader_sync Threads::Threads)
+    target_link_libraries(reader_app PUBLIC reader_core reader_store reader_document reader_dictionary reader_graphics reader_sync Threads::Threads)
     target_compile_features(reader_app PUBLIC cxx_std_17)
     target_compile_options(reader_app PRIVATE -Wall -Wextra -Werror)
 endif()

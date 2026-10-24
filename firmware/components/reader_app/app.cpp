@@ -95,7 +95,14 @@ void ReaderApp::Impl::save_refresh(const ReaderSettings &values) {
 
 ReaderApp::ReaderApp(std::string root, std::string writer, bool controlled_storage, bool async_content)
     : impl_(std::make_unique<Impl>(std::move(root), std::move(writer))) { impl_->controlled_storage = controlled_storage; impl_->async_content = async_content; }
-void ReaderApp::invalidate_identity_cache() { impl_->drain_save(); impl_->abandon_content(); impl_->foreground_job.reset(); impl_->stop_covers(); impl_->clear_prefetch(); impl_->stop_counting_job(); impl_->identities.clear(); impl_->font_identity.clear(); impl_->font_scan.reset(); impl_->effective_font.clear(); }
+void ReaderApp::invalidate_identity_cache() {
+    impl_->drain_save(); impl_->abandon_content(); impl_->foreground_job.reset(); impl_->stop_covers();
+    impl_->clear_prefetch(); impl_->stop_counting_job(); impl_->identities.clear();
+    impl_->font_identity.clear(); impl_->font_scan.reset(); impl_->effective_font.clear();
+    impl_->reset_dictionary_contact();
+    impl_->dictionary_session.reset(); impl_->dictionary_ready.clear(); impl_->dictionary_definition.reset();
+    impl_->dictionary_pages.clear(); impl_->dictionary_page = {};
+}
 ReaderApp::~ReaderApp() { network::release(impl_->manual_hold); impl_->cancel_sync(); impl_->drain_save(); }
 bool ReaderApp::initialize() {
 #ifdef ESP_PLATFORM
@@ -106,6 +113,7 @@ bool ReaderApp::initialize() {
 }
 bool ReaderApp::open_book(const std::string &path) {
     if (impl_->portal_live || impl_->active_network || impl_->update_waiting()) return false;
+    impl_->reset_dictionary_contact();
     impl_->clear_body_cache();
     impl_->clear_prefetch();
     impl_->release_counting();
@@ -145,9 +153,15 @@ void ReaderApp::input(const AppInput &event) {
 }
 bool ReaderApp::can_long_press_at(int x, int y) const {
     if (impl_->image_at(x, y)) return true;
+    if (impl_->view == View::Reading && !impl_->image_viewing && graphics::text_hit(impl_->page, x, y)) return true;
     return impl_->view == View::Library && std::any_of(impl_->hits.begin(), impl_->hits.end(), [&](const auto& hit) {
         return hit.contains(x, y) && (hit.id == Tools || (hit.id >= EntryBase && hit.id < TocBase &&
                !impl_->entries[static_cast<std::size_t>(hit.id - EntryBase)].directory));
+    });
+}
+bool ReaderApp::can_drag_selection_at(int x, int y) const {
+    return impl_->view == View::Dictionary && std::any_of(impl_->hits.begin(), impl_->hits.end(), [&](const auto& hit) {
+        return (hit.id == DictionaryStart || hit.id == DictionaryEnd) && hit.contains(x, y);
     });
 }
 const graphics::Canvas &ReaderApp::canvas() const {
@@ -161,7 +175,7 @@ bool ReaderApp::prepare_frame() {
     const auto paused = [](const std::unique_ptr<ContentJob>& job) {
         return !job || !job->started() || job->done() ||
             (job->request.kind != ContentJob::Kind::Pagination &&
-             job->request.kind != ContentJob::Kind::Chapter) || job->pause();
+             job->request.kind != ContentJob::Kind::Chapter && !ContentJob::dictionary_kind(job->request.kind)) || job->pause();
     };
     const bool foreground = paused(impl_->foreground_job);
     const bool background = paused(impl_->counting_job);
@@ -263,6 +277,10 @@ UsbTransferAction ReaderApp::take_usb_transfer_action() {
     return std::exchange(impl_->usb_action, UsbTransferAction::None);
 }
 bool ReaderApp::prepare_usb_transfer() {
+    if (impl_->foreground_job && ContentJob::dictionary_kind(impl_->foreground_job->request.kind) &&
+        impl_->foreground_job->started() && !impl_->foreground_job->done()) {
+        impl_->foreground_job->cancel(); return false;
+    }
     if (impl_->cancel_custom_preparation()) return false;
     invalidate_identity_cache();
     if (impl_->network_worker_id || impl_->portal_live || impl_->usb_prepared || impl_->display.busy() || impl_->active_network ||
@@ -487,6 +505,14 @@ void ReaderApp::show_portal(const PortalStatus &status) {
 }
 bool ReaderApp::power_menu_pending() const { return impl_->power_menu_wait.has_value(); }
 bool ReaderApp::show_power_menu() {
+    const bool dictionary_view = impl_->view == View::Dictionary || impl_->view == View::DictionarySettings;
+    if (dictionary_view && !impl_->network_worker_id && !impl_->active_network && !impl_->usb_prepared &&
+        (impl_->content_loading || impl_->foreground_job)) {
+        impl_->abandon_content();
+        impl_->dictionary_notice = "查询已取消，可重试。";
+        impl_->power_menu_wait = impl_->view;
+        return true;
+    }
     if (impl_->network_worker_id || impl_->active_network || impl_->content_loading || impl_->foreground_job ||
         impl_->usb_prepared || impl_->view == View::Portal || impl_->view == View::PowerOff) return false;
     if (impl_->display.busy()) {
@@ -496,6 +522,8 @@ bool ReaderApp::show_power_menu() {
     if (impl_->view == View::PowerMenu) return true;
     cancel_sleep();
     if (impl_->display.busy()) { impl_->power_menu_wait = impl_->view; return true; }
+    if (impl_->view == View::Dictionary) impl_->draw_dictionary();
+    else if (impl_->view == View::DictionarySettings) impl_->draw_dictionary_settings();
     impl_->control(PowerMenu);
     return impl_->view == View::PowerMenu || impl_->power_menu_wait.has_value();
 }
@@ -574,7 +602,11 @@ bool ReaderApp::begin_sleep() {
     impl_->show_sleep_wait();
     return true;
 }
-bool ReaderApp::sleep_pending() const { return impl_->sleep_cover_deadline.has_value(); }
+bool ReaderApp::sleep_pending() const {
+    return impl_->sleep_cover_deadline.has_value() || (impl_->sleep_destination_captured &&
+        impl_->foreground_job && ContentJob::dictionary_kind(impl_->foreground_job->request.kind) &&
+        impl_->foreground_job->started() && !impl_->foreground_job->done());
+}
 void ReaderApp::cancel_sleep() {
     impl_->sleep_destination_captured = false;
     impl_->custom_sleep_attempted = false;
@@ -598,6 +630,10 @@ void ReaderApp::cancel_sleep() {
 }
 bool ReaderApp::prepare_sleep() {
     if (impl_->power_menu_wait) return false;
+    if (impl_->foreground_job && ContentJob::dictionary_kind(impl_->foreground_job->request.kind) &&
+        impl_->foreground_job->started() && !impl_->foreground_job->done()) {
+        impl_->foreground_job->cancel(); return false;
+    }
     bool cover_attempted = false;
     if (impl_->sleep_cover_deadline) {
         impl_->poll_counting_job();
@@ -771,6 +807,7 @@ void ReaderApp::poll_background(bool cancel) {
     if (impl_->sleep_wait_restore_pending) impl_->restore_sleep_wait();
     // Keep completed background work from replacing the sleep feedback before preparation.
     if (impl_->sleep_wait_footer && !impl_->sleep_wait_restore_pending && impl_->view == impl_->sleep_wait_view) return;
+    if (!cancel || !impl_->dictionary_contact) impl_->flush_dictionary_selection();
     if (impl_->clear_cache_pending) {
         if (impl_->view != View::StorageSettings || !impl_->card_available) impl_->clear_cache_pending = false;
         else if (!cancel && !impl_->counting_job && !impl_->display.busy() && !impl_->save_job && !impl_->bookmark_job)

@@ -22,6 +22,29 @@ inline constexpr int kSwipeAngleScale = 100;
 
 enum class ReleasedGesture { Tap, Previous, Next, Ignore };
 
+/** One queued notification retains the latest move. Callers serialize access with the event queue. */
+class TouchMoves {
+public:
+    bool pending_for(std::uint64_t sequence) const { return latest_ && latest_->sequence == sequence; }
+    bool publish(const Event& event) {
+        if (latest_) {
+            if (latest_->sequence == event.sequence) latest_ = event;
+            return false;
+        }
+        latest_ = event;
+        return true;
+    }
+    void receive(Event& event) {
+        if (event.phase == EventPhase::Move && latest_ && latest_->sequence == event.sequence) {
+            event = *latest_;
+            latest_.reset();
+        }
+    }
+    void clear() { latest_.reset(); }
+private:
+    std::optional<Event> latest_;
+};
+
 /** Classifies a released touch using endpoint displacement, without changing contact ownership. */
 inline ReleasedGesture released_gesture(const Event& begin, const Event& end) {
     if (begin.kind != EventKind::Touch || end.kind != EventKind::Touch ||
@@ -54,9 +77,11 @@ public:
     bool pending() const { return held_.has_value(); }
     /** Returns a held touch when its threshold has elapsed without a presentation change. */
     std::optional<Event> due(std::int64_t now_us, std::uint64_t frame) const {
-        if (held_ && held_->kind == EventKind::Touch && frame == frame_ &&
-            now_us - held_->time_us >= kLongPressUs)
-            return held_;
+        if (held_ && frame == frame_) {
+            auto current = latest_;
+            current.time_us = now_us;
+            if (long_press(*held_, current)) return held_;
+        }
         return std::nullopt;
     }
     std::optional<Event> accept(const Event& event, std::uint64_t frame) {
@@ -65,16 +90,18 @@ public:
             return std::nullopt;
         }
         if (event.phase == EventPhase::Begin) {
-            if (!held_) { held_ = event; frame_ = frame; }
+            if (!held_) { held_ = latest_ = event; frame_ = frame; }
             return std::nullopt;
         }
         if (!held_ || held_->sequence != event.sequence) return std::nullopt;
+        if (event.phase == EventPhase::Move) { latest_ = event; return std::nullopt; }
         const auto tap = held_;
         held_.reset();
         return event.phase == EventPhase::End && frame == frame_ ? tap : std::nullopt;
     }
 private:
     std::optional<Event> held_;
+    Event latest_;
     std::uint64_t frame_ = 0;
 };
 

@@ -248,6 +248,7 @@ void ReaderApp::Impl::draw_reading_settings() {
     if (values.refresh_preset == "clear") value_line(0, "自动全刷间隔", "每页", 758);
     else value_line(RefreshInterval, "自动全刷间隔", "每 " + std::to_string(refresh_interval(values)) + " 页 ›", 758);
     value_line(PageEffects, "翻页效果", std::string(page_effect == PageEffect::Off ? "关闭" : "水波纹") + " · 实验 ›", 848);
+    value_line(DictionaryOpen, "离线词典", std::to_string(settings.dictionary_enabled.size()) + " 套已启用 ›", 938);
     button(FullRefresh, "立即全刷", 24, 1080, 636, 96);
 }
 

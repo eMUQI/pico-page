@@ -174,7 +174,8 @@ bool ContentJob::start() {
     const auto required_internal = 32U * 1024 + (content_requests ? 0 : content_stack_bytes);
     if ((request.kind == Kind::Pagination || request.kind == Kind::FontIdentity || request.kind == Kind::LibraryCovers ||
          request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite || request.kind == Kind::ContentCacheWrite ||
-         request.kind == Kind::SleepCover || request.kind == Kind::LockScreen || request.kind == Kind::LockScreenPreview) &&
+         request.kind == Kind::SleepCover || request.kind == Kind::LockScreen || request.kind == Kind::LockScreenPreview ||
+         dictionary_kind(request.kind)) &&
         heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < required_internal) {
         start_failure_ = StartFailure::InternalMemory;
         return false;
@@ -253,6 +254,7 @@ void ContentJob::run() {
             result.bookmarks = store.load_bookmarks(request.relative_path, request.identity.book_id, request.content_revision);
         return;
     }
+    if (dictionary_kind(request.kind)) { read_dictionary(); return; }
     if (stop()) {
         result.retryable_failure = request.kind == Kind::LockScreen;
         return;

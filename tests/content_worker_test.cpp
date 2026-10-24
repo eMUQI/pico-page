@@ -94,7 +94,7 @@ std::size_t heap_caps_get_largest_free_block(std::uint32_t caps) {
 std::size_t heap_caps_get_minimum_free_size(std::uint32_t caps) { return heap_caps_get_free_size(caps); }
 
 int main(int argc, char** argv) {
-    assert(argc == 2);
+    assert(argc == 3);
     using pico_page::ContentJob;
     using Failure = ContentJob::StartFailure;
     fail_queue = true;
@@ -334,6 +334,135 @@ int main(int argc, char** argv) {
             assert(invalid.result.cache_finished && !invalid.result.image);
             assert(fs::file_size(root / "PicoPage/cache" / cover.cache_name) == cover.cache_header.size());
         }
+        fs::remove_all(root);
+    }
+    {
+        namespace fs = std::filesystem;
+        namespace dict = pico_page::dictionary;
+        char temporary[] = "/tmp/pico-dictionary-worker-XXXXXX";
+        const char* directory = mkdtemp(temporary); assert(directory);
+        const fs::path root(directory), dictionaries = root / "Dictionaries";
+        fs::create_directories(dictionaries / "English");
+        for (const auto* suffix : {".ifo", ".idx", ".dict.dz", ".syn.dz"})
+            fs::copy_file(fs::path(argv[2]) / (std::string("compressed") + suffix),
+                          dictionaries / "English" / (std::string("main") + suffix));
+        { std::ofstream bad(dictionaries / "bad.ifo"); bad << "bad metadata"; }
+        ContentJob::Request query;
+        query.root = root.string(); query.kind = ContentJob::Kind::DictionaryList;
+        ContentJob list(query); assert(list.start()); finish(list);
+        assert(list.result.dictionary_status && list.result.dictionary_complete && list.result.dictionaries.size() == 2);
+        assert(list.result.dictionaries[0].id == "English/main.ifo" && list.result.dictionaries[0].status);
+        assert(!list.result.dictionaries[1].status);
+        assert(!fs::exists(root / "PicoPage/cache"));
+        query.kind = ContentJob::Kind::DictionaryLookup;
+        query.relative_path = "English/main.ifo";
+        query.dictionary_session = std::make_shared<pico_page::DictionarySession>();
+        query.dictionary_candidates = {{{4, 9}, "apple", false}};
+        ContentJob first(query); assert(first.start()); finish(first);
+        assert(first.result.dictionary_status && first.result.dictionary_match->word == "apple");
+        assert(first.result.dictionary_entries.size() == 1 && first.result.dictionary_fields[0].text == "lower <literal>");
+        assert(!first.result.dictionary_reused && query.dictionary_session->verified.size() == 1);
+        ContentJob warm(query); assert(warm.start()); finish(warm);
+        assert(warm.result.dictionary_status && warm.result.dictionary_reused);
+        query.dictionary_candidates = {{{0, 7}, "missing", false}, {{4, 9}, "alias", false}};
+        ContentJob alias(query); assert(alias.start()); finish(alias);
+        assert(alias.result.dictionary_status && alias.result.dictionary_entries.size() == 2);
+        assert(alias.result.dictionary_match->word == "alias" && alias.result.dictionary_fields[0].text == "upper");
+        query.dictionary_candidates = {{{0, 9}, "duplicate", false}};
+        ContentJob duplicates(query); assert(duplicates.start()); finish(duplicates);
+        assert(duplicates.result.dictionary_status && duplicates.result.dictionary_more && duplicates.result.dictionary_entries.size() == 32);
+        query.dictionary_ordinal = duplicates.result.dictionary_entries.back().ordinal + 1;
+        ContentJob continuation(query); assert(continuation.start()); finish(continuation);
+        assert(continuation.result.dictionary_status && continuation.result.dictionary_entries[0].ordinal == query.dictionary_ordinal);
+        query.kind = ContentJob::Kind::DictionaryRead; query.dictionary_ordinal = 2;
+        ContentJob read(query); assert(read.start()); finish(read);
+        assert(read.result.dictionary_status && read.result.dictionary_fields[0].text == "lower <literal>");
+        query.kind = ContentJob::Kind::DictionaryLookup; query.dictionary_ordinal = 0;
+        query.dictionary_candidates = {{{0, 7}, "missing", false}};
+        ContentJob missing(query); assert(missing.start()); finish(missing);
+        assert(missing.result.dictionary_status.status == dict::Status::NotFound && missing.result.error.empty());
+        query.dictionary_candidates = {{{4, 9}, "apple", false}};
+        ContentJob paused(query);
+        assert(!paused.pause()); assert(paused.start());
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (!paused.pause() && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        assert(paused.pause() && !paused.done());
+        paused.cancel(); finish(paused);
+        assert(paused.result.dictionary_status.status == dict::Status::Cancelled && paused.result.dictionary_fields.empty());
+        ContentJob resumed(query);
+        assert(!resumed.pause()); assert(resumed.start());
+        resumed.resume(); finish(resumed); assert(resumed.result.dictionary_status);
+        internal_free = 31 * 1024;
+        ContentJob low(query); assert(!low.start() && low.start_failure() == Failure::InternalMemory);
+        internal_free = 40 * 1024;
+        query.relative_path = "../main.ifo";
+        ContentJob unsafe(query); assert(unsafe.start()); finish(unsafe);
+        assert(unsafe.result.dictionary_status.status == dict::Status::InvalidFormat);
+        ContentJob::Request layout;
+        layout.kind = ContentJob::Kind::DictionaryPage;
+        std::string rich = "<b>";
+        for (unsigned i = 0; i < 80; ++i) rich += "word" + std::to_string(i) + " ";
+        rich += "</b><p>last</p>";
+        layout.dictionary_definition = std::make_shared<const std::vector<dict::Field>>(std::vector<dict::Field>{{'h', rich}});
+        layout.layout.left = 10; layout.layout.top = 10; layout.layout.width = 200;
+        layout.layout.height = 84; layout.layout.font_px = 28; layout.layout.line_height = 42;
+        ContentJob page_one(layout); assert(page_one.start()); finish(page_one);
+        assert(page_one.result.dictionary_status && !page_one.result.dictionary_complete);
+        assert(!page_one.result.dictionary_page.glyphs.empty() && page_one.result.dictionary_page.glyphs.front().bold);
+        layout.dictionary_cursor = page_one.result.dictionary_next;
+        ContentJob page_two(layout); assert(page_two.start()); finish(page_two);
+        assert(page_two.result.dictionary_status && page_two.result.dictionary_page.glyphs.front().bold);
+        assert(page_two.result.dictionary_next.byte > page_one.result.dictionary_next.byte);
+        layout.dictionary_cursor = {}; layout.dictionary_seek_pages = 1;
+        ContentJob replay(layout); assert(replay.start()); finish(replay);
+        assert(replay.result.dictionary_status && replay.result.dictionary_next.byte == page_two.result.dictionary_next.byte);
+        assert(replay.result.dictionary_current.byte == page_one.result.dictionary_next.byte);
+        const auto& expected = page_two.result.dictionary_page.glyphs;
+        const auto& actual = replay.result.dictionary_page.glyphs;
+        assert(actual.size() == expected.size());
+        for (std::size_t i = 0; i < actual.size(); ++i)
+            assert(actual[i].scalar == expected[i].scalar && actual[i].x == expected[i].x &&
+                   actual[i].baseline == expected[i].baseline && actual[i].bold == expected[i].bold);
+        // Reflow starts at the same decoded text, while the prefix remains reachable.
+        const auto anchor = page_two.result.dictionary_current.scalars;
+        assert(anchor > 0);
+        layout.dictionary_reflow = true; layout.dictionary_seek_pages = 0;
+        layout.dictionary_layout_anchor = anchor; layout.layout.height = 336;
+        ContentJob expanded(layout); assert(expanded.start()); finish(expanded);
+        assert(expanded.result.dictionary_status && expanded.result.dictionary_current.scalars == anchor);
+        assert(expanded.result.dictionary_page.glyphs.front().scalar == expected.front().scalar);
+        assert(expanded.result.dictionary_page.glyphs.front().bold && expanded.result.dictionary_page_number == 1);
+        layout.dictionary_reflow = false;
+        ContentJob prefix(layout); assert(prefix.start()); finish(prefix);
+        assert(prefix.result.dictionary_status && prefix.result.dictionary_current.scalars == 0);
+        assert(prefix.result.dictionary_next.scalars == anchor);
+        layout.dictionary_cursor = expanded.result.dictionary_current;
+        ContentJob forward(layout); assert(forward.start()); finish(forward);
+        assert(forward.result.dictionary_status && forward.result.dictionary_next.scalars == expanded.result.dictionary_next.scalars);
+        layout.dictionary_cursor = {}; layout.dictionary_reflow = true; layout.layout.height = 84;
+        ContentJob collapsed(layout); assert(collapsed.start()); finish(collapsed);
+        assert(collapsed.result.dictionary_status && collapsed.result.dictionary_current.scalars == anchor);
+        assert(collapsed.result.dictionary_next.scalars == page_two.result.dictionary_next.scalars);
+        layout.dictionary_reflow = false; layout.dictionary_layout_anchor = 0;
+        layout.dictionary_seek_pages = 131072;
+        ContentJob beyond(layout); assert(beyond.start()); finish(beyond);
+        assert(beyond.result.dictionary_status.status == dict::Status::NotFound);
+        layout.dictionary_seek_pages = 0;
+        psram_free = 1100 * 1024;
+        ContentJob no_layout_memory(layout); assert(no_layout_memory.start()); finish(no_layout_memory);
+        assert(no_layout_memory.result.dictionary_status.status == dict::Status::ResourceLimit);
+        psram_free = 4 * 1024 * 1024;
+        ContentJob paused_page(layout); assert(!paused_page.pause()); assert(paused_page.start());
+        paused_page.cancel(); finish(paused_page);
+        assert(paused_page.result.dictionary_page.glyphs.empty());
+        layout.font = (root / "missing.ttf").string();
+        ContentJob no_font(layout); assert(no_font.start()); finish(no_font);
+        assert(no_font.result.dictionary_status.status == dict::Status::IoError);
+        layout.font.clear();
+        layout.dictionary_definition = std::make_shared<const std::vector<dict::Field>>(std::vector<dict::Field>{{'m', "\xf4\x8f\xbf\xbf"}});
+        ContentJob missing_glyph(layout); assert(missing_glyph.start()); finish(missing_glyph);
+        assert(missing_glyph.result.dictionary_status && missing_glyph.result.dictionary_missing_glyphs);
         fs::remove_all(root);
     }
     assert(creations == 1 && allocations == 1);

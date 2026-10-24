@@ -4,26 +4,31 @@ namespace pico_page {
 
 void ReaderApp::Impl::text(const std::string &value, int x, int top, int size, int max_width,
           std::uint8_t gray, bool bold) {
-    if (!ui.size(size))
+    text(ui, value, x, top, size, max_width, gray, bold);
+}
+
+void ReaderApp::Impl::text(graphics::Font& font, const std::string& value, int x, int top, int size,
+          int max_width, std::uint8_t gray, bool bold) {
+    if (!font.size(size))
         return;
-    const int baseline = top + ui.metrics().ascender;
+    const int baseline = top + font.metrics().ascender;
     const auto scalars = decode_utf8(value);
     std::vector<int> widths;
     int total = 0;
     for (auto scalar : scalars) {
-        const int width = ui.advance(scalar);
+        const int width = font.advance(scalar);
         widths.push_back(width);
         total += width;
     }
-    const int ellipsis = ui.advance(U'…');
+    const int ellipsis = font.advance(U'…');
     const bool clipped = total > max_width;
     int used = 0;
     for (std::size_t i = 0; i < scalars.size(); ++i) {
         if (used + widths[i] > (clipped ? max_width - ellipsis : max_width)) {
-            ui.draw(canvas, U'…', x + used, baseline, gray, bold);
+            font.draw(canvas, U'…', x + used, baseline, gray, bold);
             break;
         }
-        ui.draw(canvas, scalars[i], x + used, baseline, gray, bold);
+        font.draw(canvas, scalars[i], x + used, baseline, gray, bold);
         used += widths[i];
     }
 }

@@ -403,8 +403,9 @@ Page layout_page(Font& font, std::u32string_view text, std::size_t start, const 
         int x = spec.left + indent;
         for (std::size_t i = cursor; collect && i < end; ++i) {
             if (text[i] == U'\n' || text[i] == U'\r') continue;
-            page.glyphs.push_back({text[i], i, x, baseline, spec.font_px});
-            x += font.advance(text[i]);
+            const int advance = font.advance(text[i]);
+            page.glyphs.push_back({text[i], i, x, baseline, spec.font_px, false, advance});
+            x += advance;
         }
         if (collect) page.lines.push_back({line_start, end, top, baseline, top + spec.line_height});
         cursor = end;
@@ -413,6 +414,54 @@ Page layout_page(Font& font, std::u32string_view text, std::size_t start, const 
     page.end = cursor;
     page.next_top = top;
     return page;
+}
+
+std::optional<std::size_t> text_hit(const Page& page, int x, int y, bool nearest) {
+    if (!page.error.empty()) return std::nullopt;
+    for (const auto& image : page.images)
+        if (x >= image.x && static_cast<std::int64_t>(x) < static_cast<std::int64_t>(image.x) + image.width &&
+            y >= image.y && static_cast<std::int64_t>(y) < static_cast<std::int64_t>(image.y) + image.height) return std::nullopt;
+    std::optional<std::size_t> result;
+    std::int64_t best_y = 0, best_x = 0;
+    for (const auto& line : page.lines) {
+        if (!nearest && (y < line.top || y >= line.bottom)) continue;
+        const auto dy = std::max<std::int64_t>({0, static_cast<std::int64_t>(line.top) - y,
+                                               static_cast<std::int64_t>(y) - line.bottom + 1});
+        for (const auto& glyph : page.glyphs) {
+            if (glyph.index < line.start || glyph.index >= line.end || glyph.advance <= 0 ||
+                blank(glyph.scalar) || glyph.scalar == U' ' || glyph.scalar == U'\u00a0' ||
+                glyph.scalar == U'\u1680' || (glyph.scalar >= 0x2000 && glyph.scalar <= 0x200a) ||
+                glyph.scalar == U'\u2028' || glyph.scalar == U'\u2029' || glyph.scalar == U'\u202f' ||
+                glyph.scalar == U'\u205f' || glyph.scalar == U'\u3000' || glyph.scalar == U'\ufffc') continue;
+            const auto dx = std::max<std::int64_t>({0, static_cast<std::int64_t>(glyph.x) - x,
+                                                   static_cast<std::int64_t>(x) - glyph.x - glyph.advance + 1});
+            if (!dy && !dx) return glyph.index;
+            if (nearest && (!result || dy < best_y || (dy == best_y && dx < best_x))) {
+                result = glyph.index; best_y = dy; best_x = dx;
+            }
+        }
+    }
+    return result;
+}
+
+std::vector<SelectionBox> selection_boxes(const Page& page, std::size_t begin, std::size_t end) {
+    std::vector<SelectionBox> boxes;
+    if (!page.error.empty() || begin >= end) return boxes;
+    begin = std::max(begin, page.start); end = std::min(end, page.end);
+    for (const auto& line : page.lines) {
+        if (line.end <= begin || line.start >= end) continue;
+        int left = 0, right = 0;
+        bool present = false;
+        for (const auto& glyph : page.glyphs) {
+            if (glyph.index < std::max(begin, line.start) || glyph.index >= std::min(end, line.end) ||
+                glyph.advance <= 0 || blank(glyph.scalar) || glyph.scalar == U'\ufffc') continue;
+            left = present ? std::min(left, glyph.x) : glyph.x;
+            right = std::max(right, glyph.x + glyph.advance);
+            present = true;
+        }
+        if (present) boxes.push_back({left, line.top, right - left, line.bottom - line.top});
+    }
+    return boxes;
 }
 
 bool render_page(Canvas& canvas, Font& font, const Page& page, std::uint8_t gray, const std::function<bool()>& stop) {

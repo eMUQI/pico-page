@@ -17,6 +17,7 @@ void usage() {
     std::cout
         << "Pico Page --card DIRECTORY [--book Books/file.epub|Books/file.txt] [--script FILE] [--headless]\n"
            "Keys: Left/1=K1, R/2=K2 full refresh, Right/3=K3, Escape=K2, Space=sleep/wake.\n"
+           "Mouse: right-drag selects text; left-drag adjusts selection handles. Release looks up the selection.\n"
            "Script: k1 | k2 | k3 | tap X Y | hold X Y | capture FILE.bmp | sleep | wake | open PATH | count\n";
 }
 struct Response {
@@ -365,6 +366,14 @@ int main(int argc, char **argv) {
     if (headless)
         return 0;
     bool running = true, sleep_requested = false;
+    std::uint64_t mouse_sequence = 0;
+    Uint8 mouse_button = 0;
+    const auto contact = [&](Phase phase, int x = 0, int y = 0, bool hold = false, bool deferred = false) {
+        AppInput input{{mouse_sequence, phase, Input::TouchCenter}, true, x, y, deferred, hold};
+        input.continuous = true;
+        host.app.input(input);
+        if (phase == Phase::End || phase == Phase::Cancel) { mouse_sequence = 0; mouse_button = 0; }
+    };
     while (running) {
         host.poll_network();
         host.app.poll_background();
@@ -382,7 +391,8 @@ int main(int argc, char **argv) {
             if (!sleep_requested) host.app.background_step();
             continue;
         }
-        if (sleep_requested && (event.type == SDL_KEYDOWN || event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_MOUSEBUTTONUP)) {
+        if (sleep_requested && (event.type == SDL_KEYDOWN || event.type == SDL_MOUSEBUTTONDOWN ||
+                                event.type == SDL_MOUSEBUTTONUP || event.type == SDL_MOUSEMOTION)) {
             if (event.type != SDL_KEYDOWN || event.key.keysym.sym != SDLK_SPACE || event.key.repeat) continue;
             host.app.cancel_sleep();
             sleep_requested = false;
@@ -397,9 +407,21 @@ int main(int argc, char **argv) {
             SDL_RenderClear(host.renderer);
             SDL_RenderCopy(host.renderer, host.texture, nullptr, nullptr);
             SDL_RenderPresent(host.renderer);
-        } else if (event.type == SDL_MOUSEBUTTONDOWN && (event.button.button == SDL_BUTTON_LEFT || event.button.button == SDL_BUTTON_RIGHT))
-            // The right button stands for a long press.
-            host.gesture(Input::TouchCenter, true, event.button.x, event.button.y, event.button.button == SDL_BUTTON_RIGHT);
+        } else if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_FOCUS_LOST && mouse_sequence) {
+            contact(Phase::Cancel);
+        } else if (event.type == SDL_MOUSEMOTION && mouse_sequence) {
+            contact(Phase::Move, event.motion.x, event.motion.y);
+        } else if (event.type == SDL_MOUSEBUTTONUP && mouse_sequence && event.button.button == mouse_button) {
+            contact(Phase::End, event.button.x, event.button.y);
+        } else if (event.type == SDL_MOUSEBUTTONDOWN && !mouse_sequence &&
+                   (event.button.button == SDL_BUTTON_LEFT || event.button.button == SDL_BUTTON_RIGHT)) {
+            const bool hold = event.button.button == SDL_BUTTON_RIGHT;
+            if ((hold && host.app.view() == View::Reading && host.app.can_long_press_at(event.button.x, event.button.y)) ||
+                host.app.can_drag_selection_at(event.button.x, event.button.y)) {
+                mouse_sequence = ++host.sequence; mouse_button = event.button.button;
+                contact(Phase::Begin, event.button.x, event.button.y, hold);
+            } else host.gesture(Input::TouchCenter, true, event.button.x, event.button.y, hold);
+        }
         else if (event.type == SDL_KEYDOWN && !event.key.repeat) {
             switch (event.key.keysym.sym) {
             case SDLK_LEFT:
@@ -416,6 +438,7 @@ int main(int argc, char **argv) {
                 host.gesture(Input::K3);
                 break;
             case SDLK_SPACE:
+                if (mouse_sequence) contact(Phase::Cancel, 0, 0, false, true);
                 if (host.app.view() == View::Sleeping)
                     host.app.wake();
                 else

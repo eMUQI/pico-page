@@ -9,6 +9,7 @@
 #include <deque>
 #include <list>
 #include <functional>
+#include <optional>
 
 namespace pico_page::graphics {
 
@@ -116,6 +117,7 @@ struct PositionedGlyph {
     int baseline;
     int font_px;
     bool bold = false;
+    int advance = 0;  // Measured during layout; hit testing never accesses the font face.
 };
 
 struct ImageBox {
@@ -142,6 +144,18 @@ struct Page {
     std::vector<ImageBox> images;
     std::string error;
 };
+
+struct SelectionBox { int x, y, width, height; };
+/** Returns the Unicode scalar index under a visible glyph cell. Whitespace,
+ * images and margins have no hit. With nearest=true, whitespace and margins
+ * snap to the nearest text line and glyph for dragging an existing selection.
+ * Geometry is from the already laid-out page; images still have no hit.
+ */
+std::optional<std::size_t> text_hit(const Page& page, int x, int y, bool nearest = false);
+/** One rectangle per selected text line for the scalar range [begin,end).
+ * Clips to the current page; does not select images or allocate a pixel buffer.
+ */
+std::vector<SelectionBox> selection_boxes(const Page& page, std::size_t begin, std::size_t end);
 
 /**
  * Layout only the page at a Unicode scalar offset. [start,end) includes consumed

@@ -161,7 +161,10 @@ enum Control {
     SleepCustom = 51000, SleepRotation, SleepChoose, SleepRefresh, SleepOverlay, SleepPreview, LockScreenBase = 52000,
     UpdateOpen = 53000, UpdateCheck, UpdateNotes, UpdateStart, UpdateConfirm, UpdateCancel,
     UpdateRetry, UpdateLater, UpdateRestart, UpdateDismiss,
-    FontEntryBase = 54000, FontAccept = 54300, FontCancel
+    FontEntryBase = 54000, FontAccept = 54300, FontCancel,
+    DictionaryOpen = 55000, DictionaryScan, DictionaryClose, DictionaryExpand, DictionaryRetry,
+    DictionarySources, DictionaryNextEntry, DictionaryEdit, DictionaryStart, DictionaryEnd, DictionaryManage,
+    DictionaryToggleBase = 56000, DictionaryUpBase = 56100, DictionaryDownBase = 56200, DictionaryPrepareBase = 56300, DictionarySourceBase = 56400
 };
 static_assert(ContentsBookmarks < EntryBase);
 inline std::string basename(const std::string &path) {
@@ -737,6 +740,54 @@ struct ReaderApp::Impl final : DisplayBackend {
     unsigned mapping_start_attempts = 0;
     std::chrono::steady_clock::time_point mapping_start_retry{};
     std::optional<ContentJob::Request> pending_content;
+    std::shared_ptr<DictionarySession> dictionary_session;
+    std::vector<DictionaryItem> dictionary_items;
+    std::vector<std::string> dictionary_ready;
+    std::size_t dictionary_list_page = 0, dictionary_source = 0, dictionary_entry = 0, dictionary_entry_base = 0;
+    bool dictionary_list_complete = true, dictionary_full = false, dictionary_inflections = false, dictionary_search_all = true;
+    bool dictionary_partial_error = false, dictionary_missing_glyphs = false, dictionary_omitted_fields = false;
+    std::size_t dictionary_candidate_length = 0;
+    std::size_t dictionary_layout_anchor = 0, dictionary_picker_page = 0;
+    bool dictionary_choosing = false, dictionary_settings_from_lookup = false, dictionary_settings_changed = false;
+    std::string dictionary_return_notice, dictionary_settings_source;
+    int dictionary_page_move = 0;
+    int dictionary_touch_y = 0;
+    std::string dictionary_notice, dictionary_headword, dictionary_name, dictionary_matched_word;
+    dictionary::Selection dictionary_selection;
+    dictionary::Selection dictionary_contact_anchor;
+    std::uint64_t dictionary_contact = 0;
+    std::size_t dictionary_trigger = 0;
+    int dictionary_drag_dx = 0, dictionary_drag_dy = 0;
+    bool dictionary_selecting = false, dictionary_manual = false;
+    bool dictionary_selection_dirty = false, dictionary_query_pending = false, dictionary_close_pending = false;
+    std::vector<dictionary::Candidate> dictionary_candidates;
+    std::vector<dictionary::Entry> dictionary_entries;
+    bool dictionary_more_entries = false, dictionary_page_end = true;
+    std::shared_ptr<const std::vector<dictionary::Field>> dictionary_definition;
+    std::vector<dictionary::TextCursor> dictionary_pages;
+    dictionary::TextCursor dictionary_next;
+    std::uint32_t dictionary_page_number = 0;
+    graphics::Page dictionary_page;
+    void queue_dictionary(ContentJob::Request request);
+    void open_dictionary_settings(bool from_lookup = false);
+    void leave_dictionary_settings();
+    void draw_dictionary_sources();
+    void cancel_dictionary_sources();
+    void select_dictionary(std::size_t source);
+    void draw_dictionary_settings();
+    void begin_dictionary(int x, int y, bool selecting = false);
+    bool dictionary_contact_input(const AppInput& input, bool accepted);
+    void submit_dictionary_selection();
+    void flush_dictionary_selection();
+    void reset_dictionary_contact();
+    void query_dictionary();
+    void page_dictionary(int movement = 0);
+    void draw_dictionary();
+    void finish_dictionary(ContentJob& job);
+    void dictionary_control(int id);
+    void close_dictionary();
+    int dictionary_top(bool full) const;
+    graphics::LayoutSpec dictionary_layout(bool full) const;
     ContentCacheEntry pending_chapter_cache;
     std::optional<std::chrono::steady_clock::time_point> chapter_feedback_after;
     std::unique_ptr<graphics::Canvas> prepared_image;
@@ -982,6 +1033,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void text(const std::string &value, int x, int top, int size = 28, int max_width = 612,
               std::uint8_t gray = 1, bool bold = false);
+    void text(graphics::Font& font, const std::string& value, int x, int top, int size,
+              int max_width, std::uint8_t gray, bool bold);
     /** ASCII letters, digits and path punctuation; a run of these is not divided between lines. */
     static bool word_scalar(char32_t c) {
         return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
@@ -3273,6 +3326,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         case View::Contents:
         case View::Help:
         case View::Update:
+        case View::DictionarySettings:
             return Context::Contents;
         case View::Typography:
             return Context::Typography;

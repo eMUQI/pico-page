@@ -3,6 +3,7 @@
 namespace pico_page {
 
 void ReaderApp::Impl::error(const std::string &text_in, const std::string &retry) {
+    reset_dictionary_contact();
     sleep_wait_footer.reset();
     sleep_wait_restore_pending = false;
     // Repainting an error must retain the destination captured when it first appeared.
@@ -72,6 +73,11 @@ void ReaderApp::Impl::error(const std::string &text_in, const std::string &retry
 
 
 void ReaderApp::Impl::back() {
+    if (view == View::Dictionary) {
+        if (dictionary_choosing) cancel_dictionary_sources(); else close_dictionary();
+        return;
+    }
+    if (view == View::DictionarySettings) { leave_dictionary_settings(); return; }
     if (view == View::NetworkClosing) return;
     if (network_worker_id && active_network) { wait_network(Back); return; }
     if (view == View::Typography && font_picker_open) { cancel_font_picker(); overlay(); return; }
@@ -314,6 +320,7 @@ void ReaderApp::Impl::wifi_control(int id) {
 
 
 void ReaderApp::Impl::control(int id) {
+    if (id == DictionaryOpen) { open_dictionary_settings(); return; }
     if (view == View::Typography && font_picker_open && id != FullRefresh) {
         font_picker_control(id); return;
     }
@@ -983,10 +990,20 @@ void ReaderApp::Impl::control(int id) {
 
 void ReaderApp::Impl::input(const AppInput &input) {
     const bool accepted = router.accept(input.event);
+    if (dictionary_contact_input(input, accepted)) return;
     // Key taps change the entry model only, so they are kept while a frame is in flight.
     if (accepted && view == View::TextEntry && key_input(input)) return;
     if (!accepted || display.busy() || view == View::Sleeping || view == View::PowerOff)
         return;
+    if (view == View::Dictionary || view == View::DictionarySettings) {
+        if (input.queued) return;
+        if (!input.touch) {
+            if (input.event.input == Input::K2) force_refresh();
+            else if (input.event.input == Input::K1 || input.event.input == Input::Previous) dictionary_control(Prev);
+            else if (input.event.input == Input::K3 || input.event.input == Input::Next) dictionary_control(Next);
+        } else for (const auto& hit : hits) if (hit.contains(input.x, input.y)) { dictionary_control(hit.id); break; }
+        return;
+    }
     if (async_content) {
         if (counting_job) counting_job->cancel();
     } else release_counting();
@@ -1065,6 +1082,9 @@ void ReaderApp::Impl::input(const AppInput &input) {
                 display.present({{"ui", 0, 0, ++ui_sequence}, {}, FramePurpose::Overlay,
                                  RefreshIntent::Content, RefreshRegion{0, footer_top, 684, 1216 - footer_top}});
                 return;
+            }
+            if (input.long_press && !image_at(input.x, input.y) && graphics::text_hit(page, input.x, input.y)) {
+                begin_dictionary(input.x, input.y); return;
             }
             for (const auto &link : links)
                 if (link.contains(input.x, input.y)) {

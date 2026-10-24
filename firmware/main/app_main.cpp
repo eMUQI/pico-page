@@ -653,11 +653,19 @@ extern "C" void app_main() {
     std::shared_ptr<std::atomic_bool> portal_stop;
     std::optional<pico_page::PortalStatus> deferred_portal_failure;
     std::uint64_t input_sequence = 0, physical_sequence = 0, physical_source = 0;
+    bool continuous_contact = false;
     pico_page::platform::ReleasedTap released_tap;
     std::int64_t last_activity = esp_timer_get_time();
     pico_page::platform::Event sleep_input;
     pico_page::platform::SleepInput resume_input;
+    const auto dispatch_contact = [&](pico_page::Phase phase, int x, int y, bool hold = false, bool queued = false) {
+        pico_page::AppInput input{{physical_sequence, phase, pico_page::Input::TouchCenter}, true, x, y, queued, hold};
+        input.continuous = true;
+        app->input(input);
+    };
     const auto reset_contact = [&] {
+        if (continuous_contact) dispatch_contact(pico_page::Phase::Cancel, 0, 0, false, true);
+        continuous_contact = false;
         released_tap.accept({pico_page::platform::EventKind::InputReset}, presentation_sequence);
         physical_source = physical_sequence = 0;
         physical_suppressed = false;
@@ -972,13 +980,13 @@ extern "C" void app_main() {
             }
         }
         if (event.kind == EventKind::InputReset) {
-            released_tap.accept(event, presentation_sequence);
-            physical_source = physical_sequence = 0;
-            physical_suppressed = false;
+            reset_contact();
         } else if (event.kind == EventKind::SdRemoved) {
+            reset_contact();
             app->card_removed();
             present(*app);
         } else if (event.kind == EventKind::PowerLong) {
+            reset_contact();
             app->cancel_sleep();
             sleep_requested = false;
             if (sleep_recovery && !usb_mode && !pico_page::console::transfer_active() &&
@@ -987,9 +995,6 @@ extern "C" void app_main() {
                 resume_input.begin();
                 resume_input.accept(event);
             } else if (!usb_mode && !network_busy && !pico_page::console::transfer_active()) {
-                released_tap.accept({EventKind::InputReset}, presentation_sequence);
-                physical_source = physical_sequence = 0;
-                physical_suppressed = false;
                 if (!app->show_power_menu()) app->power_unavailable("请先结束当前任务，再关机或重启。");
                 if (sleep_recovery && app->power_menu_pending()) resume_input.begin();
             } else app->power_unavailable(usb_mode ? "请先弹出设备并结束 USB 传输。" : "请先结束网络或传输任务。");
@@ -1023,15 +1028,37 @@ extern "C" void app_main() {
                     continue;
                 }
                 physical_sequence = ++input_sequence;
+                if (event.kind == EventKind::Touch && event.time_us >= settled_us &&
+                    app->can_drag_selection_at(event.x, event.y)) {
+                    continuous_contact = true;
+                    dispatch_contact(pico_page::Phase::Begin, event.x, event.y);
+                    present(*app);
+                    continue;
+                }
             } else if (physical_suppressed && physical_source == event.sequence) {
-                physical_suppressed = false;
-                physical_source = 0;
+                if (event.phase != pico_page::platform::EventPhase::Move) {
+                    physical_suppressed = false;
+                    physical_source = 0;
+                }
                 continue;
             } else if (!physical_sequence || physical_source != event.sequence) {
                 continue;
             }
+            if (continuous_contact) {
+                const auto phase = event.phase == pico_page::platform::EventPhase::Move ? pico_page::Phase::Move :
+                    event.phase == pico_page::platform::EventPhase::End ? pico_page::Phase::End : pico_page::Phase::Cancel;
+                const bool defer_move = phase == pico_page::Phase::Move &&
+                    pico_page::platform::input_waiting_before(std::numeric_limits<std::int64_t>::max());
+                dispatch_contact(phase, event.x, event.y, false, defer_move);
+                if (phase != pico_page::Phase::Move) {
+                    continuous_contact = false;
+                    physical_source = physical_sequence = 0;
+                }
+                present(*app);
+                continue;
+            }
             const auto tap = released_tap.accept(event, presentation_sequence);
-            if (event.phase != pico_page::platform::EventPhase::Begin)
+            if (event.phase == pico_page::platform::EventPhase::End || event.phase == pico_page::platform::EventPhase::Cancel)
                 physical_source = 0;
             // Several contacts made during one busy period collapse into the latest one. The
             // keyboard instead receives every tap in order and draws them in one update.
@@ -1056,7 +1083,8 @@ extern "C" void app_main() {
                 const pico_page::platform::Event end{EventKind::Touch, pico_page::platform::EventPhase::End,
                                                       held->sequence, held->x, held->y, now};
                 released_tap.accept(end, presentation_sequence);
-                dispatch_tap(*held, end);
+                continuous_contact = true;
+                dispatch_contact(pico_page::Phase::Begin, held->x, held->y, true);
                 last_activity = now;
                 present(*app);
             }

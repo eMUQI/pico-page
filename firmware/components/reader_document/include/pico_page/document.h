@@ -124,6 +124,8 @@ private:
 
 /** Lowercase hexadecimal MD5 of bytes; empty when the digest backend fails. */
 std::string md5_hex(std::string_view bytes);
+/** Named XHTML character entity without delimiters; zero when unsupported. */
+char32_t named_html_entity(std::string_view name);
 
 /** Single-owner incremental MD5. Updates retain no input references; finish consumes the digest.
  * update returns false and finish returns empty on backend failure or use after finish.
@@ -132,6 +134,20 @@ class Md5Digest {
 public:
     Md5Digest();
     ~Md5Digest();
+    bool update(std::string_view bytes);
+    std::string finish();
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+/** Single-owner incremental SHA-256. Updates retain no input references; finish consumes the digest.
+ * update returns false and finish returns empty on backend failure or use after finish.
+ */
+class Sha256Digest {
+public:
+    Sha256Digest();
+    ~Sha256Digest();
     bool update(std::string_view bytes);
     std::string finish();
 private:

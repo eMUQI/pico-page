@@ -27,6 +27,28 @@
 #endif
 
 namespace pico_page {
+char32_t named_html_entity(std::string_view name) {
+    // U+00A0 through U+00FF in order.
+    static const char* const latin1[] = {
+        "nbsp", "iexcl", "cent", "pound", "curren", "yen", "brvbar", "sect", "uml", "copy", "ordf", "laquo", "not", "shy", "reg", "macr",
+        "deg", "plusmn", "sup2", "sup3", "acute", "micro", "para", "middot", "cedil", "sup1", "ordm", "raquo", "frac14", "frac12", "frac34", "iquest",
+        "Agrave", "Aacute", "Acirc", "Atilde", "Auml", "Aring", "AElig", "Ccedil", "Egrave", "Eacute", "Ecirc", "Euml", "Igrave", "Iacute", "Icirc", "Iuml",
+        "ETH", "Ntilde", "Ograve", "Oacute", "Ocirc", "Otilde", "Ouml", "times", "Oslash", "Ugrave", "Uacute", "Ucirc", "Uuml", "Yacute", "THORN", "szlig",
+        "agrave", "aacute", "acirc", "atilde", "auml", "aring", "aelig", "ccedil", "egrave", "eacute", "ecirc", "euml", "igrave", "iacute", "icirc", "iuml",
+        "eth", "ntilde", "ograve", "oacute", "ocirc", "otilde", "ouml", "divide", "oslash", "ugrave", "uacute", "ucirc", "uuml", "yacute", "thorn", "yuml"};
+    static const std::pair<const char*, char32_t> other[] = {
+        {"OElig", 0x152}, {"oelig", 0x153}, {"Scaron", 0x160}, {"scaron", 0x161}, {"Yuml", 0x178}, {"circ", 0x2c6}, {"tilde", 0x2dc},
+        {"ensp", 0x2002}, {"emsp", 0x2003}, {"thinsp", 0x2009}, {"zwnj", 0x200c}, {"zwj", 0x200d}, {"lrm", 0x200e}, {"rlm", 0x200f},
+        {"ndash", 0x2013}, {"mdash", 0x2014}, {"lsquo", 0x2018}, {"rsquo", 0x2019}, {"sbquo", 0x201a}, {"ldquo", 0x201c}, {"rdquo", 0x201d}, {"bdquo", 0x201e},
+        {"dagger", 0x2020}, {"Dagger", 0x2021}, {"bull", 0x2022}, {"hellip", 0x2026}, {"permil", 0x2030}, {"prime", 0x2032}, {"Prime", 0x2033},
+        {"lsaquo", 0x2039}, {"rsaquo", 0x203a}, {"oline", 0x203e}, {"frasl", 0x2044}, {"euro", 0x20ac}, {"trade", 0x2122},
+        {"larr", 0x2190}, {"uarr", 0x2191}, {"rarr", 0x2192}, {"darr", 0x2193}, {"harr", 0x2194}, {"minus", 0x2212}, {"infin", 0x221e}, {"ne", 0x2260}, {"le", 0x2264}, {"ge", 0x2265}};
+    for (std::size_t i = 0; i < std::size(latin1); ++i)
+        if (name == latin1[i]) return static_cast<char32_t>(0xa0 + i);
+    for (const auto& entity : other) if (name == entity.first) return entity.second;
+    return 0;
+}
+
 namespace {
 std::atomic<std::uint64_t> identity_scans{0}, epub_opens{0};
 constexpr std::uint64_t kMaxBook = 256ULL * 1024 * 1024;
@@ -257,26 +279,7 @@ struct Xml {
         // delivered as one scalar of the surrounding text node.
         XML_SetSkippedEntityHandler(parser, [](void* opaque, const char* name, int parameter) {
             auto& x = *static_cast<Xml*>(opaque);
-            // U+00A0 through U+00FF in order.
-            static const char* const latin1[] = {
-                "nbsp", "iexcl", "cent", "pound", "curren", "yen", "brvbar", "sect", "uml", "copy", "ordf", "laquo", "not", "shy", "reg", "macr",
-                "deg", "plusmn", "sup2", "sup3", "acute", "micro", "para", "middot", "cedil", "sup1", "ordm", "raquo", "frac14", "frac12", "frac34", "iquest",
-                "Agrave", "Aacute", "Acirc", "Atilde", "Auml", "Aring", "AElig", "Ccedil", "Egrave", "Eacute", "Ecirc", "Euml", "Igrave", "Iacute", "Icirc", "Iuml",
-                "ETH", "Ntilde", "Ograve", "Oacute", "Ocirc", "Otilde", "Ouml", "times", "Oslash", "Ugrave", "Uacute", "Ucirc", "Uuml", "Yacute", "THORN", "szlig",
-                "agrave", "aacute", "acirc", "atilde", "auml", "aring", "aelig", "ccedil", "egrave", "eacute", "ecirc", "euml", "igrave", "iacute", "icirc", "iuml",
-                "eth", "ntilde", "ograve", "oacute", "ocirc", "otilde", "ouml", "divide", "oslash", "ugrave", "uacute", "ucirc", "uuml", "yacute", "thorn", "yuml"};
-            static const std::pair<const char*, char32_t> other[] = {
-                {"OElig", 0x152}, {"oelig", 0x153}, {"Scaron", 0x160}, {"scaron", 0x161}, {"Yuml", 0x178}, {"circ", 0x2c6}, {"tilde", 0x2dc},
-                {"ensp", 0x2002}, {"emsp", 0x2003}, {"thinsp", 0x2009}, {"zwnj", 0x200c}, {"zwj", 0x200d}, {"lrm", 0x200e}, {"rlm", 0x200f},
-                {"ndash", 0x2013}, {"mdash", 0x2014}, {"lsquo", 0x2018}, {"rsquo", 0x2019}, {"sbquo", 0x201a}, {"ldquo", 0x201c}, {"rdquo", 0x201d}, {"bdquo", 0x201e},
-                {"dagger", 0x2020}, {"Dagger", 0x2021}, {"bull", 0x2022}, {"hellip", 0x2026}, {"permil", 0x2030}, {"prime", 0x2032}, {"Prime", 0x2033},
-                {"lsaquo", 0x2039}, {"rsaquo", 0x203a}, {"oline", 0x203e}, {"frasl", 0x2044}, {"euro", 0x20ac}, {"trade", 0x2122},
-                {"larr", 0x2190}, {"uarr", 0x2191}, {"rarr", 0x2192}, {"darr", 0x2193}, {"harr", 0x2194}, {"minus", 0x2212}, {"infin", 0x221e}, {"ne", 0x2260}, {"le", 0x2264}, {"ge", 0x2265}};
-            char32_t scalar = 0;
-            if (!parameter) {
-                for (std::size_t i = 0; i < std::size(latin1) && !scalar; ++i) if (!std::strcmp(name, latin1[i])) scalar = static_cast<char32_t>(0xa0 + i);
-                for (const auto& entity : other) if (!scalar && !std::strcmp(name, entity.first)) scalar = entity.second;
-            }
+            const char32_t scalar = parameter ? 0 : named_html_entity(name);
             if (!scalar) { x.stop(std::string("Unsupported XML entity: ") + name); return; }
             // Every listed scalar lies in U+00A0 through U+FFFF: two or three UTF-8 bytes.
             const char utf8[] = {static_cast<char>(0xe0 | scalar >> 12), static_cast<char>(scalar < 0x800 ? 0xc0 | scalar >> 6 : 0x80 | (scalar >> 6 & 0x3f)),
@@ -1397,6 +1400,22 @@ bool Md5Digest::update(std::string_view bytes) {
     return !impl_->finished && impl_->hash.update(reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size());
 }
 std::string Md5Digest::finish() {
+    if (impl_->finished) return {};
+    impl_->finished = true;
+    std::string value;
+    return impl_->hash.finish(value) ? value : std::string();
+}
+
+struct Sha256Digest::Impl {
+    Hash hash{false};
+    bool finished = false;
+};
+Sha256Digest::Sha256Digest() : impl_(std::make_unique<Impl>()) {}
+Sha256Digest::~Sha256Digest() = default;
+bool Sha256Digest::update(std::string_view bytes) {
+    return !impl_->finished && impl_->hash.update(reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size());
+}
+std::string Sha256Digest::finish() {
     if (impl_->finished) return {};
     impl_->finished = true;
     std::string value;

@@ -8,6 +8,7 @@
  */
 
 #include "pico_page/platform.h"
+#include "pico_page/released_tap.h"
 #include "pico_page/power_key.h"
 #include "pico_page/changed_pixels_waveform.h"
 #include "esp_attr.h"
@@ -85,7 +86,8 @@ sc7a20h_handle_t accelerometer = nullptr;
 Battery battery_state{};
 // Touch and key events from the sampler task, oldest first.
 QueueHandle_t touch_events = nullptr;
-// Held by the sampler for each controller read and by sleep() around mode changes.
+TouchMoves touch_moves;
+// Serializes controller reads, contact publication/reception and sleep mode changes.
 SemaphoreHandle_t touch_lock = nullptr;
 // Asks the sampler to cancel the contact in progress and ignore input until release.
 std::atomic<bool> suppress_touch{true};
@@ -343,18 +345,21 @@ EventKind hit_test(int x, int y) {
  */
 void sample_touch(void*) {
     Event active{};
+    bool move_pending = false;
     bool suppressed = true;
     bool failing = false;
     bool interrupt_seen = false;
     int fast = settle_samples;
-    const auto emit = [&](EventPhase phase, std::int64_t now) {
+    const auto emit = [&](EventPhase phase, std::int64_t now) -> bool {
         Event event = active;
         event.phase = phase;
         event.time_us = now;
-        if (xQueueSend(touch_events, &event, 0) == pdTRUE) return;
+        if (phase == EventPhase::Move && !touch_moves.publish(event)) return touch_moves.pending_for(event.sequence);
+        if (xQueueSend(touch_events, &event, 0) == pdTRUE) return true;
         // Discard the incomplete backlog before publishing the recovery boundary. This task
         // is the only producer; the consumer can only free space after the reset.
         xQueueReset(touch_events);
+        touch_moves.clear();
         const Event reset{EventKind::InputReset, EventPhase::Cancel, event.sequence, 0, 0, now};
         const auto sent = xQueueSend(touch_events, &reset, 0);
         configASSERT(sent == pdTRUE);
@@ -362,10 +367,12 @@ void sample_touch(void*) {
         suppressed = true;
         ESP_LOGW(tag, "Input queue overflow: count=%lu; contacts cancelled",
                  static_cast<unsigned long>(input_overflows.fetch_add(1, std::memory_order_relaxed) + 1));
+        return false;
     };
     const auto cancel = [&](std::int64_t now) {
         if (active.kind != EventKind::None) emit(EventPhase::Cancel, now);
         active = {};
+        move_pending = false;
         suppressed = true;
     };
     for (;;) {
@@ -414,16 +421,21 @@ void sample_touch(void*) {
                     continue;
                 }
                 active = {kind, EventPhase::Begin, ++sequence, sample.x, sample.y, now};
+                move_pending = false;
                 emit(EventPhase::Begin, now);
             } else if (hit_test(sample.x, sample.y) != active.kind) {
                 cancel(now);
             } else {
+                const bool moved = active.x != sample.x || active.y != sample.y;
                 active.x = sample.x;
                 active.y = sample.y;
                 active.min_x = std::min<int>(active.min_x, sample.x);
                 active.min_y = std::min<int>(active.min_y, sample.y);
                 active.max_x = std::max<int>(active.max_x, sample.x);
                 active.max_y = std::max<int>(active.max_y, sample.y);
+                move_pending = move_pending || moved;
+                // A prior contact may still own the coalesced slot; retry even after the finger stops.
+                if (move_pending && active.kind == EventKind::Touch) move_pending = !emit(EventPhase::Move, now);
             }
         } else if (active.kind != EventKind::None) {
             emit(EventPhase::End, now);
@@ -801,7 +813,11 @@ bool poll(Event& event, std::string& error) {
             return true;
         }
     }
-    xQueueReceive(touch_events, &event, 0);
+    // A controller read must not make the application wait for its I/O timeout.
+    if (xSemaphoreTake(touch_lock, 0) == pdTRUE) {
+        if (xQueueReceive(touch_events, &event, 0) == pdTRUE) touch_moves.receive(event);
+        xSemaphoreGive(touch_lock);
+    }
     return true;
 }
 
@@ -847,6 +863,7 @@ bool sleep(std::string& error, bool& entered_sleep) {
     // Contacts during preparation do not veto sleep and must not survive a cancelled handoff.
     suppress_touch = true;
     xQueueReset(touch_events);
+    touch_moves.clear();
     auto result = cst836u_set_mode(touch, CST836U_MODE_DEEPSLEEP);
     if (result != ESP_OK) {
         xSemaphoreGive(touch_lock);
@@ -913,6 +930,7 @@ bool sleep(std::string& error, bool& entered_sleep) {
     if (entered_sleep) {
         suppress_touch = true;
         xQueueReset(touch_events);
+        touch_moves.clear();
     }
     xSemaphoreGive(touch_lock);
     suppress_power = entered_sleep;

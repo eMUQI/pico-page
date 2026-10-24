@@ -17,7 +17,7 @@ inline constexpr int height = 1216;
 inline constexpr std::size_t framebuffer_bytes = width * height / 2;
 
 enum class EventKind { None, K1, K2, K3, Touch, Power, SdRemoved, InputReset, PowerLong };
-enum class EventPhase { Begin, End, Cancel };
+enum class EventPhase { Begin, End, Cancel, Move };
 
 struct Event {
     EventKind kind = EventKind::None;

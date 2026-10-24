@@ -44,7 +44,9 @@ enum class View {
     LockScreens,
     LockScreenPreview,
     About,
-    Update
+    Update,
+    Dictionary,
+    DictionarySettings
 };
 enum class PageEffect { Off, Ripple };
 enum class PowerAction { None, Shutdown, Restart };
@@ -139,13 +141,16 @@ struct AppInput {
     /**
      * The contact began before the previous frame finished, so it was aimed at the earlier
      * screen. Only a page turn that follows a page turn is honoured; anything else is ignored.
+     * For continuous Move/Cancel, defers drawing while queued input or a system handoff is pending.
      */
     bool queued = false;
-    /** The touch was held before release. Book rows and reading images have long-press actions. */
+    /** The long-press threshold elapsed; continuous text contacts remain owned until release. */
     bool long_press = false;
     struct TouchBounds { int min_x, min_y, max_x, max_y; };
     /** Sampled contact extent, including press and release; omitted for synthetic point taps. */
     std::optional<TouchBounds> touch_bounds = std::nullopt;
+    /** Retains one contact through Begin/Move/End/Cancel for text selection. */
+    bool continuous = false;
 };
 
 /** Retained payload capacities; allocator bookkeeping and hash nodes are excluded. */
@@ -182,6 +187,8 @@ class ReaderApp {
     void input(const AppInput &event);
     /** True when a held touch can open an image or a library book's details at this screen point. */
     bool can_long_press_at(int x, int y) const;
+    /** True only for visible selection handles; no file or font access is performed. */
+    bool can_drag_selection_at(int x, int y) const;
     /** The canvas must remain immutable until complete_frame is called. */
     const graphics::Canvas &canvas() const;
     const std::optional<Frame> &pending_frame() const;

@@ -12,7 +12,7 @@ enum class Action { None, PreviousPage, NextPage, ForceRefresh, OpenTools, Close
                     CancelPreview, KeepLocal, Cancel, EndTransfer, Wake };
 Action MapInput(Context context, Input input);
 
-enum class Phase { Begin, End, Cancel };
+enum class Phase { Begin, End, Cancel, Move };
 struct InputEvent {
     std::uint64_t sequence;
     Phase phase;

@@ -26,7 +26,7 @@ int main() {
         input.begin();
         for (const auto kind : {EventKind::Touch, EventKind::K1, EventKind::K2, EventKind::K3, EventKind::InputReset}) {
             CHECK(SleepInput::ignores(kind));
-            for (const auto phase : {EventPhase::Begin, EventPhase::End, EventPhase::Cancel}) {
+            for (const auto phase : {EventPhase::Begin, EventPhase::End, EventPhase::Cancel, EventPhase::Move}) {
                 input.accept({kind, phase, 1, 300, 500, 1000});
                 CHECK(input.active() && !input.menu() && !input.power());
             }
@@ -214,6 +214,37 @@ int main() {
         CHECK(!taps.accept({EventKind::Touch, EventPhase::End, 21, 300, 520}, 11));
     }
     // IN03/IN04: a context change cannot reuse the input that opened it.
+    {
+        using namespace pico_page::platform;
+        TouchMoves moves;
+        Event notification{EventKind::Touch, EventPhase::Move, 21, 10, 20, 100};
+        CHECK(moves.publish(notification));
+        for (int x = 11; x < 1000; ++x)
+            CHECK(!moves.publish({EventKind::Touch, EventPhase::Move, 21, x, 20, x}));
+        CHECK(!moves.publish({EventKind::Touch, EventPhase::Move, 22, 42, 20, 1100}));
+        CHECK(!moves.pending_for(22));
+        moves.receive(notification);
+        CHECK(notification.sequence == 21 && notification.x == 999);
+        CHECK(moves.publish({EventKind::Touch, EventPhase::Move, 22, 42, 20, 1100}));
+        CHECK(moves.pending_for(22));
+        moves.clear();
+        CHECK(moves.publish({EventKind::Touch, EventPhase::Move, 23, 50, 20, 1200}));
+        ReleasedTap taps;
+        taps.accept({EventKind::Touch, EventPhase::Begin, 1, 100, 100, 1000}, 1);
+        taps.accept({EventKind::Touch, EventPhase::Move, 1, 110, 100, 2000}, 1);
+        CHECK(taps.pending() && taps.due(1000 + kLongPressUs, 1));
+        taps.accept({EventKind::Touch, EventPhase::Move, 1, 140, 100, 3000}, 1);
+        CHECK(taps.pending() && !taps.due(1000 + kLongPressUs, 1));
+        const auto released = taps.accept({EventKind::Touch, EventPhase::End, 1, 140, 100, 4000}, 1);
+        CHECK(released && released->x == 100 && !taps.pending());
+        InputRouter owner;
+        CHECK(owner.accept({1, Phase::Begin, Input::TouchCenter}));
+        CHECK(!owner.accept({1, Phase::Move, Input::TouchCenter}));
+        CHECK(!owner.accept({2, Phase::Begin, Input::K3}));
+        CHECK(!owner.accept({2, Phase::End, Input::K3}));
+        CHECK(!owner.accept({1, Phase::Cancel, Input::TouchCenter}));
+        CHECK(owner.accept({3, Phase::Begin, Input::K2}));
+    }
     InputRouter input;
     CHECK(input.route(Context::Reading, {1, Phase::Begin, Input::TouchCenter}) == Action::OpenTools);
     CHECK(input.route(Context::Tools, {1, Phase::End, Input::TouchCenter}) == Action::None);

@@ -85,6 +85,9 @@ struct RecentBook {
 /** A supported basename directly below LockScreens; hidden files and path components are refused. */
 bool valid_lock_screen_name(const std::string& name);
 
+/** StarDict metadata path relative to Dictionaries/, without traversal or hidden components. */
+bool valid_dictionary_id(const std::string& path);
+
 struct ReaderSettings {
     std::string font = "Fonts/LXGWWenKai-Regular.ttf";
     std::string font_weight = "regular";  // light, regular, medium or bold; unsupported heavier weights are synthesized.
@@ -100,6 +103,7 @@ struct ReaderSettings {
     std::string library_view = "list";
     std::string library_folders = "first";  // Global only: first or recent.
     std::string library_sort = "recent";  // Global only: recent, name or name_desc.
+    std::vector<std::string> dictionary_enabled;  // Global only; ordered metadata paths below Dictionaries/.
     bool wifi_enabled = true;  // Global only; applies to station and access-point sessions.
     int auto_sleep_minutes = 10;  // Global only; 0 disables idle sleep.
     std::string sleep_screen = "cover";  // Global only: cover, reading, simple or custom.
@@ -182,6 +186,8 @@ public:
     CacheWriter& operator=(const CacheWriter&) = delete;
     bool write(std::size_t offset, std::string_view bytes);
     bool read(std::size_t offset, char* bytes, std::size_t size);
+    /** Synchronizes staged bytes before caller-controlled readback; never publishes. */
+    bool sync();
     /** Truncates to size, syncs and publishes. A failed publication may leave a cache missing. */
     bool commit(std::size_t size);
 private:
@@ -327,6 +333,17 @@ public:
 
     /** Delete only PicoPage/cache children after users of those files stop. */
     StoreStatus clear_cache() const;
+    /** Lists metadata IDs below Dictionaries, excluding hidden and res folders.
+     * Bounds: 32 dictionaries, 256 directories, four nested directory levels and
+     * 8192 directory entries. Ok with complete=false retains a partial list.
+     * Cancellation/I/O failure clears names. Runs only on the storage worker.
+     */
+    StoreStatus dictionary_files(std::vector<std::string>& names, bool& complete,
+                                 const std::function<bool()>& stop = {}) const;
+    /** Resolves one metadata ID while rejecting unsafe source/companion paths.
+     * Does not keep files open; callers retain exclusive filesystem ownership.
+     */
+    StoreStatus dictionary_path(const std::string& id, std::string& path) const;
     /** Enumerates up to 256 regular PNG/JPEG files; refuses oversized or unsafe directories. */
     StoreStatus lock_screen_files(std::vector<std::string>& names, const std::function<bool()>& stop = {}) const;
     /** Reads at most 2 MiB, checking cancellation between bounded chunks. */
@@ -347,7 +364,8 @@ public:
      */
     StoreStatus open_cache(const std::string& name, std::size_t limit,
                            std::unique_ptr<CacheReader>& reader) const;
-    /** Creates a bounded random-access temporary cache for streamed image conversion. */
+    /** Creates a bounded random-access temporary cache. Limit is at most 2 MiB,
+     * or 64 MiB below dictionaries/ for streamed dictionary index expansion. */
     StoreStatus begin_cache(const std::string& name, std::size_t limit,
                             std::unique_ptr<CacheWriter>& writer) const;
 

@@ -1129,6 +1129,10 @@ bool CacheWriter::read(std::size_t offset, char* bytes, std::size_t size) {
     }
     return true;
 }
+bool CacheWriter::sync() {
+    if (failed_ || fd_ < 0 || fsync(fd_)) { failed_ = true; return false; }
+    return true;
+}
 bool CacheWriter::commit(std::size_t size) {
     struct stat info{};
     if (failed_ || fd_ < 0 || size > limit_ || fstat(fd_, &info) || info.st_size < 0 ||
@@ -1143,7 +1147,8 @@ StoreStatus FileStore::begin_cache(const std::string& name, std::size_t limit,
                                   std::unique_ptr<CacheWriter>& writer) const {
     writer.reset();
     const auto path = "PicoPage/cache/" + name, temporary = path + ".tmp";
-    if (!store_internal::relative_path(path) || limit > 2U * 1024 * 1024) return StoreStatus::Invalid;
+    const std::size_t maximum = name.rfind("dictionaries/", 0) == 0 ? 64U * 1024 * 1024 : 2U * 1024 * 1024;
+    if (!store_internal::relative_path(path) || limit > maximum) return StoreStatus::Invalid;
     if (!resource_parents(root_, path)) return StoreStatus::IoError;
     const auto safe = store_internal::safe_path(root_, temporary);
     if (safe != StoreStatus::Ok && safe != StoreStatus::Missing) return safe;
@@ -1324,6 +1329,75 @@ bool valid_lock_screen_name(const std::string& name) {
     for (auto& ch : ext) if (ch >= 'A' && ch <= 'Z') ch += 'a' - 'A';
     return ext == ".png" || ext == ".jpg" || ext == ".jpeg";
 }
+StoreStatus FileStore::dictionary_path(const std::string& id, std::string& path) const {
+    path.clear();
+    if (!valid_dictionary_id(id)) return StoreStatus::UnsafePath;
+    const auto relative = "Dictionaries/" + id;
+    auto safe = store_internal::safe_path(root_, relative);
+    if (safe != StoreStatus::Ok) return safe;
+    const bool packed = id.size() >= 7 && id.compare(id.size() - 7, 7, ".ifo.gz") == 0;
+    const auto base = relative.substr(0, relative.size() - (packed ? 7 : 4));
+    for (const auto* suffix : {".idx", ".idx.gz", ".dict", ".dict.dz", ".syn", ".syn.dz"}) {
+        const auto companion = base + suffix;
+        safe = store_internal::safe_path(root_, companion);
+        if (safe != StoreStatus::Ok && safe != StoreStatus::Missing) return safe;
+        if (safe == StoreStatus::Ok) {
+            struct stat info{};
+            if (inspect((root_ + '/' + companion).c_str(), &info)) return StoreStatus::IoError;
+            if (!S_ISREG(info.st_mode)) return StoreStatus::UnsafePath;
+        }
+    }
+    struct stat info{};
+    if (inspect((root_ + '/' + relative).c_str(), &info)) return StoreStatus::IoError;
+    if (!S_ISREG(info.st_mode)) return StoreStatus::UnsafePath;
+    path = root_ + '/' + relative;
+    return StoreStatus::Ok;
+}
+
+StoreStatus FileStore::dictionary_files(std::vector<std::string>& names, bool& complete,
+                                       const std::function<bool()>& stop) const {
+    names.clear(); complete = false;
+    const auto safe = store_internal::safe_path(root_, "Dictionaries");
+    if (safe != StoreStatus::Ok) return safe;
+    struct Directory { std::string name; unsigned depth; };
+    std::vector<Directory> pending{{"", 0}};
+    std::size_t directories = 1, entries = 0;
+    complete = true;
+    bool limit = false;
+    StoreStatus status = StoreStatus::Ok;
+    while (!pending.empty() && !limit && status == StoreStatus::Ok) {
+        auto current = std::move(pending.back()); pending.pop_back();
+        if (stop && stop()) { status = StoreStatus::IoError; break; }
+        const auto prefix = current.name.empty() ? std::string() : current.name + '/';
+        DIR* dir = opendir((root_ + "/Dictionaries/" + current.name).c_str());
+        if (!dir) { status = StoreStatus::IoError; break; }
+        for (;;) {
+            if (stop && stop()) { status = StoreStatus::IoError; break; }
+            errno = 0;
+            const auto* entry = readdir(dir);
+            if (!entry) { if (errno) status = StoreStatus::IoError; break; }
+            if (++entries > 8192) { limit = true; break; }
+            const std::string name = entry->d_name;
+            if (name.empty() || name.front() == '.' || name == "res") continue;
+            const auto id = prefix + name;
+            if (id.size() > 512 || !valid_dictionary_id(name + ".ifo")) continue;
+            struct stat info{};
+            if (inspect((root_ + "/Dictionaries/" + id).c_str(), &info)) { status = StoreStatus::IoError; break; }
+            if (S_ISDIR(info.st_mode)) {
+                if (current.depth == 4 || directories == 256) { complete = false; continue; }
+                pending.push_back({id, current.depth + 1}); ++directories;
+            } else if (S_ISREG(info.st_mode) && valid_dictionary_id(id)) {
+                if (names.size() == 32) { limit = true; break; }
+                names.push_back(id);
+            }
+        }
+        closedir(dir);
+    }
+    if (status != StoreStatus::Ok) { names.clear(); complete = false; }
+    else { complete = complete && !limit; std::sort(names.begin(), names.end()); }
+    return status;
+}
+
 StoreStatus FileStore::lock_screen_files(std::vector<std::string>& names, const std::function<bool()>& stop) const {
     names.clear();
     const auto safe = store_internal::safe_path(root_, "LockScreens");

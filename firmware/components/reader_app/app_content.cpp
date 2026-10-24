@@ -95,6 +95,7 @@ ReaderApp::Impl::Origin ReaderApp::Impl::origin_for(View source) const {
         ? Origin::Reading : Origin::Library;
     switch (source) {
     case View::Reading: case View::Tools: case View::Contents: case View::Sync: case View::Confirmation:
+    case View::Dictionary:
         return body_origin;
     case View::Library: case View::BookDetails: case View::BookManagement:
         return Origin::Library;
@@ -110,6 +111,8 @@ ReaderApp::Impl::Origin ReaderApp::Impl::origin_for(View source) const {
     case View::InputSettings: case View::SyncSettings: case View::TextEntry: case View::LockScreens:
     case View::About: case View::Update: case View::LockScreenPreview:
         return Origin::Settings;
+    case View::DictionarySettings:
+        return dictionary_settings_from_lookup ? body_origin : Origin::Settings;
     case View::Error: return error_origin;
     case View::Sleeping: return sleep_origin;
     case View::Loading: return loading_origin;
@@ -279,7 +282,11 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
     if (!foreground_job->started()) {
         if (!content_loading && !inline_image_pending) { foreground_job.reset(); return; }
         if (display.busy() || counting_job || save_job || cover_job || bookmark_job) return;
-        if (foreground_job->request.kind == ContentJob::Kind::Open && session.needs_save()) {
+        if ((foreground_job->request.kind == ContentJob::Kind::Open || ContentJob::dictionary_kind(foreground_job->request.kind)) && session.needs_save()) {
+            if (save_failed && ContentJob::dictionary_kind(foreground_job->request.kind)) {
+                foreground_job.reset(); content_loading = false; dictionary_notice = "进度尚未保存，请先关闭词典并重试保存。";
+                if (view == View::Dictionary) draw_dictionary(); else draw_dictionary_settings(); overlay(); return;
+            }
             if (save_failed) { foreground_job.reset(); content_loading = false; error(kSaveFailed); }
             else schedule_save();
             return;
@@ -288,6 +295,10 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
                              foreground_job->request.kind == ContentJob::Kind::MapUpload;
         if (mapping && std::chrono::steady_clock::now() < mapping_start_retry) return;
         if (!foreground_job->start()) {
+            if (ContentJob::dictionary_kind(foreground_job->request.kind)) {
+                foreground_job.reset(); content_loading = false; dictionary_notice = "词典任务无法启动，请稍后重试。";
+                if (view == View::Dictionary) draw_dictionary(); else draw_dictionary_settings(); overlay(); return;
+            }
             if (mapping) {
                 // Initialization or a full worker queue may recover on a later poll.
                 // Retries remain bounded and do not block input or repeat HTTP requests.
@@ -330,6 +341,7 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
     const auto& request = job->request;
     if ((!content_loading && !inline_image_pending) || request.generation != foreground_generation) return;
     if (request.progressive) { complete_inline_image(*job); return; }
+    if (ContentJob::dictionary_kind(request.kind)) { content_loading = false; finish_dictionary(*job); return; }
     if (request.kind == ContentJob::Kind::LockScreenList) {
         content_loading = false;
         lock_screens = std::move(job->result.lock_screens);

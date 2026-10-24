@@ -1,5 +1,6 @@
 #include "pico_page/store.h"
 
+#include <algorithm>
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -187,6 +188,44 @@ static void bookmark_tests(const fs::path& root, const FileStore& store) {
     assert(get(file) == kept);
     ReadingRecord position{other, revision, "device-a", 1, first.anchor};
     assert(store.save_progress(book, position).record && get(file) == kept);
+}
+
+static void dictionary_files_tests(const fs::path& root, const FileStore& store) {
+    std::vector<std::string> names;
+    bool complete = false;
+    std::string path;
+    const auto directory = root / "Dictionaries";
+    assert(store.dictionary_files(names, complete) == StoreStatus::Missing && names.empty() && !complete);
+    put(directory / "English/main.ifo", "metadata");
+    put(directory / "中文/词典.ifo.gz", "compressed metadata");
+    put(directory / "English/res/hidden.ifo", "resource");
+    put(directory / ".hidden/ignored.ifo", "hidden");
+    put(directory / "English/main.idx.oft", "ignored cache");
+    fs::create_directory_symlink(directory / "English", directory / "linked");
+    assert(store.dictionary_files(names, complete) == StoreStatus::Ok && complete);
+    assert((names == std::vector<std::string>{"English/main.ifo", "中文/词典.ifo.gz"}));
+    assert(store.dictionary_path(names[0], path) == StoreStatus::Ok && path == (directory / names[0]).string());
+    assert(store.dictionary_path("linked/main.ifo", path) == StoreStatus::UnsafePath && path.empty());
+    assert(store.dictionary_path("../main.ifo", path) == StoreStatus::UnsafePath);
+    assert(store.dictionary_path("missing.ifo", path) == StoreStatus::Missing);
+    fs::create_symlink(directory / "English/main.ifo", directory / "English/main.idx");
+    assert(store.dictionary_path("English/main.ifo", path) == StoreStatus::UnsafePath);
+    fs::remove(directory / "English/main.idx");
+    fs::create_directory(directory / "English/main.dict.dz");
+    assert(store.dictionary_path("English/main.ifo", path) == StoreStatus::UnsafePath);
+    fs::remove(directory / "English/main.dict.dz");
+    assert(store.dictionary_files(names, complete, [] { return true; }) == StoreStatus::IoError && names.empty() && !complete);
+    put(directory / "a/b/c/d/depth4.ifo", "metadata");
+    put(directory / "a/b/c/d/e/depth5.ifo", "metadata");
+    assert(store.dictionary_files(names, complete) == StoreStatus::Ok && !complete && names.size() == 3);
+    assert(std::find(names.begin(), names.end(), "a/b/c/d/depth4.ifo") != names.end());
+    fs::remove_all(directory);
+    for (unsigned i = 0; i < 33; ++i) put(directory / (std::to_string(i) + ".ifo"), "metadata");
+    assert(store.dictionary_files(names, complete) == StoreStatus::Ok && !complete && names.size() == 32);
+    fs::remove_all(directory);
+    for (unsigned i = 0; i < 257; ++i) fs::create_directories(directory / std::to_string(i));
+    assert(store.dictionary_files(names, complete) == StoreStatus::Ok && !complete && names.empty());
+    fs::remove_all(directory);
 }
 
 int main() {
@@ -431,6 +470,43 @@ int main() {
     config = store.load_settings();
     assert(config.settings.font_size_px == 38 && config.diagnostics[0].field == "reader.font_size_px");
     assert(config.settings.auto_sleep_minutes == 10);
+    const std::string dictionary_text =
+        "schema_version=1\n# dictionary preferences\n[dictionary]\nenabled = [\n"
+        "  'English/main.ifo', # first choice\n  \"中文/词典.ifo.gz\",\n] # preserve order note\n";
+    put(global, dictionary_text);
+    snapshot = store.settings_snapshot();
+    assert(snapshot.config.diagnostics.empty());
+    assert((snapshot.global_settings.dictionary_enabled == std::vector<std::string>{"English/main.ifo", "中文/词典.ifo.gz"}));
+    preview = snapshot.global_settings;
+    std::reverse(preview.dictionary_enabled.begin(), preview.dictionary_enabled.end());
+    assert(store.apply_settings(snapshot, preview, false, error) == StoreStatus::Ok);
+    assert(store.load_settings().settings.dictionary_enabled == preview.dictionary_enabled);
+    assert(get(global).find("# first choice") != std::string::npos && get(global).find("# preserve order note") != std::string::npos);
+    assert(get(global).find("# dictionary preferences") != std::string::npos);
+    assert(store.apply_settings(snapshot, preview, false, error) == StoreStatus::ExternalChange);
+    snapshot = store.settings_snapshot(book); preview = snapshot.config.settings;
+    preview.dictionary_enabled.clear();
+    assert(store.apply_settings(snapshot, preview, true, error) == StoreStatus::Invalid);
+    snapshot = store.settings_snapshot(); preview = snapshot.global_settings;
+    preview.dictionary_enabled.clear();
+    assert(store.apply_settings(snapshot, preview, false, error) == StoreStatus::Ok);
+    assert(store.load_settings().settings.dictionary_enabled.empty());
+    for (const auto* invalid : {"../outside.ifo", "/outside.ifo", "English/../outside.ifo", "English/.hidden.ifo", "English/word.idx"}) {
+        snapshot = store.settings_snapshot(); preview = snapshot.global_settings;
+        preview.dictionary_enabled = {invalid};
+        assert(store.apply_settings(snapshot, preview, false, error) == StoreStatus::Invalid);
+        assert(store.load_settings().settings.dictionary_enabled.empty());
+    }
+    snapshot = store.settings_snapshot(); preview = snapshot.global_settings;
+    preview.dictionary_enabled = {"English/main.ifo", "English/main.ifo"};
+    assert(store.apply_settings(snapshot, preview, false, error) == StoreStatus::Invalid);
+    preview.dictionary_enabled = {"Missing/main.ifo"};
+    fs::create_directory(global.string() + ".tmp");
+    assert(store.apply_settings(snapshot, preview, false, error) == StoreStatus::IoError);
+    assert(store.load_settings().settings.dictionary_enabled.empty());
+    fs::remove(global.string() + ".tmp");
+    assert(store.apply_settings(snapshot, preview, false, error) == StoreStatus::Ok);
+    assert(store.load_settings().settings.dictionary_enabled == preview.dictionary_enabled);
     const std::string wifi_text = "schema_version=1\n# keep network comments\n[network]\nwifi_enabled=false # user switch\n";
     put(global, wifi_text);
     assert(!store.load_settings(book).settings.wifi_enabled);
@@ -705,6 +781,7 @@ int main() {
     assert(store.book_snapshot("PicoPage/config.epub", book_state) == StoreStatus::UnsafePath);
 
     bookmark_tests(root, store);
+    dictionary_files_tests(root, store);
 
     fs::remove_all(root);
     std::cout << "store: committed recovery, configuration, cache and bookmark boundaries passed\n";

@@ -3,12 +3,25 @@
 
 #include "tomlc17.h"
 
+#include <algorithm>
 #include <cmath>
 #include <charconv>
 #include <cstring>
 #include <initializer_list>
 
 namespace pico_page {
+bool valid_dictionary_id(const std::string& path) {
+    if (path.empty() || path.size() > 512 || !store_internal::relative_path(path) ||
+        !((path.size() > 4 && path.compare(path.size() - 4, 4, ".ifo") == 0) ||
+          (path.size() > 7 && path.compare(path.size() - 7, 7, ".ifo.gz") == 0))) return false;
+    bool component_start = true;
+    for (unsigned char c : path) {
+        if (c < 32 || c == 127 || c == '\\' || c == ':' || (component_start && c == '.')) return false;
+        component_start = c == '/';
+    }
+    return true;
+}
+
 namespace store_internal {
 void configure_toml() {
     static const bool configured = [] {
@@ -64,10 +77,11 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
         return false;
     }
     if (!(book ? allowed_fields(table, {"schema_version", "reader", "display"}, "", diagnostic)
-               : allowed_fields(table, {"schema_version", "reader", "display", "library", "power", "network"}, "", diagnostic)) ||
+               : allowed_fields(table, {"schema_version", "reader", "display", "library", "power", "network", "dictionary"}, "", diagnostic)) ||
         !allowed_fields(toml_get(table, "reader"), {"font", "font_weight", "font_size_px", "line_height", "margin_x_px", "paragraph_gap_lines", "indent_chars"}, "reader", diagnostic) ||
         !allowed_fields(toml_get(table, "display"), {"refresh_preset", "balanced_full_refresh_pages", "fast_full_refresh_pages"}, "display", diagnostic) ||
         !allowed_fields(toml_get(table, "library"), {"roots", "view", "sort", "folders"}, "library", diagnostic) ||
+        !allowed_fields(toml_get(table, "dictionary"), {"enabled"}, "dictionary", diagnostic) ||
         !allowed_fields(toml_get(table, "network"), {"wifi_enabled"}, "network", diagnostic) ||
         !allowed_fields(toml_get(table, "power"), {"auto_sleep_minutes", "sleep_screen", "sleep_image", "sleep_overlay"}, "power", diagnostic)) return false;
 
@@ -181,6 +195,20 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
         if (!string_value(value, settings.library_sort) ||
             (settings.library_sort != "recent" && settings.library_sort != "name" && settings.library_sort != "name_desc")) return false;
     }
+    value = toml_seek(table, "dictionary.enabled");
+    if (value.type != TOML_UNKNOWN) {
+        diagnostic.field = "dictionary.enabled";
+        diagnostic.detail = "expected up to 32 unique metadata paths relative to Dictionaries";
+        if (value.type != TOML_ARRAY || value.u.arr.size > 32) return false;
+        std::vector<std::string> enabled;
+        for (int index = 0; index < value.u.arr.size; ++index) {
+            std::string path;
+            if (!string_value(value.u.arr.elem[index], path) || !valid_dictionary_id(path) ||
+                std::find(enabled.begin(), enabled.end(), path) != enabled.end()) return false;
+            enabled.push_back(std::move(path));
+        }
+        settings.dictionary_enabled = std::move(enabled);
+    }
     value = toml_seek(table, "library.roots");
     if (value.type != TOML_UNKNOWN) {
         diagnostic.field = "library.roots";
@@ -259,6 +287,12 @@ SettingValues setting_values(const ReaderSettings& values, bool global = false) 
             {"display.balanced_full_refresh_pages", std::to_string(values.balanced_full_refresh_pages)},
             {"display.fast_full_refresh_pages", std::to_string(values.fast_full_refresh_pages)}};
     if (global) {
+        std::string enabled = "[";
+        for (const auto& path : values.dictionary_enabled) {
+            if (enabled.size() > 1) enabled += ", ";
+            enabled += quoted(path);
+        }
+        fields.emplace_back("dictionary.enabled", enabled + "]");
         fields.emplace_back("network.wifi_enabled", values.wifi_enabled ? "true" : "false");
         fields.emplace_back("library.view", quoted(values.library_view));
         fields.emplace_back("library.sort", quoted(values.library_sort));
@@ -337,8 +371,34 @@ bool patch_value(std::string& source, const std::string& field,
         prefix = trim(prefix);
         if (prefix != key && prefix != field && prefix != quoted(key) && prefix != "'" + key + "'") return false;
         std::size_t end = begin;
+        std::string array_comments;
         const char quote = source[begin];
-        if (quote == '\'' || quote == '"') {
+        if (value.type == TOML_ARRAY) {
+            if (quote != '[') return false;
+            char delimiter = 0;
+            bool escaped = false;
+            for (end = begin + 1; end < source.size(); ++end) {
+                const char c = source[end];
+                if (delimiter) {
+                    if (!escaped && c == delimiter) delimiter = 0;
+                    if (delimiter == '"' && !escaped && c == '\\') escaped = true;
+                    else escaped = false;
+                } else if (c == '\'' || c == '"') {
+                    if (source.compare(end, 3, std::string(3, c)) == 0) return false;
+                    delimiter = c;
+                } else if (c == '#') {
+                    const auto newline = source.find('\n', end);
+                    if (newline == std::string::npos) return false;
+                    array_comments += source.substr(end, newline - end) + "\n";
+                    end = newline;
+                } else if (c == '[') return false;
+                else if (c == ']') break;
+            }
+            if (end == source.size()) return false;
+            ++end;
+            line_end = source.find('\n', end);
+            if (line_end == std::string::npos) line_end = source.size();
+        } else if (quote == '\'' || quote == '"') {
             if (source.compare(begin, 3, std::string(3, quote)) == 0) return false;
             bool escaped = false;
             for (end = begin + 1; end < line_end; ++end) {
@@ -353,7 +413,12 @@ bool patch_value(std::string& source, const std::string& field,
         }
         const auto suffix = trim(source.substr(end, line_end - end));
         if (!suffix.empty() && suffix.front() != '#') return false;
-        if (replacement) source.replace(begin, end - begin, *replacement);
+        if (replacement) {
+            auto next = *replacement;
+            if (!array_comments.empty() && !next.empty() && next.back() == ']')
+                next.insert(next.size() - 1, "\n" + array_comments);
+            source.replace(begin, end - begin, next);
+        }
         else if (suffix.empty()) source.erase(line, line_end - line + (line_end < source.size() ? 1 : 0));
         else {
             const auto indentation = source.find_first_not_of(" \t", line) - line;
@@ -419,10 +484,11 @@ StoreStatus save_settings(const std::string& root, const SettingsSnapshot& snaps
         (book_only && (values.library_view != effective.library_view ||
                        values.library_sort != effective.library_sort ||
                        values.library_folders != effective.library_folders ||
+                       values.dictionary_enabled != effective.dictionary_enabled ||
                        values.wifi_enabled != effective.wifi_enabled ||
                        values.auto_sleep_minutes != effective.auto_sleep_minutes || values.sleep_screen != effective.sleep_screen || values.sleep_image != effective.sleep_image ||
                        values.sleep_overlay != effective.sleep_overlay))) {
-        error = "library.roots is read-only; library.view, library.sort, library.folders, power and network fields are global only";
+        error = "library.roots is read-only; library.view, library.sort, library.folders, power, network and dictionary fields are global only";
         return StoreStatus::Invalid;
     }
     const auto desired = setting_values(values, !book_only);

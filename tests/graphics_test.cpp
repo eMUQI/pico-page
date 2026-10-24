@@ -281,6 +281,7 @@ int main(int argc, char** argv) {
                 while (next < page.end && (text[next] == U'\n' || text[next] == U'\r')) ++next;
                 assert(glyph.index == next && glyph.scalar == text[next]);
                 assert(glyph.x >= spec.left);
+                assert(glyph.advance == font.advance(glyph.scalar));
                 assert(glyph.x + font.advance(glyph.scalar) <= spec.left + spec.width);
                 ++next;
                 ++drawn;
@@ -295,6 +296,40 @@ int main(int argc, char** argv) {
         assert(repaginated.start == 113 && repaginated.glyphs.front().index == 113);
         const auto indented = layout_page(font, U"　　中文段落", 0, spec);
         assert(indented.error.empty() && indented.glyphs.front().x == spec.left);
+    }
+    {
+        LayoutSpec spec;
+        spec.indent_chars = 0; spec.width = 110; spec.height = 300;
+        const auto page = layout_page(font, U"甲乙丙丁戊己庚辛", 0, spec);
+        assert(page.error.empty() && page.lines.size() >= 2);
+        const auto cached = font.cached_advances();
+        for (const auto& glyph : page.glyphs) {
+            const auto hit = text_hit(page, glyph.x + glyph.advance / 2, glyph.baseline);
+            assert(hit && *hit == glyph.index);
+        }
+        assert(!text_hit(page, spec.left - 1, page.lines.front().baseline));
+        assert(!text_hit(page, spec.left, spec.top - 1));
+        assert(!text_hit(page, spec.left, page.lines.back().bottom));
+        assert(!text_hit(page, spec.left + spec.width + 1, page.lines.front().baseline));
+        assert(text_hit(page, spec.left - 20, page.lines[1].baseline, true) == page.lines[1].start);
+        assert(text_hit(page, spec.left, spec.top - 20, true) == page.start);
+        assert(text_hit(page, 680, page.lines.back().bottom + 20, true) == page.glyphs.back().index);
+        auto illustrated = page;
+        illustrated.images.push_back({0, spec.left, spec.top, 100, 100, "image.png"});
+        assert(!text_hit(illustrated, spec.left + 10, spec.top + 10, true));
+        const auto boxes = selection_boxes(page, 1, page.lines[1].end);
+        assert(boxes.size() == 2 && boxes[0].x == page.glyphs[1].x);
+        assert(boxes[1].x == spec.left && boxes[1].y == page.lines[1].top);
+        assert(selection_boxes(page, 5, 3).empty());
+        assert(selection_boxes(page, page.end, page.end + 1).empty());
+        assert(font.cached_advances() == cached);
+        const auto spaced = layout_page(font, U"甲　乙 \ufffc\u00ad", 0, LayoutSpec{});
+        for (const auto& glyph : spaced.glyphs)
+            if (glyph.scalar == U' ' || glyph.scalar == U'　' || glyph.scalar == U'\ufffc')
+                assert(!text_hit(spaced, glyph.x + glyph.advance / 2, glyph.baseline));
+        auto failed = page; failed.error = "Layout cancelled";
+        assert(!text_hit(failed, page.glyphs[0].x, page.lines[0].baseline));
+        assert(selection_boxes(failed, 0, page.end).empty());
     }
     {
         // Every module lands where the encoder put it: 264 px holds version 2 at 8 px a module.

@@ -1,5 +1,7 @@
 #pragma once
 #include "pico_page/document.h"
+#include "pico_page/dictionary_selection.h"
+#include "pico_page/dictionary_text.h"
 #include "pico_page/diagnostics.h"
 #include "page_cache.h"
 #include "content_cache.h"
@@ -64,10 +66,27 @@ struct PaginationSession {
     bool opened = false, font_opened = false, loaded = false;
 };
 
+/** Mount-scoped verification state. Only its currently running content job may
+ * access it. Reset after USB, remount or rescan, once the old job has finished.
+ * No dictionary files remain open between jobs.
+ */
+struct DictionarySession {
+    std::vector<std::pair<std::string, dictionary::Verification>> verified;
+};
+struct DictionaryItem {
+    std::string id;
+    dictionary::Info info;
+    dictionary::Result status;
+};
+
 /** A single job owns its parser and font, or borrows them from a PaginationSession. Only done() permits access to its result. */
 class ContentJob {
 public:
-    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks, LockScreenList, LockScreen, ContentCacheWrite, LockScreenPreview };
+    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks, LockScreenList, LockScreen, ContentCacheWrite, LockScreenPreview, DictionaryList, DictionaryPrepare, DictionaryLookup, DictionaryRead, DictionaryPage };
+    static bool dictionary_kind(Kind kind) {
+        return kind == Kind::DictionaryList || kind == Kind::DictionaryPrepare ||
+               kind == Kind::DictionaryLookup || kind == Kind::DictionaryRead || kind == Kind::DictionaryPage;
+    }
     enum class Target { Start, End, Before, Anchor, Fragment };
     enum class StartFailure { None, InternalMemory, TaskCreate };
     /**
@@ -114,6 +133,18 @@ public:
         std::uint64_t bookmark_next = 1;
         /** Pagination only. Without a session the job prepares and discards its own. */
         std::shared_ptr<PaginationSession> session;
+        std::shared_ptr<DictionarySession> dictionary_session;
+        /** One dictionary per job: relative_path identifies its metadata below Dictionaries. */
+        std::vector<dictionary::Candidate> dictionary_candidates;
+        std::uint32_t dictionary_ordinal = 0;
+        std::shared_ptr<const std::vector<dictionary::Field>> dictionary_definition;
+        dictionary::TextCursor dictionary_cursor;
+        std::uint32_t dictionary_seek_pages = 0;
+        bool dictionary_replay = false;
+        bool dictionary_reflow = false, dictionary_full_layout = false;
+        // Split the page before this scalar anchor so both layouts resume at the same text.
+        std::size_t dictionary_layout_anchor = 0;
+        bool dictionary_entry_lookup = false;
         bool save_last_book = false, cover_crop = false, preview = false;
         /** LockScreen: prepare the disk cache without retaining a result canvas. */
         bool lock_screen_prepare = false;
@@ -139,6 +170,18 @@ public:
         bool part_done = false, last_part = false;
         std::string error, font_identity, xpointer;
         std::vector<std::string> lock_screens;
+        std::vector<DictionaryItem> dictionaries;
+        dictionary::Result dictionary_status;
+        dictionary::Info dictionary_info;
+        std::optional<dictionary::Candidate> dictionary_match;
+        std::vector<dictionary::Entry> dictionary_entries;
+        std::vector<dictionary::Field> dictionary_fields;
+        bool dictionary_complete = false, dictionary_more = false, dictionary_reused = false;
+        bool dictionary_missing_glyphs = false;
+        graphics::Page dictionary_page;
+        dictionary::TextCursor dictionary_next;
+        dictionary::TextCursor dictionary_current;
+        std::uint32_t dictionary_page_number = 0;
         std::string lock_screen;
         Anchor mapped_anchor;
         sync::PartPosition mapped_place;  // Valid with mapped_anchor after a successful MapDownload.
@@ -193,7 +236,7 @@ public:
 #endif
     bool started() const { return started_; }
     void cancel() { cancelled_.store(true, std::memory_order_relaxed); }
-    /** Requests a cooperative Chapter or Pagination pause; true acknowledges a checkpoint. Cancellation releases it. */
+    /** Requests a cooperative parsing/lookup pause; true acknowledges a checkpoint. Cancellation releases it. */
     bool pause() {
         auto generation = pause_generation_.load(std::memory_order_relaxed);
         if (!(generation & 1U)) {
@@ -218,6 +261,7 @@ private:
     diagnostics::Token measurement_{};
 #endif
     void render_image();
+    void read_dictionary();
     void prepare_lock_screen();
     void open_book();
     void prepare_cover();
