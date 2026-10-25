@@ -564,6 +564,88 @@ static void help_test(const fs::path& root, const fs::path& fixtures, bool async
     if (!with_book) assert(!fs::exists(root));
 }
 
+static void content_font_test(const fs::path& root, const fs::path& fixtures, const fs::path& font, bool async) {
+    const std::string folder = "歡龘abc", book = "Books/" + folder + "/book.epub";
+    std::vector<std::uint8_t> header;
+    const auto crop = [](const graphics::Canvas& canvas, int x, int y, int width, int height) {
+        std::vector<std::uint8_t> pixels;
+        for (int row = y; row < y + height; ++row)
+            for (int column = x; column < x + width; ++column) pixels.push_back(canvas.pixel(column, row));
+        return pixels;
+    };
+    for (const std::string mode : {"valid", "missing", "corrupt"}) {
+        const auto card = root / mode;
+        fs::create_directories(card / "Books" / folder); fs::create_directories(card / "Fonts");
+        fs::copy_file(fixtures / "valid.epub", card / book);
+        fs::copy_file(fixtures / "valid.epub", card / "Books" / folder / "global.epub");
+        if (mode == "valid") fs::copy_file(font, card / "Fonts/Library.ttf");
+        if (mode == "corrupt") write(card / "Fonts/Library.ttf", "invalid font");
+        fs::copy_file(fs::path(__FILE__).parent_path().parent_path() /
+                      "firmware/components/reader_graphics/fonts/PicoPageFallback.otf", card / "Fonts/Book.otf");
+        write(card / "PicoPage/settings.toml", "schema_version=1\n[reader]\nfont='Fonts/Library.ttf'\n[library]\nview='list'\n");
+        FileStore store(card.string()); std::string error;
+        const auto snapshot = store.settings_snapshot(book);
+        auto settings = snapshot.config.settings; settings.font = "Fonts/Book.otf";
+        assert(store.apply_settings(snapshot, settings, true, error) == StoreStatus::Ok);
+        const auto config = read(card / "PicoPage/settings.toml");
+        ReaderApp app(card.string(), "content-font", true, async); Driver d{app};
+        assert(app.initialize()); d.present();
+        graphics::Font expected_font;
+        const auto caches = app.cache_usage();
+        assert(caches.library_glyph_bytes <= 128U * 1024 && caches.library_advances <= 1024);
+        assert(!caches.library_glyph_bytes);
+        if (mode == "valid") assert(caches.body_glyph_bytes > 0);
+        assert(mode == "valid" ? expected_font.open(font.string()) : expected_font.open_fallback());
+        assert(expected_font.set_pixel_size(28));
+        graphics::Canvas expected;
+        int x = 36;
+        for (const auto c : graphics::decode_utf8(folder)) {
+            assert(expected_font.draw(expected, c, x, 226 + expected_font.metrics().ascender));
+            x += expected_font.advance(c);
+        }
+        const auto label = crop(expected, 36, 220, 300, 65);
+        assert(crop(app.canvas(), 36, 220, 300, 65) == label);
+        const auto current_header = crop(app.canvas(), 0, 0, 684, 104);
+        if (header.empty()) header = current_header;
+        else assert(current_header == header);
+        d.refresh();
+        opened(app, book); d.present();
+        assert(!app.cache_usage().library_glyph_bytes);
+        const auto body = crop(app.canvas(), 0, 104, 684, 900);
+        const auto saved = app.saved_record();
+        d.tap(342, 500); d.present(); d.tap(68, 1150); d.present();
+        assert(app.view() == View::Contents);
+        graphics::Font book_font; assert(book_font.open_fallback() && book_font.set_pixel_size(28));
+        EpubDocument document; assert(document.open((card / book).string(), error));
+        expected.clear(1);
+        const auto metrics = book_font.metrics();
+        const int baseline = 522 + (92 - metrics.ascender - metrics.descender) / 2 + metrics.ascender;
+        x = 36;
+        for (const auto c : graphics::decode_utf8(document.toc().front().label)) {
+            assert(book_font.draw(expected, c, x, baseline, 15, true)); x += book_font.advance(c);
+        }
+        assert(crop(app.canvas(), 36, 522, 300, 90) == crop(expected, 36, 522, 300, 90));
+        d.close(); d.present();
+        assert(app.view() == View::Reading && crop(app.canvas(), 0, 104, 684, 900) == body);
+        assert(app.saved_record() == saved);
+        d.tap(342, 500); d.present(); d.tap(50, 50); d.present();
+        assert(app.view() == View::Library);
+        assert(crop(app.canvas(), 36, 470, 300, 65) == label);
+        assert((app.cache_usage().library_glyph_bytes > 0) == (mode == "valid"));
+        assert(read(card / "PicoPage/settings.toml") == config);
+        if (mode == "valid") {
+            opened(app, "Books/" + folder + "/global.epub"); d.present();
+            assert(!app.cache_usage().library_glyph_bytes);
+            d.tap(342, 500); d.present(); d.tap(50, 50); d.present();
+            assert(sleep_frame(app)); d.present(); app.wake(); d.present();
+            assert(app.view() == View::Library && crop(app.canvas(), 36, 470, 300, 65) == label);
+        }
+        assert(app.prepare_usb_transfer());
+        const auto released = app.cache_usage();
+        assert(!released.library_glyph_bytes && !released.library_glyphs && !released.library_advances);
+    }
+}
+
 static void font_picker_test(const fs::path& root, const fs::path& fixtures, const fs::path& font, bool async) {
     fs::create_directories(root / "Books"); fs::create_directories(root / "Fonts");
     fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
@@ -3060,6 +3142,8 @@ int main(int argc, char** argv) {
 
     layout_review_test(card / "LayoutSync", fixtures, argv[2], false);
     layout_review_test(card / "LayoutAsync", fixtures, argv[2], true);
+    content_font_test(card / "ContentFontSync", fixtures, argv[2], false);
+    content_font_test(card / "ContentFontAsync", fixtures, argv[2], true);
     font_picker_test(card / "FontPickerSync", fixtures, argv[2], false);
     font_picker_test(card / "FontPickerAsync", fixtures, argv[2], true);
     font_picker_image_test(card / "FontPickerImage", fixtures, argv[2]);
@@ -4690,13 +4774,14 @@ int main(int argc, char** argv) {
         driver.tap(342, 500); driver.present(); driver.tap(68, 1150); driver.present();
         graphics::Font font; assert(font.open_fallback() && font.set_pixel_size(28));
         const auto metrics = font.metrics();
-        const int title_height = metrics.ascender + metrics.descender + 36;
+        const int line_height = std::max(36, metrics.ascender + metrics.descender);
+        const int title_height = metrics.ascender + metrics.descender + line_height;
         const int row_height = std::max(92, title_height + 28);
         graphics::Canvas expected;
         const auto check_title = [&](int top, const std::u32string& first, const std::u32string& second) {
             expected.clear();
             const int baseline = top + (row_height - title_height) / 2 + metrics.ascender;
-            for (const auto& line : {std::pair{first, baseline}, std::pair{second, baseline + 36}}) {
+            for (const auto& line : {std::pair{first, baseline}, std::pair{second, baseline + line_height}}) {
                 int x = 36;
                 for (const auto scalar : line.first) {
                     assert(font.draw(expected, scalar, x, line.second));

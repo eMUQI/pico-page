@@ -56,6 +56,7 @@ void ReaderApp::Impl::apply_typography() {
         effective.indent_chars != settings.indent_chars;
     settings = effective;
     if (!book_scope) {
+        load_library_font(store.load_settings().settings.font);
         message = layout_changed ? "阅读默认已保存，当前书已应用" : "阅读默认已保存，本书排版未变";
         if (!layout_changed) {
             load_fonts();
@@ -96,6 +97,7 @@ void ReaderApp::Impl::save_refresh(const ReaderSettings &values) {
 ReaderApp::ReaderApp(std::string root, std::string writer, bool controlled_storage, bool async_content)
     : impl_(std::make_unique<Impl>(std::move(root), std::move(writer))) { impl_->controlled_storage = controlled_storage; impl_->async_content = async_content; }
 void ReaderApp::invalidate_identity_cache() {
+    impl_->library_font_reload = true;
     impl_->drain_save(); impl_->abandon_content(); impl_->foreground_job.reset(); impl_->stop_covers();
     impl_->clear_prefetch(); impl_->stop_counting_job(); impl_->identities.clear();
     impl_->font_identity.clear(); impl_->font_scan.reset(); impl_->effective_font.clear();
@@ -288,6 +290,8 @@ bool ReaderApp::prepare_usb_transfer() {
     impl_->cancel_sync();
     impl_->save_pages();
     if (!impl_->ui.open_fallback()) return false;
+    impl_->library_font.close();
+    impl_->library_uses_body = false; impl_->library_font_path.clear();
     impl_->document.close();
     impl_->clear_body_cache();
     impl_->clear_prefetch();
@@ -585,6 +589,8 @@ bool ReaderApp::close_power_files() {
     if (impl_->display.busy() || impl_->view != View::PowerOff) return false;
     impl_->document.close();
     impl_->ui.open_fallback(); impl_->body.open_fallback();
+    impl_->library_font.close(); impl_->library_font_path.clear();
+    impl_->library_uses_body = false;
     impl_->identities.clear(); impl_->font_scan.reset(); impl_->font_identity.clear();
     return true;
 }
@@ -737,6 +743,8 @@ void ReaderApp::card_removed() {
     impl_->cancel_sync();
     impl_->covers.clear();
     impl_->card_available = false;
+    impl_->library_font.close();
+    impl_->library_uses_body = false; impl_->library_font_path.clear();
     impl_->ui.open_fallback();
     impl_->body.open_fallback();
     impl_->effective_font.clear();

@@ -88,7 +88,9 @@ void Canvas::line(int x0, int y0, int x1, int y1, std::uint8_t gray, int thickne
     }
 }
 
-Font::Font() {
+Font::Font(std::size_t glyph_cache_limit_bytes, std::size_t advance_cache_limit)
+    : glyph_cache_limit_bytes_(std::max<std::size_t>(1, glyph_cache_limit_bytes)),
+      advance_cache_limit_(std::max<std::size_t>(1, advance_cache_limit)) {
     FT_Library library = nullptr;
 #ifdef ESP_PLATFORM
     const auto result = FT_New_Library(&font_memory, &library);
@@ -225,7 +227,7 @@ int Font::advance(char32_t scalar) {
         error_ = "Font glyph metrics failed"; return -1;
     }
     // Bound per-face metrics memory across all sizes; reopening invalidates every entry.
-    if (advances_.size() >= 8192) {
+    if (advances_.size() >= advance_cache_limit_) {
         advances_.erase(advance_order_.front());
         advance_order_.pop_front();
     }
@@ -305,8 +307,11 @@ bool Font::warm(char32_t scalar, bool bold) {
     if (cached == glyphs_.end()) {
         Glyph glyph;
         if (!(contains(scalar) ? rasterize(scalar, bold, glyph) : placeholder(scalar, glyph))) return false;
-        constexpr std::size_t glyph_cache_limit = 1024 * 1024;
-        while (!glyph_order_.empty() && glyph_bytes_ + glyph.coverage.size() > glyph_cache_limit) {
+        if (glyph.coverage.size() > glyph_cache_limit_bytes_) {
+            error_ = "Font glyph exceeds cache budget";
+            return false;
+        }
+        while (!glyph_order_.empty() && glyph_bytes_ + glyph.coverage.size() > glyph_cache_limit_bytes_) {
             const auto oldest = glyph_order_.front();
             glyph_bytes_ -= glyphs_.at(oldest).coverage.size();
             glyphs_.erase(oldest);

@@ -87,14 +87,14 @@ void ReaderApp::Impl::draw_sync() {
         const int order = further();
         outline(36, 674, 297, 250, order < 0 ? 3 : 2); outline(351, 674, 297, 250, order < 0 ? 2 : 3);
         text("本机", 56, 694, 24, 258, 3);
-        title_lines(chapter_label(), 56, 738, 256, 28, true, 2);
+        title_lines(body, chapter_label(), 56, 738, 256, 28, true, 2);
         text(book_percent(), 56, 806, 24, 256);
         text(order < 0 ? "这台设备 · 更靠后" : "这台设备", 56, 838, 22, 256, 3);
         canvas.line(36, 872, 332, 872, 12, 2);
         center("留在这里", 36, 882, 297, 24);
         hits.push_back({36, 674, 297, 250, SyncStay});
         text("远端", 371, 694, 24, 256, 3);
-        title_lines(anchor_label(*remote_anchor), 371, 738, 256, 28, true, 2);
+        title_lines(body, anchor_label(*remote_anchor), 371, 738, 256, 28, true, 2);
         text(remote_book_percent(), 371, 806, 24, 256);
         const auto device = remote_device.empty() ? std::string("其他设备") : remote_device;
         text(order > 0 ? device + " · 更靠后" : device, 371, 838, 22, 256, 3);

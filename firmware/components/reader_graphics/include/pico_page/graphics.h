@@ -43,7 +43,8 @@ struct FontMetrics {
 /** A single-owner font face; callers serialize sizing, measuring and drawing. */
 class Font {
 public:
-    Font();
+    /** Cache budgets exclude FreeType and container overhead; zero budgets are clamped to one. */
+    explicit Font(std::size_t glyph_cache_limit_bytes = 1024U * 1024, std::size_t advance_cache_limit = 8192);
     ~Font();
     Font(const Font&) = delete;
     Font& operator=(const Font&) = delete;
@@ -52,6 +53,8 @@ public:
     /** Replaces the previous face; the caller retains immutable font bytes until this face is closed. */
     bool open_memory(const unsigned char* bytes, std::size_t length);
     bool open_fallback();
+    /** Releases the font file and all cached glyphs and widths. The object can be opened again. */
+    void close();
     /** SHA-256 of the compiled fallback font bytes. */
     static const char* fallback_identity();
     /**
@@ -83,7 +86,6 @@ public:
     bool warm(char32_t scalar, bool bold = false);
     bool draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8_t gray = 1, bool bold = false);
 private:
-    void close();
     void* library_ = nullptr;
     void* face_ = nullptr;
     int pixel_size_ = 0;
@@ -100,6 +102,7 @@ private:
     };
     std::unordered_map<std::uint64_t, Glyph> glyphs_;
     std::size_t glyph_bytes_ = 0;
+    const std::size_t glyph_cache_limit_bytes_, advance_cache_limit_;
     std::uint64_t glyph_key(char32_t scalar, bool bold) const;
     bool rasterize(char32_t scalar, bool bold, Glyph& glyph);
     bool placeholder(char32_t scalar, Glyph& glyph);

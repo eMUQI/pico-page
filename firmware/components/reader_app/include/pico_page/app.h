@@ -160,6 +160,7 @@ struct CacheUsage {
     std::size_t retained = 0, target = 0;
     std::size_t ui_glyph_bytes = 0, body_glyph_bytes = 0, ui_glyphs = 0, body_glyphs = 0;
     std::size_t ui_advances = 0, body_advances = 0;
+    std::size_t library_glyph_bytes = 0, library_glyphs = 0, library_advances = 0;
 };
 
 /** Owns document, UI, display transactions and reading session on one task. */

@@ -136,10 +136,10 @@ void ReaderApp::Impl::draw_bookmarks(int list_top) {
         if (selected) canvas.fill_rect(0, y, 684, row - 1, 1);
         const auto position = selected ? std::string("本页") : item.percent >= 0 ? std::to_string(item.percent) + "%" : std::string();
         const int width = text_width(position, 22);
-        title_lines(item.chapter.empty() ? "书签 " + std::to_string(item.sequence) : item.chapter,
+        title_lines(item.chapter.empty() ? ui : body, item.chapter.empty() ? "书签 " + std::to_string(item.sequence) : item.chapter,
                     36, y + 18, 600 - width - 24, 26, selected, 1, ink);
         text(position, 648 - width, y + 20, 22, width, selected ? 15 : 3);
-        title_lines(item.excerpt.empty() ? "（本页没有文字）" : item.excerpt, 36, y + 64, 612, 22, false, 1, selected ? 15 : 3);
+        title_lines(item.excerpt.empty() ? ui : body, item.excerpt.empty() ? "（本页没有文字）" : item.excerpt, 36, y + 64, 612, 22, false, 1, selected ? 15 : 3);
         if (!selected) canvas.line(0, y + row - 1, 683, y + row - 1, 1, 2);
         hits.push_back({0, y, 684, row, BookmarkBase + static_cast<int>(i)});
         y += row;
@@ -163,7 +163,7 @@ void ReaderApp::Impl::draw_contents() {
         return 456 - std::min<int>(toc[index].depth, 3) * 40 - (toc_parent(index) ? 88 : 0);
     };
     auto title_height = [&](std::size_t index) {
-        return title_lines(toc[index].label, 0, 0, title_width(index), toc[index].depth ? 24 : 28,
+        return title_lines(body, toc[index].label, 0, 0, title_width(index), toc[index].depth ? 24 : 28,
                            false, 2, 1, false);
     };
     auto row_height = [&](std::size_t index) {
@@ -193,7 +193,7 @@ void ReaderApp::Impl::draw_contents() {
         const bool selected = i == current, parent = toc_parent(i);
         const std::uint8_t ink = selected ? 15 : 1;
         if (selected) canvas.fill_rect(0, y, 684, h - 1, 1);
-        title_lines(item.label, 36 + indent, y + (h - title_height(i)) / 2, title_width(i), item.depth ? 24 : 28, selected, 2, ink);
+        title_lines(body, item.label, 36 + indent, y + (h - title_height(i)) / 2, title_width(i), item.depth ? 24 : 28, selected, 2, ink);
         const int percent = toc_percent(i);
         const auto position = selected ? "当前 · " + book_percent() : percent < 0 ? std::string() : std::to_string(percent) + "%";
         const int right = parent ? 560 : 648, width = text_width(position, 22);

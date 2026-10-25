@@ -9,6 +9,7 @@ void ReaderApp::Impl::text(const std::string &value, int x, int top, int size, i
 
 void ReaderApp::Impl::text(graphics::Font& font, const std::string& value, int x, int top, int size,
           int max_width, std::uint8_t gray, bool bold) {
+    const FontSizeRestore restore(font, &font == &body);
     if (!font.set_pixel_size(size))
         return;
     const int baseline = top + font.metrics().ascender;
@@ -36,8 +37,15 @@ void ReaderApp::Impl::text(graphics::Font& font, const std::string& value, int x
 
 int ReaderApp::Impl::title_lines(const std::string &value, int x, int y, int width, int size, bool bold, int max_rows,
                 std::uint8_t gray, bool draw) {
-    ui.set_pixel_size(size);
-    const auto metrics = ui.metrics();
+    return title_lines(ui, value, x, y, width, size, bold, max_rows, gray, draw);
+}
+
+int ReaderApp::Impl::title_lines(graphics::Font& font, const std::string &value, int x, int y, int width, int size,
+                                bool bold, int max_rows, std::uint8_t gray, bool draw) {
+    const FontSizeRestore restore(font, &font == &body);
+    if (!font.set_pixel_size(size)) return 0;
+    const auto metrics = font.metrics();
+    const int line_height = &font == &ui ? size + 8 : std::max(size + 8, metrics.ascender + metrics.descender);
     const auto scalars = decode_utf8(value);
     const auto closing = [](char32_t c) {
         return std::u32string_view(U"，。！？、：；）】》」』〉’”﹐﹑﹒﹔﹕﹖﹗﹚﹜﹞｡､｣,.!?;:)]}").find(c) != std::u32string_view::npos;
@@ -48,7 +56,7 @@ int ReaderApp::Impl::title_lines(const std::string &value, int x, int y, int wid
         std::size_t end = begin;
         int used = 0;
         while (end < scalars.size()) {
-            const int advance = ui.advance(scalars[end]), run = run_width(scalars, end);
+            const int advance = font.advance(scalars[end]), run = run_width(font, scalars, end);
             if (end > begin && (used + advance > width ||
                 (rows + 1 < max_rows && run <= width && used + run > width))) break;
             if (used + advance > width) break;
@@ -57,22 +65,22 @@ int ReaderApp::Impl::title_lines(const std::string &value, int x, int y, int wid
         }
         const bool ellipsis = rows + 1 == max_rows && end < scalars.size();
         if (ellipsis) {
-            const int mark = ui.advance(U'…');
-            while (end > begin && used + mark > width) used -= ui.advance(scalars[--end]);
+            const int mark = font.advance(U'…');
+            while (end > begin && used + mark > width) used -= font.advance(scalars[--end]);
         } else if (end < scalars.size()) {
             while (end > begin + 1 && closing(scalars[end])) --end;
         }
         int offset = 0;
-        const int baseline = y + metrics.ascender + rows * (size + 8);
+        const int baseline = y + metrics.ascender + rows * line_height;
         for (auto i = begin; i < end; ++i) {
-            if (draw) ui.draw(canvas, scalars[i], x + offset, baseline, gray, bold);
-            offset += ui.advance(scalars[i]);
+            if (draw) font.draw(canvas, scalars[i], x + offset, baseline, gray, bold);
+            offset += font.advance(scalars[i]);
         }
-        if (ellipsis && draw) ui.draw(canvas, U'…', x + offset, baseline, gray, bold);
+        if (ellipsis && draw) font.draw(canvas, U'…', x + offset, baseline, gray, bold);
         if (ellipsis || end == begin) { ++rows; break; }
         begin = end;
     }
-    return rows ? metrics.ascender + metrics.descender + (rows - 1) * (size + 8) : 0;
+    return rows ? metrics.ascender + metrics.descender + (rows - 1) * line_height : 0;
 }
 
 
@@ -118,11 +126,11 @@ void ReaderApp::Impl::reading_header(bool panel) {
     const bool marking = view == View::Tools;
     const int edge = marking ? bookmark_cell_left - 12 : 660;
     const int right = unsaved || differs ? edge - 164 : edge;
-    text(chapter_label(), 132, 14, 30, right - 132, 1, true);
+    text(body, chapter_label(), 132, 14, 30, right - 132, 1, true);
     const auto percent = " · " + book_percent();
     const int percent_width = text_width(percent, 22);
-    const int title_width = std::min(text_width(document.metadata().title, 22), right - 132 - percent_width);
-    text(document.metadata().title, 132, 60, 22, title_width, 3);
+    const int title_width = std::min(text_width(body, document.metadata().title, 22), right - 132 - percent_width);
+    text(body, document.metadata().title, 132, 60, 22, title_width, 3);
     text(percent, 132 + title_width, 60, 22, percent_width, 3);
     if (unsaved || differs) {
         button(Sync, unsaved ? "尚未保存" : "位置不同 ›", edge - 148, 26, 148, 54, true, 22);

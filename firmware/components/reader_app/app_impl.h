@@ -46,6 +46,15 @@ inline constexpr auto inline_image_delay = std::chrono::milliseconds(250);
 inline constexpr const char* kSleepFallbackNotice = "本次使用简洁屏保";
 inline constexpr const char *content_revision = "epub-native-v1";
 inline constexpr const char *txt_revision = "txt-utf8-v1";
+/** UI labels may borrow the body face without changing the next reading operation's size. */
+struct FontSizeRestore {
+    graphics::Font* font;
+    int pixels;
+    FontSizeRestore(graphics::Font& value, bool restore)
+        : font(restore ? &value : nullptr), pixels(value.pixel_size()) {}
+    ~FontSizeRestore() { if (font && pixels > 0 && font->pixel_size() != pixels) font->set_pixel_size(pixels); }
+};
+
 struct Entry {
     std::string path, name;
     bool directory;
@@ -279,6 +288,9 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     graphics::Canvas canvas;
     graphics::Font ui, body;
+    graphics::Font library_font{128U * 1024, 1024};
+    std::string library_font_path;
+    bool library_uses_body = false, library_font_reload = true;
     Display display{*this};
     Session session{display};
     InputRouter router;
@@ -864,7 +876,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     void make_image_room() {
 #ifdef ESP_PLATFORM
         constexpr std::size_t wanted = ContentJob::image_room + 256U * 1024;
-        for (auto* font : {&body, &ui}) {
+        for (auto* font : {&library_font, &body, &ui}) {
             const auto available = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
             if (available >= wanted) return;
             const auto cached = font->cached_glyph_bytes();
@@ -1033,18 +1045,18 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void text(const std::string &value, int x, int top, int size = 28, int max_width = 612,
               std::uint8_t gray = 1, bool bold = false);
-    void text(graphics::Font& font, const std::string& value, int x, int top, int size,
-              int max_width, std::uint8_t gray, bool bold);
+    void text(graphics::Font& font, const std::string& value, int x, int top, int size = 28,
+              int max_width = 612, std::uint8_t gray = 1, bool bold = false);
     /** ASCII letters, digits and path punctuation; a run of these is not divided between lines. */
     static bool word_scalar(char32_t c) {
         return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
                c == '.' || c == '_' || c == '-' || c == '/' || c == '%';
     }
     /** Width of the undivided run that starts at index; 0 inside a run or outside one. */
-    int run_width(const std::u32string &scalars, std::size_t index) {
+    static int run_width(graphics::Font& font, const std::u32string &scalars, std::size_t index) {
         if (!word_scalar(scalars[index]) || (index && word_scalar(scalars[index - 1]))) return 0;
         int width = 0;
-        for (; index < scalars.size() && word_scalar(scalars[index]); ++index) width += ui.advance(scalars[index]);
+        for (; index < scalars.size() && word_scalar(scalars[index]); ++index) width += font.advance(scalars[index]);
         return width;
     }
     /**
@@ -1053,13 +1065,18 @@ struct ReaderApp::Impl final : DisplayBackend {
      */
     int wrapped(const std::string &value, int x, int top, int width, int size = 26,
                 bool draw = true, std::uint8_t gray = 1) {
-        ui.set_pixel_size(size);
-        const auto metrics = ui.metrics();
+        return wrapped(ui, value, x, top, width, size, draw, gray);
+    }
+    int wrapped(graphics::Font& font, const std::string &value, int x, int top, int width, int size = 26,
+                bool draw = true, std::uint8_t gray = 1) {
+        const FontSizeRestore restore(font, &font == &body);
+        if (!font.set_pixel_size(size)) return 0;
+        const auto metrics = font.metrics();
         const int line = metrics.ascender + metrics.descender + 2;
         const auto scalars = decode_utf8(value);
         int used = 0, rows = 1;
         for (std::size_t i = 0; i < scalars.size(); ++i) {
-            const int advance = ui.advance(scalars[i]), run = run_width(scalars, i);
+            const int advance = font.advance(scalars[i]), run = run_width(font, scalars, i);
             const bool closing = std::u32string_view(U"，。、；：！？）」』”’》").find(scalars[i]) != std::u32string_view::npos;
             if (used && !closing && (used + advance > width || (run <= width && used + run > width))) {
                 used = 0;
@@ -1068,16 +1085,18 @@ struct ReaderApp::Impl final : DisplayBackend {
             // A space that falls at the start of a continuation line is dropped.
             if (!used && rows > 1 && scalars[i] == U' ') continue;
             if (draw)
-                ui.draw(canvas, scalars[i], x + used, top + (rows - 1) * line + metrics.ascender, gray);
+                font.draw(canvas, scalars[i], x + used, top + (rows - 1) * line + metrics.ascender, gray);
             used += advance;
         }
         return rows * line;
     }
-    int text_width(const std::string &value, int size) {
-        ui.set_pixel_size(size);
+    int text_width(const std::string &value, int size) { return text_width(ui, value, size); }
+    int text_width(graphics::Font& font, const std::string &value, int size) {
+        const FontSizeRestore restore(font, &font == &body);
+        if (!font.set_pixel_size(size)) return 0;
         int length = 0;
         for (auto c : decode_utf8(value))
-            length += ui.advance(c);
+            length += font.advance(c);
         return length;
     }
     void center(const std::string &value, int x, int top, int w, int size = 28,
@@ -1122,17 +1141,19 @@ struct ReaderApp::Impl final : DisplayBackend {
      * Page header: a back cell naming the parent page, when back is non-zero, directly followed
      * by the title. right_edge leaves room for action cells drawn by the caller.
      */
-    void header(const std::string &title, int back = Back, const std::string &parent = "书库", int right_edge = 660) {
+    void header(const std::string &title, int back = Back, const std::string &parent = "书库", int right_edge = 660,
+                graphics::Font* title_font = nullptr, graphics::Font* parent_font = nullptr) {
         canvas.fill_rect(0, 0, 684, 104, 15);
         int left = 28;
         if (back) {
             const auto label = "‹ " + parent;
-            const int width = std::min(text_width(label, 28), 240);
-            text(label, 28, 32, 28, width);
+            auto& font = parent_font ? *parent_font : ui;
+            const int width = std::min(text_width(font, label, 28), 240);
+            text(font, label, 28, 32, 28, width);
             left = 28 + width + 28;
             hits.push_back({0, 0, left, 104, back});
         }
-        text(title, left, 30, 32, right_edge - left, 1, true);
+        text(title_font ? *title_font : ui, title, left, 30, 32, right_edge - left, 1, true);
         canvas.line(0, 103, 683, 103, 1, 3);
     }
     void disabled_button(const std::string &label, int x, int y, int w, int h = 88) {
@@ -1180,6 +1201,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     /** Measures or draws the same bounded title layout, retaining closing punctuation with its preceding character. */
     int title_lines(const std::string &value, int x, int y, int width, int size, bool bold = false, int max_rows = 2,
                     std::uint8_t gray = 1, bool draw = true);
+    int title_lines(graphics::Font& font, const std::string &value, int x, int y, int width, int size,
+                    bool bold = false, int max_rows = 2, std::uint8_t gray = 1, bool draw = true);
     bool typography_changed() const {
         const auto &applied = edit_snapshot.config.settings;
         return reset_overrides || draft.font != applied.font || draft.font_weight != applied.font_weight || draft.font_size_px != applied.font_size_px ||
@@ -1377,6 +1400,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         return spec;
     }
     void load_fonts(const ReaderSettings *preview = nullptr);
+    void load_library_font(const std::string& path);
+    graphics::Font& library_text_font() { return library_uses_body ? body : library_font.valid() ? library_font : ui; }
     /**
      * Lists the TTF and OTF files in Fonts/, reading at most 2048 directory entries and keeping
      * at most 256 fonts; a larger folder yields a partial list. The selected font stays listed
@@ -1865,10 +1890,12 @@ struct ReaderApp::Impl final : DisplayBackend {
         usage.ui_glyph_bytes = ui.cached_glyph_bytes(); usage.body_glyph_bytes = body.cached_glyph_bytes();
         usage.ui_glyphs = ui.cached_glyphs(); usage.body_glyphs = body.cached_glyphs();
         usage.ui_advances = ui.cached_advances(); usage.body_advances = body.cached_advances();
+        usage.library_glyph_bytes = library_font.cached_glyph_bytes();
+        usage.library_glyphs = library_font.cached_glyphs(); usage.library_advances = library_font.cached_advances();
         usage.evictions = cache_evictions; usage.target = cache_target;
         usage.retained = pending_chapter_cache.bytes.capacity() + usage.body_bitmap + usage.next_layout + usage.next_bitmap +
-            usage.page_index + usage.cover_pixels + usage.ui_glyph_bytes + usage.body_glyph_bytes +
-            (usage.ui_advances + usage.body_advances) * (sizeof(std::uint64_t) + sizeof(int));
+            usage.page_index + usage.cover_pixels + usage.ui_glyph_bytes + usage.body_glyph_bytes + usage.library_glyph_bytes +
+            (usage.ui_advances + usage.body_advances + usage.library_advances) * (sizeof(std::uint64_t) + sizeof(int));
         return usage;
     }
     void reclaim_caches();
@@ -2172,7 +2199,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                 if ((line.top < 104 && line.bottom > 104) || (line.top < top && line.bottom > top))
                     canvas.fill_rect(0, line.top, 684, line.bottom - line.top + 1, 15);
             if (live) reading_header(true);
-            else header(document.metadata().title, 0);
+            else header(document.metadata().title, 0, "", 660, &body);
         } else {
             canvas.clear();
             header("阅读", Back, "设置");
@@ -2214,7 +2241,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (view == View::Error) return;
         view = View::RefreshConfirm;
         hits.clear();
-        if (has_book() && !refresh_from_settings) header(document.metadata().title, 0);
+        if (has_book() && !refresh_from_settings) header(document.metadata().title, 0, "", 660, &body);
         else header("阅读", 0);
         canvas.fill_rect(0, 752, 684, 464, 15);
         canvas.line(0, 752, 683, 752, 1, 3);
@@ -2977,10 +3004,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         text(question, 36, 160, 40, 612, 1, true);
         int y = 244;
         if (!object.empty()) {
-            title_lines(object, 36, y, 612, 30);
-            y += std::min(wrapped(object, 0, 0, 612, 30, false), 80) + 4;
-            title_lines(path, 36, y, 612, 22, false, 2, 3);
-            y += std::min(wrapped(path, 0, 0, 612, 22, false), 64) + 28;
+            title_lines(library_text_font(), object, 36, y, 612, 30);
+            y += std::min(wrapped(library_text_font(), object, 0, 0, 612, 30, false), 80) + 4;
+            title_lines(library_text_font(), path, 36, y, 612, 22, false, 2, 3);
+            y += std::min(wrapped(library_text_font(), path, 0, 0, 612, 22, false), 64) + 28;
         }
         wrapped(consequence, 36, y, 612, 28);
     }
@@ -3169,10 +3196,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         canvas.line(342, 610, 342, 795, 1, 2);
         canvas.line(0, 795, 683, 795, 1, 2);
         text("本机", 36, 634, 24, 286, 3);
-        title_lines(local_position(), 36, 678, 286, 28, true, 1);
+        title_lines(body, local_position(), 36, 678, 286, 28, true, 1);
         text(session.needs_save() ? "尚未保存" : "这台设备", 36, 740, 22, 286, 3);
         text("远端", 362, 634, 24, 286, 3);
-        title_lines(remote_value, 362, 678, 286, 28, true, 1);
+        title_lines(remote_anchor ? body : ui, remote_value, 362, 678, 286, 28, true, 1);
         text(remote_detail, 362, 740, 22, 286, 3);
     }
     void sync_network_row() {

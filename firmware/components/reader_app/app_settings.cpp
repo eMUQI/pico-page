@@ -2,6 +2,21 @@
 
 namespace pico_page {
 
+void ReaderApp::Impl::load_library_font(const std::string& path) {
+    // Sharing a face avoids duplicating FreeType tables; labels retain their own sizes and emphasis.
+    if (controlled_storage && body.valid() && !font_fallback && effective_font == path && effective_weight == "regular") {
+        library_font.close();
+        library_font_path = path; library_uses_body = true; library_font_reload = false;
+        return;
+    }
+    if (library_font_path == path && controlled_storage && !library_font_reload && !library_uses_body) return;
+    library_uses_body = false; library_font_reload = false;
+    library_font_path = path;
+    // A failed face remains invalid; each complete label then uses the UI face.
+    if (!library_font.open(root + "/" + path)) library_font.close();
+}
+
+
 void ReaderApp::Impl::load_fonts(const ReaderSettings *preview) {
     const auto &selected = preview ? *preview : settings;
     const auto resolved = weight_font(selected);
@@ -14,6 +29,7 @@ void ReaderApp::Impl::load_fonts(const ReaderSettings *preview) {
     if (effective_font == resolved && body.valid() && controlled_storage) {
         if (effective_weight != selected.font_weight) { clear_body_cache(); clear_prefetch(); }
         effective_weight = selected.font_weight;
+        if (!library_font_path.empty()) load_library_font(library_font_path);
         return;
     }
     clear_body_cache();
@@ -32,6 +48,7 @@ void ReaderApp::Impl::load_fonts(const ReaderSettings *preview) {
     }
     effective_font = resolved;
     effective_weight = selected.font_weight;
+    if (!library_font_path.empty()) load_library_font(library_font_path);
 }
 
 

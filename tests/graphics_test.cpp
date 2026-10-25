@@ -67,6 +67,26 @@ int main(int argc, char** argv) {
         assert(regular.pixels() != medium.pixels() && medium.pixels() != bold.pixels());
         assert(restored.pixels() == regular.pixels() && font.advance(U'读') == width);
     }
+    {
+        Font small(2048, 4);
+        assert(small.open_fallback() && small.set_pixel_size(28));
+        assert(font.set_pixel_size(28));
+        Canvas expected, actual;
+        int x = 20;
+        for (const auto c : decode_utf8("读书学习天地人文读")) {
+            assert(small.draw(actual, c, x, 60) && font.draw(expected, c, x, 60));
+            assert(small.advance(c) == font.advance(c));
+            assert(small.cached_glyph_bytes() <= 2048 && small.cached_advances() <= 4);
+            x += small.advance(c);
+        }
+        assert(actual.pixels() == expected.pixels());
+        small.close();
+        assert(!small.valid() && !small.cached_glyphs() && !small.cached_advances() && !small.cached_glyph_bytes());
+        assert(small.open_fallback() && small.set_pixel_size(28) && small.warm(U'读'));
+        Font insufficient(1, 1);
+        assert(insufficient.open_fallback() && !insufficient.warm(U'读'));
+        assert(!insufficient.cached_glyph_bytes() && !insufficient.cached_glyphs());
+    }
     if (argc > 1) assert(font.open(argv[1]));
 
     Canvas canvas;

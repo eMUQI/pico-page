@@ -20,7 +20,7 @@ void ReaderApp::Impl::layout_notes(const std::string& markdown, bool truncated, 
         const auto first = note_lines.size();
         int used = 0;
         for (std::size_t i = 0; i < scalars.size(); ++i) {
-            const int advance = ui.advance(scalars[i]), run = run_width(scalars, i);
+            const int advance = ui.advance(scalars[i]), run = run_width(ui, scalars, i);
             const bool closing = std::u32string_view(U"，。、；：！？）」』”’》").find(scalars[i]) != std::u32string_view::npos;
             if (used && !closing && (used + advance > width || (run <= width && used + run > width))) {
                 const NoteLine next{{}, {}, line.size, line.indent, line.gap, false, 0};

@@ -102,7 +102,8 @@ bool ReaderApp::Impl::finish_open(const std::string& path, ContentJob::Result* l
 
 void ReaderApp::Impl::footer() {
     canvas.fill_rect(0, footer_top, 684, 88, 15);
-    text(notice().empty() ? footer_position_text() : message, 36, 1156, 24, 476, 3);
+    text(notice().empty() && footer_position == reading_footer::Position::ChapterName ? body : ui,
+         notice().empty() ? footer_position_text() : message, 36, 1156, 24, 476, 3);
     footer_charging = battery_charging;
     if (footer_device == reading_footer::Device::Clock) {
         // The system clock is restored from RTC or calibrated by on-demand networking.
@@ -165,9 +166,9 @@ void ReaderApp::Impl::reclaim_caches() {
         if (counting_job && counting_job->request.generation == counting_generation) {
             invalidate_counting(); release_counting(); counting_index = not_counting;
         }
-        const auto before = ui.cached_glyph_bytes() + body.cached_glyph_bytes();
-        ui.trim_glyph_cache(128U * 1024); body.trim_glyph_cache(256U * 1024);
-        if (ui.cached_glyph_bytes() + body.cached_glyph_bytes() < before) ++cache_evictions;
+        const auto before = ui.cached_glyph_bytes() + body.cached_glyph_bytes() + library_font.cached_glyph_bytes();
+        library_font.trim_glyph_cache(0); ui.trim_glyph_cache(128U * 1024); body.trim_glyph_cache(256U * 1024);
+        if (ui.cached_glyph_bytes() + body.cached_glyph_bytes() + library_font.cached_glyph_bytes() < before) ++cache_evictions;
         defer_counting();
     }
 }

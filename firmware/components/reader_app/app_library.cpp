@@ -10,6 +10,7 @@ void ReaderApp::Impl::scan_library() {
     if (!card_available)
         return;
     const auto cfg = store.load_settings();
+    load_library_font(cfg.settings.font);
     library_sort = cfg.settings.library_sort;
     folders_first = cfg.settings.library_folders == "first";
     const auto &roots = cfg.settings.library_roots;
@@ -156,6 +157,7 @@ void ReaderApp::Impl::draw_library(bool decode) {
     if (async_content) cancel_covers();
     decode = decode || display.busy();
     bool undecoded = false;
+    auto& font = library_text_font();
     view = View::Library;
     hits.clear();
     canvas.clear();
@@ -163,7 +165,9 @@ void ReaderApp::Impl::draw_library(bool decode) {
     else {
         const auto slash = folder.find_last_of('/');
         const auto parent = slash == std::string::npos ? "" : folder.substr(0, slash);
-        header(basename(folder), Back, folder_root || parent.empty() || parent == library_home_root ? "书库" : basename(parent), 388);
+        const bool parent_is_library = folder_root || parent.empty() || parent == library_home_root;
+        header(basename(folder), Back, parent_is_library ? "书库" : basename(parent), 388, &font,
+               parent_is_library ? nullptr : &font);
         hits.back() = {0, 0, 396, 104, Back};
     }
     for (int x : {396, 540}) canvas.line(x, 0, x, 102, 1, 2);
@@ -189,10 +193,10 @@ void ReaderApp::Impl::draw_library(bool decode) {
         if (cover == Cover::Drawn) outline(47, 183, kContinueCoverWidth + 2, kContinueCoverHeight + 2);
         const int left = cover == Cover::Drawn ? 168 : 48;
         const int width = cover == Cover::Drawn ? 420 : 540;
-        title_lines(has_book() ? document.metadata().title : basename(last_book), left, 182, width, 30, true);
+        title_lines(font, has_book() ? document.metadata().title : basename(last_book), left, 182, width, 30, true);
         const auto date = library_recent ? recent_date(resume_opened_at) : "";
         if (!date.empty()) position += (position.empty() ? "" : " · ") + date;
-        text(position.empty() ? "打开后恢复已保存的位置" : position, left, 288, 22, width, 3);
+        text(position.empty() ? ui : font, position.empty() ? "打开后恢复已保存的位置" : position, left, 288, 22, width, 3);
         text("›", 620, 214, 28, 30);
         hits.push_back({24, 128, 636, 206, Tools});
         top = 354;
@@ -245,12 +249,12 @@ void ReaderApp::Impl::draw_library(bool decode) {
                 canvas.fill_rect(x, y, 2, 22, 1);
                 canvas.fill_rect(x + 82, y, 2, 22, 1);
                 outline(x, y + 22, kLibraryCoverWidth, kLibraryCoverHeight - 22);
-                title_lines(label, x + 18, y + 162, 148, 28, true);
+                title_lines(font, label, x + 18, y + 162, 148, 28, true);
             } else {
                 const auto cover = draw_cover(entry, x, y, decode);
                 undecoded = undecoded || cover == Cover::Undecoded;
                 if (cover != Cover::Drawn) {
-                    title_lines(label, x + 18, y + 20, 148, 28, true, 4);
+                    title_lines(font, label, x + 18, y + 20, 148, 28, true, 4);
                     canvas.fill_rect(x + 18, y + 228, 48, 2, 1);
                 }
                 outline(x, y, kLibraryCoverWidth, kLibraryCoverHeight);
@@ -276,7 +280,7 @@ void ReaderApp::Impl::draw_library(bool decode) {
             const auto status = entry.directory ? entry.status + " ›" : entry.status;
             const int status_width = std::min(std::max(text_width(status, 22), text_width(date, 22)), 200);
             const int title_width = 628 - left - status_width;
-            title_lines(label, left, y + (text_width(label, 28) <= title_width ? 44 : 26), title_width, 28);
+            title_lines(font, label, left, y + (text_width(font, label, 28) <= title_width ? 44 : 26), title_width, 28);
             if (!date.empty()) {
                 text(date, 648 - text_width(date, 22), y + 30, 22, 200, 3);
                 text(status, 648 - status_width, y + 66, 20, status_width, 3);
@@ -333,6 +337,7 @@ void ReaderApp::Impl::inspect_book(const std::string &path, bool keep_message) {
 void ReaderApp::Impl::draw_details() {
     view = View::BookDetails;
     hits.clear(); canvas.clear(); header("书籍详情", Back, "书库");
+    auto& font = library_text_font();
     const auto title = detail_metadata.title.empty() ? basename(detail_path) : detail_metadata.title;
     struct stat info{};
     std::vector<std::uint8_t> cover;
@@ -343,12 +348,12 @@ void ReaderApp::Impl::draw_details() {
     if (covered) blit(cover, 36, 140, 120, 160);
     const int title_x = covered ? 180 : 36, title_width = covered ? 468 : 612;
     int size = 32;
-    while (size > 22 && wrapped(title, 0, 0, title_width, size, false) > 160) size -= 2;
-    title_lines(title, title_x, 140, title_width, size, true, 4);
-    text(detail_metadata.author.empty() ? "作者未知" : detail_metadata.author, 36, 324, 24, 612, 3);
+    while (size > 22 && wrapped(font, title, 0, 0, title_width, size, false) > 160) size -= 2;
+    title_lines(font, title, title_x, 140, title_width, size, true, 4);
+    text(detail_metadata.author.empty() ? ui : font, detail_metadata.author.empty() ? "作者未知" : detail_metadata.author, 36, 324, 24, 612, 3);
     canvas.line(24, 378, 660, 378, 1, 2);
     text("进度", 36, 408, 24, 130, 3);
-    text(detail_progress.record ? detail_position : (detail_progress.status == StoreStatus::Missing || detail_progress.status == StoreStatus::Cleared) ? "尚无本地阅读记录" : "阅读记录无法验证", 186, 408, 24, 462);
+    text(detail_progress.record ? font : ui, detail_progress.record ? detail_position : (detail_progress.status == StoreStatus::Missing || detail_progress.status == StoreStatus::Cleared) ? "尚无本地阅读记录" : "阅读记录无法验证", 186, 408, 24, 462);
     text("同步", 36, 478, 24, 130, 3);
     text(txt_name(detail_path) ? "仅本地" : detail_path == book_path && detail_metadata.book_id == document.metadata().book_id ? sync_badge() : "打开书籍后检查", 186, 478, 24, 462);
     text("原书占用", 36, 548, 24, 150, 3);
