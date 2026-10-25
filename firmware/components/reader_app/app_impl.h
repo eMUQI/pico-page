@@ -451,10 +451,10 @@ struct ReaderApp::Impl final : DisplayBackend {
     enum class SyncState { Unchecked, NoRecord, Same, Different, Unmapped, Uploaded, Uncertain,
                            Unauthorized, Failed, LinkFailed, ConfigChanged };
     SyncState sync_state = SyncState::Unchecked;
-    // Percentage in [0, 1] as the server reported it, and device name, from the last answered check;
-    // negative when unknown. Each client computes this percentage its own way, so it is shown only
-    // for a position that could not be mapped and never compared with a local percentage.
-    double remote_percent = -1;
+    // Progress fraction in [0, 1] and device name from the last answered check; negative when unknown.
+    // Each client estimates progress independently, so the fraction is shown only for an unmapped
+    // position and never compared with a local estimate.
+    double remote_fraction = -1;
     std::string remote_device;
     // Whether the running or failed check may use only the pinned network, and that network's name.
     bool sync_link_pinned = false;
@@ -1053,7 +1053,7 @@ struct ReaderApp::Impl final : DisplayBackend {
      */
     int wrapped(const std::string &value, int x, int top, int width, int size = 26,
                 bool draw = true, std::uint8_t gray = 1) {
-        ui.size(size);
+        ui.set_pixel_size(size);
         const auto metrics = ui.metrics();
         const int line = metrics.ascender + metrics.descender + 2;
         const auto scalars = decode_utf8(value);
@@ -1074,7 +1074,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         return rows * line;
     }
     int text_width(const std::string &value, int size) {
-        ui.size(size);
+        ui.set_pixel_size(size);
         int length = 0;
         for (auto c : decode_utf8(value))
             length += ui.advance(c);
@@ -1368,7 +1368,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         spec.width = 684 - 2 * spec.left;
         spec.height = bottom - top;
         spec.font_px = cfg.font_size_px;
-        body.size(spec.font_px);
+        body.set_pixel_size(spec.font_px);
         spec.indent_chars = cfg.indent_chars;
         spec.paragraph_gap = static_cast<int>(
             std::lround(cfg.paragraph_gap_lines * cfg.font_size_px * cfg.line_height));
@@ -2531,7 +2531,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             const auto& line = note_lines[i];
             if (i != begin && line.block_rows) y += line.gap;
             if (bottom && y + note_line_height(line.size) > bottom) { text("…", 36, y, 24, 612, 3); return; }
-            ui.size(line.size);
+            ui.set_pixel_size(line.size);
             const int baseline = y + ui.metrics().ascender;
             if (line.bullet && line.block_rows) ui.draw(canvas, ui.contains(U'•') ? U'•' : U'·', 36, baseline, 1);
             int x = 36 + line.indent;
@@ -3012,7 +3012,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         spec.indent_chars = 0;
         graphics::Page title_page;
         for (int size = initial_size; size >= 28; size -= 2) {
-            body.size(size);
+            body.set_pixel_size(size);
             spec.font_px = size;
             spec.line_height = std::max(size * 5 / 4, body.metrics().ascender + body.metrics().descender);
             title_page = graphics::layout_page(body, content, 0, spec);
@@ -3093,7 +3093,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         sync_checked = false;
         uploading = false;
         sync_state = SyncState::Unchecked;
-        remote_percent = -1;
+        remote_fraction = -1;
         remote_device.clear();
     }
     std::string anchor_label(const Anchor& anchor) const {
@@ -3127,7 +3127,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             const auto percent = remote_book_percent();
             return anchor_label(*remote_anchor) + (percent.empty() ? "" : " · " + percent);
         }
-        return remote_percent >= 0 ? "约 " + percent_text(remote_percent) : "位置未知";
+        return remote_fraction >= 0 ? "约 " + percent_text(remote_fraction) : "位置未知";
     }
     /**
      * 1 when the mapped remote position lies after the visible page, -1 when it lies before the
@@ -3263,7 +3263,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             "这个位置暂时不能上传。";
     }
     void upload();
-    void send_upload(const ReadingRecord& record, const std::string& xpointer, double percent);
+    void send_upload(const ReadingRecord& record, const std::string& xpointer, double progress_fraction);
     void network_complete(std::uint64_t id, int status, const std::string &bytes,
                           const std::string &failure, LinkFailure link);
     /**

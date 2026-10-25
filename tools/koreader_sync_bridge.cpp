@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
         pico_page::sync::Config config{"https://loopback.invalid", username, key, "pico-validation", 20260812};
         pico_page::ReadingRecord saved{document.metadata().book_id, "epub-native-v1", "pico-validation", 7, anchor};
         pico_page::sync::HttpRequest request;
-        require(pico_page::sync::put_request(config, document.metadata().partial_md5, pointer, .777, saved, request, error), error);
+        require(pico_page::sync::build_put_request(config, document.metadata().partial_md5, pointer, .777, saved, request, error), error);
         string(output, "method", request.method);
         string(output, "body", request.body);
         auto* headers = cJSON_AddObjectToObject(output, "headers");

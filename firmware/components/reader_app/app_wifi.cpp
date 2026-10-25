@@ -220,7 +220,7 @@ void ReaderApp::Impl::draw_entry() {
     text(prompt, 36, 132, 24, 612, 3);
     outline(24, 176, 636, 88);
     // The end of the text and the cursor stay visible; earlier characters scroll out to the left.
-    ui.size(34);
+    ui.set_pixel_size(34);
     const auto scalars = decode_utf8(entry.value);
     const std::u32string shown = entry.masked ? std::u32string(scalars.size(), U'•') : scalars;
     std::size_t begin = shown.size();

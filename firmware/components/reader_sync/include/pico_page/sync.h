@@ -32,24 +32,47 @@ struct HttpRequest {
     std::optional<ReadingRecord> uploaded_record;
 };
 
-bool get_request(const Config& config, const std::string& partial_md5,
-                 HttpRequest& request, std::string& error);
-/** Capture the saved record at send time; an ACK applies only to this record. */
-bool put_request(const Config& config, const std::string& partial_md5,
-                 const std::string& xpointer, double percentage, const ReadingRecord& saved_record,
-                 HttpRequest& request, std::string& error);
+/**
+ * Builds a progress query without network I/O.
+ * @param config Account configuration; must satisfy valid_config().
+ * @param partial_md5 KOReader document identity as 32 lowercase hexadecimal digits.
+ * @param[out] request Owned request data; cleared on failure.
+ * @param[out] error Failure description; cleared on success.
+ * @return True when the request is ready; false for invalid configuration or identity.
+ */
+bool build_get_request(const Config& config, const std::string& partial_md5,
+                       HttpRequest& request, std::string& error);
+/**
+ * Builds an upload without network I/O. The request owns a saved-record snapshot;
+ * a confirmed server write applies only to that snapshot.
+ * @param config Account configuration; must satisfy valid_config().
+ * @param partial_md5 KOReader document identity as 32 lowercase hexadecimal digits.
+ * @param xpointer Exact mapped position of saved_record, starting with '/', at most 4096 bytes.
+ * @param progress_fraction Finite display estimate in [0, 1]; never used as a locator.
+ * @param saved_record Successfully committed record with a book ID, revision and anchor.
+ * @param[out] request Owned request data; cleared on failure.
+ * @param[out] error Failure description; cleared on success.
+ * @return True when the request is ready; false for invalid input or allocation/encoding failure.
+ */
+bool build_put_request(const Config& config, const std::string& partial_md5,
+                       const std::string& xpointer, double progress_fraction, const ReadingRecord& saved_record,
+                       HttpRequest& request, std::string& error);
 
 /**
- * Asks the server whether the account is accepted. 200 confirms it and 401 rejects it;
- * no record is read or written.
+ * Builds an account-verification request without network I/O or progress-record access.
+ * The caller sends it and interprets HTTP 200 as acceptance and 401 as rejection.
+ * @param config Account configuration; must satisfy valid_config().
+ * @param[out] request Owned request data; cleared on failure.
+ * @param[out] error Failure description; cleared on success.
+ * @return True when the request is ready, not when the account has been verified.
  */
-bool auth_request(const Config& config, HttpRequest& request, std::string& error);
+bool build_auth_request(const Config& config, HttpRequest& request, std::string& error);
 
 enum class RemoteStatus { Found, NoRecord, Unauthorized, Error };
 struct RemoteResult {
     RemoteStatus status = RemoteStatus::Error;
     std::string progress;
-    double percentage = 0;
+    double progress_fraction = 0;  ///< Server's "percentage" field in [0, 1], valid when status is Found.
     std::string device;
     std::string device_id;
     std::string error;
@@ -83,12 +106,12 @@ bool to_xpointer(const EpubDocument& document, const Chapter& chapter, const Anc
 /**
  * Maps an upload anchor by reading its source part from an already opened document.
  * The caller exclusively owns document during this call; no cache or progress is written.
- * percentage is a display estimate, never a locator. On failure or cancellation, xpointer
- * is empty, percentage is zero, and error describes the cause. stop is checked while reading
+ * progress_fraction is a display estimate in [0, 1], never a locator. On failure or cancellation,
+ * xpointer is empty, progress_fraction is zero, and error describes the cause. stop is checked while reading
  * and after mapping; an individual file operation or mapping call may still block.
  */
 bool map_upload_position(EpubDocument& document, const Anchor& anchor, int dom_version,
-                         std::string& xpointer, double& percentage, std::string& error,
+                         std::string& xpointer, double& progress_fraction, std::string& error,
                          const std::function<bool()>& stop = {});
 /**
  * A reading-text position inside one spine item. Unlike an Anchor it can be ordered against

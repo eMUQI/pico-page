@@ -97,6 +97,12 @@ git diff --check
 
 实际修改代码、配置或项目文档的批次在 `docs/development-status.md` 追加变更、命令/环境、结果、未测项和下一步；仅在当前实现或验收状态变化时更新「当前摘要」。纯讨论和只读审计不强制产生仓库改动。稳定规则更新其权威文档，历史记录保留原样，不把过程日志复制到 AGENTS。文档位置与维护职责见[文档导航](docs/README.md#改动后更新哪里)：只更新受影响事实，不重复抄写状态、测试总数或完整功能列表；官网、仓库指南和设备帮助仍分别维护，仅在用户操作或限制变化时核对。根文件保持小于 16,000 UTF-8 字节。
 
+## Naming Policy
+
+- Names must express their domain meaning within the enclosing namespace or type. Functions name an action and its object; variables name the value or state they hold. Boolean names describe a predicate or state. Avoid opaque abbreviations and generic names when the context does not identify their role; conventional local indices, coordinates and established technical abbreviations are acceptable.
+- Distinguish request construction, scheduling and completion in names. Include units or representation where ambiguity matters, such as `_us`, `_bytes`, Unicode scalar offsets, and a fraction in `[0, 1]` versus a percentage in `[0, 100]`.
+- Follow the surrounding C/C++ conventions: `snake_case` for functions and variables, `CamelCase` for types. Apply the [ESP-IDF style guide](https://docs.espressif.com/projects/esp-idf/zh_CN/stable/esp32/contribute/style-guide.html) where compatible. Preserve external protocol names and third-party interfaces; rename unclear project-owned symbols with all callers, without unrelated style churn.
+
 ## Code Comment Policy
 
 Comments explain the current implementation to maintainers without conversation context. Prefer clear names, types, constants and control flow; retain useful comments without unnecessary refactoring.

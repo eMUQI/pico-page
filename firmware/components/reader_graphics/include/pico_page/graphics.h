@@ -47,15 +47,22 @@ public:
     ~Font();
     Font(const Font&) = delete;
     Font& operator=(const Font&) = delete;
+    /** Closes the previous face before attempting to open path; failure does not restore that face. */
     bool open(const std::string& path);
-    /** The caller retains immutable font bytes until this face is closed. */
+    /** Replaces the previous face; the caller retains immutable font bytes until this face is closed. */
     bool open_memory(const unsigned char* bytes, std::size_t length);
     bool open_fallback();
     /** SHA-256 of the compiled fallback font bytes. */
     static const char* fallback_identity();
-    bool size(int pixels);
-    /** Synthetic stroke strength: 0 regular, 1 medium, 2 bold; advances are unchanged. */
-    void weight(unsigned strength) { weight_ = strength > 2 ? 2 : strength; }
+    /**
+     * Sets the pixel height of an open font face.
+     * @param pixels Requested height in pixels, from 8 through 256.
+     * @return True on success; false for a missing face, invalid size or FreeType failure.
+     *         error() describes the failure.
+     */
+    bool set_pixel_size(int pixels);
+    /** Synthetic stroke strength: 0 regular, 1 medium, 2 bold; larger values clamp to 2. Advances are unchanged. */
+    void set_synthetic_weight(unsigned strength) { weight_ = strength > 2 ? 2 : strength; }
     bool valid() const { return face_ != nullptr; }
     const std::string& error() const { return error_; }
     int pixel_size() const { return pixel_size_; }
@@ -175,7 +182,8 @@ std::uint64_t image_decode_count();
 
 inline constexpr char kImageCancelled[] = "Image decode cancelled";
 
-/** Decode PNG/baseline JPEG centered in the box. Crop fills the box; otherwise fit the whole image.
+/** Decode PNG/JPEG centered in the box. Progressive JPEG uses a reduced-detail DC preview.
+ * Crop fills the box; otherwise fit the whole image.
  * Validation and decode failures leave the canvas unchanged. Temporary pixels are bounded by
  * the box dimensions; scaling tables hold one 16-bit entry per source column and row.
  * Cancellation is checked between PNG input chunks, JPEG blocks and output rows; it returns

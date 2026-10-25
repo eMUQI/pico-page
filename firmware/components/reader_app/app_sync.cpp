@@ -47,7 +47,7 @@ void ReaderApp::Impl::verify_account() {
     sync::Config next;
     sync::HttpRequest request;
     std::string problem;
-    if (!account_config(next) || !sync::auth_request(next, request, problem)) {
+    if (!account_config(next) || !sync::build_auth_request(next, request, problem)) {
         account_notice = "服务地址必须以 https:// 开头，账户和密码不能为空。";
     } else if (!wifi_enabled()) account_notice = "Wi-Fi 已关闭。请先在 Wi-Fi 设置中打开。";
     else if (wifi_worker || portal_live || active_network) account_notice = "请先结束当前任务。";
@@ -211,7 +211,7 @@ void ReaderApp::Impl::check_sync(bool automatic) {
     sync::HttpRequest request;
     if (!wifi_enabled() || !sync::load_config(root, sync_config, detail)) {
         // The panel shows the closed radio or the missing account with its own action.
-    } else if (!sync::get_request(sync_config, document.metadata().partial_md5, request, detail)) {
+    } else if (!sync::build_get_request(sync_config, document.metadata().partial_md5, request, detail)) {
         sync_state = SyncState::Failed;
         sync_status = "无法生成同步请求，请检查同步账户。";
     } else {
@@ -253,25 +253,25 @@ void ReaderApp::Impl::upload() {
     const auto record = *session.saved_record();
     if (async_content) { begin_mapping(ContentJob::Kind::MapUpload); return; }
     std::string xpointer;
-    double percent = 0;
+    double progress_fraction = 0;
     if (!sync::map_upload_position(document, record.anchor, sync_config.dom_version,
-                                   xpointer, percent, detail)) {
+                                   xpointer, progress_fraction, detail)) {
         upload_mapping_failed(detail);
         draw_sync();
         overlay();
         return;
     }
-    send_upload(record, xpointer, percent);
+    send_upload(record, xpointer, progress_fraction);
 }
 
 
-void ReaderApp::Impl::send_upload(const ReadingRecord& record, const std::string& xpointer, double percent) {
+void ReaderApp::Impl::send_upload(const ReadingRecord& record, const std::string& xpointer, double progress_fraction) {
     // The upload belongs to the session that answered the check; an ended session checks again.
     if (!network::live(sync_hold)) { check_sync(); return; }
     if (!wifi_enabled()) { cancel_sync(); draw_sync(); overlay(); return; }
     std::string detail;
     sync::HttpRequest request;
-    if (!sync::put_request(sync_config, document.metadata().partial_md5, xpointer, percent,
+    if (!sync::build_put_request(sync_config, document.metadata().partial_md5, xpointer, progress_fraction,
                            record, request, detail)) {
         sync_status = "无法生成同步请求，请检查同步账户。";
         draw_sync();
@@ -343,7 +343,7 @@ void ReaderApp::Impl::network_complete(std::uint64_t id, int status, const std::
             Anchor candidate;
             sync::PartPosition place;
             sync_checked = true;
-            remote_percent = remote.percentage;  // parse_remote() accepts only [0, 1].
+            remote_fraction = remote.progress_fraction;  // parse_remote() accepts only [0, 1].
             remote_device = remote.device;
             if (async_content) { begin_mapping(ContentJob::Kind::MapDownload, remote.progress); return; }
             sync::from_xpointer(document, remote.progress, sync_config.dom_version, candidate, detail, {}, &place);

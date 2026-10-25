@@ -135,7 +135,7 @@ bool Font::open(const std::string& path) {
         close(); error_ = "Font has no Unicode character map"; return false;
     }
     error_.clear();
-    return size(28);
+    return set_pixel_size(28);
 }
 
 bool Font::open_memory(const unsigned char* bytes, std::size_t length) {
@@ -152,14 +152,14 @@ bool Font::open_memory(const unsigned char* bytes, std::size_t length) {
         close(); error_ = "Font has no Unicode character map"; return false;
     }
     error_.clear();
-    return size(28);
+    return set_pixel_size(28);
 }
 
 const char* Font::fallback_identity() { return kFallbackIdentity; }
 
 bool Font::open_fallback() { return open_memory(kFallbackFont, kFallbackFontSize); }
 
-bool Font::size(int pixels) {
+bool Font::set_pixel_size(int pixels) {
     if (!face_ || pixels < 8 || pixels > 256 ||
         FT_Set_Pixel_Sizes(static_cast<FT_Face>(face_), 0, pixels)) {
         error_ = "Invalid font size or unavailable font"; return false;
@@ -357,7 +357,7 @@ Page layout_page(Font& font, std::u32string_view text, std::size_t start, const 
         spec.height > 4096 || spec.top < 0 || spec.top > 4096 || spec.left < 0 || spec.left > 4096 ||
         spec.line_height <= 0 || spec.line_height > 1024 || spec.indent_chars < 0 ||
         spec.indent_chars > 4 || spec.paragraph_gap < 0 || spec.paragraph_gap > 1024 ||
-        !font.size(spec.font_px)) {
+        !font.set_pixel_size(spec.font_px)) {
         page.error = "Invalid page geometry or font"; return page;
     }
     const auto metrics = font.metrics();
@@ -465,17 +465,17 @@ std::vector<SelectionBox> selection_boxes(const Page& page, std::size_t begin, s
 }
 
 bool render_page(Canvas& canvas, Font& font, const Page& page, std::uint8_t gray, const std::function<bool()>& stop) {
-    if (!page.error.empty() || !font.size(page.font_px)) return false;
+    if (!page.error.empty() || !font.set_pixel_size(page.font_px)) return false;
     int current_size = page.font_px;
     for (const auto& glyph : page.glyphs) {
         if (stop && stop()) return false;
         if (glyph.font_px != current_size) {
-            if (!font.size(glyph.font_px)) return false;
+            if (!font.set_pixel_size(glyph.font_px)) return false;
             current_size = glyph.font_px;
         }
         if (!font.draw(canvas, glyph.scalar, glyph.x, glyph.baseline, gray, glyph.bold)) return false;
     }
-    return current_size == page.font_px || font.size(page.font_px);
+    return current_size == page.font_px || font.set_pixel_size(page.font_px);
 }
 
 std::u32string decode_utf8(std::string_view text) {

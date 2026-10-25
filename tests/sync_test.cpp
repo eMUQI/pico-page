@@ -48,10 +48,10 @@ int main(int argc, char** argv) {
     const Anchor leading{chapter.resource, "/html[1]/body[1]/p[1]/text()[1]", 2};
     // These expected paths and normalized text offsets were exported by the pinned CREngine.
     for (int version : {20240114, 20260812}) {
-        double percentage = -1;
-        assert(sync::map_upload_position(document, emoji, version, pointer, percentage, error));
+        double progress_fraction = -1;
+        assert(sync::map_upload_position(document, emoji, version, pointer, progress_fraction, error));
         assert(pointer == "/body[1]/DocFragment[1]/body[1]/p[1]/em[1]/text()[1].3");
-        assert(percentage >= 0 && percentage <= 1 && error.empty());
+        assert(progress_fraction >= 0 && progress_fraction <= 1 && error.empty());
         Anchor recovered;
         assert(sync::from_xpointer(document, pointer, version, recovered, error));
         assert(recovered == emoji);
@@ -72,15 +72,15 @@ int main(int argc, char** argv) {
     }
     {
         // Rejected uploads must not expose outputs retained from a previous successful mapping.
-        double percentage = 1;
+        double progress_fraction = 1;
         pointer = "stale";
         assert(!sync::map_upload_position(document, {"missing.xhtml", emoji.node, emoji.offset},
-                                          20260812, pointer, percentage, error));
-        assert(pointer.empty() && percentage == 0 && error == "Saved position cannot be mapped");
-        pointer = "stale"; percentage = 1;
-        assert(!sync::map_upload_position(document, emoji, 20260812, pointer, percentage, error,
+                                          20260812, pointer, progress_fraction, error));
+        assert(pointer.empty() && progress_fraction == 0 && error == "Saved position cannot be mapped");
+        pointer = "stale"; progress_fraction = 1;
+        assert(!sync::map_upload_position(document, emoji, 20260812, pointer, progress_fraction, error,
                                           [] { return true; }));
-        assert(pointer.empty() && percentage == 0 && error == kChapterCancelled);
+        assert(pointer.empty() && progress_fraction == 0 && error == kChapterCancelled);
     }
     chapter.plain_dom = false;
     assert(!sync::to_xpointer(document, chapter, emoji, 20260812, pointer, error));
@@ -191,10 +191,10 @@ int main(int argc, char** argv) {
 
     sync::Config config{"https://sync.example.invalid", "test-user", "test-key", "test-device", 20260812};
     sync::HttpRequest request;
-    assert(sync::get_request(config, document.metadata().partial_md5, request, error));
+    assert(sync::build_get_request(config, document.metadata().partial_md5, request, error));
     assert(request.method == "GET" && request.body.empty());
     ReadingRecord saved{document.metadata().book_id, "epub-native-v1", "test-writer", 7, emoji};
-    assert(sync::put_request(config, document.metadata().partial_md5,
+    assert(sync::build_put_request(config, document.metadata().partial_md5,
            "/body[1]/DocFragment[1]/body[1]/p[1]/em[1]/text()[1].3", 0.2, saved, request, error));
     saved.local_revision = 8;
     assert(request.uploaded_record && request.uploaded_record->local_revision == 7);
@@ -208,7 +208,7 @@ int main(int argc, char** argv) {
     assert(sync::parse_remote(200, R"({"progress":"x","percentage":2})").status == sync::RemoteStatus::Error);
     assert(sync::parse_remote(200, R"({"error":"server error"})").status == sync::RemoteStatus::Error);
     config.endpoint = "http://sync.example.invalid";
-    assert(!sync::get_request(config, document.metadata().partial_md5, request, error));
+    assert(!sync::build_get_request(config, document.metadata().partial_md5, request, error));
     char directory[] = "/tmp/pico-page-sync-XXXXXX";
     assert(mkdtemp(directory));
     const auto config_dir = std::filesystem::path(directory) / "PicoPage";

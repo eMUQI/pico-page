@@ -22,7 +22,7 @@ int main(int argc, char** argv) {
     for (const auto c : decode_utf8("我们在黄昏时读完了这本书，“窗外”下起雨来——他说：好！①")) assert(font.contains(c));
     {
         Canvas missing, other, space;
-        assert(!font.contains(U'龘') && font.size(28) && font.draw(missing, U'龘', 40, 60));
+        assert(!font.contains(U'龘') && font.set_pixel_size(28) && font.draw(missing, U'龘', 40, 60));
         assert(missing.pixels() != Canvas().pixels());
         // Every missing character draws the same hollow box inside its advance and shares one cache entry.
         const auto cached = font.cached_glyphs();
@@ -50,20 +50,20 @@ int main(int argc, char** argv) {
     {
         // Prewarming an independent font face must preserve the rasterized pixels.
         Canvas rasterized, cached;
-        assert(font.size(28) && font.draw(rasterized, fallback_text[0], 40, 60));
+        assert(font.set_pixel_size(28) && font.draw(rasterized, fallback_text[0], 40, 60));
         Font warmed;
-        assert(warmed.open_fallback() && warmed.size(28) && warmed.warm(fallback_text[0]));
+        assert(warmed.open_fallback() && warmed.set_pixel_size(28) && warmed.warm(fallback_text[0]));
         assert(warmed.draw(cached, fallback_text[0], 40, 60));
         assert(rasterized.pixels() == cached.pixels() && rasterized.pixels() != Canvas().pixels());
     }
     {
         Canvas regular, medium, bold, restored;
-        assert(font.size(38));
+        assert(font.set_pixel_size(38));
         const auto width = font.advance(U'读');
         assert(font.draw(regular, U'读', 40, 70));
-        font.weight(1); assert(font.warm(U'读') && font.draw(medium, U'读', 40, 70));
-        font.weight(2); assert(font.draw(bold, U'读', 40, 70));
-        font.weight(0); assert(font.draw(restored, U'读', 40, 70));
+        font.set_synthetic_weight(1); assert(font.warm(U'读') && font.draw(medium, U'读', 40, 70));
+        font.set_synthetic_weight(2); assert(font.draw(bold, U'读', 40, 70));
+        font.set_synthetic_weight(0); assert(font.draw(restored, U'读', 40, 70));
         assert(regular.pixels() != medium.pixels() && medium.pixels() != bold.pixels());
         assert(restored.pixels() == regular.pixels() && font.advance(U'读') == width);
     }
@@ -220,7 +220,7 @@ int main(int argc, char** argv) {
     assert(canvas.data()[0] == 0x31);
     assert(canvas.pixels().size() == 415872);
     canvas.clear();
-    assert(font.size(28));
+    assert(font.set_pixel_size(28));
     assert(font.draw(canvas, U'中', 40, 80));
     const auto regular = canvas.pixels();
     canvas.clear();
@@ -236,12 +236,12 @@ int main(int argc, char** argv) {
     const auto previous_advance = font.advance(U'中');
     for (char32_t cp = 0x4e00; cp < 0x4e00 + 9000; ++cp) assert(font.advance(cp) >= 0);
     assert(font.advance(U'中') == previous_advance);
-    assert(font.size(64));
+    assert(font.set_pixel_size(64));
     for (char32_t cp = 0x4e00; cp < 0x4e00 + 1024; ++cp) assert(font.warm(cp));
     const auto retained_glyphs = font.cached_glyphs();
     font.trim_glyph_cache(0, 32);
     assert(retained_glyphs - font.cached_glyphs() <= 32 && font.cached_glyphs() < retained_glyphs);
-    assert(font.size(28));
+    assert(font.set_pixel_size(28));
     canvas.clear();
     assert(font.draw(canvas, U'中', 40, 80));
     assert(canvas.pixels() == regular);

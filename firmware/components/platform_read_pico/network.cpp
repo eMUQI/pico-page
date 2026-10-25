@@ -108,9 +108,9 @@ bool valid_url(const std::string& url) {
 // A pending frame takes priority between SDK steps. An in-flight SDK step retains
 // its own DNS, TCP and cryptographic bounds; the application retries without waiting.
 template <typename Operation, typename Result>
-Result http_step(Operation operation, Result pending, std::int64_t deadline, const std::atomic_bool* cancelled) {
+Result http_step(Operation operation, Result pending, std::int64_t deadline_us, const std::atomic_bool* cancelled) {
     for (;;) {
-        if ((cancelled && cancelled->load(std::memory_order_acquire)) || esp_timer_get_time() >= deadline)
+        if ((cancelled && cancelled->load(std::memory_order_acquire)) || esp_timer_get_time() >= deadline_us)
             return pending;
         if (presentation_gate.try_network()) {
             const auto result = operation();
@@ -129,19 +129,19 @@ esp_err_t step_error(std::int64_t value) { return value == -ESP_ERR_HTTP_EAGAIN 
 // IDF closes the connection when a request header write fails, so a retry opens a new request.
 // Later steps poll the socket in 50 ms intervals.
 esp_err_t http_open(esp_http_client_handle_t client, int length,
-                    std::int64_t deadline, const std::atomic_bool* cancelled) {
+                    std::int64_t deadline_us, const std::atomic_bool* cancelled) {
     esp_http_client_set_timeout_ms(client, 10000);
     const auto result = http_step([&] {
         errno = 0;
         const auto value = esp_http_client_open(client, length);
         return value != ESP_OK && (errno == EAGAIN || errno == EWOULDBLOCK) ? ESP_ERR_HTTP_EAGAIN : value;
-    }, ESP_ERR_HTTP_EAGAIN, deadline, cancelled);
+    }, ESP_ERR_HTTP_EAGAIN, deadline_us, cancelled);
     if (result == ESP_OK) esp_http_client_set_timeout_ms(client, 50);
     return result == ESP_ERR_HTTP_EAGAIN ? ESP_ERR_TIMEOUT : result;
 }
 
 std::int64_t http_headers(esp_http_client_handle_t client, int& status,
-                          std::int64_t deadline, const std::atomic_bool* cancelled) {
+                          std::int64_t deadline_us, const std::atomic_bool* cancelled) {
     status = 0;
     return http_step([&] {
         const auto length = esp_http_client_fetch_headers(client);
@@ -149,7 +149,7 @@ std::int64_t http_headers(esp_http_client_handle_t client, int& status,
         const auto parsed_status = esp_http_client_get_status_code(client);
         if (parsed_status > 0) status = parsed_status;
         return length;
-    }, static_cast<std::int64_t>(-ESP_ERR_HTTP_EAGAIN), deadline, cancelled);
+    }, static_cast<std::int64_t>(-ESP_ERR_HTTP_EAGAIN), deadline_us, cancelled);
 }
 
 void http_close(esp_http_client_handle_t client, bool destroy) {
@@ -226,9 +226,9 @@ bool scan(std::vector<NearbyNetwork>& networks, std::string& error, const std::a
     xEventGroupClearBits(events, scan_complete);
     const auto result = esp_wifi_scan_start(&configuration, false);
     if (result != ESP_OK) return fail(error, "Wi-Fi scan", result);
-    const auto deadline = esp_timer_get_time() + 10'000'000;
+    const auto deadline_us = esp_timer_get_time() + 10'000'000;
     while (!(xEventGroupWaitBits(events, scan_complete, pdFALSE, pdFALSE, pdMS_TO_TICKS(100)) & scan_complete)) {
-        if ((cancelled && cancelled->load()) || esp_timer_get_time() >= deadline) {
+        if ((cancelled && cancelled->load()) || esp_timer_get_time() >= deadline_us) {
             esp_wifi_scan_stop(); esp_wifi_clear_ap_list();
             error = cancelled && cancelled->load() ? "操作已取消。" : "搜索网络超时，请重试。";
             return false;
@@ -392,11 +392,11 @@ bool connect_network(const std::string& ssid, const std::string& password, std::
         return fail(error, "Wi-Fi initialization", result);
     }
     EventBits_t bits = 0;
-    const auto deadline = esp_timer_get_time() + 20'000'000;
+    const auto deadline_us = esp_timer_get_time() + 20'000'000;
     do {
         if (cancelled && cancelled->load()) { abandon_station(); error = "操作已取消。"; return false; }
         bits = xEventGroupWaitBits(events, has_address | connection_failed, pdFALSE, pdFALSE, pdMS_TO_TICKS(100));
-    } while (!(bits & (has_address | connection_failed)) && esp_timer_get_time() < deadline);
+    } while (!(bits & (has_address | connection_failed)) && esp_timer_get_time() < deadline_us);
     if (!(bits & has_address) || (bits & connection_failed)) {
         if (bits & connection_failed) {
             outcome = {ConnectFailure::Stage::Link, disconnect_reason};
@@ -432,8 +432,8 @@ bool synchronize_clock(std::string& error, ConnectFailure* failure, const std::a
     if (cancelled && cancelled->load()) { error = "操作已取消。"; return false; }
     if (fresh) stop_clock();
     start_clock();
-    const auto deadline = esp_timer_get_time() + 10'000'000;
-    while (sntp_initialized && !clock_synchronized && esp_timer_get_time() < deadline) {
+    const auto deadline_us = esp_timer_get_time() + 10'000'000;
+    while (sntp_initialized && !clock_synchronized && esp_timer_get_time() < deadline_us) {
         if (cancelled && cancelled->load()) { error = "操作已取消。"; return false; }
         clock_synchronized = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(100)) == ESP_OK;
     }
@@ -521,7 +521,7 @@ bool http_request(const std::string& method, const std::string& url,
     configuration.buffer_size_tx = 4096;
     auto* client = esp_http_client_init(&configuration);
     if (!client) return fail(error, "HTTP allocation", ESP_ERR_NO_MEM);
-    const auto deadline = esp_timer_get_time() + 25'000'000;
+    const auto deadline_us = esp_timer_get_time() + 25'000'000;
     auto perform = [&]() -> bool {
         for (const auto& header : headers) {
             const auto result = esp_http_client_set_header(client, header.first.c_str(), header.second.c_str());
@@ -530,24 +530,24 @@ bool http_request(const std::string& method, const std::string& url,
         if (cancel_requested()) return false;
         request_started = true;
         auto result = http_open(client, static_cast<int>(body.size()),
-                                std::min(deadline, esp_timer_get_time() + 10'000'000), cancelled);
+                                std::min(deadline_us, esp_timer_get_time() + 10'000'000), cancelled);
         if (cancel_requested()) return false;
         if (result != ESP_OK) return fail(error, "HTTPS connection", result);
         std::size_t sent = 0;
         while (sent < body.size()) {
             if (cancel_requested()) return false;
-            if (esp_timer_get_time() >= deadline) return fail(error, "HTTP request", ESP_ERR_TIMEOUT);
+            if (esp_timer_get_time() >= deadline_us) return fail(error, "HTTP request", ESP_ERR_TIMEOUT);
             const int count = http_step([&] {
                 errno = 0;
                 const auto value = esp_http_client_write(client, body.data() + sent, static_cast<int>(body.size() - sent));
                 return value == 0 || (value < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) ? -ESP_ERR_HTTP_EAGAIN : value;
-            }, -ESP_ERR_HTTP_EAGAIN, std::min(deadline, esp_timer_get_time() + 10'000'000), cancelled);
+            }, -ESP_ERR_HTTP_EAGAIN, std::min(deadline_us, esp_timer_get_time() + 10'000'000), cancelled);
             if (count <= 0) return fail(error, "HTTP request write", step_error(count));
             sent += static_cast<std::size_t>(count);
         }
         if (cancel_requested()) return false;
         const auto length = http_headers(client, status,
-                                     std::min(deadline, esp_timer_get_time() + 10'000'000), cancelled);
+                                     std::min(deadline_us, esp_timer_get_time() + 10'000'000), cancelled);
         if (length < 0) return fail(error, "HTTP response headers", step_error(length));
         if (cancel_requested()) return false;
         if (length > static_cast<std::int64_t>(response_limit)) {
@@ -559,10 +559,10 @@ bool http_request(const std::string& method, const std::string& url,
         // complete flag includes buffered bytes that still need to be read.
         while (true) {
             if (cancel_requested()) return false;
-            const auto remaining = deadline - esp_timer_get_time();
+            const auto remaining = deadline_us - esp_timer_get_time();
             if (remaining <= 0) return fail(error, "HTTP response", ESP_ERR_TIMEOUT);
             const int count = http_step([&] { return esp_http_client_read(client, buffer, sizeof(buffer)); },
-                                       -ESP_ERR_HTTP_EAGAIN, std::min(deadline, esp_timer_get_time() + 5'000'000), cancelled);
+                                       -ESP_ERR_HTTP_EAGAIN, std::min(deadline_us, esp_timer_get_time() + 5'000'000), cancelled);
             if (cancel_requested()) return false;
             if (count < 0) return fail(error, "HTTP response read", step_error(count));
             if (count == 0) {
@@ -598,7 +598,7 @@ esp_err_t firmware_header(esp_http_client_event_t* event) {
     if (event->event_id == HTTP_EVENT_ON_HEADER && event->header_key && event->header_value &&
         strcasecmp(event->header_key, "Content-Range") == 0) {
         auto& range = *static_cast<FirmwareRange*>(event->user_data);
-        range.header(std::string_view(event->header_value, strnlen(event->header_value, 64)));
+        range.parse_content_range(std::string_view(event->header_value, strnlen(event->header_value, 64)));
     }
     return ESP_OK;
 }
@@ -691,23 +691,23 @@ bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, F
     )
     psa_hash_operation_t hash = PSA_HASH_OPERATION_INIT;
     const auto flash = [&](bool begin) {
-        PP_DIAGNOSTIC(const auto started = esp_timer_get_time();)
+        PP_DIAGNOSTIC(const auto started_us = esp_timer_get_time();)
         if (hooks.flash) hooks.flash(hooks.context, begin);
-        PP_DIAGNOSTIC(if (begin) wait_us += esp_timer_get_time() - started;)
+        PP_DIAGNOSTIC(if (begin) wait_us += esp_timer_get_time() - started_us;)
     };
     FirmwareRecovery recovery(esp_timer_get_time());
-    const auto deadline = recovery.deadline();
+    const auto deadline_us = recovery.deadline_us();
     const auto open_response = [&]() -> bool {
         if (cancel_requested()) return false;
-        if (esp_timer_get_time() >= deadline) return stop(FirmwareFailure::Network, "Firmware download", ESP_ERR_TIMEOUT);
+        if (esp_timer_get_time() >= deadline_us) return stop(FirmwareFailure::Network, "Firmware download", ESP_ERR_TIMEOUT);
         if (!station_connected()) {
             xEventGroupClearBits(events, connection_failed);
             if (!(xEventGroupGetBits(events) & associated)) {
                 const auto result = esp_wifi_connect();
                 if (result != ESP_OK) return stop(FirmwareFailure::Network, "Wi-Fi reconnect", result);
             }
-            const auto until = recovery.read_deadline(esp_timer_get_time());
-            while (!station_connected() && esp_timer_get_time() < until) {
+            const auto until_us = recovery.read_deadline_us(esp_timer_get_time());
+            while (!station_connected() && esp_timer_get_time() < until_us) {
                 if (cancel_requested()) return false;
                 if (xEventGroupGetBits(events) & connection_failed) break;
                 vTaskDelay(pdMS_TO_TICKS(20));
@@ -723,13 +723,13 @@ bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, F
             if (result != ESP_OK) return stop(FirmwareFailure::Flash, "Firmware range header", result);
         }
         PP_DIAGNOSTIC(const auto connecting = esp_timer_get_time();)
-        auto result = http_open(client, 0, std::min(deadline, esp_timer_get_time() + 10'000'000), cancelled);
+        auto result = http_open(client, 0, std::min(deadline_us, esp_timer_get_time() + 10'000'000), cancelled);
         PP_DIAGNOSTIC(connect_us += esp_timer_get_time() - connecting;)
         if (cancel_requested()) return false;
         if (result != ESP_OK) return stop(FirmwareFailure::Network, "HTTPS connection", result);
         PP_DIAGNOSTIC(const auto headers_started = esp_timer_get_time();)
         int status = 0;
-        const auto length = http_headers(client, status, std::min(deadline, esp_timer_get_time() + 10'000'000), cancelled);
+        const auto length = http_headers(client, status, std::min(deadline_us, esp_timer_get_time() + 10'000'000), cancelled);
         PP_DIAGNOSTIC(headers_us += esp_timer_get_time() - headers_started;)
         if (cancel_requested()) return false;
         if (length < 0) return stop(FirmwareFailure::Network, "HTTP response headers", step_error(length));
@@ -744,12 +744,12 @@ bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, F
         http_close(client, false);
         ESP_LOGW("pico_network", "Firmware reconnect %u/%u at byte %lu: %s", recovery.reconnects(),
                  FirmwareRecovery::max_reconnects, static_cast<unsigned long>(written), error.c_str());
-        const auto until = std::min(deadline, esp_timer_get_time() + 250'000 * recovery.reconnects());
-        while (esp_timer_get_time() < until) {
+        const auto until_us = std::min(deadline_us, esp_timer_get_time() + 250'000 * recovery.reconnects());
+        while (esp_timer_get_time() < until_us) {
             if (cancel_requested()) return false;
             vTaskDelay(pdMS_TO_TICKS(20));
         }
-        return !cancel_requested() && esp_timer_get_time() < deadline;
+        return !cancel_requested() && esp_timer_get_time() < deadline_us;
     };
     auto perform = [&]() -> bool {
         esp_err_t result;
@@ -758,7 +758,7 @@ bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, F
         bool complete = false, response_open = false;
         while (!complete) {
             if (cancel_requested()) return false;
-            if (esp_timer_get_time() >= deadline) return stop(FirmwareFailure::Network, "Firmware download", ESP_ERR_TIMEOUT);
+            if (esp_timer_get_time() >= deadline_us) return stop(FirmwareFailure::Network, "Firmware download", ESP_ERR_TIMEOUT);
             if (!response_open) {
                 if (!open_response()) {
                     if (failure != FirmwareFailure::Network || !retry_response()) return false;
@@ -770,7 +770,7 @@ bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, F
             const int count = http_step([&] {
                 return esp_http_client_read(client, reinterpret_cast<char*>(block) + held,
                                             static_cast<int>(firmware_block - held));
-            }, -ESP_ERR_HTTP_EAGAIN, recovery.read_deadline(esp_timer_get_time()), cancelled);
+            }, -ESP_ERR_HTTP_EAGAIN, recovery.read_deadline_us(esp_timer_get_time()), cancelled);
             PP_DIAGNOSTIC(
                 const auto elapsed_read = esp_timer_get_time() - reading;
                 read_us += elapsed_read; read_max_us = std::max(read_max_us, elapsed_read); ++read_calls;
@@ -818,7 +818,7 @@ bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, F
                     // Let the application publish input and cancellation between erase blocks.
                     vTaskDelay(1);
                     if (cancel_requested()) return false;
-                    if (esp_timer_get_time() >= deadline) return stop(FirmwareFailure::Network, "Firmware download", ESP_ERR_TIMEOUT);
+                    if (esp_timer_get_time() >= deadline_us) return stop(FirmwareFailure::Network, "Firmware download", ESP_ERR_TIMEOUT);
                     const auto length = std::min<std::size_t>(firmware_erase_block, erase_end - erased);
                     flash(true);
                     PP_DIAGNOSTIC(const auto erasing = esp_timer_get_time();)

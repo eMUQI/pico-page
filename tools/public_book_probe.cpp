@@ -68,7 +68,7 @@ int main(int argc, char **argv) {
                 }
                 graphics::LayoutSpec spec;
                 spec.font_px = size;
-                font.size(size);
+                font.set_pixel_size(size);
                 const auto metrics = font.metrics();
                 spec.line_height = std::max(size * 3 / 2, metrics.ascender + metrics.descender);
                 std::size_t start = 0, count = 0;

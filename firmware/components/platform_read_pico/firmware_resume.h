@@ -12,7 +12,7 @@ struct FirmwareRange {
     std::uint32_t first = 0, last = 0, size = 0;
     bool present = false, valid = false;
 
-    void header(std::string_view value) {
+    void parse_content_range(std::string_view value) {
         if (present) { valid = false; return; }
         present = true;
         if (value.size() >= 64 || value.substr(0, 6) != "bytes ") return;
@@ -52,18 +52,18 @@ public:
     static constexpr std::int64_t total_us = 1'200'000'000;
     static constexpr unsigned max_reconnects = 3;
 
-    explicit FirmwareRecovery(std::int64_t started) : deadline_(started + total_us) {}
-    std::int64_t deadline() const { return deadline_; }
-    std::int64_t read_deadline(std::int64_t now) const { return std::min(deadline_, now + idle_us); }
+    explicit FirmwareRecovery(std::int64_t started_us) : deadline_us_(started_us + total_us) {}
+    std::int64_t deadline_us() const { return deadline_us_; }
+    std::int64_t read_deadline_us(std::int64_t now_us) const { return std::min(deadline_us_, now_us + idle_us); }
     unsigned reconnects() const { return reconnects_; }
-    bool retry(std::int64_t now, bool cancelled) {
-        if (cancelled || now >= deadline_ || reconnects_ == max_reconnects) return false;
+    bool retry(std::int64_t now_us, bool cancelled) {
+        if (cancelled || now_us >= deadline_us_ || reconnects_ == max_reconnects) return false;
         ++reconnects_;
         return true;
     }
 
 private:
-    std::int64_t deadline_;
+    std::int64_t deadline_us_;
     unsigned reconnects_ = 0;
 };
 

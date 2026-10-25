@@ -34,7 +34,7 @@ header{padding:18px 20px;border-bottom:3px solid #111}h1{font-size:22px;margin:0
 const $=id=>document.getElementById(id),files=$('files'),list=$('list'),stop=$('stop'),again=$('again');
 const table=Array.from({length:256},(_,i)=>{let c=i;for(let j=0;j<8;j++)c=(c>>>1)^((c&1)?0xedb88320:0);return c>>>0;});
 const esc=s=>String(s).replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');
-const size=n=>n<1048576?Math.max(1,Math.round(n/1024))+' KB':(n/1048576).toFixed(1)+' MB';
+const formatFileSize=n=>n<1048576?Math.max(1,Math.round(n/1024))+' KB':(n/1048576).toFixed(1)+' MB';
 // Statuses for which the device refused only this file; the batch goes on with the next one.
 const skip=new Set([400,409,413,415]);
 // Pattern, folder, size limit in MiB and name of each accepted kind; the device applies the same table.
@@ -42,7 +42,7 @@ const kinds=[[/\.(epub|txt)$/i,'Books',64,'书籍'],[/\.(ttf|otf)$/i,'Fonts',32,
 const kind=file=>kinds.find(k=>k[0].test(file.name));
 // Resolves to a refusal for an image beyond what the device can prepare. An image this browser
 // cannot read is sent on; the device decides when it prepares the image.
-const pixels=file=>new Promise(resolve=>{
+const imageSizeProblem=file=>new Promise(resolve=>{
  if(!globalThis.Image||!globalThis.URL||!URL.createObjectURL)return resolve('');
  const image=new Image(),url=URL.createObjectURL(file),done=why=>{URL.revokeObjectURL(url);resolve(why);};
  image.onload=()=>{const w=image.naturalWidth,h=image.naturalHeight;done(w>4096||h>4096||w*h>8388608?'图片为 '+w+' × '+h+' 像素，超过单边 4096 像素或总计 8 百万像素的上限。':'');};
@@ -61,7 +61,7 @@ const row=(item,i)=>{
   const label=item.state==='check'?'校验中':item.state==='verify'?'保存并回读':'上传中 · '+item.percent+'%';
   const width=item.state==='check'?0:item.state==='verify'?100:item.percent;
   return '<div class="row now"><div class="line"><b>'+name+'</b><span>'+label+'</span></div><div class="bar"><i style="width:'+width+'%"></i></div></div>';}
- case 'saved':return '<div class="row"><div>'+name+'<small>'+size(item.file.size)+' · 已存入 '+kind(item.file)[1]+'</small></div><span class="tag">已保存</span></div>';
+ case 'saved':return '<div class="row"><div>'+name+'<small>'+formatFileSize(item.file.size)+' · 已存入 '+kind(item.file)[1]+'</small></div><span class="tag">已保存</span></div>';
  case 'rejected':return '<div class="row"><div>'+name+'<small class="why">'+esc(item.why)+'</small></div><span class="tag">未上传</span></div>';
  default:return '<div class="row"><div>'+name+'<small class="why">'+esc(item.why)+'</small></div><button class="retry" data-retry="'+i+'">重试</button></div>';}
 };
@@ -84,8 +84,8 @@ const checksum=async item=>{
  }
  return ((crc^0xffffffff)>>>0).toString(16);
 };
-const transmit=(url,item,headers,body,timeout)=>new Promise((resolve,reject)=>{
- xhr=new XMLHttpRequest();xhr.open('POST',url);xhr.timeout=timeout;
+const transmit=(url,item,headers,body,timeoutMs)=>new Promise((resolve,reject)=>{
+ xhr=new XMLHttpRequest();xhr.open('POST',url);xhr.timeout=timeoutMs;
  for(const [key,value] of Object.entries(headers))xhr.setRequestHeader(key,value);
  xhr.upload.onprogress=e=>{if(!body||!e.lengthComputable)return;item.percent=Math.floor(e.loaded/e.total*100);item.state=e.loaded===e.total?'verify':'upload';render();};
  xhr.onload=()=>xhr.status===200?resolve():reject({status:xhr.status,why:xhr.responseText||'设备拒绝了这个文件。'});
@@ -97,7 +97,7 @@ const transmit=(url,item,headers,body,timeout)=>new Promise((resolve,reject)=>{
 const send=async item=>{
  const k=kind(item.file);
  let local=!k?'仅支持 EPUB、TXT、TTF、OTF、PNG 和 JPEG 文件。':!item.file.size||item.file.size>k[2]*1048576?k[3]+'大小必须为 1 字节至 '+k[2]+' MiB。':'';
- if(!local&&k[1]==='LockScreens')local=await pixels(item.file);
+ if(!local&&k[1]==='LockScreens')local=await imageSizeProblem(item.file);
  if(local){item.state='rejected';item.why=local;return true;}
  item.state='check';item.percent=0;render();
  let sending=false;

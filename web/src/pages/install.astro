@@ -255,8 +255,8 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
           await loader.writeReg(0x600080b0, 0).catch(() => {});
         }
 
-        // Restarts the device out of download mode and frees the port. Returns whether the device
-        // restarted; a page reload frees a port that did not close.
+        // Attempts to leave download mode and free the port. The result reports command and
+        // cleanup success, not an observed firmware boot; reloading can free an unclosed port.
         async function release() {
           let clean = true;
           if (loader?.chip?.CHIP_NAME === "ESP32-S3") {

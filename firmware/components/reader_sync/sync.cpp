@@ -91,7 +91,7 @@ bool load_config(const std::string& card_root, Config& config, std::string& erro
 
 std::string account_scope(const Config& config) { return config.endpoint + "\n" + config.username + "\n" + config.device_id; }
 
-bool auth_request(const Config& config, HttpRequest& request, std::string& error) {
+bool build_auth_request(const Config& config, HttpRequest& request, std::string& error) {
     request = {};
     if (!valid_config(config)) { error = "Invalid sync configuration"; return false; }
     request.method = "GET";
@@ -103,27 +103,27 @@ bool auth_request(const Config& config, HttpRequest& request, std::string& error
     return true;
 }
 
-bool get_request(const Config& config, const std::string& partial_md5,
-                 HttpRequest& request, std::string& error) {
+bool build_get_request(const Config& config, const std::string& partial_md5,
+                       HttpRequest& request, std::string& error) {
     if (!begin_request(config, partial_md5, request, error)) return false;
     request.method = "GET";
     request.url = config.endpoint + "/syncs/progress/" + partial_md5;
     return true;
 }
 
-bool put_request(const Config& config, const std::string& partial_md5,
-                 const std::string& xpointer, double percentage, const ReadingRecord& saved_record,
-                 HttpRequest& request, std::string& error) {
+bool build_put_request(const Config& config, const std::string& partial_md5,
+                       const std::string& xpointer, double progress_fraction, const ReadingRecord& saved_record,
+                       HttpRequest& request, std::string& error) {
     if (!begin_request(config, partial_md5, request, error)) return false;
     if (saved_record.book_id.size() != 64 || !saved_record.local_revision || saved_record.anchor.node.empty() ||
         xpointer.empty() || xpointer.size() > 4096 || xpointer.front() != '/' ||
-        !std::isfinite(percentage) || percentage < 0 || percentage > 1) {
+        !std::isfinite(progress_fraction) || progress_fraction < 0 || progress_fraction > 1) {
         request = {}; error = "A saved position and an exact mapped XPointer are required"; return false;
     }
     std::unique_ptr<cJSON, decltype(&cJSON_Delete)> json(cJSON_CreateObject(), &cJSON_Delete);
     if (!json || !cJSON_AddStringToObject(json.get(), "document", partial_md5.c_str()) ||
         !cJSON_AddStringToObject(json.get(), "progress", xpointer.c_str()) ||
-        !cJSON_AddNumberToObject(json.get(), "percentage", percentage) ||
+        !cJSON_AddNumberToObject(json.get(), "percentage", progress_fraction) ||
         !cJSON_AddStringToObject(json.get(), "device", "Pico Page") ||
         !cJSON_AddStringToObject(json.get(), "device_id", config.device_id.c_str())) {
         request = {}; error = "Cannot allocate sync request"; return false;
@@ -166,7 +166,7 @@ RemoteResult parse_remote(int http_status, const std::string& body) {
         percentage->valuedouble < 0 || percentage->valuedouble > 1) {
         result.error = "Sync response has no valid position"; return result;
     }
-    result.percentage = percentage->valuedouble;
+    result.progress_fraction = percentage->valuedouble;
     result.device = json_string(json.get(), "device", 256);
     result.device_id = json_string(json.get(), "device_id", 256);
     result.status = RemoteStatus::Found;

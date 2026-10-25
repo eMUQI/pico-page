@@ -91,9 +91,16 @@ bool save_connection(const std::string& card_root, const std::string& ssid, std:
 
 /**
  * Adds or removes one network without operating the radio while retaining other TOML text.
- * now is a successful connection time in Unix seconds; pass 0 for an untested save.
- * remove ignores the password and time. Unsupported syntax, an external edit, or a failed
- * commit leaves the file unchanged and returns false with an error.
+ * Syntax validation and external-change checks reject the edit without replacing the file.
+ * A publication, sync or readback failure can leave the destination changed or missing;
+ * reload its state before retrying. Failure does not guarantee rollback.
+ *
+ * @param card_root Mounted card root.
+ * @param wifi Network identity and credentials; removal uses only the SSID.
+ * @param remove True to remove the network, false to add or update it.
+ * @param now Successful connection time in Unix seconds; 0 for an untested save, ignored on removal.
+ * @param[out] error Failure description; cleared on success.
+ * @return True after the edited file has been published and verified; false on failure.
  */
 bool save_network_edit(const std::string& card_root, const WifiCredentials& wifi, bool remove,
                        std::int64_t now, std::string& error);

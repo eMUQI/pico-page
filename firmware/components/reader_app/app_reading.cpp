@@ -418,7 +418,7 @@ bool ReaderApp::Impl::render_body(std::size_t start) {
                 if (glyph.baseline == line.baseline && glyph.index >= link.begin &&
                     glyph.index < link.end) {
                     left = std::min(left, glyph.x);
-                    body.size(glyph.font_px);
+                    body.set_pixel_size(glyph.font_px);
                     right = std::max(right, glyph.x + body.advance(glyph.scalar));
                 }
             if (right > left) {

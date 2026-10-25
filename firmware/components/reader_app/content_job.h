@@ -185,7 +185,7 @@ public:
         std::string lock_screen;
         Anchor mapped_anchor;
         sync::PartPosition mapped_place;  // Valid with mapped_anchor after a successful MapDownload.
-        double percentage = 0;
+        double progress_fraction = 0;
         std::unique_ptr<graphics::Canvas> image;
         std::vector<std::size_t> failed_images;
         PP_DIAGNOSTIC(std::uint32_t decoded_images = 0;)
@@ -214,6 +214,7 @@ public:
         ino_t file_inode = 0;
     };
     explicit ContentJob(Request request);
+    /** Requests cancellation and waits for completion; destruction can block on in-flight I/O. */
     ~ContentJob();
     ContentJob(const ContentJob&) = delete;
     ContentJob& operator=(const ContentJob&) = delete;
@@ -226,6 +227,11 @@ public:
      */
     static StartFailure prepare_worker();
 #endif
+    /**
+     * Starts or enqueues this job from its owner task. True means accepted, not completed.
+     * Retain the job and its borrowed resources until done(). False means already started
+     * or a resource/start failure; start_failure() describes failures of a new start attempt.
+     */
     bool start();
     StartFailure start_failure() const { return start_failure_; }
 #ifndef ESP_PLATFORM
@@ -235,6 +241,7 @@ public:
     static void delay_starts_for_test(Kind kind, std::chrono::milliseconds delay);
 #endif
     bool started() const { return started_; }
+    /** Requests cooperative cancellation; does not confirm completion or release borrowed resources. */
     void cancel() { cancelled_.store(true, std::memory_order_relaxed); }
     /** Requests a cooperative parsing/lookup pause; true acknowledges a checkpoint. Cancellation releases it. */
     bool pause() {
@@ -250,6 +257,11 @@ public:
         if (generation & 1U) pause_generation_.store(generation + 1, std::memory_order_release);
     }
     bool done() const { return done_.load(std::memory_order_acquire); }
+    /**
+     * Waits for a started job to finish, without a timeout; returns immediately if never started.
+     * In-flight I/O may delay completion even after cancel(). Keep this wait out of input and
+     * drawing callbacks; poll done() before consuming result or releasing borrowed resources.
+     */
     void wait();
     const Request request;
     Result result;

@@ -185,7 +185,7 @@ class ReaderApp {
      */
     void set_firmware_version(const std::string& version);
     void input(const AppInput &event);
-    /** True when a held touch can open an image or a library book's details at this screen point. */
+    /** True when a held touch can select reading text, open an image or open a library book's details here. */
     bool can_long_press_at(int x, int y) const;
     /** True only for visible selection handles; no file or font access is performed. */
     bool can_drag_selection_at(int x, int y) const;
@@ -273,7 +273,11 @@ class ReaderApp {
     void power_unavailable(const std::string& message);
     /** Consumes an explicit menu choice; the device loop performs the hardware operation. */
     PowerRequest take_power_request();
-    /** Saves local progress and starts irreversible teardown. Only save failure allows returning. */
+    /**
+     * Validates the power request, attempts required saves and starts irreversible teardown.
+     * True means teardown has begun. False includes invalid/busy requests, insufficient installation
+     * power and save failure; an explicit previously offered without-save choice may bypass saving.
+     */
     bool prepare_power(PowerRequest request);
     /** Closes card consumers after the final frame attempt, even if presentation failed. */
     bool close_power_files();
@@ -284,11 +288,16 @@ class ReaderApp {
     void wake(bool slept = true);
     void card_removed();
     /**
-     * True when a presented position awaits its first save attempt. Saving is left to the
-     * caller's idle time because a card commit blocks input sampling.
+     * True when a presented position or recent-book entry needs an eligible save attempt.
+     * The caller applies the reading dwell policy before calling save_progress().
      */
     bool save_due() const;
-    /** Commits the presented position now; a failure replaces the page with the error view. */
+    /**
+     * Requests saving the presented position and, in asynchronous mode, its recent-book entry.
+     * Asynchronous mode queues an immutable snapshot; completion and failure are handled by
+     * poll_background(). Synchronous mode commits before returning. Does nothing while
+     * transfer mode owns storage or a display frame is pending; return does not confirm a save.
+     */
     void save_progress();
     /** True while an immutable displayed-position snapshot or a bookmark list is being committed. */
     bool save_busy() const;
@@ -297,15 +306,13 @@ class ReaderApp {
      * typography; nullopt until every chapter has been counted or outside the reading order.
      */
     std::optional<BookPages> book_pages() const;
-    /** True while the reading page is shown and next-page preparation or counting has work left. */
+    /** True when optional background work is pending or active, including covers, caches and page counting. */
     bool background_due() const;
     /** True while foreground content is pending, including the inline-image dwell interval and cancellation. */
     bool content_busy() const;
     /**
-     * Diagnostic state: "opening" during book preparation, "image" while an image is prepared, "prefetch" while the next page is being prepared, "idle" without
-     * a book or when all work is complete, "counting"
-     * while chapters remain, "waiting" while memory is too low to load the next chapter, and
-     * "failed" after a chapter could not be read or laid out. The string is static.
+     * Static diagnostic label for selected content work, cache preparation or page-counting state.
+     * "idle" means no work selected by this query; it does not confirm that all workers have stopped.
      */
     const char *background_state() const;
     /**

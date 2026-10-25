@@ -198,9 +198,9 @@ bool to_xpointer(const EpubDocument& document, const Chapter& chapter, const Anc
 }
 
 bool map_upload_position(EpubDocument& document, const Anchor& anchor, int dom_version,
-                         std::string& xpointer, double& percentage, std::string& error,
+                         std::string& xpointer, double& progress_fraction, std::string& error,
                          const std::function<bool()>& stop) {
-    xpointer.clear(); percentage = 0; error.clear();
+    xpointer.clear(); progress_fraction = 0; error.clear();
     if (stop && stop()) { error = kChapterCancelled; return false; }
     Chapter source;
     std::size_t index;
@@ -213,7 +213,7 @@ bool map_upload_position(EpubDocument& document, const Anchor& anchor, int dom_v
         return false;
     }
     if (stop && stop()) { xpointer.clear(); error = kChapterCancelled; return false; }
-    percentage = (static_cast<double>(index) +
+    progress_fraction = (static_cast<double>(index) +
         (source.text.empty() ? 0. : static_cast<double>(offset) / source.text.size())) / document.spine().size();
     return true;
 }

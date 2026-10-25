@@ -3,7 +3,7 @@
 
 namespace pico_page {
 
-Action MapInput(Context context, Input input) {
+Action map_input(Context context, Input input) {
     if (context == Context::Sleeping) return Action::None;
     if (input == Input::K2) return Action::ForceRefresh;
     if (context == Context::Reading && input == Input::TouchCenter) return Action::OpenTools;
@@ -32,7 +32,7 @@ bool InputRouter::accept(InputEvent event) {
 Action InputRouter::route(Context context, InputEvent event, bool wake_authorized) {
     if (!accept(event)) return Action::None;
     if (context == Context::Sleeping) return wake_authorized ? Action::Wake : Action::None;
-    return MapInput(context, event.input);
+    return map_input(context, event.input);
 }
 
 bool operator==(const OperationContext& a, const OperationContext& b) {

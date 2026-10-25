@@ -1355,17 +1355,17 @@ struct FileDigest::Impl {
 FileDigest::FileDigest(const std::string& path) : impl_(std::make_unique<Impl>(path)) {}
 FileDigest::~FileDigest() = default;
 const std::string& FileDigest::digest() const { return impl_->value; }
-bool FileDigest::step(std::size_t budget, const std::function<bool()>& stop) {
+bool FileDigest::step(std::size_t budget_bytes, const std::function<bool()>& stop) {
     auto& state = *impl_;
     if (state.finished) return true;
-    if (!budget || (stop && stop())) return false;
+    if (!budget_bytes || (stop && stop())) return false;
     if (!state.file) {
         state.file.reset(std::fopen(state.path.c_str(), "rb"));
         if (!state.file) { state.finished = true; return true; }
     }
     std::array<unsigned char, 8192> bytes;
-    while (budget && (!stop || !stop())) {
-        const auto requested = std::min(budget, bytes.size());
+    while (budget_bytes && (!stop || !stop())) {
+        const auto requested = std::min(budget_bytes, bytes.size());
         const auto count = std::fread(bytes.data(), 1, requested, state.file.get());
         if (count && !state.sha.update(bytes.data(), count)) {
             state.finished = true;
@@ -1374,7 +1374,7 @@ bool FileDigest::step(std::size_t budget, const std::function<bool()>& stop) {
             state.finished = true;
         }
         if (state.finished) { state.file.reset(); return true; }
-        budget -= count;
+        budget_bytes -= count;
     }
     return false;
 }
@@ -1452,8 +1452,8 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
     if (detail != ChapterLoad::Mapping) {
         parser.keep_mapping = false;
         parser.keep_anchors = detail == ChapterLoad::Reading;
-        // Decoded text holds at most one scalar per XHTML byte and a part is closed at kMaxText;
-        // reserving that avoids the transient copies of geometric growth.
+        // Reserve from the source-size and part bounds when memory permits, with room for separators.
+        // Reading can still grow incrementally if this reservation is not admitted.
         const auto scalars = std::min<std::size_t>(spine[index].bytes, kMaxText) + 1024;
         if (memory_room(scalars * sizeof(char32_t))) parser.chapter.text.reserve(scalars);
         else if (detail == ChapterLoad::Layout) return fail(error, std::string(kChapterMemoryError) + ": " + spine[index].resource);
@@ -1491,7 +1491,7 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
         chapter.plain_dom = parser.chapter.plain_dom;
         chapter.long_source_node = parser.chapter.long_source_node;
     }
-    // A chapter kept for reading gives back the unused part of its reservation.
+    // Release substantial excess capacity only when the temporary copy fits the memory budget.
     if (detail == ChapterLoad::Reading && chapter.text.capacity() - chapter.text.size() > 4096 &&
         memory_room(chapter.text.size() * sizeof(char32_t))) {
         std::u32string exact(chapter.text.begin(), chapter.text.end());
@@ -1610,25 +1610,25 @@ bool EpubDocument::read_image(const std::string& resource, std::vector<std::uint
     if (!png && !jpeg) { bytes.clear(); return fail(error, "Image format is not PNG or JPEG"); }
     return true;
 }
-bool Chapter::anchor_at(std::uint32_t offset, Anchor& anchor) const {
-    auto run = std::upper_bound(runs.begin(), runs.end(), offset, [](std::uint32_t value, const TextRun& r) { return value < r.begin; });
+bool Chapter::anchor_at(std::uint32_t scalar_offset, Anchor& anchor) const {
+    auto run = std::upper_bound(runs.begin(), runs.end(), scalar_offset, [](std::uint32_t value, const TextRun& r) { return value < r.begin; });
     if (run == runs.begin()) return false;
     --run;
-    if (offset >= run->end) return false;
-    anchor = run->source; if (!run->element_reference) anchor.offset += offset - run->begin; return true;
+    if (scalar_offset >= run->end) return false;
+    anchor = run->source; if (!run->element_reference) anchor.offset += scalar_offset - run->begin; return true;
 }
-bool Chapter::offset_for(const Anchor& anchor, std::uint32_t& offset) const {
+bool Chapter::offset_for(const Anchor& anchor, std::uint32_t& scalar_offset) const {
     if (anchor.resource != resource) return false;
     for (const auto& run : runs) {
         if (run.source.node != anchor.node) continue;
-        if (run.element_reference) { if (anchor.offset == 0) { offset = run.begin; return true; } }
-        else if (anchor.offset >= run.source.offset && anchor.offset < run.source.offset + run.end - run.begin) { offset = run.begin + anchor.offset - run.source.offset; return true; }
+        if (run.element_reference) { if (anchor.offset == 0) { scalar_offset = run.begin; return true; } }
+        else if (anchor.offset >= run.source.offset && anchor.offset < run.source.offset + run.end - run.begin) { scalar_offset = run.begin + anchor.offset - run.source.offset; return true; }
     }
     return false;
 }
-bool Chapter::fragment_offset(const std::string& id, std::uint32_t& offset) const {
-    if (id.empty()) { offset = 0; return true; }
-    for (const auto& target : fragments) if (target.id == id) { offset = target.offset; return true; }
+bool Chapter::fragment_offset(const std::string& id, std::uint32_t& scalar_offset) const {
+    if (id.empty()) { scalar_offset = 0; return true; }
+    for (const auto& target : fragments) if (target.id == id) { scalar_offset = target.offset; return true; }
     return false;
 }
 }  // namespace pico_page

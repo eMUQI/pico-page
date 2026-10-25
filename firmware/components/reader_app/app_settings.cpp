@@ -10,7 +10,7 @@ void ReaderApp::Impl::load_fonts(const ReaderSettings *preview) {
     const bool native_weight = resolved.find(tag) != std::string::npos;
     const bool weighted_base = resolved.find("-Bold.") != std::string::npos || resolved.find("-Medium.") != std::string::npos || resolved.find("-Light.") != std::string::npos;
     weight_unavailable = weight_unavailable || (selected.font_weight != "regular" && !native_weight && weighted_base);
-    body.weight(native_weight || weight_unavailable ? 0 : selected.font_weight == "bold" ? 2 : selected.font_weight == "medium" ? 1 : 0);
+    body.set_synthetic_weight(native_weight || weight_unavailable ? 0 : selected.font_weight == "bold" ? 2 : selected.font_weight == "medium" ? 1 : 0);
     if (effective_font == resolved && body.valid() && controlled_storage) {
         if (effective_weight != selected.font_weight) { clear_body_cache(); clear_prefetch(); }
         effective_weight = selected.font_weight;

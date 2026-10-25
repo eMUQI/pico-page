@@ -445,7 +445,7 @@ void ContentJob::map_position() {
     }
     if (!request.record) { result.error = "Saved record unavailable"; return; }
     sync::map_upload_position(document, request.record->anchor, request.dom_version,
-                              result.xpointer, result.percentage, result.error, stop);
+                              result.xpointer, result.progress_fraction, result.error, stop);
 }
 bool read_lock_screen_cache(CacheReader& reader, const std::string& header, graphics::Canvas* image,
                             bool& alpha, const std::function<bool()>& stop) {

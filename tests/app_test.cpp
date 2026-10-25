@@ -1059,7 +1059,7 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
         driver.tap(342, 500); driver.present();
         assert(app.view() == View::Tools);
         graphics::Canvas expected;
-        graphics::Font font; assert(font.open_fallback() && font.size(30));
+        graphics::Font font; assert(font.open_fallback() && font.set_pixel_size(30));
         int x = 132;
         for (auto scalar : graphics::decode_utf8(title)) {
             font.draw(expected, scalar, x, 14 + font.metrics().ascender, 1, true);
@@ -1083,7 +1083,7 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     };
     const auto expect_text = [&](const std::string& value) {
         graphics::Canvas expected;
-        graphics::Font font; assert(font.open_fallback() && font.size(24));
+        graphics::Font font; assert(font.open_fallback() && font.set_pixel_size(24));
         int x = 36, width = 0;
         const auto scalars = graphics::decode_utf8(value);
         for (auto scalar : scalars) width += font.advance(scalar);
@@ -2820,7 +2820,7 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
             shot(query == 0 ? "dictionary-rich-text" : query == 1 ? "dictionary-long-query" :
                  query == 2 ? "dictionary-missing-glyph" : "dictionary-traditional-headword", reader);
             if (query == 3) {
-                graphics::Font expected_font; assert(expected_font.open(font) && expected_font.size(30));
+                graphics::Font expected_font; assert(expected_font.open(font) && expected_font.set_pixel_size(30));
                 assert(!expected_font.missing(U'發'));
                 graphics::Canvas expected;
                 expected.clear();
@@ -4688,7 +4688,7 @@ int main(int argc, char** argv) {
         assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
         const auto saved = *app.saved_record();
         driver.tap(342, 500); driver.present(); driver.tap(68, 1150); driver.present();
-        graphics::Font font; assert(font.open_fallback() && font.size(28));
+        graphics::Font font; assert(font.open_fallback() && font.set_pixel_size(28));
         const auto metrics = font.metrics();
         const int title_height = metrics.ascender + metrics.descender + 36;
         const int row_height = std::max(92, title_height + 28);

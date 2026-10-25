@@ -91,9 +91,8 @@ TouchMoves touch_moves;
 SemaphoreHandle_t touch_lock = nullptr;
 // Asks the sampler to cancel the contact in progress and ignore input until release.
 std::atomic<bool> suppress_touch{true};
-// Sampling every 5 ms costs the application task about a fifth of its CPU-bound speed, so
-// that rate is kept only around a contact. The controller's interrupt line starts it; the
-// idle period bounds the delay should that line not respond.
+// Faster sampling is limited to contacts and their settling interval to reduce idle CPU use.
+// The controller interrupt starts it; idle polling also detects contacts if the line is missed.
 constexpr TickType_t sample_period = pdMS_TO_TICKS(5);
 constexpr TickType_t idle_sample_period = pdMS_TO_TICKS(50);
 constexpr int settle_samples = 40;
@@ -272,6 +271,7 @@ bool pmu_events(bool& short_press, bool& wake_press, std::string& error, bool* l
  *
  * @param irq Expander interrupt line, active low.
  * @param idle Set when the line is released and the PMU has no pending events.
+ * @param[out] error Failure description when the status read fails.
  * @return false if the PMU status read fails; @p error then describes the failure.
  */
 bool wake_lines_idle(gpio_num_t irq, bool& idle, std::string& error) {
@@ -300,6 +300,7 @@ bool wake_lines_idle(gpio_num_t irq, bool& idle, std::string& error) {
  *
  * @param irq Expander interrupt line, active low.
  * @param wake_press Set when the events include a power-key press.
+ * @param[out] error Failure description when interrupt settling fails.
  * @return false if the PMU still fails, or if the line or the PMU queue is still not idle,
  *         2 s after the wake without a key press; @p error then describes the failure.
  */

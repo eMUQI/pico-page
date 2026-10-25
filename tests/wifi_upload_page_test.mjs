@@ -92,7 +92,7 @@ assert.deepEqual(requests.map(r=>r.url),['/check','/upload','/check','/upload'])
 assert.ok(list().includes('已存入 Fonts')&&list().includes('已存入 LockScreens'));
 assert.ok(list().includes('字体大小必须为 1 字节至 32 MiB')&&list().includes('锁屏图片大小必须为 1 字节至 2 MiB'));
 assert.equal(elements['result-title'].textContent,'已保存 2 个，3 个没有完成');
-// The largest book gets more than the 247 s its bytes take at the measured 265 KiB/s.
+// The largest book receives the base timeout plus its size-dependent transfer allowance.
 open();
 await choose(sized('max.epub',64*1048576));
 assert.equal(requests[1].timeout,120000+64*1048576/50);

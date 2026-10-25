@@ -49,7 +49,7 @@ def schema_defaults(root=ROOT):
 
 
 def verify_image(image):
-    """Check an image as the ROM and the bootloader do: segments, checksum, appended digest.
+    """Validate ESP image framing, segment bounds, checksum and appended digest.
 
     An image that keeps a valid start but is truncated or altered would otherwise be published
     and fail on every device only after its complete download. Returns the length of the image;
@@ -128,7 +128,7 @@ def full_name(version):
 
 
 def verify_table(table):
-    """Check a partition table as the bootloader does and that it carries the layout updates rely on."""
+    """Check partition entries, their digest, flash bounds and the OTA slots required by this project."""
     entries = []
     for offset in range(0, len(table), 32):
         magic, kind, subtype, start, size, label = struct.unpack_from('<HBBII16s', table, offset)
@@ -162,7 +162,7 @@ def build_full(bootloader, table, application):
 
 
 def verify_full(full, application):
-    """Check that a full-flash image starts Read Pico and holds exactly the published application."""
+    """Check the Read Pico full-image layout and embedded application bytes; this does not verify booting."""
     if len(full) <= APP_OFFSET:
         raise ValueError('Full image is truncated')
     end = verify_image(full[:TABLE_OFFSET])

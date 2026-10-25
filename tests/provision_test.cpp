@@ -291,12 +291,12 @@ int main() {
     assert(provision::wifi_qr({"a;b", "c:d\\e"}) == R"(WIFI:T:WPA;S:a\;b;P:c\:d\\e;;)");
 
     sync::HttpRequest request;
-    assert(sync::auth_request(account, request, error) && request.method == "GET" && request.body.empty());
+    assert(sync::build_auth_request(account, request, error) && request.method == "GET" && request.body.empty());
     assert(request.url == "https://sync.example.invalid/users/auth" && request.headers.size() == 3);
     assert(request.headers[2].first == "x-auth-key" && request.headers[2].second == account.userkey);
     auto insecure = account;
     insecure.endpoint = "http://sync.example.invalid";
-    assert(!sync::auth_request(insecure, request, error) && request.url.empty());
+    assert(!sync::build_auth_request(insecure, request, error) && request.url.empty());
 
     fs::remove_all(card);
     std::cout << "saved networks, connection mode and order, and failure sentences passed\n";

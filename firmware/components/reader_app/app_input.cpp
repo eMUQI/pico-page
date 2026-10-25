@@ -1043,7 +1043,7 @@ void ReaderApp::Impl::input(const AppInput &input) {
     if (!preserve_prefetch) clear_prefetch();
     if (input.queued) {
         const bool turn_touch = input.touch && input.y < footer_top && (input.x < 205 || input.x >= 479);
-        const auto action = input.touch ? Action::None : MapInput(context(), input.event.input);
+        const auto action = input.touch ? Action::None : map_input(context(), input.event.input);
         const bool turn_key = action == Action::PreviousPage || action == Action::NextPage;
         if (view != View::Reading || !turned || (!turn_touch && !turn_key))
             return;
@@ -1125,7 +1125,7 @@ void ReaderApp::Impl::input(const AppInput &input) {
         }
         return;
     }
-    const auto action = MapInput(context(), input.event.input);
+    const auto action = map_input(context(), input.event.input);
     if (action == Action::ForceRefresh)
         force_refresh();
     else if (action == Action::PreviousPage)

@@ -96,8 +96,9 @@ void guard_flash_io(bool begin);
  * portrait pixels; K1/K2/K3 retain their controller coordinates below the panel.
  * InputReset cancels all prior contacts after queue overflow; input resumes after release.
  * A held input never repeats. Read failures cancel an active touch sequence.
- * A sampler task records touch and key events every 5 ms, including while the
- * application task is blocked, except while Flash operations or sleep hold the controller lock.
+ * An independent sampler uses a faster cadence around contacts and an interrupt-woken idle
+ * cadence. It runs while the application task is blocked, except while Flash operations or
+ * sleep hold the controller lock.
  * Events are returned here in order with their sample time.
  */
 bool poll(Event& event, std::string& error);
@@ -332,9 +333,10 @@ struct FirmwareHooks {
  * the slot passed its own digest check; the boot slot is not changed. On any failure the
  * running firmware and the boot slot are untouched; an incomplete inactive image is never selected.
  * Reads tolerate 30 s without data. Up to three reconnects resume from bytes accepted by the OTA
- * handle, with a shared 20 min deadline; no state survives cancellation or a new call. SDK connection
- * steps may block for up to 10 s. cancelled is sampled between SDK steps and writes and must outlive
- * the call, including cleanup after the display/network gate is released.
+ * handle, with a shared 20 min retry budget; no state survives cancellation or a new call.
+ * The client uses a 10 s connection timeout, but synchronous DNS, in-flight SDK calls and cleanup
+ * can extend the call beyond these budgets. cancelled is sampled at explicit checkpoints between
+ * SDK steps and writes; it must outlive the call, including mandatory resource cleanup.
  */
 bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, FirmwareFailure& failure,
                        std::string& error, const std::atomic_bool* cancelled = nullptr);

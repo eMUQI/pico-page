@@ -131,7 +131,9 @@ struct SettingsSnapshot {
     std::optional<std::string> book_source;
 };
 
-/** A single-owner staged resource import; destruction removes its uncommitted temporary file. */
+/** A single-owner staged resource import; destruction attempts to remove its remaining staging file.
+ * Call cancel() explicitly when cleanup errors must be reported; destruction cannot report them.
+ */
 class FileImport {
 public:
     ~FileImport();
@@ -139,7 +141,11 @@ public:
     FileImport& operator=(const FileImport&) = delete;
     /** Appends the next block, at most 2048 bytes; offsets must be contiguous. */
     StoreStatus append(std::uint64_t offset, const void* data, std::size_t size, std::string& error);
-    /** Verifies size/CRC, synchronizes, reads back and publishes without replacing any destination. */
+    /**
+     * Verifies size/CRC, synchronizes, reads back and publishes without replacing any destination.
+     * Failure after publication can leave the destination present; inspect it before retrying.
+     * This closes the transaction even on failure; cancel() only cleans up remaining staging data.
+     */
     StoreStatus finish(std::string& error);
     /** Closes the transaction and removes only its unpublished staging file; reports cleanup errors. */
     StoreStatus cancel(std::string& error);
@@ -162,10 +168,17 @@ public:
     CacheReader(const CacheReader&) = delete;
     CacheReader& operator=(const CacheReader&) = delete;
     std::size_t size() const { return size_; }
-    /** Reads exactly size bytes into caller-owned storage; false on bounds, truncation or I/O failure. */
-    bool read(char* bytes, std::size_t size);
-    /** Reads a bounded range on the same file without allocating a payload buffer. */
-    bool read_at(std::size_t offset, char* bytes, std::size_t size);
+    /**
+     * Reads exactly byte_count bytes into caller-owned storage, advancing the cursor.
+     * False on bounds, truncation or I/O failure; a partial read may modify both buffer and cursor.
+     */
+    bool read(char* bytes, std::size_t byte_count);
+    /**
+     * Seeks to byte_offset and reads byte_count bytes without allocating a payload buffer.
+     * Changes the cursor used by read(); on success it is byte_offset + byte_count.
+     * A failed read may leave a changed cursor and partial output, as with read().
+     */
+    bool read_at(std::size_t byte_offset, char* bytes, std::size_t byte_count);
     /** Returns to byte zero on the same open file; refuses a changed length. */
     bool rewind();
 private:
@@ -176,20 +189,22 @@ private:
 };
 
 /** Single-owner temporary cache. Range writes never touch the published entry.
- * Release before card handoff; destruction discards an uncommitted temporary file.
- * A failed operation prevents publication. Callers initialize every published byte.
+ * Release before card handoff; destruction attempts to discard an uncommitted temporary file.
+ * A failed read, write or sync prevents a later commit. Callers initialize every published byte.
  */
 class CacheWriter {
 public:
     ~CacheWriter();
     CacheWriter(const CacheWriter&) = delete;
     CacheWriter& operator=(const CacheWriter&) = delete;
-    bool write(std::size_t offset, std::string_view bytes);
-    bool read(std::size_t offset, char* bytes, std::size_t size);
+    /** Writes the entire borrowed byte range at byte_offset; false permanently prevents publication. */
+    bool write(std::size_t byte_offset, std::string_view bytes);
+    /** Reads exactly byte_count staged bytes; false may leave partial output and prevents publication. */
+    bool read(std::size_t byte_offset, char* bytes, std::size_t byte_count);
     /** Synchronizes staged bytes before caller-controlled readback; never publishes. */
     bool sync();
-    /** Truncates to size, syncs and publishes. A failed publication may leave a cache missing. */
-    bool commit(std::size_t size);
+    /** Truncates to byte_count, syncs and publishes. A failed publication may leave a cache missing or replaced. */
+    bool commit(std::size_t byte_count);
 private:
     friend class FileStore;
     CacheWriter(int fd, std::string root, std::string path, std::size_t limit)

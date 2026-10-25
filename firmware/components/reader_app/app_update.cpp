@@ -11,7 +11,7 @@ void ReaderApp::Impl::layout_notes(const std::string& markdown, bool truncated, 
         const bool heading = block.kind == update::NoteBlock::Kind::Heading;
         const bool item = block.kind == update::NoteBlock::Kind::Item;
         NoteLine line{{}, {}, heading ? 30 : 26, item ? 28 : 0, heading ? 28 : 12, item, 0};
-        ui.size(line.size);
+        ui.set_pixel_size(line.size);
         std::u32string scalars;
         std::vector<bool> bold;
         for (const auto& span : block.spans)

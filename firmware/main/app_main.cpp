@@ -27,11 +27,10 @@
 namespace {
 constexpr auto tag = "pico_page";
 constexpr std::int64_t idle_slow_us = 3'000'000;
-// A progress commit blocks action dispatch for its duration, so it waits until the page has
-// been left alone this long. Leaving the book, sleeping and USB transfer commit immediately.
+// Defer background saves until the page settles to avoid writing every intermediate turn.
+// Leaving the book, sleeping and USB transfer flush pending saves and handle failures before handoff.
 constexpr std::int64_t idle_save_us = 2'000'000;
-// Whole-book page counting shares the application task with input handling and starts only
-// after the page has been left alone this long, so consecutive page turns are not delayed.
+// Delay optional content-worker tasks until the page settles so foreground work has priority.
 constexpr std::int64_t idle_background_us = 1'000'000;
 std::uint64_t presentation_sequence = 0;
 // When the most recent frame and its follow-up work finished; contacts sampled earlier were
@@ -394,8 +393,9 @@ void guard_flash(void*, bool begin) {
 }
 /**
  * Fetches the update manifest or streams the firmware image into the inactive slot. The link
- * is released afterwards unless another hold keeps it. A download blocks this task for up to
- * 20 minutes; cancellation takes effect at the next read or write.
+ * is released afterwards unless another hold keeps it. The download-stage retry budget excludes
+ * connection and clock setup and is not an end-to-end task deadline. Cancellation is observed at
+ * explicit checkpoints; in-flight SDK operations and resource cleanup must still complete.
  */
 void run_update(NetworkJob& job) {
     using pico_page::UpdateFailure;

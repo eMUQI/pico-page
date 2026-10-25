@@ -36,13 +36,13 @@ void ReaderApp::Impl::prepare_next(const std::function<bool()>& stop) {
 #endif
     // Images are prepared only for a displayed page; the planned layout is kept for the turn.
     if (!next_page->images.empty()) { prefetch_done = true; return; }
-    if (!body.size(next_page->font_px)) { next_page.reset(); prefetch_done = true; return; }
+    if (!body.set_pixel_size(next_page->font_px)) { next_page.reset(); prefetch_done = true; return; }
     int warm_size = next_page->font_px;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(15);
     while (warm_cursor < next_page->glyphs.size()) {
         if ((stop && stop()) || std::chrono::steady_clock::now() >= deadline) return;
         const auto& glyph = next_page->glyphs[warm_cursor];
-        if ((glyph.font_px != warm_size && !body.size(glyph.font_px)) ||
+        if ((glyph.font_px != warm_size && !body.set_pixel_size(glyph.font_px)) ||
             !body.warm(glyph.scalar, glyph.bold)) {
             next_page.reset(); prefetch_done = true; return;
         }
@@ -386,7 +386,7 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
         } else if (!sync_checked || !request.record || !session.saved_record() || !(*session.saved_record() == *request.record)) {
             cancel_sync();
             sync_status = "阅读位置已经改变，请重新检查。";
-        } else { send_upload(*request.record, job->result.xpointer, job->result.percentage); return; }
+        } else { send_upload(*request.record, job->result.xpointer, job->result.progress_fraction); return; }
         draw_sync(); overlay(); return;
     }
     if (request.kind == ContentJob::Kind::Open || request.kind == ContentJob::Kind::Inspect) {

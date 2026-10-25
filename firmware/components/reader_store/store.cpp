@@ -1073,11 +1073,11 @@ StoreStatus FileStore::load_cache(const std::string& name, std::size_t limit, st
 }
 
 CacheReader::~CacheReader() { close(fd_); }
-bool CacheReader::read(char* bytes, std::size_t size) {
-    if (size > size_ - offset_ || (size && !bytes)) return false;
+bool CacheReader::read(char* bytes, std::size_t byte_count) {
+    if (byte_count > size_ - offset_ || (byte_count && !bytes)) return false;
     std::size_t filled = 0;
-    while (filled < size) {
-        const auto count = ::read(fd_, bytes + filled, size - filled);
+    while (filled < byte_count) {
+        const auto count = ::read(fd_, bytes + filled, byte_count - filled);
         if (count < 0 && errno == EINTR) continue;
         if (count <= 0) return false;
         filled += static_cast<std::size_t>(count);
@@ -1092,20 +1092,20 @@ bool CacheReader::rewind() {
     offset_ = 0;
     return true;
 }
-bool CacheReader::read_at(std::size_t offset, char* bytes, std::size_t size) {
-    if (offset > size_ || size > size_ - offset ||
-        lseek(fd_, static_cast<off_t>(offset), SEEK_SET) != static_cast<off_t>(offset)) return false;
-    offset_ = offset;
-    return read(bytes, size);
+bool CacheReader::read_at(std::size_t byte_offset, char* bytes, std::size_t byte_count) {
+    if (byte_offset > size_ || byte_count > size_ - byte_offset ||
+        lseek(fd_, static_cast<off_t>(byte_offset), SEEK_SET) != static_cast<off_t>(byte_offset)) return false;
+    offset_ = byte_offset;
+    return read(bytes, byte_count);
 }
 
 CacheWriter::~CacheWriter() {
     if (fd_ >= 0) close(fd_);
     if (!committed_) unlink((root_ + "/" + path_ + ".tmp").c_str());
 }
-bool CacheWriter::write(std::size_t offset, std::string_view bytes) {
-    if (failed_ || fd_ < 0 || offset > limit_ || bytes.size() > limit_ - offset ||
-        lseek(fd_, static_cast<off_t>(offset), SEEK_SET) != static_cast<off_t>(offset)) {
+bool CacheWriter::write(std::size_t byte_offset, std::string_view bytes) {
+    if (failed_ || fd_ < 0 || byte_offset > limit_ || bytes.size() > limit_ - byte_offset ||
+        lseek(fd_, static_cast<off_t>(byte_offset), SEEK_SET) != static_cast<off_t>(byte_offset)) {
         failed_ = true; return false;
     }
     for (std::size_t at = 0; at < bytes.size();) {
@@ -1116,13 +1116,13 @@ bool CacheWriter::write(std::size_t offset, std::string_view bytes) {
     }
     return true;
 }
-bool CacheWriter::read(std::size_t offset, char* bytes, std::size_t size) {
-    if (failed_ || fd_ < 0 || offset > limit_ || size > limit_ - offset || (size && !bytes) ||
-        lseek(fd_, static_cast<off_t>(offset), SEEK_SET) != static_cast<off_t>(offset)) {
+bool CacheWriter::read(std::size_t byte_offset, char* bytes, std::size_t byte_count) {
+    if (failed_ || fd_ < 0 || byte_offset > limit_ || byte_count > limit_ - byte_offset || (byte_count && !bytes) ||
+        lseek(fd_, static_cast<off_t>(byte_offset), SEEK_SET) != static_cast<off_t>(byte_offset)) {
         failed_ = true; return false;
     }
-    for (std::size_t at = 0; at < size;) {
-        const auto count = ::read(fd_, bytes + at, size - at);
+    for (std::size_t at = 0; at < byte_count;) {
+        const auto count = ::read(fd_, bytes + at, byte_count - at);
         if (count < 0 && errno == EINTR) continue;
         if (count <= 0) { failed_ = true; return false; }
         at += static_cast<std::size_t>(count);
@@ -1133,11 +1133,11 @@ bool CacheWriter::sync() {
     if (failed_ || fd_ < 0 || fsync(fd_)) { failed_ = true; return false; }
     return true;
 }
-bool CacheWriter::commit(std::size_t size) {
+bool CacheWriter::commit(std::size_t byte_count) {
     struct stat info{};
-    if (failed_ || fd_ < 0 || size > limit_ || fstat(fd_, &info) || info.st_size < 0 ||
-        static_cast<std::uint64_t>(info.st_size) < size ||
-        ftruncate(fd_, static_cast<off_t>(size)) || fsync(fd_)) { failed_ = true; return false; }
+    if (failed_ || fd_ < 0 || byte_count > limit_ || fstat(fd_, &info) || info.st_size < 0 ||
+        static_cast<std::uint64_t>(info.st_size) < byte_count ||
+        ftruncate(fd_, static_cast<off_t>(byte_count)) || fsync(fd_)) { failed_ = true; return false; }
     const int closed = close(fd_); fd_ = -1;
     if (closed != 0) { failed_ = true; return false; }
     committed_ = publish(root_, path_ + ".tmp", path_);

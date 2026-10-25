@@ -92,11 +92,12 @@ struct Chapter {
     std::vector<DocumentLink> links;
     std::vector<DocumentImage> images;
     std::vector<std::string> warnings;
-    /** Return a text scalar or media element source; inserted separators return false. */
-    bool anchor_at(std::uint32_t offset, Anchor& anchor) const;
-    /** Find a retained text scalar or media start; removed whitespace has no mapping. */
-    bool offset_for(const Anchor& anchor, std::uint32_t& offset) const;
-    bool fragment_offset(const std::string& id, std::uint32_t& offset) const;
+    /** Maps a Unicode scalar index in text to a source anchor; inserted separators return false. */
+    bool anchor_at(std::uint32_t scalar_offset, Anchor& anchor) const;
+    /** Finds the Unicode scalar index in text for a retained text scalar or media start; removed whitespace has no mapping. */
+    bool offset_for(const Anchor& anchor, std::uint32_t& scalar_offset) const;
+    /** Finds a fragment's Unicode scalar index in text; an empty ID resolves to zero, an unknown ID returns false. */
+    bool fragment_offset(const std::string& id, std::uint32_t& scalar_offset) const;
 };
 
 /** Number of full-file EPUB identity scan attempts in this process. */
@@ -114,8 +115,13 @@ class FileDigest {
 public:
     explicit FileDigest(const std::string& path);
     ~FileDigest();
-    /** Reads at most budget bytes; true means finished, including an error (empty digest). */
-    bool step(std::size_t budget, const std::function<bool()>& stop = {});
+    /**
+     * Reads at most budget_bytes; true means finished, including an error (empty digest).
+     * False means unfinished, including zero budget or cancellation; a later step can resume.
+     * stop is checked between reads and does not interrupt an in-flight file operation.
+     */
+    bool step(std::size_t budget_bytes, const std::function<bool()>& stop = {});
+    /** Lowercase SHA-256 after successful completion; empty before completion or after failure. */
     const std::string& digest() const;
 private:
     struct Impl;
@@ -201,9 +207,9 @@ public:
      * failure. Earlier parts are parsed and discarded, so a later part takes longer to reach.
      * For Reading loads, visit receives each completed normalized part before it is discarded
      * or returned. Its reference is valid only during the callback; it must not reenter this document.
-     * Below Mapping the text is reserved once, at most twice kChapterPartScalars, instead of
-     * growing geometrically; a Reading part is then trimmed to its length. A Layout load fails
-     * with kChapterMemoryError when that reservation does not fit.
+     * Reading and Layout attempt a bounded text reservation. Reading can fall back to incremental
+     * growth and shrinks excess capacity only when the temporary copy fits the memory budget.
+     * Layout fails with kChapterMemoryError when the initial reservation does not fit.
      * stop is called synchronously before loading, between XML chunks of at most 4096 bytes,
      * and around linked stylesheet reads. It must not reenter this document. A true result
      * releases output and returns false with kChapterCancelled; retry starts parsing again.

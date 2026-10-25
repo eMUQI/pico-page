@@ -10,7 +10,7 @@ enum class Context { Reading, Tools, Typography, Contents, Library, LibraryRoot,
 enum class Input { K1, K2, K3, TouchCenter, Previous, Next };
 enum class Action { None, PreviousPage, NextPage, ForceRefresh, OpenTools, Close,
                     CancelPreview, KeepLocal, Cancel, EndTransfer, Wake };
-Action MapInput(Context context, Input input);
+Action map_input(Context context, Input input);
 
 enum class Phase { Begin, End, Cancel, Move };
 struct InputEvent {

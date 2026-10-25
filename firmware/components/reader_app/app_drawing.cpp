@@ -9,7 +9,7 @@ void ReaderApp::Impl::text(const std::string &value, int x, int top, int size, i
 
 void ReaderApp::Impl::text(graphics::Font& font, const std::string& value, int x, int top, int size,
           int max_width, std::uint8_t gray, bool bold) {
-    if (!font.size(size))
+    if (!font.set_pixel_size(size))
         return;
     const int baseline = top + font.metrics().ascender;
     const auto scalars = decode_utf8(value);
@@ -36,7 +36,7 @@ void ReaderApp::Impl::text(graphics::Font& font, const std::string& value, int x
 
 int ReaderApp::Impl::title_lines(const std::string &value, int x, int y, int width, int size, bool bold, int max_rows,
                 std::uint8_t gray, bool draw) {
-    ui.size(size);
+    ui.set_pixel_size(size);
     const auto metrics = ui.metrics();
     const auto scalars = decode_utf8(value);
     const auto closing = [](char32_t c) {

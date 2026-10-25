@@ -255,14 +255,14 @@ int main() {
     CHECK(input.route(Context::Reading, {3, Phase::End, Input::K2}) == Action::None);
     CHECK(input.route(Context::Sleeping, {4, Phase::Begin, Input::K2}) == Action::None);
     CHECK(input.route(Context::Sleeping, {4, Phase::End, Input::K2}) == Action::None);
-    CHECK(MapInput(Context::Typography, Input::K2) == Action::ForceRefresh);
-    CHECK(MapInput(Context::Conflict, Input::K2) == Action::ForceRefresh);
-    CHECK(MapInput(Context::Confirmation, Input::K2) == Action::ForceRefresh);
-    CHECK(MapInput(Context::LibraryRoot, Input::K2) == Action::ForceRefresh);
-    CHECK(MapInput(Context::Transfer, Input::K2) == Action::ForceRefresh);
+    CHECK(map_input(Context::Typography, Input::K2) == Action::ForceRefresh);
+    CHECK(map_input(Context::Conflict, Input::K2) == Action::ForceRefresh);
+    CHECK(map_input(Context::Confirmation, Input::K2) == Action::ForceRefresh);
+    CHECK(map_input(Context::LibraryRoot, Input::K2) == Action::ForceRefresh);
+    CHECK(map_input(Context::Transfer, Input::K2) == Action::ForceRefresh);
     for (auto context : {Context::Tools, Context::Typography, Context::Conflict, Context::Confirmation}) {
-        CHECK(MapInput(context, Input::K1) == Action::None);
-        CHECK(MapInput(context, Input::K3) == Action::None);
+        CHECK(map_input(context, Input::K1) == Action::None);
+        CHECK(map_input(context, Input::K3) == Action::None);
     }
 
     Recorder backend;
@@ -286,7 +286,7 @@ int main() {
     CHECK(!session.needs_save());
 
     // IN01/IN02: unchanged content still submits a full-clean transaction exactly once.
-    CHECK(MapInput(Context::Reading, Input::K2) == Action::ForceRefresh);
+    CHECK(map_input(Context::Reading, Input::K2) == Action::ForceRefresh);
     CHECK(session.force_refresh());
     const auto refresh = backend.frames.back();
     CHECK(refresh.purpose == FramePurpose::ManualRefresh);

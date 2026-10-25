@@ -160,7 +160,7 @@ struct Host {
                       << "\n";
             if (!okay)
                 return false;
-            // The desktop preview has no input sampling to protect and commits at once.
+            // The synchronous desktop preview saves after presentation without the firmware dwell delay.
             if (!app.pending_frame() && app.save_due())
                 app.save_progress();
         }
