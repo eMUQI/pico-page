@@ -2,12 +2,61 @@
 
 namespace pico_page {
 
+bool ReaderApp::Impl::chapter_prefetch_due() const {
+    return async_content && background_content_ready() && !counting_job &&
+        !prepared_chapter && !chapter_prefetch_attempted && !chapter.text.empty() &&
+        (readable_offset(page.end) == chapter.text.size() ||
+         (next_page && readable_offset(next_page->end) == chapter.text.size()));
+}
+
+void ReaderApp::Impl::prepare_chapter() {
+    chapter_prefetch_attempted = true;
+    auto index = chapter_index;
+    auto part = chapter.part + 1;
+    if (chapter.last_part) {
+        part = 0;
+        do { ++index; } while (index < document.spine().size() && !document.spine()[index].linear);
+    }
+    if (index >= document.spine().size()) return;
+    // Near the boundary, release optional counting resources before assessing reading headroom.
+    yield_counting_session();
+    // Reading keeps source anchors; use the existing parser reserve as well as the counting budget.
+    if (!counting_memory(document.spine()[index].bytes) ||
+        !chapter_memory_available(4U * std::min(document.spine()[index].bytes, 2 * kChapterPartScalars))) return;
+    ContentJob::Request request;
+    request.kind = ContentJob::Kind::Chapter; request.target = ContentJob::Target::Start;
+    request.chapter_prefetch = true;
+    request.root = root; request.path = root + "/" + book_path; request.identity = document.metadata();
+    request.chapter = index; request.part = part; request.chapter_resource = document.spine()[index].resource;
+    request.generation = foreground_generation;
+    counting_job = std::make_unique<ContentJob>(std::move(request));
+    if (!counting_job->start()) counting_job.reset();
+}
+
+namespace {
+std::size_t chapter_result_bytes(const ContentJob& job) {
+    const auto& content = job.result.chapter;
+    auto bytes = content.resource.capacity() + content.text.capacity() * sizeof(char32_t) +
+        content.blocks.capacity() * sizeof(TextBlock) + content.runs.capacity() * sizeof(TextRun) +
+        content.fragments.capacity() * sizeof(FragmentTarget) + content.links.capacity() * sizeof(DocumentLink) +
+        content.images.capacity() * sizeof(DocumentImage) + content.warnings.capacity() * sizeof(std::string) +
+        job.result.content_cache.bytes.capacity();
+    for (const auto& run : content.runs) bytes += run.source.resource.capacity() + run.source.node.capacity();
+    for (const auto& fragment : content.fragments) bytes += fragment.id.capacity();
+    for (const auto& link : content.links) bytes += link.resource.capacity() + link.fragment.capacity();
+    for (const auto& image : content.images)
+        bytes += image.resource.capacity() + image.alt.capacity() + image.source.resource.capacity() + image.source.node.capacity();
+    for (const auto& warning : content.warnings) bytes += warning.capacity();
+    return bytes;
+}
+}
+
 void ReaderApp::Impl::prepare_next(const std::function<bool()>& stop) {
     if (stop && stop()) return;
     const StageTimer timer{"next_page_prepare"};
     if (!next_page) {
         const auto start = readable_offset(page.end);
-        // The next part or chapter is loaded by the turn that reaches it.
+        // Adjacent content uses the worker after the current page preparation finishes.
         if (start >= chapter.text.size()) { prefetch_done = true; return; }
 #ifdef ESP_PLATFORM
         if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2048U * 1024 ||
@@ -187,6 +236,16 @@ bool ReaderApp::Impl::begin_image(std::size_t start, const graphics::Page& plann
 
 bool ReaderApp::Impl::begin_chapter(std::size_t index, std::uint32_t part, ContentJob::Target target,
                    std::size_t position, const Anchor& anchor, const std::string& fragment) {
+    poll_counting_job();
+    std::unique_ptr<ContentJob> prepared;
+    if (target == ContentJob::Target::Start && prepared_chapter &&
+        prepared_chapter->request.generation == foreground_generation &&
+        prepared_chapter->request.identity.book_id == document.metadata().book_id &&
+        prepared_chapter->request.chapter == index && prepared_chapter->request.part == part)
+        prepared = std::move(prepared_chapter);
+    auto current_cache = std::move(chapter_cache);
+    auto recent_cache = std::move(recent_chapter_cache);
+    const bool current_write = chapter_cache_write_needed, recent_write = recent_cache_write_needed;
     abandon_content();
     invalidate_counting();
     release_counting();
@@ -195,19 +254,39 @@ bool ReaderApp::Impl::begin_chapter(std::size_t index, std::uint32_t part, Conte
     request.root = root; request.path = root + "/" + book_path; request.identity = document.metadata();
     request.font = body_font_path(); request.layout = layout(settings, link_return ? 144 : 64);
     request.chapter = index; request.part = part; request.offset = position;
+    if (index < document.spine().size()) request.chapter_resource = document.spine()[index].resource;
+    for (const auto& candidate : {std::make_pair(current_cache, current_write), std::make_pair(recent_cache, recent_write)})
+        if (candidate.first && content_cache_matches(*candidate.first, request.identity.book_id, index, part)) {
+            request.content_cache = candidate.first; request.content_cache_write_needed = candidate.second; break;
+        }
+    if (current_cache && current_cache != request.content_cache) {
+        recent_chapter_cache = std::move(current_cache); recent_cache_write_needed = current_write;
+    } else if (recent_cache != request.content_cache) {
+        recent_chapter_cache = std::move(recent_cache); recent_cache_write_needed = recent_write;
+    }
     request.anchor = anchor; request.fragment = fragment; request.generation = foreground_generation;
     if (target == ContentJob::Target::End && !link_return && index < counted_live.size() && counted_live[index]) {
         const auto& parts = chapter_pages[index];
         const auto selected = part == kLastChapterPart && !parts.empty() ? parts.size() - 1 : part;
         if (selected < parts.size() && !parts[selected].empty()) request.known_start = parts[selected].back();
     }
-    pending_content = std::move(request);
+    if (target == ContentJob::Target::End) {
+        for (auto i = page_history.rbegin(); i != page_history.rend(); ++i)
+            if (i->chapter == index && i->return_bar == link_return.has_value() && i->part_end &&
+                (part == kLastChapterPart ? i->last_part : i->part == part)) {
+                request.part = i->part;
+                request.known_start = i->start; request.known_end = i->end;
+                break;
+            }
+    }
+    if (!prepared) pending_content = std::move(request);
     if (view == View::Reading) {
         loading_origin = origin_for(view);
         content_loading = true; view = View::Loading; hits.clear(); loading_cancel = {};
         chapter_feedback_after = std::chrono::steady_clock::now() + std::chrono::seconds(1);
     } else loading("正在准备章节…");
     clear_body_cache(); clear_prefetch(); covers.clear(); release(chapter); page = {};
+    if (prepared) { ++chapter_prefetch_hits; finish_chapter(*prepared); }
     return true;
 }
 
@@ -418,14 +497,7 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
         return;
     }
     if (request.kind == ContentJob::Kind::Chapter) {
-        content_loading = false;
-        if (!job->result.error.empty()) { error(chapter_error(job->result.error)); return; }
-        pending_chapter_cache = std::move(job->result.content_cache);
-        chapter = std::move(job->result.chapter); chapter_index = request.chapter;
-        offset = job->result.offset;
-        for (const auto& span : job->result.history) record_boundary(computed_pages, span.first, span.second);
-        // End/Before are backward turns; the job retains its target across loading waits.
-        show_page(offset, request.target == ContentJob::Target::End || request.target == ContentJob::Target::Before);
+        finish_chapter(*job);
         return;
     }
     if (request.chapter != chapter_index || request.part != chapter.part) return;
@@ -446,11 +518,46 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
 }
 
 
+void ReaderApp::Impl::finish_chapter(ContentJob& job) {
+    if (memory_error(job.result.error) && (recent_chapter_cache || job.request.content_cache)) {
+        // Retry once without optional retained payloads; the completed job releases its references on return.
+        auto retry = job.request;
+        retry.content_cache.reset(); retry.content_cache_write_needed = false;
+        recent_chapter_cache.reset(); recent_cache_write_needed = false;
+        pending_content = std::move(retry);
+        return;
+    }
+    content_loading = false; chapter_feedback_after.reset();
+    if (!job.result.error.empty()) { error(chapter_error(job.result.error)); return; }
+    if (job.result.retained_cache_hit) {
+        chapter_cache = job.request.content_cache;
+        chapter_cache_write_needed = job.request.content_cache_write_needed;
+    } else if (!job.result.content_cache.bytes.empty()) {
+        chapter_cache = std::make_shared<ContentCacheEntry>(std::move(job.result.content_cache));
+        chapter_cache_write_needed = true;
+    }
+    chapter = std::move(job.result.chapter); chapter_index = job.request.chapter;
+    offset = job.result.offset;
+    for (const auto& span : job.result.history) record_boundary(computed_pages, span.first, span.second);
+    show_page(offset, job.request.target == ContentJob::Target::End || job.request.target == ContentJob::Target::Before);
+}
+
+
 void ReaderApp::Impl::poll_counting_job() {
     if (!counting_job || !counting_job->done()) return;
     auto job = std::move(counting_job);
     const auto& request = job->request;
     const auto& result = job->result;
+    if (request.kind == ContentJob::Kind::Chapter) {
+        if (request.generation != foreground_generation || request.identity.book_id != document.metadata().book_id) return;
+        if (result.error == kChapterCancelled) chapter_prefetch_attempted = false;
+        if (result.error.empty() && !result.chapter.text.empty()) {
+            prepared_chapter_size_bytes = chapter_result_bytes(*job);
+            prepared_chapter = std::move(job);
+            if (cache_usage().retained > cache_target) prepared_chapter.reset();
+        }
+        return;
+    }
     if (request.generation != counting_generation) return;
     if (request.kind == ContentJob::Kind::ContentCacheWrite) return;
     // The lock screen reads the cover cache itself; a failed or cancelled attempt falls back to the title.

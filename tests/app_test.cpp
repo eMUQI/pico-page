@@ -5139,9 +5139,9 @@ int main(int argc, char** argv) {
         assert(cache_budget < 2U * 1024 * 1024);
         set_chapter_memory_probe([](std::size_t bytes) { return bytes <= cache_budget; });
         unsigned stops = 0;
-        assert(load_content(store, doc, 0, cached, error, ChapterLoad::Reading, 2, [&] { ++stops; return false; }));
+        assert(load_content_cache(store, doc.metadata().book_id, doc.spine()[0].resource, 0, 2, cached));
         set_chapter_memory_probe(nullptr);
-        assert(stops == 2 && cached.text == original.text);
+        assert(cached.text == original.text);
         // Rejecting the cache buffer falls back to the source without losing its anchors.
         static unsigned allocations;
         allocations = 0;
@@ -5161,7 +5161,7 @@ int main(int argc, char** argv) {
         stops = 0;
         assert(find_content(store, doc, 0, cached, error, ChapterLoad::Reading,
             [](const Chapter& c) { return c.part == 2; }, [&] { ++stops; return false; }, &deferred));
-        assert(stops == 3 && deferred.bytes.empty() && cached.text == original.text);
+        assert(deferred.bytes.empty() && cached.text == original.text);
         fs::remove_all(cache.parent_path());
         assert(find_content(store, doc, 0, cached, error, ChapterLoad::Reading,
             [](const Chapter& c) { return c.part == 2; }, {}, &deferred));
@@ -5175,6 +5175,53 @@ int main(int argc, char** argv) {
         assert(cached.text == original.text && read(cache) == data);
         assert(!load_content(store, doc, 0, cached, error, ChapterLoad::Reading, 2, [] { return true; }));
         assert(error == kChapterCancelled && cached.text.empty());
+        // Hot chapter jobs need neither EPUB metadata nor font setup for a known last page.
+        ContentJob::Request hot;
+        hot.kind = ContentJob::Kind::Chapter; hot.target = ContentJob::Target::End;
+        hot.path = (fixtures / "multi-part.epub").string(); hot.root = card.string(); hot.identity = doc.metadata();
+        hot.chapter = 0; hot.part = 2; hot.chapter_resource = doc.spine()[0].resource;
+        ContentJob last(hot); assert(last.start()); last.wait();
+        assert(last.result.error.empty() && !last.result.history.empty());
+        hot.known_start = last.result.offset; hot.known_end = last.result.chapter.text.size();
+        hot.font = (card / "missing-font.ttf").string();
+        const auto opens = epub_open_count();
+        ContentJob known(hot); assert(known.start()); known.wait();
+        assert(known.result.error.empty() && known.result.offset == last.result.offset && known.result.history.empty());
+        assert(epub_open_count() == opens && known.result.chapter.text == original.text);
+        hot.known_end = *hot.known_end + 1;
+        ContentJob stale(hot); assert(stale.start()); stale.wait();
+        assert(!stale.result.error.empty());
+        hot.target = ContentJob::Target::Start;
+        hot.chapter_resource = "wrong-resource";
+        ContentJob mismatch(hot); assert(mismatch.start()); mismatch.wait();
+        assert(mismatch.result.error.empty() && mismatch.result.chapter.text == original.text && epub_open_count() == opens + 1);
+        hot.chapter_resource = doc.spine()[0].resource;
+        // Unwritten neighboring content survives a quick return; a damaged retained payload falls back.
+        fs::remove(cache);
+        assert(load_content(store, doc, 0, cached, error, ChapterLoad::Reading, 2, {}, &deferred));
+        hot.content_cache = std::make_shared<ContentCacheEntry>(std::move(deferred));
+        const auto retained_opens = epub_open_count();
+        ContentJob retained(hot); assert(retained.start()); retained.wait();
+        assert(retained.result.error.empty() && retained.result.retained_cache_hit && retained.result.chapter.text == original.text);
+        assert(epub_open_count() == retained_opens && !fs::exists(cache));
+        auto damaged = std::make_shared<ContentCacheEntry>(*hot.content_cache);
+        damaged->bytes.back() ^= 1; hot.content_cache = damaged;
+        ContentJob repaired(hot); assert(repaired.start()); repaired.wait();
+        assert(repaired.result.error.empty() && !repaired.result.retained_cache_hit && repaired.result.chapter.text == original.text);
+        assert(epub_open_count() == retained_opens + 1);
+        assert(save_content_cache(store, repaired.result.content_cache));
+        // Cancellation inside a decoded part never publishes partial text or source anchors.
+        stops = 0;
+        assert(!load_content_cache(store, doc.metadata().book_id, doc.spine()[0].resource, 0, 2, cached,
+                                   [&] { return ++stops == 10; }));
+        assert(cached.text.empty());
+        // Re-reading a later cold part must not rewrite previously cached prefix files.
+        const auto prefix = cache.parent_path() / "0";
+        const auto timestamp = fs::file_time_type::clock::now() - std::chrono::hours(1);
+        fs::last_write_time(prefix, timestamp); fs::remove(cache);
+        assert(load_content(store, doc, 0, cached, error, ChapterLoad::Reading, 2, {}, &deferred));
+        assert(fs::last_write_time(prefix) == timestamp && !deferred.bytes.empty());
+        assert(save_content_cache(store, deferred));
         for (const auto kind : {ContentJob::Kind::Chapter, ContentJob::Kind::Pagination})
         for (bool cancel : {false, true}) {
             ContentJob::Request request;
@@ -5571,19 +5618,89 @@ int main(int argc, char** argv) {
         fs::copy_file(fixtures / "next-chapter-image.epub", card / "Books/next-chapter-image.epub");
         ReaderApp app(card.string(), "next-chapter-image", true, true); Driver driver{app};
         assert(app.initialize()); driver.present(); opened(app, "Books/next-chapter-image.epub"); driver.present();
-        // Idle time prepares nothing beyond the chapter end; the turn loads the next chapter in the foreground.
+        // Idle time prepares the adjacent text and source anchors, without decoding its image.
+        const auto decodes = graphics::image_decode_count();
+        const auto saved = app.saved_record();
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
         while (app.background_due()) {
             app.background_step(); app.poll_background();
             assert(!app.pending_frame() && std::chrono::steady_clock::now() < deadline);
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        assert(!app.cache_usage().next_layout && !app.cache_usage().next_bitmap);
+        assert(!app.cache_usage().next_layout && !app.cache_usage().next_bitmap && app.cache_usage().next_chapter);
+        assert(graphics::image_decode_count() == decodes && app.saved_record() == saved);
+        const auto opens = epub_open_count();
         driver.key(Input::K3);
+        assert(app.cache_usage().chapter_prefetch_hits == 1 && epub_open_count() == opens);
         assert(app.content_busy());
         driver.present(); driver.complete_content();
         assert(app.view() == View::Reading && app.saved_record()->anchor.resource.find("chapter2") != std::string::npos);
         assert(app.cache_usage().bitmap_hits == 0);
+    }
+    {
+        const auto root = card / "ChapterReturn";
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
+        ReaderApp app(root.string(), "chapter-return", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+        const auto first = app.saved_record()->anchor;
+        const auto first_pixels = app.canvas().pixels();
+        driver.key(Input::K3); driver.present(); driver.complete_content();
+        assert(app.saved_record()->anchor.resource != first.resource);
+        const auto opens = epub_open_count();
+        for (unsigned turn = 0; turn < 3; ++turn) {
+            // No idle/cache-write step occurs between these turns.
+            driver.key(Input::K1); driver.present(); driver.complete_content();
+            assert(app.saved_record()->anchor == first && epub_open_count() == opens);
+            assert(std::equal(first_pixels.begin(), first_pixels.begin() + 342 * 1128, app.canvas().pixels().begin()));
+            driver.key(Input::K3); driver.present(); driver.complete_content();
+            assert(app.saved_record()->anchor.resource != first.resource && epub_open_count() == opens);
+        }
+        // The first source load is denied; retrying after evicting optional payloads restores reading.
+        static std::uint64_t memory_retry_open;
+        memory_retry_open = epub_open_count() + 2;
+        set_chapter_memory_probe([](std::size_t) { return epub_open_count() >= memory_retry_open; });
+        driver.key(Input::K1); driver.present(); driver.complete_content();
+        set_chapter_memory_probe(nullptr);
+        assert(app.view() == View::Reading && app.saved_record()->anchor == first && epub_open_count() == memory_retry_open);
+    }
+    {
+        const auto root = card / "ChapterPrefetchCancel";
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
+        ReaderApp app(root.string(), "chapter-prefetch-cancel", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+        const auto saved = app.saved_record();
+        ContentJob::delay_starts_for_test(ContentJob::Kind::Chapter, std::chrono::seconds(2));
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (std::string(app.background_state()) != "chapter-prefetch") {
+            app.background_step(); app.poll_background();
+            assert(!app.pending_frame() && std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        driver.refresh();
+        ContentJob::delay_starts_for_test(ContentJob::Kind::Chapter, std::chrono::milliseconds{});
+        assert(app.saved_record() == saved && !app.cache_usage().next_chapter);
+        // A cancelled preparation must not delay or replace a requested chapter.
+        driver.key(Input::K3); driver.present(); driver.complete_content();
+        assert(app.view() == View::Reading && app.saved_record()->anchor.resource != saved->anchor.resource);
+        driver.key(Input::K1); driver.present(); driver.complete_content();
+        // Refusing optional preparation leaves normal foreground reading available.
+        set_chapter_memory_probe([](std::size_t) { return false; });
+        for (unsigned i = 0; i < 10; ++i) { app.background_step(); app.poll_background(); }
+        assert(!app.cache_usage().next_chapter && app.saved_record()->anchor == saved->anchor);
+        set_chapter_memory_probe(nullptr);
+        driver.key(Input::K3); driver.present(); driver.complete_content();
+        assert(app.view() == View::Reading && app.saved_record()->anchor.resource != saved->anchor.resource);
+        driver.key(Input::K1); driver.present(); driver.complete_content();
+        while (!app.cache_usage().next_chapter) {
+            app.background_step(); app.poll_background();
+            assert(!app.pending_frame() && std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        fs::copy_file(fixtures / "long-chapter.epub", root / "Books/other.epub");
+        opened(app, "Books/other.epub"); driver.present();
+        assert(!app.cache_usage().next_chapter && app.saved_record()->book_id != saved->book_id);
     }
     {
         ReaderApp app(card.string(), "preview-worker", true, true); Driver driver{app};
@@ -5705,11 +5822,21 @@ int main(int argc, char** argv) {
         assert(async.view() == View::Loading && async.saved_record() == previous);
         driver.refresh(); driver.complete_content(); same_body();
         ContentJob::delay_starts_for_test(ContentJob::Kind::Chapter, std::chrono::milliseconds(0));
-        // The adjacent part is loaded by the turn that reaches it.
+        // A completed adjacent part is published by the turn, with the same body and source anchor.
+        const auto chapter_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (!async.cache_usage().next_chapter) {
+            async.background_step(); async.poll_background();
+            assert(!async.pending_frame() && std::chrono::steady_clock::now() < chapter_deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
         reverse = false;
         ref_driver.key(Input::K3); ref_driver.present();
+        const auto chapter_opens = epub_open_count();
+        const auto chapter_hits = async.cache_usage().chapter_prefetch_hits;
         driver.key(Input::K3);
-        assert(async.view() == View::Loading && !async.pending_frame());
+        assert(async.view() == View::Reading && async.pending_frame());
+        assert(epub_open_count() == chapter_opens && async.cache_usage().chapter_prefetch_hits == chapter_hits + 1);
+        driver.present();
         driver.refresh(); driver.complete_content(); same_body();
         assert(async.saved_record()->anchor == first);
         reverse = false;

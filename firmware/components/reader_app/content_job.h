@@ -116,6 +116,10 @@ public:
         std::string fragment, xpointer;
         int dom_version = 0;
         std::optional<std::size_t> known_start;
+        /** History hints are accepted only for the exact loaded part length. */
+        std::optional<std::size_t> known_end;
+        /** Resource copied from the current verified spine; permits cache lookup before reopening EPUB. */
+        std::string chapter_resource;
         std::string root, image_resource, cache_name, relative_path, content_revision;
         DocumentMetadata identity;
         graphics::LayoutSpec layout;
@@ -123,7 +127,8 @@ public:
         std::vector<CoverSource> covers;
         std::string cache_header;
         std::optional<PageCache> page_cache;
-        ContentCacheEntry content_cache;
+        std::shared_ptr<const ContentCacheEntry> content_cache;
+        bool content_cache_write_needed = false;
         std::vector<SpineItem> spine;
         std::optional<ReadingRecord> record;
         std::shared_ptr<FileDigest> font_scan;
@@ -159,6 +164,8 @@ public:
         /** LockScreen: an absolute deadline shared by all rotation candidates; zero uses the default budget. */
         std::chrono::steady_clock::time_point lock_screen_deadline{};
         bool progressive = false;
+        /** Optional chapter preparation uses the worker's background admission budget. */
+        bool chapter_prefetch = false;
         std::uint64_t generation = 0;
         PP_DIAGNOSTIC(std::uint64_t diagnostic_session = 0, diagnostic_layout = 0;)
         std::size_t chapter = 0, offset = 0;
@@ -193,6 +200,7 @@ public:
         std::unique_ptr<EpubDocument> document;
         Chapter chapter;
         ContentCacheEntry content_cache;
+        bool retained_cache_hit = false;
         std::vector<std::pair<std::uint32_t, std::uint32_t>> history;
         std::size_t chapter_index = 0;
         ConfigResult configuration;

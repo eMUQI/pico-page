@@ -175,7 +175,7 @@ bool ContentJob::start() {
     if ((request.kind == Kind::Pagination || request.kind == Kind::FontIdentity || request.kind == Kind::LibraryCovers ||
          request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite || request.kind == Kind::ContentCacheWrite ||
          request.kind == Kind::SleepCover || request.kind == Kind::LockScreen || request.kind == Kind::LockScreenPreview ||
-         dictionary_kind(request.kind)) &&
+         dictionary_kind(request.kind) || request.chapter_prefetch) &&
         heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < required_internal) {
         start_failure_ = StartFailure::InternalMemory;
         return false;
@@ -232,7 +232,7 @@ void ContentJob::run() {
     result.offset = request.offset;
     const auto stop = [this] { return checkpoint(); };
     if (request.kind == Kind::ContentCacheWrite) {
-        result.cache_finished = save_content_cache(FileStore(request.root), request.content_cache, stop);
+        result.cache_finished = request.content_cache && save_content_cache(FileStore(request.root), *request.content_cache, stop);
         return;
     }
     if (request.kind == Kind::SaveProgress) {
@@ -912,7 +912,18 @@ void ContentJob::load_chapter() {
     EpubDocument document;
     FileStore store(request.root);
     result.chapter_index = request.chapter;
-    if (!document.open_verified(request.path, request.identity, result.error, stop) || stop()) return;
+    const bool locate = request.target == Target::Anchor || request.target == Target::Fragment;
+    bool cached = false;
+    if (!locate && !request.chapter_resource.empty()) {
+        if (request.content_cache)
+            cached = result.retained_cache_hit = load_content_cache(store, request.identity.book_id,
+                request.chapter_resource, request.chapter, request.part, result.chapter, stop, request.content_cache.get());
+        if (!cached && !stop()) cached = load_content_cache(store, request.identity.book_id,
+            request.chapter_resource, request.chapter, request.part, result.chapter, stop);
+    }
+    if (stop()) { result.error = kChapterCancelled; return; }
+    if (!cached && !document.open_verified(request.path, request.identity, result.error, stop)) return;
+    if (stop()) { result.error = kChapterCancelled; return; }
     std::uint32_t position = 0;
     if (request.target == Target::Anchor || request.target == Target::Fragment) {
         const auto match = [&](const Chapter& part) {
@@ -930,9 +941,12 @@ void ContentJob::load_chapter() {
         }
         return;
     }
-    if (!load_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading, request.part, stop, &result.content_cache)) return;
+    if (!cached && !load_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading,
+        request.part, stop, &result.content_cache, request.chapter < document.spine().size() &&
+        request.chapter_resource == document.spine()[request.chapter].resource)) return;
     if (request.target == Target::Start) return;
-    if (request.known_start && *request.known_start < result.chapter.text.size()) { result.offset = *request.known_start; return; }
+    if (request.known_start && *request.known_start < result.chapter.text.size() &&
+        (!request.known_end || *request.known_end == result.chapter.text.size())) { result.offset = *request.known_start; return; }
     graphics::Font font;
     if (!(request.font.empty() ? font.open_fallback() : font.open(request.font))) { result.error = font.error(); return; }
     const auto limit = request.target == Target::End ? result.chapter.text.size() : request.offset;

@@ -773,7 +773,8 @@ bool ReaderApp::content_busy() const {
 }
 bool ReaderApp::background_due() const {
     return !!impl_->cover_job || impl_->pending_covers.has_value() || !!impl_->counting_job ||
-           impl_->chapter_cache_due() || impl_->custom_prepare_due() || impl_->prefetch_due() || impl_->counting_due();
+           impl_->chapter_cache_due() || impl_->custom_prepare_due() || impl_->prefetch_due() ||
+           impl_->chapter_prefetch_due() || impl_->counting_due();
 }
 #if !defined(ESP_PLATFORM) || defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
 // Only the diagnostic console reads this; other firmware builds do not carry the name table.
@@ -794,6 +795,7 @@ const char *ReaderApp::background_state() const {
             kind == ContentJob::Kind::Chapter ? "chapter" : "image";
     }
     if (impl_->cover_job || impl_->pending_covers) return "covers";
+    if (impl_->counting_job && impl_->counting_job->request.kind == ContentJob::Kind::Chapter) return "chapter-prefetch";
     if (impl_->counting_job && (impl_->counting_job->request.kind == ContentJob::Kind::SleepCover || impl_->counting_job->request.kind == ContentJob::Kind::LockScreen)) return "sleep-cover";
     if (impl_->prefetch_due()) return "prefetch";
     if (impl_->counting_blocked == impl_->chapter_index) return "waiting";
@@ -885,6 +887,7 @@ void ReaderApp::background_step(const std::function<bool()>& stop) {
     if (impl_->chapter_cache_due()) impl_->write_chapter_cache();
     else if (impl_->custom_prepare_due()) impl_->prepare_custom_sleep(false);
     else if (impl_->prefetch_due()) impl_->prepare_next(stop);
+    else if (impl_->chapter_prefetch_due()) impl_->prepare_chapter();
     else if (impl_->counting_due()) impl_->count_pages(stop);
 }
 void ReaderApp::show_error(const std::string &message) {

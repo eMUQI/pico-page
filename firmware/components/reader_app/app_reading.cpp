@@ -73,7 +73,10 @@ bool ReaderApp::Impl::finish_open(const std::string& path, ContentJob::Result* l
     if (restored.status != StoreStatus::Ok && restored.status != StoreStatus::Missing && restored.status != StoreStatus::Cleared)
         message = "原进度无法读取，未覆盖原记录";
     if (loaded) {
-        pending_chapter_cache = std::move(loaded->content_cache);
+        if (!loaded->content_cache.bytes.empty()) {
+            chapter_cache = std::make_shared<ContentCacheEntry>(std::move(loaded->content_cache));
+            chapter_cache_write_needed = true;
+        }
         chapter = std::move(loaded->chapter);
         chapter_index = loaded->chapter_index;
         offset = loaded->offset;
@@ -141,7 +144,11 @@ void ReaderApp::Impl::reclaim_caches() {
 #endif
     };
     if (!pressure()) return;
-    if (!pending_chapter_cache.bytes.empty()) { pending_chapter_cache = {}; ++cache_evictions; }
+    if (prepared_chapter) { prepared_chapter.reset(); ++cache_evictions; }
+    if (!pressure()) return;
+    if (recent_chapter_cache) { recent_chapter_cache.reset(); recent_cache_write_needed = false; ++cache_evictions; }
+    if (!pressure()) return;
+    if (chapter_cache) { chapter_cache.reset(); chapter_cache_write_needed = false; ++cache_evictions; }
     if (!pressure()) return;
     // The counting session is rebuilt on demand, so it goes before any counted pages.
     if (yield_counting_session()) { defer_counting(); return; }

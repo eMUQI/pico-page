@@ -136,7 +136,12 @@ int main(int argc, char** argv) {
     internal_free = 31 * 1024;
     ContentJob low_memory(request);
     assert(!low_memory.start() && low_memory.start_failure() == Failure::InternalMemory);
+    request.kind = ContentJob::Kind::Chapter; request.chapter_prefetch = true;
+    ContentJob low_memory_prefetch(request);
+    assert(!low_memory_prefetch.start() && low_memory_prefetch.start_failure() == Failure::InternalMemory);
     internal_free = 40 * 1024;
+    ContentJob admitted_prefetch(request); admitted_prefetch.cancel();
+    assert(admitted_prefetch.start()); finish(admitted_prefetch);
     {
         namespace fs = std::filesystem;
         char temporary[] = "/tmp/pico-cover-worker-XXXXXX";
