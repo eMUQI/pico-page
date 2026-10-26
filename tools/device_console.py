@@ -85,7 +85,8 @@ class Console:
             time.sleep(0.1)
         raise TimeoutError("The application still has a pending frame")
 
-    def capture(self, output):
+    def capture(self, output, after_chunk=None):
+        """Export one stable frame, optionally servicing diagnostics between chunk requests."""
         if output.exists():
             raise FileExistsError(output)
         state = self.settled()
@@ -102,6 +103,8 @@ class Console:
                     or int(reply.get("count", "-1")) != count or len(data) != count):
                 raise RuntimeError("Frame chunk identity or length mismatch")
             packed.extend(data)
+            if after_chunk is not None:
+                after_chunk()
         final, _ = self.request("status")
         if (final.get("pending") != "0" or final.get("frame_ok") != "1"
                 or final.get("frame") != state["frame"] or final.get("crc32") != state["crc32"]

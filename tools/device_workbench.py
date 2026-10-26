@@ -181,6 +181,10 @@ class Session(Console):
                 return state
         self.gap("trace_drain_budget_exhausted")
 
+    def capture(self, output):
+        # Background jobs can fill the trace recorder during a full canvas export.
+        return super().capture(output, after_chunk=self.drain)
+
     def cutoff(self):
         state, _ = self.request("trace_stop")
         if state.get("stopped") != "1":
