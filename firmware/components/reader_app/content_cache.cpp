@@ -228,7 +228,7 @@ bool save_content_cache(const FileStore& store, const ContentCacheEntry& entry, 
     return saved;
 }
 bool load_content(const FileStore& store, EpubDocument& doc, std::size_t index, Chapter& chapter,
-                  std::string& error, ChapterLoad detail, std::uint32_t part, const std::function<bool()>& stop, ContentCacheEntry* deferred, bool cache_checked) {
+                  std::string& error, ChapterLoad detail, std::uint32_t part, const std::function<bool()>& stop, ContentCacheEntry* deferred, bool cache_checked, bool sequential) {
     if (deferred) *deferred = {};
     release(chapter); error.clear();
     if (stop && stop()) { error = kChapterCancelled; return false; }
@@ -242,12 +242,12 @@ bool load_content(const FileStore& store, EpubDocument& doc, std::size_t index, 
         if (stop && stop()) return;
         if (!deferred) save(store, doc, index, completed, stop);
         else if (!target) save_missing(store, doc, index, completed, stop);
-    });
+    }, sequential);
     if (loaded && deferred && detail == ChapterLoad::Reading) *deferred = prepare(doc, index, chapter, stop);
     return loaded;
 }
 bool find_content(const FileStore& store, EpubDocument& doc, std::size_t index, Chapter& chapter,
-                  std::string& error, ChapterLoad detail, const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop, ContentCacheEntry* deferred) {
+                  std::string& error, ChapterLoad detail, const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop, ContentCacheEntry* deferred, bool sequential) {
     if (deferred) *deferred = {};
     std::uint32_t cached_prefix = 0;
     if (detail == ChapterLoad::Reading) {
@@ -270,7 +270,7 @@ bool find_content(const FileStore& store, EpubDocument& doc, std::size_t index, 
     };
     const bool loaded = doc.find_chapter_part(index, chapter, error, detail, select, stop, [&](const Chapter& completed) {
         if (!deferred && !(stop && stop())) save(store, doc, index, completed, stop);
-    });
+    }, sequential);
     if (loaded && deferred && detail == ChapterLoad::Reading) *deferred = prepare(doc, index, chapter, stop);
     return loaded;
 }

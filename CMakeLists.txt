@@ -97,6 +97,9 @@ add_custom_target(document_fixtures_target
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/make_document_fixtures.py ${document_fixtures}
     VERBATIM)
 add_dependencies(content_worker_test document_fixtures_target)
+add_executable(chapter_stream_probe EXCLUDE_FROM_ALL tools/chapter_stream_probe.cpp)
+target_link_libraries(chapter_stream_probe PRIVATE reader_document)
+target_compile_options(chapter_stream_probe PRIVATE -Wall -Wextra -Werror)
 add_executable(document_test tests/document_test.cpp)
 add_dependencies(document_test document_fixtures_target)
 target_link_libraries(document_test PRIVATE reader_document)

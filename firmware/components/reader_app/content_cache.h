@@ -26,9 +26,9 @@ bool save_content_cache(const FileStore& store, const ContentCacheEntry& entry,
 bool load_content(const FileStore& store, EpubDocument& document, std::size_t index,
                   Chapter& chapter, std::string& error, ChapterLoad detail, std::uint32_t part,
                   const std::function<bool()>& stop = {}, ContentCacheEntry* deferred = nullptr,
-                  bool cache_checked = false);
+                  bool cache_checked = false, bool sequential = false);
 bool find_content(const FileStore& store, EpubDocument& document, std::size_t index,
                   Chapter& chapter, std::string& error, ChapterLoad detail,
                   const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop = {},
-                  ContentCacheEntry* deferred = nullptr);
+                  ContentCacheEntry* deferred = nullptr, bool sequential = false);
 } // namespace pico_page

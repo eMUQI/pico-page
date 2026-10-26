@@ -229,6 +229,16 @@ void ContentJob::execute() {
 #else
 void ContentJob::run() {
 #endif
+    // The session may already own files when a queued job is cancelled before dispatch.
+    struct FinishChapterSession {
+        ContentJob& job;
+        ~FinishChapterSession() {
+            if (!job.request.chapter_session) return;
+            auto& document = job.request.chapter_session->document;
+            if (!job.result.error.empty() || job.cancelled_.load(std::memory_order_relaxed)) document.close();
+            job.result.chapter_stream_bytes = document.metadata().book_id.empty() ? 0 : document.retained_bytes();
+        }
+    } finish{*this};
     result.offset = request.offset;
     const auto stop = [this] { return checkpoint(); };
     if (request.kind == Kind::ContentCacheWrite) {
@@ -257,6 +267,7 @@ void ContentJob::run() {
     if (dictionary_kind(request.kind)) { read_dictionary(); return; }
     if (stop()) {
         result.retryable_failure = request.kind == Kind::LockScreen;
+        if (request.kind == Kind::Chapter) result.error = kChapterCancelled;
         return;
     }
     if (request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite) {
@@ -876,7 +887,7 @@ void ContentJob::open_book() {
         std::uint32_t offset = 0;
         const auto match = [&](const Chapter& part) { return part.offset_for(anchor, offset); };
         if (!document.chapter_index_for(anchor.resource, result.chapter_index) ||
-            !find_content(store, document, result.chapter_index, result.chapter, result.error, ChapterLoad::Reading, match, stop, &result.content_cache) ||
+            !find_content(store, document, result.chapter_index, result.chapter, result.error, ChapterLoad::Reading, match, stop, &result.content_cache, !!request.chapter_session) ||
             !result.chapter.offset_for(anchor, offset)) {
             if (result.error.empty()) result.error = "Saved position cannot be mapped";
             return;
@@ -885,7 +896,7 @@ void ContentJob::open_book() {
     } else {
         while (result.chapter_index + 1 < document.spine().size() && !document.spine()[result.chapter_index].linear)
             ++result.chapter_index;
-        if (!load_content(store, document, result.chapter_index, result.chapter, result.error, ChapterLoad::Reading, 0, stop, &result.content_cache)) return;
+        if (!load_content(store, document, result.chapter_index, result.chapter, result.error, ChapterLoad::Reading, 0, stop, &result.content_cache, false, !!request.chapter_session)) return;
     }
     if (stop()) return;
     if (stat(request.path.c_str(), &after) != 0 || before.st_size != after.st_size ||
@@ -893,6 +904,13 @@ void ContentJob::open_book() {
         result.error = "Book changed while opening"; return;
     }
     result.file_size = after.st_size; result.file_modified = after.st_mtime; result.file_inode = after.st_ino;
+    if (request.chapter_session) {
+        if (auto reader = document.detach_reader()) {
+            request.chapter_session->document = std::move(*reader);
+            request.chapter_session->path = request.path;
+            result.chapter_stream_bytes = request.chapter_session->document.retained_bytes();
+        } else document.reset_chapter_stream();
+    }
 }
 bool ContentJob::checkpoint() {
     while (!cancelled_.load(std::memory_order_relaxed)) {
@@ -909,7 +927,13 @@ bool ContentJob::checkpoint() {
 }
 void ContentJob::load_chapter() {
     const auto stop = [this] { return checkpoint(); };
-    EpubDocument document;
+    EpubDocument local;
+    auto& document = request.chapter_session ? request.chapter_session->document : local;
+    if (request.chapter_session && (request.chapter_session->path != request.path ||
+        document.metadata().book_id != request.identity.book_id)) {
+        document.close(); request.chapter_session->path = request.path;
+    }
+    if (request.target != Target::Start) document.reset_chapter_stream();
     FileStore store(request.root);
     result.chapter_index = request.chapter;
     const bool locate = request.target == Target::Anchor || request.target == Target::Fragment;
@@ -922,7 +946,8 @@ void ContentJob::load_chapter() {
             request.chapter_resource, request.chapter, request.part, result.chapter, stop);
     }
     if (stop()) { result.error = kChapterCancelled; return; }
-    if (!cached && !document.open_verified(request.path, request.identity, result.error, stop)) return;
+    if (!cached && document.metadata().book_id.empty() &&
+        !document.open_verified(request.path, request.identity, result.error, stop)) return;
     if (stop()) { result.error = kChapterCancelled; return; }
     std::uint32_t position = 0;
     if (request.target == Target::Anchor || request.target == Target::Fragment) {
@@ -943,7 +968,8 @@ void ContentJob::load_chapter() {
     }
     if (!cached && !load_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading,
         request.part, stop, &result.content_cache, request.chapter < document.spine().size() &&
-        request.chapter_resource == document.spine()[request.chapter].resource)) return;
+        request.chapter_resource == document.spine()[request.chapter].resource,
+        request.chapter_session && request.target == Target::Start)) return;
     if (request.target == Target::Start) return;
     if (request.known_start && *request.known_start < result.chapter.text.size() &&
         (!request.known_end || *request.known_end == result.chapter.text.size())) { result.offset = *request.known_start; return; }

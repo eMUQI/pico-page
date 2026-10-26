@@ -144,6 +144,10 @@ void ReaderApp::Impl::reclaim_caches() {
 #endif
     };
     if (!pressure()) return;
+    if (chapter_session) {
+        release_chapter_session(); ++cache_evictions;
+    }
+    if (!pressure()) return;
     if (prepared_chapter) { prepared_chapter.reset(); ++cache_evictions; }
     if (!pressure()) return;
     if (recent_chapter_cache) { recent_chapter_cache.reset(); recent_cache_write_needed = false; ++cache_evictions; }

@@ -227,9 +227,11 @@ struct Xml {
     std::function<void()> complex_markup;
     bool foreign_namespace = false;
     bool source_utf8 = false;
+    bool suspend_requested = false, suspended = false;
     std::string error;
     unsigned depth = 0;
     std::size_t nodes = 0, bytes = 0;
+    std::size_t pending_bytes = 0, pending_limit = 0;
     Xml() {
         parser = XML_ParserCreateNS(nullptr, '|');
         if (!parser) { error = "XML parser allocation failed"; return; }
@@ -262,14 +264,17 @@ struct Xml {
             const char* separator = std::strchr(name, '|');
             if (separator && std::string(name, separator - name) != "http://www.w3.org/1999/xhtml") x.foreign_namespace = true;
             if (x.start) x.start(local_name(name), attrs);
+            x.complete_event();
         }, [](void* opaque, const char* name) {
             auto& x = *static_cast<Xml*>(opaque);
             if (x.end) x.end(local_name(name));
             --x.depth;
+            x.complete_event();
         });
         XML_SetCharacterDataHandler(parser, [](void* opaque, const char* value, int count) {
             auto& x = *static_cast<Xml*>(opaque);
             if (x.text) x.text(value, static_cast<std::size_t>(count));
+            x.complete_event();
         });
         XML_SetStartDoctypeDeclHandler(parser, [](void* opaque, const char*, const char*, const char*, int has_internal_subset) {
             auto& x = *static_cast<Xml*>(opaque);
@@ -285,28 +290,53 @@ struct Xml {
             const char utf8[] = {static_cast<char>(0xe0 | scalar >> 12), static_cast<char>(scalar < 0x800 ? 0xc0 | scalar >> 6 : 0x80 | (scalar >> 6 & 0x3f)),
                                  static_cast<char>(0x80 | (scalar & 0x3f))};
             if (x.text) scalar < 0x800 ? x.text(utf8 + 1, 2) : x.text(utf8, 3);
+            x.complete_event();
         });
         XML_SetExternalEntityRefHandler(parser, [](XML_Parser, const char*, const char*, const char*, const char*) -> int { return XML_STATUS_ERROR; });
         XML_SetStartCdataSectionHandler(parser, [](void* opaque) { auto& x = *static_cast<Xml*>(opaque); if (x.complex_markup) x.complex_markup(); });
-        XML_SetCommentHandler(parser, [](void* opaque, const char*) { auto& x = *static_cast<Xml*>(opaque); if (x.boundary) x.boundary(); });
-        XML_SetProcessingInstructionHandler(parser, [](void* opaque, const char*, const char*) { auto& x = *static_cast<Xml*>(opaque); if (x.boundary) x.boundary(); });
+        XML_SetCommentHandler(parser, [](void* opaque, const char*) { auto& x = *static_cast<Xml*>(opaque); if (x.boundary) x.boundary(); x.complete_event(); });
+        XML_SetProcessingInstructionHandler(parser, [](void* opaque, const char*, const char*) { auto& x = *static_cast<Xml*>(opaque); if (x.boundary) x.boundary(); x.complete_event(); });
     }
     ~Xml() { if (parser) XML_ParserFree(parser); }
     void stop(const std::string& message) { if (error.empty()) error = message; if (parser) XML_StopParser(parser, XML_FALSE); }
+    // Expat may deliver additional callbacks after suspension; finish each event in full.
+    void complete_event() {
+        if (pending_limit) {
+            const auto index = XML_GetCurrentByteIndex(parser);
+            const auto count = XML_GetCurrentByteCount(parser);
+            if (index >= 0 && count >= 0 && static_cast<std::size_t>(index) + count <= bytes)
+                pending_bytes = bytes - (static_cast<std::size_t>(index) + count);
+        }
+        if (!suspend_requested || suspended || !error.empty()) return;
+        suspend_requested = false;
+        if (XML_StopParser(parser, XML_TRUE) == XML_STATUS_OK) suspended = true;
+        else stop("Cannot suspend XML parser");
+    }
+    bool parse_status(XML_Status status) {
+        if (status != XML_STATUS_ERROR) return error.empty();
+        if (error.empty()) error = std::string("Invalid XML: ") + XML_ErrorString(XML_GetErrorCode(parser));
+        return false;
+    }
+    bool resume() {
+        suspended = false;
+        return parse_status(XML_ResumeParser(parser));
+    }
     bool feed(const char* value, std::size_t count, bool final) {
         if (!bytes && count >= 4) {
             source_utf8 = true;
             for (std::size_t i = 0; i < 4; ++i)
                 if (value[i] == '\0' || static_cast<unsigned char>(value[i]) >= 0xfe) source_utf8 = false;
         }
-        bytes += count;
         if (!error.empty() || !parser) return false;
-        if (bytes > kMaxXmlBytes) { stop("XML byte limit exceeded"); return false; }
-        if (XML_Parse(parser, value, static_cast<int>(count), final ? XML_TRUE : XML_FALSE) != XML_STATUS_OK) {
-            if (error.empty()) error = std::string("Invalid XML: ") + XML_ErrorString(XML_GetErrorCode(parser));
-            return false;
+        if (pending_limit) {
+            if (pending_bytes > pending_limit || count > pending_limit - pending_bytes) {
+                stop("Sequential XML token budget exceeded"); return false;
+            }
+            pending_bytes += count;
         }
-        return true;
+        bytes += count;
+        if (bytes > kMaxXmlBytes) { stop("XML byte limit exceeded"); return false; }
+        return parse_status(XML_Parse(parser, value, static_cast<int>(count), final ? XML_TRUE : XML_FALSE));
     }
 };
 
@@ -368,7 +398,7 @@ struct ChapterParser {
     const std::function<bool(const Chapter&)>* match = nullptr;  // Replaces wanted when set.
     std::uint32_t part = 0;
     std::size_t part_nodes = 0;
-    bool split_pending = false, captured = false;
+    bool split_pending = false, captured = false, resumable = false;
     Xml xml;
     std::vector<Frame> frames;
     std::uint32_t block_start = 0, source_count = 0;
@@ -488,7 +518,8 @@ struct ChapterParser {
         if (!captured && selected()) {
             capture(false);
             // Position mapping reads the stylesheets and structure of the whole document.
-            if (!keep_mapping) { xml.stop(kPartComplete); return false; }
+            if (!keep_mapping && !resumable) { xml.stop(kPartComplete); return false; }
+            if (resumable) xml.suspend_requested = true;
         }
         chapter.text.clear(); chapter.blocks.clear(); chapter.runs.clear(); chapter.fragments.clear();
         chapter.links.clear(); chapter.images.clear();
@@ -769,8 +800,25 @@ struct ZipTiming {
 };
 }
 
+struct ChapterStream {
+    std::size_t index;
+    Chapter ready;
+    ChapterParser parser;
+    mz_zip_reader_extract_iter_state* iterator = nullptr;
+    std::array<char, 4096> input{};
+    bool input_finished = false;
+    ChapterStream(std::size_t value, const std::string& resource) : index(value), parser(ready, resource) {
+        parser.keep_mapping = false; parser.keep_anchors = true; parser.resumable = true;
+        // Large incomplete tokens retain Expat input buffers across pauses; use the original path instead.
+        parser.xml.pending_limit = 64U * 1024;
+    }
+    ~ChapterStream() { if (iterator) mz_zip_reader_extract_iter_free(iterator); }
+};
+
 struct EpubDocument::Impl {
     FILE* file = nullptr;
+    std::unique_ptr<ChapterStream> chapter_stream;
+    std::uint64_t source_read_bytes = 0, xml_feed_bytes = 0;
     bool txt = false;
     std::uint32_t txt_bytes = 0;
     mz_zip_archive zip{};
@@ -818,7 +866,7 @@ struct EpubDocument::Impl {
     std::vector<SpineItem> spine;
     std::vector<TocEntry> toc;
     std::string cover, cover_page;
-    ~Impl() { if (zip.m_pState) mz_zip_reader_end(&zip); if (file) std::fclose(file); }
+    ~Impl() { chapter_stream.reset(); if (zip.m_pState) mz_zip_reader_end(&zip); if (file) std::fclose(file); }
     ZipTiming* read_timing = nullptr;
     static std::size_t read(void* opaque, mz_uint64 offset, void* buffer, std::size_t size) {
         auto* self = static_cast<Impl*>(opaque);
@@ -834,6 +882,7 @@ struct EpubDocument::Impl {
             self->read_timing->read_max_us = std::max(self->read_timing->read_max_us, us);
         }
 #endif
+        self->source_read_bytes += count;
         return count;
     }
     bool load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
@@ -855,13 +904,14 @@ struct EpubDocument::Impl {
         } active(*this, timing);
         struct Feed {
             Xml& xml;
+            Impl& owner;
             ZipTiming& timing;
             const std::function<bool()>& stop;
             bool cancelled = false;
 #ifdef ESP_PLATFORM
             TickType_t yielded_at = xTaskGetTickCount();
 #endif
-        } feed{xml, timing, stop};
+        } feed{xml, *this, timing, stop};
         const bool extracted = mz_zip_reader_extract_to_callback(&zip, entry->member, [](void* opaque, mz_uint64, const void* data, std::size_t count) -> std::size_t {
             auto& feed = *static_cast<Feed*>(opaque);
             for (std::size_t offset = 0; offset < count;) {
@@ -881,6 +931,7 @@ struct EpubDocument::Impl {
 #ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
                 const auto started = ZipTiming::Clock::now();
 #endif
+                feed.owner.xml_feed_bytes += size;
                 const bool parsed = feed.xml.feed(static_cast<const char*>(data) + offset, size, false);
 #ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
                 const auto us = ZipTiming::elapsed(started);
@@ -1429,12 +1480,160 @@ void release(Chapter& chapter) {
     std::swap(chapter, empty);
 }
 
+DocumentReadStats EpubDocument::read_stats() const {
+    return {impl_->source_read_bytes, impl_->xml_feed_bytes, impl_->zip_allocated, !!impl_->chapter_stream};
+}
+std::size_t EpubDocument::retained_bytes() const {
+    const auto& owner = *impl_;
+    const auto& metadata = owner.metadata;
+    std::size_t bytes = sizeof(Impl) + owner.zip_allocated + owner.zip_entries * sizeof(Impl::ZipEntry) +
+        metadata.title.capacity() + metadata.author.capacity() + metadata.language.capacity() +
+        metadata.book_id.capacity() + metadata.partial_md5.capacity() + metadata.txt_offsets.capacity() * sizeof(std::uint32_t) +
+        owner.spine.capacity() * sizeof(SpineItem) + owner.toc.capacity() * sizeof(TocEntry) +
+        owner.cover.capacity() + owner.cover_page.capacity();
+    for (const auto& item : owner.spine) bytes += item.resource.capacity() + item.id.capacity();
+    for (const auto& item : owner.toc) bytes += item.label.capacity() + item.resource.capacity() + item.fragment.capacity();
+    if (!owner.chapter_stream) return bytes;
+    const auto& stream = *owner.chapter_stream;
+    const auto& parser = stream.parser;
+    bytes += sizeof(ChapterStream) + parser.frames.capacity() * sizeof(ChapterParser::Frame) + parser.xml.error.capacity();
+    for (const auto& frame : parser.frames) {
+        bytes += frame.name.capacity() + frame.path.capacity() + frame.node.capacity() + frame.background.capacity();
+        for (const auto& child : frame.children) bytes += sizeof(child) + child.first.capacity();
+    }
+    // Reading streams never retain Mapping source nodes or stylesheets.
+    for (const auto* part : {&parser.chapter, &stream.ready}) {
+        bytes += part->resource.capacity() + part->text.capacity() * sizeof(char32_t) +
+            part->blocks.capacity() * sizeof(TextBlock) + part->runs.capacity() * sizeof(TextRun) +
+            part->fragments.capacity() * sizeof(FragmentTarget) + part->links.capacity() * sizeof(DocumentLink) +
+            part->images.capacity() * sizeof(DocumentImage) + part->warnings.capacity() * sizeof(std::string);
+        for (const auto& run : part->runs) bytes += run.source.resource.capacity() + run.source.node.capacity();
+        for (const auto& fragment : part->fragments) bytes += fragment.id.capacity();
+        for (const auto& link : part->links) bytes += link.resource.capacity() + link.fragment.capacity();
+        for (const auto& image : part->images)
+            bytes += image.resource.capacity() + image.alt.capacity() + image.source.resource.capacity() + image.source.node.capacity();
+        for (const auto& warning : part->warnings) bytes += warning.capacity();
+    }
+    return bytes;
+}
+std::unique_ptr<EpubDocument> EpubDocument::detach_reader() {
+    if (!impl_->file || impl_->txt || !memory_room(retained_bytes())) return {};
+    auto reader = std::make_unique<EpubDocument>();
+    reader->impl_->metadata = impl_->metadata;
+    reader->impl_->spine = impl_->spine;
+    reader->impl_->toc = impl_->toc;
+    impl_.swap(reader->impl_);
+    return reader;
+}
+void EpubDocument::reset_chapter_stream() { impl_->chapter_stream.reset(); }
+bool EpubDocument::read_next_chapter_part(std::size_t index, Chapter& chapter, std::string& error,
+                                          const std::function<bool()>& stop) {
+    release(chapter); error.clear();
+    auto& owner = *impl_;
+    const auto abort = [&](const std::string& message) {
+        error = message; owner.chapter_stream.reset(); release(chapter); return false;
+    };
+    if (stop && stop()) return abort(kChapterCancelled);
+    if (!owner.file || owner.txt || index >= owner.spine.size()) return abort("Invalid EPUB stream chapter");
+    if (owner.chapter_stream && owner.chapter_stream->index != index) owner.chapter_stream.reset();
+    if (!owner.chapter_stream) {
+        const auto& resource = owner.spine[index].resource;
+        const auto* entry = owner.find_member(resource);
+        if (!entry || entry->bytes > kMaxXmlBytes) return abort("Missing or oversized EPUB stream resource");
+        // Iterator input is at most 64 KiB, its DEFLATE window is 32 KiB; no task stack grows.
+        if (!memory_room(sizeof(ChapterStream) + sizeof(mz_zip_reader_extract_iter_state) + 96U * 1024))
+            return abort(kChapterMemoryError);
+        auto stream = std::make_unique<ChapterStream>(index, resource);
+        stream->iterator = mz_zip_reader_extract_iter_new(&owner.zip, entry->member, 0);
+        if (!stream->iterator) return abort("Cannot initialize EPUB stream");
+        const auto scalars = std::min<std::size_t>(entry->bytes, kMaxText) + 1024;
+        if (memory_room(scalars * sizeof(char32_t))) stream->parser.chapter.text.reserve(scalars);
+        owner.chapter_stream = std::move(stream);
+    }
+    auto& stream = *owner.chapter_stream;
+    auto& parser = stream.parser;
+    parser.captured = false; parser.wanted = parser.part;
+#ifdef ESP_PLATFORM
+    auto yielded_at = xTaskGetTickCount();
+#endif
+    while (!parser.captured) {
+#ifdef ESP_PLATFORM
+        if (xTaskGetTickCount() - yielded_at >= pdMS_TO_TICKS(20)) {
+            vTaskDelay(1); yielded_at = xTaskGetTickCount();
+        }
+#endif
+        if (stop && stop()) return abort(kChapterCancelled);
+        if (!memory_room(0)) return abort(kChapterMemoryError);
+        if (parser.xml.suspended) {
+            if (!parser.xml.resume()) return abort(parser.xml.error);
+            continue;
+        }
+        if (stream.input_finished) {
+            parser.finish_block();
+            if (!parser.xml.error.empty()) return abort(parser.xml.error);
+            if (!parser.seen_body || (parser.part == 0 && parser.chapter.text.empty()))
+                return abort("Chapter contains no supported body content");
+            parser.capture(true);
+            break;
+        }
+        const auto size = mz_zip_reader_extract_iter_read(stream.iterator, stream.input.data(), stream.input.size());
+        if (stream.iterator->status < 0) return abort("Invalid compressed EPUB stream");
+        if (size) {
+            const auto before = parser.xml.bytes;
+            const bool parsed = parser.xml.feed(stream.input.data(), size, false);
+            owner.xml_feed_bytes += parser.xml.bytes - before;
+            if (!parsed) return abort(parser.xml.error);
+            continue;
+        }
+        // CRC and expanded length must be confirmed before the final part is published.
+        const bool valid = mz_zip_reader_extract_iter_free(std::exchange(stream.iterator, nullptr));
+        if (!valid) return abort("Invalid EPUB stream length or CRC");
+        // Deferred tokenization can suspend even the final feed; resume before closing the last part.
+        stream.input_finished = true;
+        if (!parser.xml.feed("", 0, true)) return abort(parser.xml.error);
+    }
+    if (stop && stop()) return abort(kChapterCancelled);
+    chapter = std::move(stream.ready);
+    if (chapter.text.capacity() - chapter.text.size() > 4096 && memory_room(chapter.text.size() * sizeof(char32_t))) {
+        std::u32string exact(chapter.text.begin(), chapter.text.end()); chapter.text.swap(exact);
+    }
+    // Completion releases parser state immediately; subsequent reading starts a new stream.
+    if (chapter.last_part) owner.chapter_stream.reset();
+    return true;
+}
+
 bool EpubDocument::load_chapter(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail, std::uint32_t part,
-                                const std::function<bool()>& stop, const std::function<void(const Chapter&)>& visit) {
+                                const std::function<bool()>& stop, const std::function<void(const Chapter&)>& visit, bool sequential) {
+    if (sequential && detail == ChapterLoad::Reading && part != kLastChapterPart && !impl_->txt) {
+        if (impl_->chapter_stream && (impl_->chapter_stream->index != index ||
+            impl_->chapter_stream->parser.part > part)) reset_chapter_stream();
+        while (read_next_chapter_part(index, chapter, error, stop)) {
+            if (visit) visit(chapter);
+            if (stop && stop()) { reset_chapter_stream(); release(chapter); return fail(error, kChapterCancelled); }
+            if (chapter.part == part) return true;
+            if (chapter.last_part) break;
+        }
+        if (error == kChapterCancelled) return false;
+        // Sequential-only limits must not reject a part the ordinary loader can read.
+        release(chapter); error.clear();
+    }
+    reset_chapter_stream();
     return impl_->load(index, chapter, error, detail, part, nullptr, stop, visit);
 }
 bool EpubDocument::find_chapter_part(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
-                                     const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop, const std::function<void(const Chapter&)>& visit) {
+                                     const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop, const std::function<void(const Chapter&)>& visit, bool sequential) {
+    reset_chapter_stream();
+    if (sequential && detail == ChapterLoad::Reading && !impl_->txt) {
+        while (read_next_chapter_part(index, chapter, error, stop)) {
+            if (visit) visit(chapter);
+            const bool selected = match(chapter);
+            if (stop && stop()) { reset_chapter_stream(); release(chapter); return fail(error, kChapterCancelled); }
+            if (selected) return true;
+            if (chapter.last_part) break;
+        }
+        if (error == kChapterCancelled) return false;
+        reset_chapter_stream(); release(chapter); error.clear();
+    }
     return impl_->load(index, chapter, error, detail, 0, &match, stop, visit);
 }
 bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,

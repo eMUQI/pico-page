@@ -29,3 +29,20 @@ python3 tools/summarize_reader_perf.py /tmp/image-cache.log
 CSV 保留全部样本的耗时、整屏级分配次数、累计申请字节和像素摘要。计时从任务启动到 `wait()` 返回，包含 host 线程调度；普通 C++ `new`／`new[]` 申请至少 415,872 字节才计入分配指标，不包括 C 分配、对齐分配及小对象，不代表同时存活的堆峰值或设备内存。日志阶段带 `host_image_` 前缀且无慢样本过滤；汇总脚本中没有设备资源或溢出数据，不表示设备不存在这些问题。基线和候选使用相同配置、依赖、样本及统计方法，比较耗时时应结束其他构建任务，并交替运行两种版本。
 
 异常回归复用 `app_test` 与 `content_worker_test`：前者覆盖旧格式、像素、摘要损坏、真实文件截断、块间取消、`RLIMIT_FSIZE` 短写及不可写缓存；后者编译 ESP_PLATFORM 内容路径，用能力堆桩验证热缓存门槛和冷路径拒绝。桩验证不替代设备上的实际分配或碎片验收。
+
+## 顺序分段解析对照
+
+`chapter_stream_probe` 对比原有 `load_chapter` 和 `read_next_chapter_part`；后者保留 ZIP 解压及 XML 状态，异步 `ReaderApp` 通过受控章节会话使用续读接口。探针按需构建，不新增 CTest 项。两条路径都复用已打开的文档，不读写正文缓存；计时包含解析与必要的容量收尾，不含开书、摘要生成、排版、绘制或面板。每次运行使用新进程和新文档，操作系统文件缓存未清空。
+
+```sh
+cmake --build build/host --target document_test chapter_stream_probe --parallel 4
+build/host/chapter_stream_probe load build/host/document-fixtures/stream-events.epub 0 > /tmp/chapter-load.csv
+build/host/chapter_stream_probe stream build/host/document-fixtures/stream-events.epub 0 > /tmp/chapter-stream.csv
+build/host/chapter_stream_probe stream build/host/document-fixtures/stream-events.epub 0 --memory > /tmp/chapter-memory.csv
+```
+
+章节参数为从零开始的 spine 序号，`all` 逐项读取整本书。CSV 逐段记录耗时、原书回调返回字节、实际送入 XML 的字节、保留的 miniz 分配、取消检查间隔及正文／全部 Reading 字段的 SHA-256；摘要只用于同一 host 的语义对比，不写出书籍正文。标准错误输出进程峰值 RSS；失败返回非零。测量时结束构建与其他测试，交替运行两种模式并保留全部样本。可将各样本的 `elapsed_us` 转为 `reader_perf: stage=host_chapter us=<值> min_us=0`，使用 `tools/summarize_reader_perf.py` 汇总分位数。
+
+`--memory` 只支持普通 macOS host 构建，通过所有 malloc zone 统计采样；不要将其耗时混入常规计时。`heap_retained_bytes` 为释放输出 Chapter 后相对于开书完成时的堆增量，`heap_sampled_peak_bytes` 为检查点与返回时观察到的最大增量，可能漏掉瞬时分配峰值；两者都包含进程内其他分配，不能当作设备 PSRAM 峰值。无采样时这些字段为零，表示未测。`zip_retained_bytes` 仅计 miniz 的仍存活载荷，不包含 XML、容器、分配器开销及文档原有 ZIP 索引。
+
+现有 `document` 回归逐段核对文本、块、源锚点、链接、图片、分段标志和末段判定，覆盖 stored／deflate、UTF-16、实体、跨字符回调及最后一次 XML 输入中的暂停。取消、预算拒绝、随机访问、移动所有权、关闭、截断、坏 XML 和 CRC 失败必须清空输出并释放游标。超过 64 KiB 仍无完整 XML 事件的输入停止续读，验证同一有效正文仍可由原路径读完；这限制未处理输入，不是 XML 或总堆的完整上限。`app` 回归覆盖开书向章节任务移交游标、不重复开包、排队取消、换书和休眠／USB 后会话释放。设备内存、慢 TF、实体输入、睡眠／USB 交接及输入到正文呈现时间另按设备专项验证。

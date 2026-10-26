@@ -29,6 +29,8 @@ void ReaderApp::Impl::prepare_chapter() {
     request.root = root; request.path = root + "/" + book_path; request.identity = document.metadata();
     request.chapter = index; request.part = part; request.chapter_resource = document.spine()[index].resource;
     request.generation = foreground_generation;
+    if (!chapter_session) chapter_session = std::make_shared<ChapterSession>();
+    request.chapter_session = chapter_session;
     counting_job = std::make_unique<ContentJob>(std::move(request));
     if (!counting_job->start()) counting_job.reset();
 }
@@ -243,6 +245,8 @@ bool ReaderApp::Impl::begin_chapter(std::size_t index, std::uint32_t part, Conte
         prepared_chapter->request.identity.book_id == document.metadata().book_id &&
         prepared_chapter->request.chapter == index && prepared_chapter->request.part == part)
         prepared = std::move(prepared_chapter);
+    auto continuing_session = std::move(chapter_session);
+    const auto continuing_bytes = chapter_stream_bytes;
     auto current_cache = std::move(chapter_cache);
     auto recent_cache = std::move(recent_chapter_cache);
     const bool current_write = chapter_cache_write_needed, recent_write = recent_cache_write_needed;
@@ -251,6 +255,9 @@ bool ReaderApp::Impl::begin_chapter(std::size_t index, std::uint32_t part, Conte
     release_counting();
     ContentJob::Request request;
     request.kind = ContentJob::Kind::Chapter; request.target = target;
+    chapter_session = continuing_session ? std::move(continuing_session) : std::make_shared<ChapterSession>();
+    chapter_stream_bytes = continuing_bytes;
+    request.chapter_session = chapter_session;
     request.root = root; request.path = root + "/" + book_path; request.identity = document.metadata();
     request.font = body_font_path(); request.layout = layout(settings, link_return ? 144 : 64);
     request.chapter = index; request.part = part; request.offset = position;
@@ -493,6 +500,7 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
             draw_details(); overlay(); return;
         }
         document = std::move(*job->result.document);
+        if (request.chapter_session == chapter_session) chapter_stream_bytes = job->result.chapter_stream_bytes;
         finish_open(request.relative_path, &job->result);
         return;
     }
@@ -519,14 +527,16 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
 
 
 void ReaderApp::Impl::finish_chapter(ContentJob& job) {
-    if (memory_error(job.result.error) && (recent_chapter_cache || job.request.content_cache)) {
+    if (memory_error(job.result.error) && (recent_chapter_cache || job.request.content_cache || job.request.chapter_session)) {
         // Retry once without optional retained payloads; the completed job releases its references on return.
         auto retry = job.request;
         retry.content_cache.reset(); retry.content_cache_write_needed = false;
+        retry.chapter_session.reset(); chapter_session.reset(); chapter_stream_bytes = 0;
         recent_chapter_cache.reset(); recent_cache_write_needed = false;
         pending_content = std::move(retry);
         return;
     }
+    chapter_stream_bytes = job.request.chapter_session == chapter_session ? job.result.chapter_stream_bytes : 0;
     content_loading = false; chapter_feedback_after.reset();
     if (!job.result.error.empty()) { error(chapter_error(job.result.error)); return; }
     if (job.result.retained_cache_hit) {
@@ -550,6 +560,7 @@ void ReaderApp::Impl::poll_counting_job() {
     const auto& result = job->result;
     if (request.kind == ContentJob::Kind::Chapter) {
         if (request.generation != foreground_generation || request.identity.book_id != document.metadata().book_id) return;
+        if (request.chapter_session == chapter_session) chapter_stream_bytes = result.chapter_stream_bytes;
         if (result.error == kChapterCancelled) chapter_prefetch_attempted = false;
         if (result.error.empty() && !result.chapter.text.empty()) {
             prepared_chapter_size_bytes = chapter_result_bytes(*job);

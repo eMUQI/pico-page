@@ -2,6 +2,8 @@
 #include <fstream>
 #include <cassert>
 #include <iostream>
+#include <filesystem>
+#include <tuple>
 
 using namespace pico_page;
 
@@ -16,6 +18,37 @@ extern "C" void* __wrap_calloc(std::size_t count, std::size_t size) {
     return __real_calloc(count, size);
 }
 #endif
+
+
+static void same_reading_part(const Chapter& a, const Chapter& b) {
+    assert(a.resource == b.resource && a.part == b.part && a.last_part == b.last_part);
+    assert(a.split_node == b.split_node && a.plain_dom == b.plain_dom && a.long_source_node == b.long_source_node);
+    assert(a.text == b.text && a.css_sources == b.css_sources && a.warnings == b.warnings);
+    assert(a.source_nodes.empty() && b.source_nodes.empty());
+    assert(a.blocks.size() == b.blocks.size() && a.runs.size() == b.runs.size());
+    assert(a.fragments.size() == b.fragments.size() && a.links.size() == b.links.size() && a.images.size() == b.images.size());
+    for (std::size_t i = 0; i < a.blocks.size(); ++i) {
+        const auto& x = a.blocks[i]; const auto& y = b.blocks[i];
+        assert(std::tie(x.begin, x.end, x.kind) == std::tie(y.begin, y.end, y.kind));
+    }
+    for (std::size_t i = 0; i < a.runs.size(); ++i) {
+        const auto& x = a.runs[i]; const auto& y = b.runs[i];
+        assert(std::tie(x.begin, x.end, x.element_reference) == std::tie(y.begin, y.end, y.element_reference));
+        assert(x.source == y.source);
+    }
+    for (std::size_t i = 0; i < a.fragments.size(); ++i)
+        assert(a.fragments[i].id == b.fragments[i].id && a.fragments[i].offset == b.fragments[i].offset);
+    for (std::size_t i = 0; i < a.links.size(); ++i) {
+        const auto& x = a.links[i]; const auto& y = b.links[i];
+        assert(std::tie(x.begin, x.end, x.resource, x.fragment, x.external) ==
+               std::tie(y.begin, y.end, y.resource, y.fragment, y.external));
+    }
+    for (std::size_t i = 0; i < a.images.size(); ++i) {
+        const auto& x = a.images[i]; const auto& y = b.images[i];
+        assert(std::tie(x.begin, x.end, x.resource, x.alt) == std::tie(y.begin, y.end, y.resource, y.alt));
+        assert(x.source == y.source);
+    }
+}
 
 int main(int argc, char** argv) {
     {
@@ -464,6 +497,129 @@ int main(int argc, char** argv) {
             if (piece.last_part) break;
         }
         assert(decoded == std::u32string(24575, U'甲') + U"😀\ue587" + std::u32string(500, U'乙') + U"\r\n末尾");
+    }
+    {
+        const auto directory = std::filesystem::path(argv[1]).parent_path();
+        for (const char* name : {"valid.epub", "multi-part.epub", "multi-part-link.epub", "mapping-node-parts.epub",
+                                 "mapping-node-utf16.epub", "mapping-node-entities.epub", "image-flow.epub",
+                                 "stream-events.epub", "stream-stored.epub", "stream-deferred-final.epub", "part-boundary-image.epub"}) {
+            EpubDocument reference, sequential;
+            assert(reference.open((directory / name).string(), error));
+            assert(sequential.open_verified((directory / name).string(), reference.metadata(), error));
+            for (std::size_t index = 0; index < reference.spine().size(); ++index) {
+                for (std::uint32_t part = 0;; ++part) {
+                    Chapter expected, actual;
+                    if (!reference.load_chapter(index, expected, error, ChapterLoad::Reading, part)) {
+                        std::cerr << name << " chapter=" << index << " part=" << part << ": " << error << std::endl;
+                        return 1;
+                    }
+                    assert(sequential.read_next_chapter_part(index, actual, error));
+                    same_reading_part(expected, actual);
+                    if (actual.last_part) { assert(!sequential.read_stats().stream_active); break; }
+                    assert(sequential.read_stats().stream_active);
+                }
+            }
+        }
+        EpubDocument sequential;
+        const auto path = (directory / "stream-events.epub").string();
+        assert(sequential.open(path, error));
+        const auto base_zip = sequential.read_stats().zip_allocated_bytes;
+        Chapter part;
+        assert(sequential.read_next_chapter_part(0, part, error) && !part.last_part);
+        unsigned checks = 0;
+        assert(!sequential.read_next_chapter_part(0, part, error, [&] { return ++checks == 4; }));
+        assert(error == kChapterCancelled && part.text.empty() && !sequential.read_stats().stream_active);
+        assert(sequential.read_stats().zip_allocated_bytes == base_zip);
+        assert(sequential.read_next_chapter_part(0, part, error) && part.part == 0);
+        set_chapter_memory_probe([](std::size_t) { return false; });
+        assert(!sequential.read_next_chapter_part(0, part, error));
+        set_chapter_memory_probe(nullptr);
+        assert(error == kChapterMemoryError && part.text.empty() && !sequential.read_stats().stream_active);
+        assert(sequential.read_stats().zip_allocated_bytes == base_zip);
+        assert(sequential.read_next_chapter_part(0, part, error));
+        const auto reads = sequential.read_stats().source_read_bytes;
+        sequential.reset_chapter_stream();
+        assert(!sequential.read_stats().stream_active && sequential.read_stats().source_read_bytes == reads);
+        assert(sequential.read_stats().zip_allocated_bytes == base_zip);
+        assert(sequential.read_next_chapter_part(0, part, error));
+        assert(sequential.load_chapter(0, part, error, ChapterLoad::Reading, 1));
+        assert(!sequential.read_stats().stream_active);
+        assert(sequential.read_next_chapter_part(0, part, error) && part.part == 0);
+        EpubDocument moved = std::move(sequential);
+        assert(moved.read_next_chapter_part(0, part, error) && part.part == 1);
+        moved.close();
+        assert(!moved.read_stats().stream_active && moved.read_stats().zip_allocated_bytes == 0);
+        assert(moved.open((directory / "valid.epub").string(), error));
+        assert(moved.read_next_chapter_part(0, part, error) && part.part == 0);
+        for (const char* name : {"stream-malformed.epub", "stream-events.epub"}) {
+            const auto temporary = directory / "stream-interrupted.epub";
+            std::filesystem::copy_file(directory / name, temporary, std::filesystem::copy_options::overwrite_existing);
+            EpubDocument interrupted;
+            assert(interrupted.open(temporary.string(), error));
+            assert(interrupted.read_next_chapter_part(0, part, error) && !part.last_part);
+            if (std::string(name) == "stream-events.epub") std::filesystem::resize_file(temporary, 1);
+            bool failed = false;
+            for (unsigned i = 0; i < 64; ++i) {
+                if (!interrupted.read_next_chapter_part(0, part, error)) { failed = true; break; }
+                assert(!part.last_part);
+            }
+            assert(failed && !error.empty() && part.text.empty() && !interrupted.read_stats().stream_active);
+            interrupted.close();
+            std::filesystem::remove(temporary);
+        }
+        EpubDocument large_token;
+        assert(large_token.open((directory / "stream-large-token.epub").string(), error));
+        const auto before_token = large_token.read_stats();
+        assert(!large_token.read_next_chapter_part(0, part, error));
+        assert(error == "Sequential XML token budget exceeded" && part.text.empty());
+        assert(!large_token.read_stats().stream_active);
+        assert(large_token.read_stats().zip_allocated_bytes == before_token.zip_allocated_bytes);
+        assert(large_token.read_stats().xml_feed_bytes - before_token.xml_feed_bytes <= 64U * 1024);
+        std::size_t fallback_scalars = 0;
+        for (std::uint32_t index = 0;; ++index) {
+            assert(large_token.load_chapter(0, part, error, ChapterLoad::Reading, index));
+            fallback_scalars += part.text.size() + 1;
+            if (part.last_part) break;
+        }
+        assert(fallback_scalars == std::u32string(U"连续解析保留正文与源位置。\n").size() * 12000);
+        // The integrated API falls back on bounded-stream rejection without changing valid text.
+        Chapter ordinary;
+        assert(large_token.load_chapter(0, ordinary, error, ChapterLoad::Reading, 1));
+        assert(large_token.load_chapter(0, part, error, ChapterLoad::Reading, 1, {}, {}, true));
+        same_reading_part(ordinary, part);
+        assert(!large_token.read_stats().stream_active);
+        assert(sequential.open(path, error));
+        assert(sequential.find_chapter_part(0, part, error, ChapterLoad::Reading,
+            [](const Chapter& c) { return c.part == 1; }, {}, {}, true));
+        const auto identity = sequential.metadata().book_id;
+        const auto catalog_size = sequential.spine().size();
+        set_chapter_memory_probe([](std::size_t) { return false; });
+        assert(!sequential.detach_reader() && sequential.read_stats().stream_active);
+        set_chapter_memory_probe(nullptr);
+        auto reader = sequential.detach_reader();
+        assert(reader && reader->read_stats().stream_active && !sequential.read_stats().stream_active);
+        assert(sequential.read_stats().zip_allocated_bytes == 0 && sequential.metadata().book_id == identity);
+        assert(sequential.spine().size() == catalog_size && reader->metadata().book_id == identity);
+        assert(!sequential.load_chapter(0, part, error, ChapterLoad::Reading));
+        sequential.close();
+        const auto opens = epub_open_count();
+        assert(reader->load_chapter(0, part, error, ChapterLoad::Reading, 2, {}, {}, true));
+        assert(part.part == 2 && epub_open_count() == opens);
+        assert(reader->load_chapter(0, ordinary, error, ChapterLoad::Reading, 2));
+        same_reading_part(ordinary, part);
+        assert(reader->load_chapter(0, part, error, ChapterLoad::Reading, 0, {}, {}, true));
+        assert(part.part == 0);
+        assert(!reader->load_chapter(0, part, error, ChapterLoad::Reading, 1, [] { return true; }, {}, true));
+        assert(error == kChapterCancelled && part.text.empty() && !reader->read_stats().stream_active);
+        EpubDocument corrupt;
+        assert(corrupt.open((directory / "stream-bad-crc.epub").string(), error));
+        bool rejected = false;
+        for (unsigned i = 0; i < 64; ++i) {
+            if (!corrupt.read_next_chapter_part(0, part, error)) { rejected = true; break; }
+            assert(!part.last_part);
+        }
+        assert(rejected && error == "Invalid EPUB stream length or CRC" && part.text.empty());
+        assert(!corrupt.read_stats().stream_active);
     }
     return 0;
 }

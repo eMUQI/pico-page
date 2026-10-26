@@ -66,6 +66,15 @@ struct PaginationSession {
     bool opened = false, font_opened = false, loaded = false;
 };
 
+/** One optional sequential reader, accessed exclusively by its running chapter job.
+ * The app may drop its reference at any time; the job retains it until completion.
+ * End the session before changing books, handing off storage or preparing sleep.
+ */
+struct ChapterSession {
+    EpubDocument document;
+    std::string path;
+};
+
 /** Mount-scoped verification state. Only its currently running content job may
  * access it. Reset after USB, remount or rescan, once the old job has finished.
  * No dictionary files remain open between jobs.
@@ -138,6 +147,7 @@ public:
         std::uint64_t bookmark_next = 1;
         /** Pagination only. Without a session the job prepares and discards its own. */
         std::shared_ptr<PaginationSession> session;
+        std::shared_ptr<ChapterSession> chapter_session;
         std::shared_ptr<DictionarySession> dictionary_session;
         /** One dictionary per job: relative_path identifies its metadata below Dictionaries. */
         std::vector<dictionary::Candidate> dictionary_candidates;
@@ -201,6 +211,7 @@ public:
         Chapter chapter;
         ContentCacheEntry content_cache;
         bool retained_cache_hit = false;
+        std::size_t chapter_stream_bytes = 0;
         std::vector<std::pair<std::uint32_t, std::uint32_t>> history;
         std::size_t chapter_index = 0;
         ConfigResult configuration;

@@ -154,6 +154,7 @@ ReaderApp::Impl::Cover ReaderApp::Impl::draw_cover(const Entry &entry, int x, in
 
 
 void ReaderApp::Impl::draw_library(bool decode) {
+    release_chapter_session();
     if (async_content) cancel_covers();
     decode = decode || display.busy();
     bool undecoded = false;

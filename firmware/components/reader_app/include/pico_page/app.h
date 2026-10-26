@@ -155,7 +155,7 @@ struct AppInput {
 
 /** Retained payload capacities; allocator bookkeeping and hash nodes are excluded. */
 struct CacheUsage {
-    std::size_t body_bitmap = 0, next_layout = 0, next_bitmap = 0, next_chapter = 0, page_index = 0, cover_pixels = 0;
+    std::size_t body_bitmap = 0, next_layout = 0, next_bitmap = 0, next_chapter = 0, chapter_stream = 0, page_index = 0, cover_pixels = 0;
     std::uint64_t bitmap_hits = 0, chapter_prefetch_hits = 0, evictions = 0;
     std::size_t retained = 0, target = 0;
     std::size_t ui_glyph_bytes = 0, body_glyph_bytes = 0, ui_glyphs = 0, body_glyphs = 0;

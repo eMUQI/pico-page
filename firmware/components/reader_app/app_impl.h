@@ -805,6 +805,16 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::shared_ptr<const ContentCacheEntry> chapter_cache, recent_chapter_cache;
     bool chapter_cache_write_needed = false, recent_cache_write_needed = false;
     std::unique_ptr<ContentJob> prepared_chapter;
+    std::shared_ptr<ChapterSession> chapter_session;
+    // Published after a job completes; never inspect its mutable parser from the app task.
+    std::size_t chapter_stream_bytes = 0;
+    void release_chapter_session() {
+        if (chapter_session) {
+            if (counting_job && counting_job->request.chapter_session == chapter_session) counting_job->cancel();
+            if (prepared_chapter && prepared_chapter->request.chapter_session == chapter_session) prepared_chapter.reset();
+        }
+        chapter_session.reset(); chapter_stream_bytes = 0;
+    }
     std::uint64_t chapter_prefetch_hits = 0;
     std::size_t prepared_chapter_size_bytes = 0;
     bool chapter_prefetch_attempted = false;
@@ -829,6 +839,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         recent_chapter_cache.reset();
         chapter_cache_write_needed = recent_cache_write_needed = false;
         prepared_chapter.reset(); chapter_prefetch_attempted = false;
+        release_chapter_session();
         chapter_feedback_after.reset();
         content_loading = image_prepared = false;
         inline_image_pending = false;
@@ -926,6 +937,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         cancel_sync();
         ContentJob::Request request;
         request.kind = kind;
+        if (kind == ContentJob::Kind::Open) {
+            chapter_session = std::make_shared<ChapterSession>();
+            request.chapter_session = chapter_session;
+        }
         request.root = root; request.relative_path = path; request.path = root + "/" + path;
         request.generation = foreground_generation;
         struct stat info{};
@@ -1897,6 +1912,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         usage.bitmap_hits = bitmap_hits;
         usage.next_chapter = prepared_chapter ? prepared_chapter_size_bytes : 0;
         usage.chapter_prefetch_hits = chapter_prefetch_hits;
+        usage.chapter_stream = chapter_session ? chapter_stream_bytes : 0;
         usage.page_index = page_index_bytes();
         for (const auto& cover : covers) usage.cover_pixels += cover.pixels.capacity();
         if (detail_cover) usage.cover_pixels += detail_cover->pixels().capacity();
@@ -1909,7 +1925,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         usage.library_glyphs = library_font.cached_glyphs(); usage.library_advances = library_font.cached_advances();
         usage.evictions = cache_evictions; usage.target = cache_target;
         usage.retained = (chapter_cache ? chapter_cache->bytes.capacity() : 0) +
-            (recent_chapter_cache ? recent_chapter_cache->bytes.capacity() : 0) + usage.next_chapter +
+            (recent_chapter_cache ? recent_chapter_cache->bytes.capacity() : 0) + usage.next_chapter + usage.chapter_stream +
             usage.body_bitmap + usage.next_layout + usage.next_bitmap +
             usage.page_index + usage.cover_pixels + usage.ui_glyph_bytes + usage.body_glyph_bytes + usage.library_glyph_bytes +
             (usage.ui_advances + usage.body_advances + usage.library_advances) * (sizeof(std::uint64_t) + sizeof(int));

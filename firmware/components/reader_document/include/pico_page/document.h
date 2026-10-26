@@ -182,6 +182,13 @@ void set_chapter_memory_probe(bool (*probe)(std::size_t bytes));
 /** Applies the same allocation reserve to cached and parsed chapter loads. */
 bool chapter_memory_available(std::size_t bytes);
 
+/** Read diagnostics count bytes returned by file reads and supplied to Expat, including read-ahead. */
+struct DocumentReadStats {
+    std::uint64_t source_read_bytes = 0, xml_feed_bytes = 0;
+    std::size_t zip_allocated_bytes = 0;
+    bool stream_active = false;
+};
+
 /** Bounded, read-only EPUB and UTF-8/GB18030 TXT access. XML source paths are not KOReader XPointer values. */
 class EpubDocument {
 public:
@@ -199,6 +206,12 @@ public:
      */
     bool open_verified(const std::string& path, const DocumentMetadata& identity, std::string& error, const std::function<bool()>& stop = {});
     void close();
+    /** Transfers file, ZIP and parser ownership to a new reader, retaining only an immutable
+     * metadata/spine/TOC snapshot here. The snapshot cannot load content until reopened.
+     * Returns null without changing this document if the snapshot does not fit the memory budget.
+     * Call only after all operations on this document have completed.
+     */
+    std::unique_ptr<EpubDocument> detach_reader();
     const DocumentMetadata& metadata() const;
     const std::vector<SpineItem>& spine() const;
     const std::vector<TocEntry>& toc() const;
@@ -213,19 +226,37 @@ public:
      * stop is called synchronously before loading, between XML chunks of at most 4096 bytes,
      * and around linked stylesheet reads. It must not reenter this document. A true result
      * releases output and returns false with kChapterCancelled; retry starts parsing again.
+     * sequential retains a Reading cursor for forward part requests. Backward requests restart;
+     * unsupported streams fall back to the ordinary loader after releasing the cursor.
      * Blocking storage and decompressor calls are not interrupted by this callback.
      */
     bool load_chapter(std::size_t index, Chapter& chapter, std::string& error,
                       ChapterLoad detail = ChapterLoad::Mapping, std::uint32_t part = 0,
                       const std::function<bool()>& stop = {},
-                      const std::function<void(const Chapter&)>& visit = {});
+                      const std::function<void(const Chapter&)>& visit = {}, bool sequential = false);
     /**
      * Like load_chapter, for the first part that match accepts. match sees each complete part
      * at the given detail, before the stylesheet fields of a Mapping load are final.
+     * sequential retains a Reading cursor after the selected part; searches always start at zero.
      */
     bool find_chapter_part(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
                            const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop = {},
-                           const std::function<void(const Chapter&)>& visit = {});
+                           const std::function<void(const Chapter&)>& visit = {}, bool sequential = false);
+    /** Sequential Reading API used by the content worker and parser probes.
+     * Starts at part zero; repeated calls for the same index continue one part at a time.
+     * Last-part completion, errors, cancellation, random access and close discard the cursor.
+     * The document and stream have one executor. Reset/close only after an active call returns.
+     * At most 64 KiB of source input may remain without a completed XML event; otherwise
+     * the stream is discarded. Failure clears output; load_chapter remains the fallback.
+     * stop must not reenter this document. It runs between XML chunks/resumes; a storage or DEFLATE call is not interruptible.
+     */
+    bool read_next_chapter_part(std::size_t index, Chapter& chapter, std::string& error,
+                                const std::function<bool()>& stop = {});
+    /** Discards the sequential cursor without closing the verified document. No parsing or I/O. */
+    void reset_chapter_stream();
+    DocumentReadStats read_stats() const;
+    /** Owned payload capacities, excluding Expat pools and allocator bookkeeping. Read only between loads. */
+    std::size_t retained_bytes() const;
     bool chapter_index_for(const std::string& resource, std::size_t& index) const;
     /** Read an internal PNG/JPEG resource, at most 2 MiB; output is cleared on failure. */
     bool read_image(const std::string& resource, std::vector<std::uint8_t>& bytes, std::string& error,

@@ -1,6 +1,7 @@
 """Generate original EPUB inputs for the native reader's integration check."""
 
 import argparse
+import hashlib
 import struct
 import zipfile
 from pathlib import Path
@@ -309,6 +310,42 @@ def generate(directory: Path) -> None:
     write_fixture(directory / "swipe.epub", swipe)
     entries["EPUB/chapter1.xhtml"] = entries["EPUB/chapter1.xhtml"].replace("<p>第0段", '<p><a href="#late">后段</a>第0段', 1)
     write_fixture(directory / "multi-part-link.epub", entries)
+
+    # Mixed event boundaries exercise resumable XML, including text split inside one callback.
+    streaming = fixture_entries()
+    streaming["EPUB/chapter1.xhtml"] = ('<html><body><p>' +
+        ('甲😀 &amp; &#x4e59;\r\n' * 30000) + '</p>' + ''.join(
+        f'<p id="s{i}"><a href="#s0">{hashlib.sha256(str(i).encode()).hexdigest()}</a>'
+        '<em>尾部</em><br/>' + ('<img src="missing.png" alt="图"/>' if i % 16 == 0 else '') +
+        '</p>' for i in range(4500)) + '</body></html>')
+    write_fixture(directory / "stream-events.epub", streaming)
+    with zipfile.ZipFile(directory / "stream-stored.epub", "w", compression=zipfile.ZIP_STORED) as archive:
+        for name, content in streaming.items():
+            archive.writestr(name, content)
+    malformed = dict(streaming)
+    malformed["EPUB/chapter1.xhtml"] = malformed["EPUB/chapter1.xhtml"].replace("</body></html>", "</broken>")
+    write_fixture(directory / "stream-malformed.epub", malformed)
+    deferred = dict(streaming)
+    element = 's' * 1000
+    deferred["EPUB/chapter1.xhtml"] = ('<html><!--' + 'x' * 40000 + '--><body><' + element + '>' +
+        '<p>甲</p>' * 800 + '</' + element + '></body></html>')
+    write_fixture(directory / "stream-deferred-final.epub", deferred)
+    excessive = dict(streaming)
+    excessive["EPUB/chapter1.xhtml"] = ('<html><!--' + 'x' * (1024 * 1024) + '--><body>' +
+        '<p>连续解析保留正文与源位置。</p>' * 12000 + '</body></html>')
+    write_fixture(directory / "stream-large-token.epub", excessive)
+    damaged = bytearray((directory / "stream-events.epub").read_bytes())
+    at = 0
+    while True:
+        at = damaged.find(b"PK\x01\x02", at)
+        if at < 0:
+            raise AssertionError("missing chapter directory entry")
+        name_size = struct.unpack_from("<H", damaged, at + 28)[0]
+        if damaged[at + 46:at + 46 + name_size] == b"EPUB/chapter1.xhtml":
+            damaged[at + 16] ^= 1
+            break
+        at += 46 + name_size
+    (directory / "stream-bad-crc.epub").write_bytes(damaged)
 
 
 if __name__ == "__main__":
