@@ -1,0 +1,4926 @@
+{
+  "schema_version": 1,
+  "baseline_id": "2026-10-26-b6e882b7",
+  "protocol": "chapter-workload-v1",
+  "date": "2026-10-26",
+  "timezone": "Asia/Singapore",
+  "verdict": "completed_with_known_failures_and_unverified_hardware_items",
+  "source": {
+    "commit": "b6e882b7924bcdf0ff6989eea2e73e19814540eb",
+    "initial_worktree_clean": true,
+    "dirty": true,
+    "version": "0.4.0+gb6e882b.dirty",
+    "patch": "reader_console view_name adds View::Onboarding -> onboarding",
+    "patch_sha256": "26a9a704c006301566095a99ca5c8cbde9f79cceae25cfa98b0c4b37e792ff98",
+    "original_main_standard_build": "failed_Werror_switch_missing_Onboarding",
+    "production_patch_lines": 1,
+    "committed": false,
+    "pushed": false
+  },
+  "toolchain": {
+    "host": "macOS 27.0 arm64",
+    "host_compiler": "AppleClang 21",
+    "firmware_compiler": "Xtensa GCC 15.2.0",
+    "idf_version": "v6.1",
+    "idf_commit": "fff9895c82d744c7237be8847347bdd1b07c6643",
+    "idf_local_changes": [
+      "components/esp_system/ld/ld.ext_ram.sections",
+      "untracked tools/requirements/requirements.merged.txt"
+    ],
+    "bsp_commit": "5f3406deec33304de8801046db583dec7c49e55b",
+    "cmake": "4.4.3",
+    "node": "26.7.0",
+    "host_python": "3.14.7"
+  },
+  "builds": [
+    {
+      "mode": "standard",
+      "bytes": 3872272,
+      "slot_free_bytes": 322032,
+      "provenance": {
+        "schema": 1,
+        "source_commit": "b6e882b7924bcdf0ff6989eea2e73e19814540eb",
+        "source_dirty": true,
+        "source_sha256": "dbd87ebe16bbe9ccbeb5cffb0e9084aec374a3ae42477745f3c5fa49f0a104c0",
+        "version": "0.4.0+gb6e882b.dirty",
+        "build_mode": "default",
+        "artifacts_sha256": {
+          "pico_page.bin": "c6327766f3334e2b0f4e51fe5543a094b8a9c455888035207d0b5ab20d95ab8c",
+          "pico_page.elf": "52800babdb5dc94c678c11bf26c8f50874cb838776ace7322296685b3c821f52",
+          "sdkconfig": "545f11932b97a6c1bd83a228f7b9b975b5701750d9a1ddeb5f4377a778a0bf26"
+        }
+      },
+      "flags": [
+        "CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE=y",
+        "# CONFIG_PICO_PAGE_PERF_METRICS is not set",
+        "# CONFIG_PICO_PAGE_TRACE_EVENTS is not set",
+        "# CONFIG_PICO_PAGE_LEGACY_PERF_LOG is not set"
+      ]
+    },
+    {
+      "mode": "release",
+      "bytes": 3845664,
+      "slot_free_bytes": 348640,
+      "provenance": {
+        "schema": 1,
+        "source_commit": "b6e882b7924bcdf0ff6989eea2e73e19814540eb",
+        "source_dirty": true,
+        "source_sha256": "dbd87ebe16bbe9ccbeb5cffb0e9084aec374a3ae42477745f3c5fa49f0a104c0",
+        "version": "0.4.0+gb6e882b.dirty",
+        "build_mode": "release",
+        "artifacts_sha256": {
+          "pico_page.bin": "90d6306905e378b8717bf2be2df5c1dd3dad03b2debd7dc1421449b07895ab8d",
+          "pico_page.elf": "506ea3e63d9cef09ca96eb52c7afec03b908691d7269868bc19db0b235bc9681",
+          "sdkconfig": "2f43f175cdfc751c13875a6cc455455da40c8d82f3cf8cf234f9cdb4e095d11f"
+        }
+      },
+      "flags": [
+        "# CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE is not set",
+        "# CONFIG_PICO_PAGE_PERF_METRICS is not set"
+      ]
+    },
+    {
+      "mode": "performance",
+      "bytes": 3851184,
+      "slot_free_bytes": 343120,
+      "provenance": {
+        "schema": 1,
+        "source_commit": "b6e882b7924bcdf0ff6989eea2e73e19814540eb",
+        "source_dirty": true,
+        "source_sha256": "9807deebc55ab24f55aa3b971703907a8d0f21a02b9a4d88e8fb45e8770b3fa1",
+        "version": "0.4.0+gb6e882b.dirty",
+        "build_mode": "performance",
+        "artifacts_sha256": {
+          "pico_page.bin": "b16aab12286441470bb30389be7c85b33850984b4199ec6c399c72c1e67c3946",
+          "pico_page.elf": "48cb4042d05028e5036367de368b45995aef5b3ce543ddff2cec05d160d8b66b",
+          "sdkconfig": "d07f336538ab1cba4e4c99deaf4d111bbf0a4f6cc6aee2dcb21c4154647bfdf9"
+        }
+      },
+      "flags": [
+        "# CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE is not set",
+        "CONFIG_PICO_PAGE_PERF_METRICS=y"
+      ]
+    },
+    {
+      "mode": "diagnostic",
+      "bytes": 3887024,
+      "slot_free_bytes": 307280,
+      "provenance": {
+        "schema": 1,
+        "source_commit": "b6e882b7924bcdf0ff6989eea2e73e19814540eb",
+        "source_dirty": true,
+        "source_sha256": "dbd87ebe16bbe9ccbeb5cffb0e9084aec374a3ae42477745f3c5fa49f0a104c0",
+        "version": "0.4.0+gb6e882b.dirty",
+        "build_mode": "diagnostic",
+        "artifacts_sha256": {
+          "pico_page.bin": "97f2ef77a33f576f674f69118093c4c2fc086a3b9866946f8bf86f970c02dcc1",
+          "pico_page.elf": "efaad5a4df1cbd86fd14fb1c56f5e80184ff05a601c13b32567224ecd6bbcf36",
+          "sdkconfig": "5af616b9fc58f5d9289286775a0aae16d3094d3d2ad4611045f68d7b9651f2a0"
+        }
+      },
+      "flags": [
+        "CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE=y",
+        "CONFIG_PICO_PAGE_PERF_METRICS=y",
+        "CONFIG_PICO_PAGE_TRACE_EVENTS=y"
+      ]
+    }
+  ],
+  "install": {
+    "installed_sha256": "97f2ef77a33f576f674f69118093c4c2fc086a3b9866946f8bf86f970c02dcc1",
+    "size": 3887024,
+    "offset": 65536,
+    "before_and_after_prefix_sha256": "e5579c25a21af15306101f1a9d98ffe2c2cedec3a082eaac464e9091411459f0",
+    "independent_verify": true
+  },
+  "conditions": {
+    "device": "D1 ESP32-S3 rev 0.2 / 8 MiB PSRAM",
+    "app_partition": {
+      "label": "factory",
+      "offset": 65536,
+      "bytes": 4194304,
+      "ota_slots": false
+    },
+    "tf": {
+      "filesystem": "FAT32",
+      "volume_bytes": 31253889024,
+      "allocation_bytes": 32768,
+      "metadata_date": "2026-10-25",
+      "cid_rechecked": false,
+      "same_installed_card": true
+    },
+    "reader": {
+      "font_size_px": 46,
+      "refresh_preset": "balanced",
+      "full_refresh_interval": 20,
+      "page_effect": "default/off; global settings did not set page_effect",
+      "font": {
+        "path": "Fonts/LXGWWenKai-Regular.ttf",
+        "sha256": "8d6ba638ac9553413354cfaab97637c1cd778444e259441ea1e5f8fb2c697fba"
+      },
+      "font_weight": "regular"
+    },
+    "line_height": 1.5,
+    "margin_px": 36,
+    "paragraph_gap": 0,
+    "indent": 2,
+    "cache": "persistent retained; exact K1 reposition then K2 per group; no cold-cache claim",
+    "input": "diagnostic serial injections",
+    "timing": "host monotonic command send to confirmed driver frame; not optical or physical input delay",
+    "usb_mass_storage_entered": false,
+    "sample_books": [
+      {
+        "id": "A",
+        "bytes": 417537,
+        "sha256": "2f3544db2d30b9049512bb78cf6aac0d02317cb228efbcda7b28889a574a9c86"
+      },
+      {
+        "id": "B",
+        "bytes": 5721068,
+        "sha256": "6470156742e24e78eb549e50b8d88dd26a8dca7b7a63a8efd430601d929ac989"
+      },
+      {
+        "id": "C",
+        "bytes": 1136922,
+        "sha256": "6f11d56ed992db0a4cfcaa4b7f629939cf38a3736654fb042deb6b049cd00e6a"
+      }
+    ],
+    "nine_device_copy_size_crc32_checks": true
+  },
+  "host": {
+    "debug": {
+      "passed": 31,
+      "registered": 31,
+      "seconds": 69.62,
+      "bsp_waveform": true
+    },
+    "asan_ubsan": {
+      "passed": 31,
+      "registered": 31,
+      "seconds": 140.32,
+      "trace_events": true,
+      "bsp_waveform": true,
+      "lsan_tested": false
+    },
+    "ci_path_tests": {
+      "passed": 3
+    },
+    "creengine": {
+      "reference_books": 19,
+      "profiles": 114,
+      "checked_scalar_observations": 283710,
+      "reverse_positions": 6216,
+      "engine_bookmarks": 5740,
+      "image_observations": 78,
+      "unsupported_scalar_observations": 1570266,
+      "unsupported_bookmark_observations": 476,
+      "scope": "Per-profile observations are not distinct source positions. Explicitly unsupported long source node splits remain unsupported; exit status zero is not complete KOReader-client acceptance."
+    },
+    "real_book_parse": [
+      {
+        "sample": "A",
+        "parts": 16,
+        "digests_equal": true,
+        "scalars": 202812,
+        "load_total_us": 44282,
+        "stream_total_us": 28204
+      },
+      {
+        "sample": "B",
+        "parts": 714,
+        "digests_equal": true,
+        "scalars": 2855722,
+        "load_total_us": 497407,
+        "stream_total_us": 498719
+      },
+      {
+        "sample": "C",
+        "parts": 33,
+        "digests_equal": true,
+        "scalars": 124749,
+        "load_total_us": 17374,
+        "stream_total_us": 17532
+      }
+    ],
+    "synthetic_parse": {
+      "parts": 8,
+      "all_semantic_digests_equal": true,
+      "load_total_us": 692984,
+      "stream_total_us": 135988,
+      "load_source_bytes": 1050518,
+      "stream_source_bytes": 198340
+    },
+    "image_cache": {
+      "milliseconds": {
+        "stage/host_image_cold": {
+          "n": 40,
+          "p50": 5.409,
+          "p95": 5.589,
+          "p99": 5.711,
+          "max": 5.711,
+          "logged_min_ms": [
+            0.0
+          ]
+        },
+        "stage/host_image_hot": {
+          "n": 40,
+          "p50": 1.468,
+          "p95": 1.492,
+          "p99": 1.518,
+          "max": 1.518,
+          "logged_min_ms": [
+            0.0
+          ]
+        }
+      },
+      "minimum_bytes": {},
+      "overflow_log_lines": 0,
+      "maximum_reported_overflow_count": null
+    },
+    "article_full_parse": {
+      "samples": 52,
+      "passed": 42,
+      "failed": 10,
+      "results": [
+        {
+          "corpus_id": "C000",
+          "host_exit": 1,
+          "bytes": 12910,
+          "local_sha256": "eccd262e0d8588301d4a6169a76f6d13c696c1d0fe5fc7473f2b07d7538a5d2d"
+        },
+        {
+          "corpus_id": "C001",
+          "host_exit": 1,
+          "bytes": 20401,
+          "local_sha256": "cd518549e1dffb5f1d38bda86321c258eccb289dcf834d76df47bdaa758ef60b"
+        },
+        {
+          "corpus_id": "C002",
+          "host_exit": 1,
+          "bytes": 716981,
+          "local_sha256": "df63b43f9f4d2b198781e710abcf7acf7c64ad19b47594cbdd05f9edfdc8a7fd"
+        },
+        {
+          "corpus_id": "C003",
+          "host_exit": 1,
+          "bytes": 35586,
+          "local_sha256": "af0842d9f470123f63aee0e60e3b13f95b751086dc65e099c5d883ff12c702f1"
+        },
+        {
+          "corpus_id": "C004",
+          "host_exit": 1,
+          "bytes": 100751,
+          "local_sha256": "5f902adea4d39b938d6babe79d7a07881a539691c38f826dbca52e40b90bff3d"
+        },
+        {
+          "corpus_id": "C005",
+          "host_exit": 1,
+          "bytes": 579764,
+          "local_sha256": "1c8b86c6469c6175b8ac20b2b425cf3f766b9a6d05909b7485539be6ab7ff869"
+        },
+        {
+          "corpus_id": "C006",
+          "host_exit": 1,
+          "bytes": 23356,
+          "local_sha256": "831a27fedbe5d54e80e2f2270823611c2e595cba816c1da3f76add3c2c15bc9e"
+        },
+        {
+          "corpus_id": "C007",
+          "host_exit": 1,
+          "bytes": 2186851,
+          "local_sha256": "43f0c1736002ad9532ad5b89ab6824fe1a3d4507654b766b766dddd24f80feff"
+        },
+        {
+          "corpus_id": "C008",
+          "host_exit": 0,
+          "bytes": 12831,
+          "local_sha256": "74797fe9796b3f8e473aa78ccec4882a6f923ec5925c5f90753f160962a28180"
+        },
+        {
+          "corpus_id": "C009",
+          "host_exit": 0,
+          "bytes": 20921,
+          "local_sha256": "956110243cfdaff7759bd5ff652a378db30a82d5c32365d23f3cd5b998e0fef7"
+        },
+        {
+          "corpus_id": "C010",
+          "host_exit": 0,
+          "bytes": 37627,
+          "local_sha256": "eefda715f48a47284174a1281edff85e84860059962135b33f86fb983c7a9f22"
+        },
+        {
+          "corpus_id": "C011",
+          "host_exit": 0,
+          "bytes": 297657,
+          "local_sha256": "f2b9a7ab7cc37c869d1413e93332ac8613cc025c4931f5d000c6658a8e63e99d"
+        },
+        {
+          "corpus_id": "C012",
+          "host_exit": 0,
+          "bytes": 18862,
+          "local_sha256": "848dd614d01159498c0a194fadfa0bc39ba482d5648e6af762ec9b4c81d1e802"
+        },
+        {
+          "corpus_id": "C013",
+          "host_exit": 0,
+          "bytes": 7466,
+          "local_sha256": "b4ef6e68055b69260920abdf68f0523c784e533ab14290df5dd1215cdda93463"
+        },
+        {
+          "corpus_id": "C014",
+          "host_exit": 0,
+          "bytes": 6478,
+          "local_sha256": "089a981277a9634bea02f026d957020a4917c5a12b066a71d924dd5b19d218b0"
+        },
+        {
+          "corpus_id": "C015",
+          "host_exit": 0,
+          "bytes": 30332,
+          "local_sha256": "ef466da7230ac615416f10c506d80863752232b4d5892cc52ae042793d705ed9"
+        },
+        {
+          "corpus_id": "C016",
+          "host_exit": 0,
+          "bytes": 8053,
+          "local_sha256": "f527f82b7ee520dd459245f45364fedec2eba5477a2dc2d7ecb2eca85c8a5de2"
+        },
+        {
+          "corpus_id": "C017",
+          "host_exit": 0,
+          "bytes": 6954,
+          "local_sha256": "9118a583c0ace58789916e45d93be79d27bf82e9245534e07783d3a0271d0f95"
+        },
+        {
+          "corpus_id": "C018",
+          "host_exit": 0,
+          "bytes": 833835,
+          "local_sha256": "8ade162185ff5b7c4b64bbffaefa2f2bc8efdd488ab6b87bbb4570f221b5a0f0"
+        },
+        {
+          "corpus_id": "C019",
+          "host_exit": 0,
+          "bytes": 91654,
+          "local_sha256": "8e21524cac2eede0c8df230ecba515062a3c80f2e087dac9a95a6b0d6454d0bd"
+        },
+        {
+          "corpus_id": "C020",
+          "host_exit": 0,
+          "bytes": 6477,
+          "local_sha256": "58e5552b60a928d3fbe210d8bfd3b4e2b65583f3e43a6841c655b3f4a935b479"
+        },
+        {
+          "corpus_id": "C021",
+          "host_exit": 0,
+          "bytes": 39248,
+          "local_sha256": "0818742bb61d12932b907c8c2db8b579d9bf33d20ea6e8cac7369978432e8468"
+        },
+        {
+          "corpus_id": "C022",
+          "host_exit": 0,
+          "bytes": 330653,
+          "local_sha256": "29f1d21b87f360585ddf4d245a7b4adc125e12574789e968d27e1f94c396af07"
+        },
+        {
+          "corpus_id": "C023",
+          "host_exit": 0,
+          "bytes": 12306,
+          "local_sha256": "a80ee7943421114062e9c49d8e4a6d6edc071a60099ca24ebd81f161328673ae"
+        },
+        {
+          "corpus_id": "C024",
+          "host_exit": 0,
+          "bytes": 48239,
+          "local_sha256": "8eceb8604766c5856029c55925375bc90613e50bbaf798cd39acea4872d11683"
+        },
+        {
+          "corpus_id": "C025",
+          "host_exit": 0,
+          "bytes": 6793,
+          "local_sha256": "f16e61f1e95742cf1daec7ced5bf5590a3019c2e685ea44993e4aa7d156ee8c0"
+        },
+        {
+          "corpus_id": "C026",
+          "host_exit": 0,
+          "bytes": 351664,
+          "local_sha256": "8b8cb1714913cd3391544b99c849ee0017e2ff8cb26216d2532115380c30c1b1"
+        },
+        {
+          "corpus_id": "C027",
+          "host_exit": 0,
+          "bytes": 6650,
+          "local_sha256": "70f0e733729de518c62b02edbbf1a0bdd6221aae42023c38596a1af9ffe798ed"
+        },
+        {
+          "corpus_id": "C028",
+          "host_exit": 0,
+          "bytes": 13315,
+          "local_sha256": "fa0a43b92ea7225cc12eaa1fc89cd8a19d25943d42f6af47917a0013b91ce04d"
+        },
+        {
+          "corpus_id": "C029",
+          "host_exit": 0,
+          "bytes": 6481,
+          "local_sha256": "d78c7c8de9dd7e13b04ca51b4d6de694fe1ba0adb5c3ebf5e7f704a7d51da3df"
+        },
+        {
+          "corpus_id": "C030",
+          "host_exit": 0,
+          "bytes": 67344,
+          "local_sha256": "a407d30284b296454a76434e75724e16c08045683a300f594f00bb2fd2623e6c"
+        },
+        {
+          "corpus_id": "C031",
+          "host_exit": 0,
+          "bytes": 91654,
+          "local_sha256": "9f18509ed117f7bd7e06f943542e129adceeb95f8693bf47489b3c1a4e0ccdfb"
+        },
+        {
+          "corpus_id": "C032",
+          "host_exit": 0,
+          "bytes": 140577,
+          "local_sha256": "8ad77976d108bc0bfb47a8e9ae8ebb48ae65d00f7f5979a12625a6708d068882"
+        },
+        {
+          "corpus_id": "C033",
+          "host_exit": 0,
+          "bytes": 46012,
+          "local_sha256": "95bc581ade0d358d30a1bd44f4d567d2efd2be291780fa043870dc4215ab4f1f"
+        },
+        {
+          "corpus_id": "C034",
+          "host_exit": 0,
+          "bytes": 6477,
+          "local_sha256": "71383a8cf9150083aaf0dfa85f2f58cf2769b5b1a4c1c1322a9fb68c19dcbd08"
+        },
+        {
+          "corpus_id": "C035",
+          "host_exit": 0,
+          "bytes": 171089,
+          "local_sha256": "3924b371303e9a60363df930d5859a72e55a61837a14b97af6af086b4926fc93"
+        },
+        {
+          "corpus_id": "C036",
+          "host_exit": 0,
+          "bytes": 39486,
+          "local_sha256": "314dca0b80261cebd7c0a64ae56784b40965b1a52412bdabe0333b4587456499"
+        },
+        {
+          "corpus_id": "C037",
+          "host_exit": 1,
+          "bytes": 192238,
+          "local_sha256": "875ae9e5801d4ee5d4ae9ada0a2089e942b0651cb21810a911138a640fe9f7ac"
+        },
+        {
+          "corpus_id": "C038",
+          "host_exit": 0,
+          "bytes": 454743,
+          "local_sha256": "1e6a9ac93cca1513160ea4e52e5dbd58310660b6588d6c842848cbe232598642"
+        },
+        {
+          "corpus_id": "C039",
+          "host_exit": 0,
+          "bytes": 31812,
+          "local_sha256": "b23a6536ab84ca9a0550f2a2bb44807572b82911e993fd972fa2f3a5359bdee4"
+        },
+        {
+          "corpus_id": "C040",
+          "host_exit": 0,
+          "bytes": 1202825,
+          "local_sha256": "4b721cf0f543da06ba60ed2769a928a9a04ebb0a49c0ffc61efe8512e3bfd154"
+        },
+        {
+          "corpus_id": "C041",
+          "host_exit": 1,
+          "bytes": 25362,
+          "local_sha256": "eddc919fa71a6329021f8ae1331e45b42ac788d2a08a3aa8d3e2cc05a18e6c23"
+        },
+        {
+          "corpus_id": "C042",
+          "host_exit": 0,
+          "bytes": 25188,
+          "local_sha256": "11403dc6ee04f824e8e47418e66bdeaef4ee97fa1be4ccf33878b401b1a479bb"
+        },
+        {
+          "corpus_id": "C043",
+          "host_exit": 0,
+          "bytes": 15846,
+          "local_sha256": "a2da5cc3c4d047979efaac1821a3c91f108bb7f9dbf57b0b99ed2bfc4cdd87d1"
+        },
+        {
+          "corpus_id": "C044",
+          "host_exit": 0,
+          "bytes": 10692,
+          "local_sha256": "82b02c744888c427bc373e00a88790f9853500a93ee364f09150d58a684a603a"
+        },
+        {
+          "corpus_id": "C045",
+          "host_exit": 0,
+          "bytes": 6446,
+          "local_sha256": "fcd3acbd7db829e3c8f1b8d1e6a669bc6a3cb79362bbaf2459f848a6a2a6bfc0"
+        },
+        {
+          "corpus_id": "C046",
+          "host_exit": 0,
+          "bytes": 467813,
+          "local_sha256": "6a6330aad2b474158c38074553c3c3d641f0321eaafe37daf2ca13977282dc21"
+        },
+        {
+          "corpus_id": "C047",
+          "host_exit": 0,
+          "bytes": 41331,
+          "local_sha256": "702a79e0e2c51e9c359013e42db7013cba8767932f9047471792b2035aeae6f6"
+        },
+        {
+          "corpus_id": "C048",
+          "host_exit": 0,
+          "bytes": 123542,
+          "local_sha256": "e3ae9a7588a2992ef8d045349cfae129ca0bb0ae17ce02d2196969dcaece6692"
+        },
+        {
+          "corpus_id": "C049",
+          "host_exit": 0,
+          "bytes": 301882,
+          "local_sha256": "9fdd0e130129971f4944c107742094e2518b43e8836d0e64cec99ef0a8219909"
+        },
+        {
+          "corpus_id": "C050",
+          "host_exit": 0,
+          "bytes": 265844,
+          "local_sha256": "49c7c46c2cf8fb8a59888df8b556b1848cc6d5c81742114c9b695e783a3dbf4c"
+        },
+        {
+          "corpus_id": "C051",
+          "host_exit": 0,
+          "bytes": 11332,
+          "local_sha256": "e75ac3d75645e98bb304ccca3df16d38ab65fb7da54980a7523ce2a1f7cbb95a"
+        }
+      ],
+      "device_identity_reverified": false
+    }
+  },
+  "reading": {
+    "groups": 9,
+    "measured_page_turns": 388,
+    "all_action_windows": 438,
+    "key_commands_including_setup": 411,
+    "position_roundtrip_groups_passed": 9,
+    "per_group": [
+      {
+        "group": "long-7-0",
+        "counts": {
+          "success": 56,
+          "failure": 0,
+          "cancelled": 2,
+          "timeout": 0,
+          "unfinished": 0,
+          "command_failure": 0,
+          "command_timeout": 0,
+          "busy": 0
+        },
+        "gaps": [],
+        "frame_failures": 0
+      },
+      {
+        "group": "long-7-1",
+        "counts": {
+          "success": 61,
+          "failure": 0,
+          "cancelled": 0,
+          "timeout": 0,
+          "unfinished": 0,
+          "command_failure": 0,
+          "command_timeout": 0,
+          "busy": 0
+        },
+        "gaps": [],
+        "frame_failures": 0
+      },
+      {
+        "group": "long-8-0",
+        "counts": {
+          "success": 73,
+          "failure": 0,
+          "cancelled": 5,
+          "timeout": 0,
+          "unfinished": 0,
+          "command_failure": 0,
+          "command_timeout": 0,
+          "busy": 0
+        },
+        "gaps": [],
+        "frame_failures": 0
+      },
+      {
+        "group": "many-30-0",
+        "counts": {
+          "success": 132,
+          "failure": 0,
+          "cancelled": 7,
+          "timeout": 0,
+          "unfinished": 0,
+          "command_failure": 0,
+          "command_timeout": 0,
+          "busy": 0
+        },
+        "gaps": [],
+        "frame_failures": 0
+      },
+      {
+        "group": "many-320-0",
+        "counts": {
+          "success": 62,
+          "failure": 0,
+          "cancelled": 8,
+          "timeout": 0,
+          "unfinished": 0,
+          "command_failure": 0,
+          "command_timeout": 0,
+          "busy": 0
+        },
+        "gaps": [],
+        "frame_failures": 0
+      },
+      {
+        "group": "many-650-0",
+        "counts": {
+          "success": 61,
+          "failure": 0,
+          "cancelled": 7,
+          "timeout": 0,
+          "unfinished": 0,
+          "command_failure": 0,
+          "command_timeout": 0,
+          "busy": 0
+        },
+        "gaps": [],
+        "frame_failures": 0
+      },
+      {
+        "group": "short-4-0",
+        "counts": {
+          "success": 165,
+          "failure": 0,
+          "cancelled": 6,
+          "timeout": 0,
+          "unfinished": 0,
+          "command_failure": 0,
+          "command_timeout": 0,
+          "busy": 0
+        },
+        "gaps": [],
+        "frame_failures": 0
+      },
+      {
+        "group": "short-10-0",
+        "counts": {
+          "success": 113,
+          "failure": 0,
+          "cancelled": 8,
+          "timeout": 0,
+          "unfinished": 0,
+          "command_failure": 0,
+          "command_timeout": 0,
+          "busy": 0
+        },
+        "gaps": [],
+        "frame_failures": 0
+      },
+      {
+        "group": "short-18-0",
+        "counts": {
+          "success": 54,
+          "failure": 0,
+          "cancelled": 1,
+          "timeout": 0,
+          "unfinished": 0,
+          "command_failure": 0,
+          "command_timeout": 0,
+          "busy": 0
+        },
+        "gaps": [],
+        "frame_failures": 0
+      }
+    ],
+    "distributions_ms": [
+      {
+        "book": "A",
+        "scenario": "first_boundary",
+        "cache": "disk",
+        "refresh": "partial",
+        "n": 1,
+        "p50": 842.03,
+        "p95": 842.03,
+        "p99": 842.03,
+        "max": 842.03
+      },
+      {
+        "book": "A",
+        "scenario": "first_boundary",
+        "cache": "prepared",
+        "refresh": "partial",
+        "n": 2,
+        "p50": 693.8855,
+        "p95": 697.656,
+        "p99": 697.656,
+        "max": 697.656
+      },
+      {
+        "book": "A",
+        "scenario": "repeat_backward",
+        "cache": "disk",
+        "refresh": "partial",
+        "n": 15,
+        "p50": 837.518,
+        "p95": 868.889,
+        "p99": 868.889,
+        "max": 868.889
+      },
+      {
+        "book": "A",
+        "scenario": "repeat_forward",
+        "cache": "disk",
+        "refresh": "partial",
+        "n": 15,
+        "p50": 847.692,
+        "p95": 920.211,
+        "p99": 920.211,
+        "max": 920.211
+      },
+      {
+        "book": "A",
+        "scenario": "walk_page",
+        "cache": "no_chapter_read",
+        "refresh": "full",
+        "n": 3,
+        "p50": 2012.231,
+        "p95": 2095.089,
+        "p99": 2095.089,
+        "max": 2095.089
+      },
+      {
+        "book": "A",
+        "scenario": "walk_page",
+        "cache": "no_chapter_read",
+        "refresh": "partial",
+        "n": 33,
+        "p50": 700.717,
+        "p95": 1079.857,
+        "p99": 1164.931,
+        "max": 1164.931
+      },
+      {
+        "book": "B",
+        "scenario": "first_boundary",
+        "cache": "prepared",
+        "refresh": "partial",
+        "n": 3,
+        "p50": 687.302,
+        "p95": 695.44,
+        "p99": 695.44,
+        "max": 695.44
+      },
+      {
+        "book": "B",
+        "scenario": "repeat_backward",
+        "cache": "disk",
+        "refresh": "partial",
+        "n": 13,
+        "p50": 723.961,
+        "p95": 772.759,
+        "p99": 772.759,
+        "max": 772.759
+      },
+      {
+        "book": "B",
+        "scenario": "repeat_backward",
+        "cache": "no_chapter_read",
+        "refresh": "partial",
+        "n": 2,
+        "p50": 709.7095,
+        "p95": 709.719,
+        "p99": 709.719,
+        "max": 709.719
+      },
+      {
+        "book": "B",
+        "scenario": "repeat_forward",
+        "cache": "disk",
+        "refresh": "partial",
+        "n": 15,
+        "p50": 767.111,
+        "p95": 795.609,
+        "p99": 795.609,
+        "max": 795.609
+      },
+      {
+        "book": "B",
+        "scenario": "walk_chapter",
+        "cache": "disk",
+        "refresh": "partial",
+        "n": 3,
+        "p50": 899.843,
+        "p95": 1502.49,
+        "p99": 1502.49,
+        "max": 1502.49
+      },
+      {
+        "book": "B",
+        "scenario": "walk_page",
+        "cache": "no_chapter_read",
+        "refresh": "full",
+        "n": 6,
+        "p50": 1859.4935,
+        "p95": 1905.237,
+        "p99": 1905.237,
+        "max": 1905.237
+      },
+      {
+        "book": "B",
+        "scenario": "walk_page",
+        "cache": "no_chapter_read",
+        "refresh": "partial",
+        "n": 95,
+        "p50": 790.224,
+        "p95": 880.133,
+        "p99": 950.683,
+        "max": 950.683
+      },
+      {
+        "book": "C",
+        "scenario": "first_boundary",
+        "cache": "prepared",
+        "refresh": "partial",
+        "n": 3,
+        "p50": 658.383,
+        "p95": 663.417,
+        "p99": 663.417,
+        "max": 663.417
+      },
+      {
+        "book": "C",
+        "scenario": "repeat_backward",
+        "cache": "disk",
+        "refresh": "partial",
+        "n": 15,
+        "p50": 704.938,
+        "p95": 761.498,
+        "p99": 761.498,
+        "max": 761.498
+      },
+      {
+        "book": "C",
+        "scenario": "repeat_forward",
+        "cache": "disk",
+        "refresh": "partial",
+        "n": 15,
+        "p50": 740.254,
+        "p95": 762.599,
+        "p99": 762.599,
+        "max": 762.599
+      },
+      {
+        "book": "C",
+        "scenario": "walk_chapter",
+        "cache": "disk",
+        "refresh": "partial",
+        "n": 2,
+        "p50": 726.5165,
+        "p95": 744.013,
+        "p99": 744.013,
+        "max": 744.013
+      },
+      {
+        "book": "C",
+        "scenario": "walk_chapter",
+        "cache": "no_chapter_read",
+        "refresh": "partial",
+        "n": 1,
+        "p50": 879.827,
+        "p95": 879.827,
+        "p99": 879.827,
+        "max": 879.827
+      },
+      {
+        "book": "C",
+        "scenario": "walk_chapter",
+        "cache": "retained",
+        "refresh": "partial",
+        "n": 1,
+        "p50": 690.345,
+        "p95": 690.345,
+        "p99": 690.345,
+        "max": 690.345
+      },
+      {
+        "book": "C",
+        "scenario": "walk_page",
+        "cache": "miss",
+        "refresh": "partial",
+        "n": 2,
+        "p50": 647.1145,
+        "p95": 670.452,
+        "p99": 670.452,
+        "max": 670.452
+      },
+      {
+        "book": "C",
+        "scenario": "walk_page",
+        "cache": "no_chapter_read",
+        "refresh": "full",
+        "n": 6,
+        "p50": 1707.5165000000002,
+        "p95": 1715.9,
+        "p99": 1715.9,
+        "max": 1715.9
+      },
+      {
+        "book": "C",
+        "scenario": "walk_page",
+        "cache": "no_chapter_read",
+        "refresh": "partial",
+        "n": 92,
+        "p50": 669.039,
+        "p95": 678.524,
+        "p99": 689.598,
+        "max": 689.598
+      }
+    ],
+    "all_stage_distributions": {
+      "stage/long_boundary_disk_partial_chapter_job": {
+        "n": 1,
+        "p50": 51.145,
+        "p95": 51.145,
+        "p99": 51.145,
+        "max": 51.145,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_boundary_disk_partial_command_to_frame": {
+        "n": 1,
+        "p50": 842.03,
+        "p95": 842.03,
+        "p99": 842.03,
+        "max": 842.03,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_boundary_disk_partial_panel_copy": {
+        "n": 1,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_boundary_disk_partial_panel_draw": {
+        "n": 1,
+        "p50": 484.0,
+        "p95": 484.0,
+        "p99": 484.0,
+        "max": 484.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_boundary_disk_partial_panel_power": {
+        "n": 1,
+        "p50": 92.0,
+        "p95": 92.0,
+        "p99": 92.0,
+        "max": 92.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_boundary_prepared_partial_command_to_frame": {
+        "n": 2,
+        "p50": 690.115,
+        "p95": 697.656,
+        "p99": 697.656,
+        "max": 697.656,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_boundary_prepared_partial_panel_copy": {
+        "n": 2,
+        "p50": 51.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_boundary_prepared_partial_panel_draw": {
+        "n": 2,
+        "p50": 486.0,
+        "p95": 488.0,
+        "p99": 488.0,
+        "max": 488.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_boundary_prepared_partial_panel_power": {
+        "n": 2,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_leave_library_no_chapter_read_full_command_to_frame": {
+        "n": 3,
+        "p50": 2121.228,
+        "p95": 2136.585,
+        "p99": 2136.585,
+        "max": 2136.585,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_leave_library_no_chapter_read_full_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_leave_library_no_chapter_read_full_panel_draw": {
+        "n": 3,
+        "p50": 1524.0,
+        "p95": 1524.0,
+        "p99": 1524.0,
+        "max": 1524.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_leave_library_no_chapter_read_full_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_leave_tools_no_chapter_read_partial_command_to_frame": {
+        "n": 3,
+        "p50": 657.36,
+        "p95": 687.383,
+        "p99": 687.383,
+        "max": 687.383,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_leave_tools_no_chapter_read_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_leave_tools_no_chapter_read_partial_panel_draw": {
+        "n": 3,
+        "p50": 483.0,
+        "p95": 483.0,
+        "p99": 483.0,
+        "max": 483.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_leave_tools_no_chapter_read_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_open_disk_partial_command_to_frame": {
+        "n": 3,
+        "p50": 2391.831,
+        "p95": 2503.633,
+        "p99": 2503.633,
+        "max": 2503.633,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_open_disk_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_open_disk_partial_panel_draw": {
+        "n": 3,
+        "p50": 489.0,
+        "p95": 490.0,
+        "p99": 490.0,
+        "max": 490.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_open_disk_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_repeat_backward_disk_partial_chapter_job": {
+        "n": 15,
+        "p50": 191.836,
+        "p95": 206.065,
+        "p99": 206.065,
+        "max": 206.065,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_repeat_backward_disk_partial_command_to_frame": {
+        "n": 15,
+        "p50": 837.518,
+        "p95": 868.889,
+        "p99": 868.889,
+        "max": 868.889,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_repeat_backward_disk_partial_panel_copy": {
+        "n": 15,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_repeat_backward_disk_partial_panel_draw": {
+        "n": 15,
+        "p50": 487.0,
+        "p95": 488.0,
+        "p99": 488.0,
+        "max": 488.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_repeat_backward_disk_partial_panel_power": {
+        "n": 15,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_repeat_forward_disk_partial_chapter_job": {
+        "n": 15,
+        "p50": 131.745,
+        "p95": 203.943,
+        "p99": 203.943,
+        "max": 203.943,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_repeat_forward_disk_partial_command_to_frame": {
+        "n": 15,
+        "p50": 847.692,
+        "p95": 920.211,
+        "p99": 920.211,
+        "max": 920.211,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_repeat_forward_disk_partial_panel_copy": {
+        "n": 15,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_repeat_forward_disk_partial_panel_draw": {
+        "n": 15,
+        "p50": 487.0,
+        "p95": 488.0,
+        "p99": 488.0,
+        "max": 488.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_repeat_forward_disk_partial_panel_power": {
+        "n": 15,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_setup_back_one_disk_partial_chapter_job": {
+        "n": 2,
+        "p50": 3090.012,
+        "p95": 3763.265,
+        "p99": 3763.265,
+        "max": 3763.265,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_setup_back_one_disk_partial_command_to_frame": {
+        "n": 2,
+        "p50": 4813.204,
+        "p95": 5176.305,
+        "p99": 5176.305,
+        "max": 5176.305,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_setup_back_one_disk_partial_panel_copy": {
+        "n": 2,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_setup_back_one_disk_partial_panel_draw": {
+        "n": 2,
+        "p50": 486.0,
+        "p95": 488.0,
+        "p99": 488.0,
+        "max": 488.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_setup_back_one_disk_partial_panel_power": {
+        "n": 2,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_setup_back_two_no_chapter_read_partial_command_to_frame": {
+        "n": 2,
+        "p50": 1180.972,
+        "p95": 1282.007,
+        "p99": 1282.007,
+        "max": 1282.007,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_setup_back_two_no_chapter_read_partial_panel_copy": {
+        "n": 2,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_setup_back_two_no_chapter_read_partial_panel_draw": {
+        "n": 2,
+        "p50": 487.0,
+        "p95": 488.0,
+        "p99": 488.0,
+        "max": 488.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_setup_back_two_no_chapter_read_partial_panel_power": {
+        "n": 2,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_setup_full_refresh_miss_full_command_to_frame": {
+        "n": 1,
+        "p50": 1693.898,
+        "p95": 1693.898,
+        "p99": 1693.898,
+        "max": 1693.898,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_setup_full_refresh_miss_full_panel_copy": {
+        "n": 1,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_setup_full_refresh_miss_full_panel_draw": {
+        "n": 1,
+        "p50": 1524.0,
+        "p95": 1524.0,
+        "p99": 1524.0,
+        "max": 1524.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_setup_full_refresh_miss_full_panel_power": {
+        "n": 1,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_setup_full_refresh_no_chapter_read_full_command_to_frame": {
+        "n": 2,
+        "p50": 1622.871,
+        "p95": 1653.231,
+        "p99": 1653.231,
+        "max": 1653.231,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_setup_full_refresh_no_chapter_read_full_panel_copy": {
+        "n": 2,
+        "p50": 51.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_setup_full_refresh_no_chapter_read_full_panel_draw": {
+        "n": 2,
+        "p50": 1524.0,
+        "p95": 1525.0,
+        "p99": 1525.0,
+        "max": 1525.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_setup_full_refresh_no_chapter_read_full_panel_power": {
+        "n": 2,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_tail_no_chapter_read_partial_command_to_frame": {
+        "n": 3,
+        "p50": 639.6,
+        "p95": 652.16,
+        "p99": 652.16,
+        "max": 652.16,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_tail_no_chapter_read_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_tail_no_chapter_read_partial_panel_draw": {
+        "n": 3,
+        "p50": 487.0,
+        "p95": 487.0,
+        "p99": 487.0,
+        "max": 487.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_tail_no_chapter_read_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_first_again_disk_partial_chapter_job": {
+        "n": 1,
+        "p50": 52.749,
+        "p95": 52.749,
+        "p99": 52.749,
+        "max": 52.749,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_first_again_disk_partial_command_to_frame": {
+        "n": 1,
+        "p50": 760.581,
+        "p95": 760.581,
+        "p99": 760.581,
+        "max": 760.581,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_first_again_disk_partial_panel_copy": {
+        "n": 1,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_first_again_disk_partial_panel_draw": {
+        "n": 1,
+        "p50": 486.0,
+        "p95": 486.0,
+        "p99": 486.0,
+        "max": 486.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_first_again_disk_partial_panel_power": {
+        "n": 1,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_first_again_prepared_partial_command_to_frame": {
+        "n": 2,
+        "p50": 690.199,
+        "p95": 690.876,
+        "p99": 690.876,
+        "max": 690.876,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_first_again_prepared_partial_panel_copy": {
+        "n": 2,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_first_again_prepared_partial_panel_draw": {
+        "n": 2,
+        "p50": 487.0,
+        "p95": 488.0,
+        "p99": 488.0,
+        "max": 488.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_first_again_prepared_partial_panel_power": {
+        "n": 2,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_seed_no_chapter_read_partial_command_to_frame": {
+        "n": 3,
+        "p50": 694.38,
+        "p95": 695.96,
+        "p99": 695.96,
+        "max": 695.96,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_seed_no_chapter_read_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_seed_no_chapter_read_partial_panel_draw": {
+        "n": 3,
+        "p50": 487.0,
+        "p95": 487.0,
+        "p99": 487.0,
+        "max": 487.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_seed_no_chapter_read_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_tail_again_no_chapter_read_partial_command_to_frame": {
+        "n": 3,
+        "p50": 636.17,
+        "p95": 637.109,
+        "p99": 637.109,
+        "max": 637.109,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_tail_again_no_chapter_read_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_tail_again_no_chapter_read_partial_panel_draw": {
+        "n": 3,
+        "p50": 487.0,
+        "p95": 488.0,
+        "p99": 488.0,
+        "max": 488.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_tail_again_no_chapter_read_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_tail_disk_partial_chapter_job": {
+        "n": 3,
+        "p50": 192.359,
+        "p95": 204.027,
+        "p99": 204.027,
+        "max": 204.027,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_tail_disk_partial_command_to_frame": {
+        "n": 3,
+        "p50": 853.454,
+        "p95": 858.423,
+        "p99": 858.423,
+        "max": 858.423,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_tail_disk_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_tail_disk_partial_panel_draw": {
+        "n": 3,
+        "p50": 486.0,
+        "p95": 488.0,
+        "p99": 488.0,
+        "max": 488.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_verify_tail_disk_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_walk_backward_no_chapter_read_partial_command_to_frame": {
+        "n": 18,
+        "p50": 698.139,
+        "p95": 702.378,
+        "p99": 702.378,
+        "max": 702.378,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_walk_backward_no_chapter_read_partial_panel_copy": {
+        "n": 18,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_walk_backward_no_chapter_read_partial_panel_draw": {
+        "n": 18,
+        "p50": 488.0,
+        "p95": 489.0,
+        "p99": 489.0,
+        "max": 489.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_walk_backward_no_chapter_read_partial_panel_power": {
+        "n": 18,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_walk_forward_no_chapter_read_full_command_to_frame": {
+        "n": 3,
+        "p50": 2012.231,
+        "p95": 2095.089,
+        "p99": 2095.089,
+        "max": 2095.089,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_walk_forward_no_chapter_read_full_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_walk_forward_no_chapter_read_full_panel_draw": {
+        "n": 3,
+        "p50": 1524.0,
+        "p95": 1524.0,
+        "p99": 1524.0,
+        "max": 1524.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_walk_forward_no_chapter_read_full_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_walk_forward_no_chapter_read_partial_command_to_frame": {
+        "n": 15,
+        "p50": 940.357,
+        "p95": 1164.931,
+        "p99": 1164.931,
+        "max": 1164.931,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_walk_forward_no_chapter_read_partial_panel_copy": {
+        "n": 15,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_walk_forward_no_chapter_read_partial_panel_draw": {
+        "n": 15,
+        "p50": 488.0,
+        "p95": 489.0,
+        "p99": 489.0,
+        "max": 489.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/long_walk_forward_no_chapter_read_partial_panel_power": {
+        "n": 15,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_boundary_prepared_partial_command_to_frame": {
+        "n": 3,
+        "p50": 687.302,
+        "p95": 695.44,
+        "p99": 695.44,
+        "max": 695.44,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_boundary_prepared_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_boundary_prepared_partial_panel_draw": {
+        "n": 3,
+        "p50": 487.0,
+        "p95": 488.0,
+        "p99": 488.0,
+        "max": 488.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_boundary_prepared_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_leave_library_no_chapter_read_full_command_to_frame": {
+        "n": 3,
+        "p50": 2177.783,
+        "p95": 2291.225,
+        "p99": 2291.225,
+        "max": 2291.225,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_leave_library_no_chapter_read_full_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_leave_library_no_chapter_read_full_panel_draw": {
+        "n": 3,
+        "p50": 1524.0,
+        "p95": 1524.0,
+        "p99": 1524.0,
+        "max": 1524.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_leave_library_no_chapter_read_full_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_leave_tools_no_chapter_read_partial_command_to_frame": {
+        "n": 3,
+        "p50": 710.037,
+        "p95": 732.247,
+        "p99": 732.247,
+        "max": 732.247,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_leave_tools_no_chapter_read_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_leave_tools_no_chapter_read_partial_panel_draw": {
+        "n": 3,
+        "p50": 483.0,
+        "p95": 483.0,
+        "p99": 483.0,
+        "max": 483.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_leave_tools_no_chapter_read_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_open_disk_partial_command_to_frame": {
+        "n": 3,
+        "p50": 5120.737,
+        "p95": 5213.774,
+        "p99": 5213.774,
+        "max": 5213.774,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_open_disk_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_open_disk_partial_panel_draw": {
+        "n": 3,
+        "p50": 489.0,
+        "p95": 489.0,
+        "p99": 489.0,
+        "max": 489.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_open_disk_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_repeat_backward_disk_partial_chapter_job": {
+        "n": 13,
+        "p50": 65.468,
+        "p95": 70.106,
+        "p99": 70.106,
+        "max": 70.106,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_repeat_backward_disk_partial_command_to_frame": {
+        "n": 13,
+        "p50": 723.961,
+        "p95": 772.759,
+        "p99": 772.759,
+        "max": 772.759,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_repeat_backward_disk_partial_panel_copy": {
+        "n": 13,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_repeat_backward_disk_partial_panel_draw": {
+        "n": 13,
+        "p50": 487.0,
+        "p95": 489.0,
+        "p99": 489.0,
+        "max": 489.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_repeat_backward_disk_partial_panel_power": {
+        "n": 13,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_repeat_backward_no_chapter_read_partial_chapter_job": {
+        "n": 2,
+        "p50": 61.805,
+        "p95": 62.123,
+        "p99": 62.123,
+        "max": 62.123,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_repeat_backward_no_chapter_read_partial_command_to_frame": {
+        "n": 2,
+        "p50": 709.7,
+        "p95": 709.719,
+        "p99": 709.719,
+        "max": 709.719,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_repeat_backward_no_chapter_read_partial_panel_copy": {
+        "n": 2,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_repeat_backward_no_chapter_read_partial_panel_draw": {
+        "n": 2,
+        "p50": 486.0,
+        "p95": 486.0,
+        "p99": 486.0,
+        "max": 486.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_repeat_backward_no_chapter_read_partial_panel_power": {
+        "n": 2,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_repeat_forward_disk_partial_chapter_job": {
+        "n": 15,
+        "p50": 62.435,
+        "p95": 71.885,
+        "p99": 71.885,
+        "max": 71.885,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_repeat_forward_disk_partial_command_to_frame": {
+        "n": 15,
+        "p50": 767.111,
+        "p95": 795.609,
+        "p99": 795.609,
+        "max": 795.609,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_repeat_forward_disk_partial_panel_copy": {
+        "n": 15,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_repeat_forward_disk_partial_panel_draw": {
+        "n": 15,
+        "p50": 487.0,
+        "p95": 489.0,
+        "p99": 489.0,
+        "max": 489.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_repeat_forward_disk_partial_panel_power": {
+        "n": 15,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_setup_back_one_disk_partial_chapter_job": {
+        "n": 3,
+        "p50": 1515.061,
+        "p95": 1696.137,
+        "p99": 1696.137,
+        "max": 1696.137,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_setup_back_one_disk_partial_command_to_frame": {
+        "n": 3,
+        "p50": 2947.594,
+        "p95": 3270.005,
+        "p99": 3270.005,
+        "max": 3270.005,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_setup_back_one_disk_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_setup_back_one_disk_partial_panel_draw": {
+        "n": 3,
+        "p50": 487.0,
+        "p95": 489.0,
+        "p99": 489.0,
+        "max": 489.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_setup_back_one_disk_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_setup_back_two_no_chapter_read_partial_command_to_frame": {
+        "n": 3,
+        "p50": 1154.753,
+        "p95": 1219.99,
+        "p99": 1219.99,
+        "max": 1219.99,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_setup_back_two_no_chapter_read_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_setup_back_two_no_chapter_read_partial_panel_draw": {
+        "n": 3,
+        "p50": 487.0,
+        "p95": 488.0,
+        "p99": 488.0,
+        "max": 488.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_setup_back_two_no_chapter_read_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_setup_full_refresh_no_chapter_read_full_command_to_frame": {
+        "n": 3,
+        "p50": 1611.184,
+        "p95": 1611.777,
+        "p99": 1611.777,
+        "max": 1611.777,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_setup_full_refresh_no_chapter_read_full_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_setup_full_refresh_no_chapter_read_full_panel_draw": {
+        "n": 3,
+        "p50": 1524.0,
+        "p95": 1525.0,
+        "p99": 1525.0,
+        "max": 1525.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_setup_full_refresh_no_chapter_read_full_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_tail_no_chapter_read_partial_command_to_frame": {
+        "n": 3,
+        "p50": 629.059,
+        "p95": 632.904,
+        "p99": 632.904,
+        "max": 632.904,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_tail_no_chapter_read_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_tail_no_chapter_read_partial_panel_draw": {
+        "n": 3,
+        "p50": 487.0,
+        "p95": 488.0,
+        "p99": 488.0,
+        "max": 488.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_tail_no_chapter_read_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_verify_first_again_prepared_partial_command_to_frame": {
+        "n": 3,
+        "p50": 687.394,
+        "p95": 696.538,
+        "p99": 696.538,
+        "max": 696.538,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_verify_first_again_prepared_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_verify_first_again_prepared_partial_panel_draw": {
+        "n": 3,
+        "p50": 487.0,
+        "p95": 489.0,
+        "p99": 489.0,
+        "max": 489.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_verify_first_again_prepared_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_verify_seed_no_chapter_read_partial_command_to_frame": {
+        "n": 3,
+        "p50": 696.931,
+        "p95": 707.885,
+        "p99": 707.885,
+        "max": 707.885,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_verify_seed_no_chapter_read_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_verify_seed_no_chapter_read_partial_panel_draw": {
+        "n": 3,
+        "p50": 488.0,
+        "p95": 488.0,
+        "p99": 488.0,
+        "max": 488.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_verify_seed_no_chapter_read_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_verify_tail_again_no_chapter_read_partial_command_to_frame": {
+        "n": 3,
+        "p50": 627.701,
+        "p95": 629.387,
+        "p99": 629.387,
+        "max": 629.387,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_verify_tail_again_no_chapter_read_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_verify_tail_again_no_chapter_read_partial_panel_draw": {
+        "n": 3,
+        "p50": 487.0,
+        "p95": 488.0,
+        "p99": 488.0,
+        "max": 488.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_verify_tail_again_no_chapter_read_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_verify_tail_disk_partial_chapter_job": {
+        "n": 3,
+        "p50": 65.496,
+        "p95": 69.522,
+        "p99": 69.522,
+        "max": 69.522,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_verify_tail_disk_partial_command_to_frame": {
+        "n": 3,
+        "p50": 708.654,
+        "p95": 754.002,
+        "p99": 754.002,
+        "max": 754.002,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_verify_tail_disk_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_verify_tail_disk_partial_panel_draw": {
+        "n": 3,
+        "p50": 487.0,
+        "p95": 489.0,
+        "p99": 489.0,
+        "max": 489.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_verify_tail_disk_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_backward_disk_partial_chapter_job": {
+        "n": 2,
+        "p50": 72.357,
+        "p95": 651.024,
+        "p99": 651.024,
+        "max": 651.024,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_backward_disk_partial_command_to_frame": {
+        "n": 2,
+        "p50": 771.003,
+        "p95": 1502.49,
+        "p99": 1502.49,
+        "max": 1502.49,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_backward_disk_partial_panel_copy": {
+        "n": 2,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_backward_disk_partial_panel_draw": {
+        "n": 2,
+        "p50": 488.0,
+        "p95": 489.0,
+        "p99": 489.0,
+        "max": 489.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_backward_disk_partial_panel_power": {
+        "n": 2,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_backward_no_chapter_read_full_command_to_frame": {
+        "n": 2,
+        "p50": 1735.756,
+        "p95": 1905.237,
+        "p99": 1905.237,
+        "max": 1905.237,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_backward_no_chapter_read_full_panel_copy": {
+        "n": 2,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_backward_no_chapter_read_full_panel_draw": {
+        "n": 2,
+        "p50": 1524.0,
+        "p95": 1524.0,
+        "p99": 1524.0,
+        "max": 1524.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_backward_no_chapter_read_full_panel_power": {
+        "n": 2,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_backward_no_chapter_read_partial_command_to_frame": {
+        "n": 48,
+        "p50": 702.711,
+        "p95": 865.5,
+        "p99": 904.066,
+        "max": 904.066,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_backward_no_chapter_read_partial_panel_copy": {
+        "n": 48,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_backward_no_chapter_read_partial_panel_draw": {
+        "n": 48,
+        "p50": 488.0,
+        "p95": 489.0,
+        "p99": 489.0,
+        "max": 489.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_backward_no_chapter_read_partial_panel_power": {
+        "n": 48,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_forward_disk_partial_chapter_job": {
+        "n": 1,
+        "p50": 75.064,
+        "p95": 75.064,
+        "p99": 75.064,
+        "max": 75.064,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_forward_disk_partial_command_to_frame": {
+        "n": 1,
+        "p50": 899.843,
+        "p95": 899.843,
+        "p99": 899.843,
+        "max": 899.843,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_forward_disk_partial_panel_copy": {
+        "n": 1,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_forward_disk_partial_panel_draw": {
+        "n": 1,
+        "p50": 489.0,
+        "p95": 489.0,
+        "p99": 489.0,
+        "max": 489.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_forward_disk_partial_panel_power": {
+        "n": 1,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_forward_no_chapter_read_full_command_to_frame": {
+        "n": 4,
+        "p50": 1841.756,
+        "p95": 1891.942,
+        "p99": 1891.942,
+        "max": 1891.942,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_forward_no_chapter_read_full_panel_copy": {
+        "n": 4,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_forward_no_chapter_read_full_panel_draw": {
+        "n": 4,
+        "p50": 1524.0,
+        "p95": 1525.0,
+        "p99": 1525.0,
+        "max": 1525.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_forward_no_chapter_read_full_panel_power": {
+        "n": 4,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_forward_no_chapter_read_partial_command_to_frame": {
+        "n": 47,
+        "p50": 820.702,
+        "p95": 881.24,
+        "p99": 950.683,
+        "max": 950.683,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_forward_no_chapter_read_partial_panel_copy": {
+        "n": 47,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_forward_no_chapter_read_partial_panel_draw": {
+        "n": 47,
+        "p50": 488.0,
+        "p95": 489.0,
+        "p99": 489.0,
+        "max": 489.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/many_walk_forward_no_chapter_read_partial_panel_power": {
+        "n": 47,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_boundary_prepared_partial_command_to_frame": {
+        "n": 3,
+        "p50": 658.383,
+        "p95": 663.417,
+        "p99": 663.417,
+        "max": 663.417,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_boundary_prepared_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_boundary_prepared_partial_panel_draw": {
+        "n": 3,
+        "p50": 485.0,
+        "p95": 487.0,
+        "p99": 487.0,
+        "max": 487.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_boundary_prepared_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_leave_library_no_chapter_read_full_command_to_frame": {
+        "n": 3,
+        "p50": 2172.163,
+        "p95": 2172.935,
+        "p99": 2172.935,
+        "max": 2172.935,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_leave_library_no_chapter_read_full_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_leave_library_no_chapter_read_full_panel_draw": {
+        "n": 3,
+        "p50": 1524.0,
+        "p95": 1524.0,
+        "p99": 1524.0,
+        "max": 1524.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_leave_library_no_chapter_read_full_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_leave_tools_no_chapter_read_partial_command_to_frame": {
+        "n": 3,
+        "p50": 684.788,
+        "p95": 708.495,
+        "p99": 708.495,
+        "max": 708.495,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_leave_tools_no_chapter_read_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_leave_tools_no_chapter_read_partial_panel_draw": {
+        "n": 3,
+        "p50": 482.0,
+        "p95": 482.0,
+        "p99": 482.0,
+        "max": 482.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_leave_tools_no_chapter_read_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_open_disk_partial_command_to_frame": {
+        "n": 3,
+        "p50": 2186.762,
+        "p95": 2337.111,
+        "p99": 2337.111,
+        "max": 2337.111,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_open_disk_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_open_disk_partial_panel_draw": {
+        "n": 3,
+        "p50": 488.0,
+        "p95": 488.0,
+        "p99": 488.0,
+        "max": 488.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_open_disk_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_repeat_backward_disk_partial_chapter_job": {
+        "n": 15,
+        "p50": 60.772,
+        "p95": 66.096,
+        "p99": 66.096,
+        "max": 66.096,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_repeat_backward_disk_partial_command_to_frame": {
+        "n": 15,
+        "p50": 704.938,
+        "p95": 761.498,
+        "p99": 761.498,
+        "max": 761.498,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_repeat_backward_disk_partial_panel_copy": {
+        "n": 15,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_repeat_backward_disk_partial_panel_draw": {
+        "n": 15,
+        "p50": 485.0,
+        "p95": 487.0,
+        "p99": 487.0,
+        "max": 487.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_repeat_backward_disk_partial_panel_power": {
+        "n": 15,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_repeat_forward_disk_partial_chapter_job": {
+        "n": 15,
+        "p50": 67.168,
+        "p95": 67.896,
+        "p99": 67.896,
+        "max": 67.896,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_repeat_forward_disk_partial_command_to_frame": {
+        "n": 15,
+        "p50": 740.254,
+        "p95": 762.599,
+        "p99": 762.599,
+        "max": 762.599,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_repeat_forward_disk_partial_panel_copy": {
+        "n": 15,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_repeat_forward_disk_partial_panel_draw": {
+        "n": 15,
+        "p50": 485.0,
+        "p95": 487.0,
+        "p99": 487.0,
+        "max": 487.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_repeat_forward_disk_partial_panel_power": {
+        "n": 15,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_setup_back_one_disk_partial_chapter_job": {
+        "n": 2,
+        "p50": 220.504,
+        "p95": 236.188,
+        "p99": 236.188,
+        "max": 236.188,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_setup_back_one_disk_partial_command_to_frame": {
+        "n": 2,
+        "p50": 1414.515,
+        "p95": 1454.972,
+        "p99": 1454.972,
+        "max": 1454.972,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_setup_back_one_disk_partial_panel_copy": {
+        "n": 2,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_setup_back_one_disk_partial_panel_draw": {
+        "n": 2,
+        "p50": 485.0,
+        "p95": 487.0,
+        "p99": 487.0,
+        "max": 487.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_setup_back_one_disk_partial_panel_power": {
+        "n": 2,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_setup_back_two_no_chapter_read_partial_command_to_frame": {
+        "n": 2,
+        "p50": 673.778,
+        "p95": 674.607,
+        "p99": 674.607,
+        "max": 674.607,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_setup_back_two_no_chapter_read_partial_panel_copy": {
+        "n": 2,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_setup_back_two_no_chapter_read_partial_panel_draw": {
+        "n": 2,
+        "p50": 485.0,
+        "p95": 486.0,
+        "p99": 486.0,
+        "max": 486.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_setup_back_two_no_chapter_read_partial_panel_power": {
+        "n": 2,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_setup_full_refresh_miss_full_command_to_frame": {
+        "n": 2,
+        "p50": 1655.749,
+        "p95": 1655.999,
+        "p99": 1655.999,
+        "max": 1655.999,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_setup_full_refresh_miss_full_panel_copy": {
+        "n": 2,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_setup_full_refresh_miss_full_panel_draw": {
+        "n": 2,
+        "p50": 1523.0,
+        "p95": 1525.0,
+        "p99": 1525.0,
+        "max": 1525.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_setup_full_refresh_miss_full_panel_power": {
+        "n": 2,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_setup_full_refresh_no_chapter_read_full_command_to_frame": {
+        "n": 1,
+        "p50": 1606.419,
+        "p95": 1606.419,
+        "p99": 1606.419,
+        "max": 1606.419,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_setup_full_refresh_no_chapter_read_full_panel_copy": {
+        "n": 1,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_setup_full_refresh_no_chapter_read_full_panel_draw": {
+        "n": 1,
+        "p50": 1524.0,
+        "p95": 1524.0,
+        "p99": 1524.0,
+        "max": 1524.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_setup_full_refresh_no_chapter_read_full_panel_power": {
+        "n": 1,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_tail_miss_partial_command_to_frame": {
+        "n": 1,
+        "p50": 629.286,
+        "p95": 629.286,
+        "p99": 629.286,
+        "max": 629.286,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_tail_miss_partial_panel_copy": {
+        "n": 1,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_tail_miss_partial_panel_draw": {
+        "n": 1,
+        "p50": 486.0,
+        "p95": 486.0,
+        "p99": 486.0,
+        "max": 486.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_tail_miss_partial_panel_power": {
+        "n": 1,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_tail_no_chapter_read_partial_command_to_frame": {
+        "n": 2,
+        "p50": 614.06,
+        "p95": 631.873,
+        "p99": 631.873,
+        "max": 631.873,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_tail_no_chapter_read_partial_panel_copy": {
+        "n": 2,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_tail_no_chapter_read_partial_panel_draw": {
+        "n": 2,
+        "p50": 485.0,
+        "p95": 485.0,
+        "p99": 485.0,
+        "max": 485.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_tail_no_chapter_read_partial_panel_power": {
+        "n": 2,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_first_again_prepared_partial_command_to_frame": {
+        "n": 3,
+        "p50": 663.411,
+        "p95": 668.245,
+        "p99": 668.245,
+        "max": 668.245,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_first_again_prepared_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_first_again_prepared_partial_panel_draw": {
+        "n": 3,
+        "p50": 485.0,
+        "p95": 488.0,
+        "p99": 488.0,
+        "max": 488.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_first_again_prepared_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_seed_no_chapter_read_partial_command_to_frame": {
+        "n": 3,
+        "p50": 671.864,
+        "p95": 673.526,
+        "p99": 673.526,
+        "max": 673.526,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_seed_no_chapter_read_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_seed_no_chapter_read_partial_panel_draw": {
+        "n": 3,
+        "p50": 486.0,
+        "p95": 486.0,
+        "p99": 486.0,
+        "max": 486.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_seed_no_chapter_read_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_tail_again_miss_partial_command_to_frame": {
+        "n": 1,
+        "p50": 628.858,
+        "p95": 628.858,
+        "p99": 628.858,
+        "max": 628.858,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_tail_again_miss_partial_panel_copy": {
+        "n": 1,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_tail_again_miss_partial_panel_draw": {
+        "n": 1,
+        "p50": 486.0,
+        "p95": 486.0,
+        "p99": 486.0,
+        "max": 486.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_tail_again_miss_partial_panel_power": {
+        "n": 1,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_tail_again_no_chapter_read_partial_command_to_frame": {
+        "n": 2,
+        "p50": 630.982,
+        "p95": 633.74,
+        "p99": 633.74,
+        "max": 633.74,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_tail_again_no_chapter_read_partial_panel_copy": {
+        "n": 2,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_tail_again_no_chapter_read_partial_panel_draw": {
+        "n": 2,
+        "p50": 484.0,
+        "p95": 485.0,
+        "p99": 485.0,
+        "max": 485.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_tail_again_no_chapter_read_partial_panel_power": {
+        "n": 2,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_tail_disk_partial_chapter_job": {
+        "n": 3,
+        "p50": 61.628,
+        "p95": 64.116,
+        "p99": 64.116,
+        "max": 64.116,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_tail_disk_partial_command_to_frame": {
+        "n": 3,
+        "p50": 699.511,
+        "p95": 723.664,
+        "p99": 723.664,
+        "max": 723.664,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_tail_disk_partial_panel_copy": {
+        "n": 3,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_tail_disk_partial_panel_draw": {
+        "n": 3,
+        "p50": 485.0,
+        "p95": 487.0,
+        "p99": 487.0,
+        "max": 487.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_verify_tail_disk_partial_panel_power": {
+        "n": 3,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_disk_partial_chapter_job": {
+        "n": 1,
+        "p50": 65.46,
+        "p95": 65.46,
+        "p99": 65.46,
+        "max": 65.46,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_disk_partial_command_to_frame": {
+        "n": 1,
+        "p50": 709.02,
+        "p95": 709.02,
+        "p99": 709.02,
+        "max": 709.02,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_disk_partial_panel_copy": {
+        "n": 1,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_disk_partial_panel_draw": {
+        "n": 1,
+        "p50": 485.0,
+        "p95": 485.0,
+        "p99": 485.0,
+        "max": 485.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_disk_partial_panel_power": {
+        "n": 1,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_miss_partial_command_to_frame": {
+        "n": 1,
+        "p50": 670.452,
+        "p95": 670.452,
+        "p99": 670.452,
+        "max": 670.452,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_miss_partial_panel_copy": {
+        "n": 1,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_miss_partial_panel_draw": {
+        "n": 1,
+        "p50": 486.0,
+        "p95": 486.0,
+        "p99": 486.0,
+        "max": 486.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_miss_partial_panel_power": {
+        "n": 1,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_no_chapter_read_full_command_to_frame": {
+        "n": 2,
+        "p50": 1706.784,
+        "p95": 1710.434,
+        "p99": 1710.434,
+        "max": 1710.434,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_no_chapter_read_full_panel_copy": {
+        "n": 2,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_no_chapter_read_full_panel_draw": {
+        "n": 2,
+        "p50": 1524.0,
+        "p95": 1524.0,
+        "p99": 1524.0,
+        "max": 1524.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_no_chapter_read_full_panel_power": {
+        "n": 2,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_no_chapter_read_partial_command_to_frame": {
+        "n": 47,
+        "p50": 668.722,
+        "p95": 674.82,
+        "p99": 676.687,
+        "max": 676.687,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_no_chapter_read_partial_panel_copy": {
+        "n": 47,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_no_chapter_read_partial_panel_draw": {
+        "n": 47,
+        "p50": 486.0,
+        "p95": 487.0,
+        "p99": 487.0,
+        "max": 487.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_no_chapter_read_partial_panel_power": {
+        "n": 47,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_retained_partial_chapter_job": {
+        "n": 1,
+        "p50": 7.661,
+        "p95": 7.661,
+        "p99": 7.661,
+        "max": 7.661,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_retained_partial_command_to_frame": {
+        "n": 1,
+        "p50": 690.345,
+        "p95": 690.345,
+        "p99": 690.345,
+        "max": 690.345,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_retained_partial_panel_copy": {
+        "n": 1,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_retained_partial_panel_draw": {
+        "n": 1,
+        "p50": 486.0,
+        "p95": 486.0,
+        "p99": 486.0,
+        "max": 486.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_backward_retained_partial_panel_power": {
+        "n": 1,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_forward_disk_partial_chapter_job": {
+        "n": 1,
+        "p50": 66.019,
+        "p95": 66.019,
+        "p99": 66.019,
+        "max": 66.019,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_forward_disk_partial_command_to_frame": {
+        "n": 1,
+        "p50": 744.013,
+        "p95": 744.013,
+        "p99": 744.013,
+        "max": 744.013,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_forward_disk_partial_panel_copy": {
+        "n": 1,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_forward_disk_partial_panel_draw": {
+        "n": 1,
+        "p50": 485.0,
+        "p95": 485.0,
+        "p99": 485.0,
+        "max": 485.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_forward_disk_partial_panel_power": {
+        "n": 1,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_forward_miss_partial_command_to_frame": {
+        "n": 1,
+        "p50": 623.777,
+        "p95": 623.777,
+        "p99": 623.777,
+        "max": 623.777,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_forward_miss_partial_panel_copy": {
+        "n": 1,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_forward_miss_partial_panel_draw": {
+        "n": 1,
+        "p50": 486.0,
+        "p95": 486.0,
+        "p99": 486.0,
+        "max": 486.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_forward_miss_partial_panel_power": {
+        "n": 1,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_forward_no_chapter_read_full_command_to_frame": {
+        "n": 4,
+        "p50": 1706.117,
+        "p95": 1715.9,
+        "p99": 1715.9,
+        "max": 1715.9,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_forward_no_chapter_read_full_panel_copy": {
+        "n": 4,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_forward_no_chapter_read_full_panel_draw": {
+        "n": 4,
+        "p50": 1524.0,
+        "p95": 1524.0,
+        "p99": 1524.0,
+        "max": 1524.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_forward_no_chapter_read_full_panel_power": {
+        "n": 4,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_forward_no_chapter_read_partial_chapter_job": {
+        "n": 1,
+        "p50": 173.926,
+        "p95": 173.926,
+        "p99": 173.926,
+        "max": 173.926,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_forward_no_chapter_read_partial_command_to_frame": {
+        "n": 46,
+        "p50": 669.562,
+        "p95": 685.706,
+        "p99": 879.827,
+        "max": 879.827,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_forward_no_chapter_read_partial_panel_copy": {
+        "n": 46,
+        "p50": 52.0,
+        "p95": 52.0,
+        "p99": 52.0,
+        "max": 52.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_forward_no_chapter_read_partial_panel_draw": {
+        "n": 46,
+        "p50": 486.0,
+        "p95": 487.0,
+        "p99": 487.0,
+        "max": 487.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      },
+      "stage/short_walk_forward_no_chapter_read_partial_panel_power": {
+        "n": 46,
+        "p50": 1.0,
+        "p95": 1.0,
+        "p99": 1.0,
+        "max": 1.0,
+        "logged_min_ms": [
+          0.0
+        ]
+      }
+    },
+    "observed_minimum_bytes": {
+      "input_stack_bytes": 2640,
+      "internal": 80471,
+      "largest_internal": 34816,
+      "largest_psram": 1310720,
+      "psram": 1768584,
+      "stack_bytes": 3252
+    },
+    "input_overflows": 0,
+    "stream_cache_peak_bytes": 301081,
+    "stream_cache_released_on_library": true
+  },
+  "historical_comparison": {
+    "comparisons": [
+      {
+        "reference": "chapter-real-device-20261025",
+        "groups": [
+          {
+            "book": "A",
+            "scenario": "ordinary_page",
+            "before": {
+              "n": 30,
+              "p50": 721.417,
+              "p95": 1094.854,
+              "p99": 1185.701,
+              "max": 1185.701
+            },
+            "current": {
+              "n": 30,
+              "p50": 699.173,
+              "p95": 1079.857,
+              "p99": 1164.931,
+              "max": 1164.931
+            },
+            "p50_change_pct": -3.0833761888061972
+          },
+          {
+            "book": "A",
+            "scenario": "repeat_boundary",
+            "before": {
+              "n": 30,
+              "p50": 796.6435,
+              "p95": 1059.677,
+              "p99": 1220.92,
+              "max": 1220.92
+            },
+            "current": {
+              "n": 30,
+              "p50": 842.605,
+              "p95": 919.914,
+              "p99": 920.211,
+              "max": 920.211
+            },
+            "p50_change_pct": 5.769393712494986
+          },
+          {
+            "book": "B",
+            "scenario": "ordinary_page",
+            "before": {
+              "n": 90,
+              "p50": 807.5405000000001,
+              "p95": 899.799,
+              "p99": 1135.692,
+              "max": 1135.692
+            },
+            "current": {
+              "n": 90,
+              "p50": 788.4449999999999,
+              "p95": 873.644,
+              "p99": 950.683,
+              "max": 950.683
+            },
+            "p50_change_pct": -2.3646492033526645
+          },
+          {
+            "book": "B",
+            "scenario": "repeat_boundary",
+            "before": {
+              "n": 30,
+              "p50": 752.5425,
+              "p95": 1086.286,
+              "p99": 1134.105,
+              "max": 1134.105
+            },
+            "current": {
+              "n": 30,
+              "p50": 766.1015,
+              "p95": 795.297,
+              "p99": 795.609,
+              "max": 795.609
+            },
+            "p50_change_pct": 1.8017587046578631
+          },
+          {
+            "book": "C",
+            "scenario": "ordinary_page",
+            "before": {
+              "n": 88,
+              "p50": 688.2085,
+              "p95": 698.059,
+              "p99": 710.505,
+              "max": 710.505
+            },
+            "current": {
+              "n": 88,
+              "p50": 668.9555,
+              "p95": 678.483,
+              "p99": 689.598,
+              "max": 689.598
+            },
+            "p50_change_pct": -2.7975533577396905
+          },
+          {
+            "book": "C",
+            "scenario": "repeat_boundary",
+            "before": {
+              "n": 30,
+              "p50": 728.5419999999999,
+              "p95": 747.366,
+              "p99": 755.829,
+              "max": 755.829
+            },
+            "current": {
+              "n": 30,
+              "p50": 734.9069999999999,
+              "p95": 761.545,
+              "p99": 762.599,
+              "max": 762.599
+            },
+            "p50_change_pct": 0.8736627401028318
+          }
+        ],
+        "checks": [
+          {
+            "run": "long-7-0",
+            "same_seed_first_far_anchor": true,
+            "same_first_frame_crc": false,
+            "same_far_frame_crc": false
+          },
+          {
+            "run": "long-7-1",
+            "same_seed_first_far_anchor": true,
+            "same_first_frame_crc": false,
+            "same_far_frame_crc": false
+          },
+          {
+            "run": "long-8-0",
+            "same_seed_first_far_anchor": true,
+            "same_first_frame_crc": false,
+            "same_far_frame_crc": false
+          },
+          {
+            "run": "many-30-0",
+            "same_seed_first_far_anchor": true,
+            "same_first_frame_crc": false,
+            "same_far_frame_crc": false
+          },
+          {
+            "run": "many-320-0",
+            "same_seed_first_far_anchor": true,
+            "same_first_frame_crc": false,
+            "same_far_frame_crc": false
+          },
+          {
+            "run": "many-650-0",
+            "same_seed_first_far_anchor": true,
+            "same_first_frame_crc": false,
+            "same_far_frame_crc": false
+          },
+          {
+            "run": "short-4-0",
+            "same_seed_first_far_anchor": true,
+            "same_first_frame_crc": false,
+            "same_far_frame_crc": false
+          },
+          {
+            "run": "short-10-0",
+            "same_seed_first_far_anchor": true,
+            "same_first_frame_crc": false,
+            "same_far_frame_crc": false
+          },
+          {
+            "run": "short-18-0",
+            "same_seed_first_far_anchor": true,
+            "same_first_frame_crc": false,
+            "same_far_frame_crc": false
+          }
+        ]
+      },
+      {
+        "reference": "chapter-stream-device-final-20261025",
+        "groups": [
+          {
+            "book": "A",
+            "scenario": "ordinary_page",
+            "before": {
+              "n": 30,
+              "p50": 722.6475,
+              "p95": 1084.815,
+              "p99": 1172.908,
+              "max": 1172.908
+            },
+            "current": {
+              "n": 30,
+              "p50": 699.173,
+              "p95": 1079.857,
+              "p99": 1164.931,
+              "max": 1164.931
+            },
+            "p50_change_pct": -3.2484025752528067
+          },
+          {
+            "book": "A",
+            "scenario": "repeat_boundary",
+            "before": {
+              "n": 30,
+              "p50": 789.8225,
+              "p95": 987.952,
+              "p99": 1132.51,
+              "max": 1132.51
+            },
+            "current": {
+              "n": 30,
+              "p50": 842.605,
+              "p95": 919.914,
+              "p99": 920.211,
+              "max": 920.211
+            },
+            "p50_change_pct": 6.682830635997328
+          },
+          {
+            "book": "B",
+            "scenario": "ordinary_page",
+            "before": {
+              "n": 90,
+              "p50": 810.77,
+              "p95": 893.299,
+              "p99": 966.621,
+              "max": 966.621
+            },
+            "current": {
+              "n": 90,
+              "p50": 788.4449999999999,
+              "p95": 873.644,
+              "p99": 950.683,
+              "max": 950.683
+            },
+            "p50_change_pct": -2.7535552622815374
+          },
+          {
+            "book": "B",
+            "scenario": "repeat_boundary",
+            "before": {
+              "n": 30,
+              "p50": 754.7145,
+              "p95": 766.004,
+              "p99": 766.103,
+              "max": 766.103
+            },
+            "current": {
+              "n": 30,
+              "p50": 766.1015,
+              "p95": 795.297,
+              "p99": 795.609,
+              "max": 795.609
+            },
+            "p50_change_pct": 1.5087824601223376
+          },
+          {
+            "book": "C",
+            "scenario": "ordinary_page",
+            "before": {
+              "n": 88,
+              "p50": 688.3145,
+              "p95": 700.493,
+              "p99": 713.572,
+              "max": 713.572
+            },
+            "current": {
+              "n": 88,
+              "p50": 668.9555,
+              "p95": 678.483,
+              "p99": 689.598,
+              "max": 689.598
+            },
+            "p50_change_pct": -2.8125224733751675
+          },
+          {
+            "book": "C",
+            "scenario": "repeat_boundary",
+            "before": {
+              "n": 30,
+              "p50": 732.185,
+              "p95": 754.428,
+              "p99": 759.466,
+              "max": 759.466
+            },
+            "current": {
+              "n": 30,
+              "p50": 734.9069999999999,
+              "p95": 761.545,
+              "p99": 762.599,
+              "max": 762.599
+            },
+            "p50_change_pct": 0.3717639667570438
+          }
+        ],
+        "checks": [
+          {
+            "run": "long-7-0",
+            "same_seed_first_far_anchor": true,
+            "same_first_frame_crc": false,
+            "same_far_frame_crc": false
+          },
+          {
+            "run": "long-7-1",
+            "same_seed_first_far_anchor": true,
+            "same_first_frame_crc": false,
+            "same_far_frame_crc": false
+          },
+          {
+            "run": "long-8-0",
+            "same_seed_first_far_anchor": true,
+            "same_first_frame_crc": false,
+            "same_far_frame_crc": false
+          },
+          {
+            "run": "many-30-0",
+            "same_seed_first_far_anchor": true,
+            "same_first_frame_crc": false,
+            "same_far_frame_crc": false
+          },
+          {
+            "run": "many-320-0",
+            "same_seed_first_far_anchor": true,
+            "same_first_frame_crc": false,
+            "same_far_frame_crc": false
+          },
+          {
+            "run": "many-650-0",
+            "same_seed_first_far_anchor": true,
+            "same_first_frame_crc": false,
+            "same_far_frame_crc": false
+          },
+          {
+            "run": "short-4-0",
+            "same_seed_first_far_anchor": true,
+            "same_first_frame_crc": false,
+            "same_far_frame_crc": false
+          },
+          {
+            "run": "short-10-0",
+            "same_seed_first_far_anchor": true,
+            "same_first_frame_crc": false,
+            "same_far_frame_crc": false
+          },
+          {
+            "run": "short-18-0",
+            "same_seed_first_far_anchor": true,
+            "same_first_frame_crc": false,
+            "same_far_frame_crc": false
+          }
+        ]
+      }
+    ],
+    "scope": "Common labelled actions with non-clearing final frames in both runs; repeated boundaries and pages without foreground chapter jobs; diagnostic USB host-to-driver elapsed time.",
+    "limitations": [
+      "Current persistent caches are retained; first open and cold boundary timings are not comparable.",
+      "Current workload starts each group with K2 and repositions using K1; automatic full-clean cadence differs and mismatched full frames are excluded.",
+      "Book bytes are rechecked separately; semantic positions use source anchors; CRC includes changing footer counters and battery/time.",
+      "Sequential historical runs, not randomized A/B; small-sample P99 is often the maximum."
+    ]
+  },
+  "corpus_sweep": {
+    "status": "completed",
+    "books": 83,
+    "opened": 73,
+    "open_errors": 10,
+    "scope": "83 other existing files, excluding 9 measured copies; first open/settle/exit only",
+    "article_epub_open_failures": 9,
+    "txt_open_failures": 1,
+    "unsupported_gif_samples": [
+      "C008"
+    ],
+    "later_chapter_host_parse_failure_after_device_open": [
+      "C037"
+    ],
+    "items": [
+      {
+        "id": "C000",
+        "format": "epub",
+        "bytes": 12910,
+        "status": "open_error"
+      },
+      {
+        "id": "C001",
+        "format": "epub",
+        "bytes": 20401,
+        "status": "open_error"
+      },
+      {
+        "id": "C002",
+        "format": "epub",
+        "bytes": 716981,
+        "status": "open_error"
+      },
+      {
+        "id": "C003",
+        "format": "epub",
+        "bytes": 35586,
+        "status": "open_error"
+      },
+      {
+        "id": "C004",
+        "format": "epub",
+        "bytes": 100751,
+        "status": "open_error"
+      },
+      {
+        "id": "C005",
+        "format": "epub",
+        "bytes": 579764,
+        "status": "open_error"
+      },
+      {
+        "id": "C006",
+        "format": "epub",
+        "bytes": 23356,
+        "status": "open_error"
+      },
+      {
+        "id": "C007",
+        "format": "epub",
+        "bytes": 2186851,
+        "status": "open_error"
+      },
+      {
+        "id": "C008",
+        "format": "epub",
+        "bytes": 12831,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C009",
+        "format": "epub",
+        "bytes": 20921,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C010",
+        "format": "epub",
+        "bytes": 37627,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C011",
+        "format": "epub",
+        "bytes": 297657,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C012",
+        "format": "epub",
+        "bytes": 18862,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C013",
+        "format": "epub",
+        "bytes": 7466,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C014",
+        "format": "epub",
+        "bytes": 6478,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C015",
+        "format": "epub",
+        "bytes": 30332,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C016",
+        "format": "epub",
+        "bytes": 8053,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C017",
+        "format": "epub",
+        "bytes": 6954,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C018",
+        "format": "epub",
+        "bytes": 833835,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C019",
+        "format": "epub",
+        "bytes": 91654,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C020",
+        "format": "epub",
+        "bytes": 6477,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C021",
+        "format": "epub",
+        "bytes": 39248,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C022",
+        "format": "epub",
+        "bytes": 330653,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C023",
+        "format": "epub",
+        "bytes": 12306,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C024",
+        "format": "epub",
+        "bytes": 48239,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C025",
+        "format": "epub",
+        "bytes": 6793,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C026",
+        "format": "epub",
+        "bytes": 351664,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C027",
+        "format": "epub",
+        "bytes": 6650,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C028",
+        "format": "epub",
+        "bytes": 13315,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C029",
+        "format": "epub",
+        "bytes": 6481,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C030",
+        "format": "epub",
+        "bytes": 67344,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C031",
+        "format": "epub",
+        "bytes": 91654,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C032",
+        "format": "epub",
+        "bytes": 140577,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C033",
+        "format": "epub",
+        "bytes": 46012,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C034",
+        "format": "epub",
+        "bytes": 6477,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C035",
+        "format": "epub",
+        "bytes": 171089,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C036",
+        "format": "epub",
+        "bytes": 39486,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C037",
+        "format": "epub",
+        "bytes": 192238,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C038",
+        "format": "epub",
+        "bytes": 454743,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C039",
+        "format": "epub",
+        "bytes": 31812,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C040",
+        "format": "epub",
+        "bytes": 1202825,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C041",
+        "format": "epub",
+        "bytes": 25362,
+        "status": "open_error"
+      },
+      {
+        "id": "C042",
+        "format": "epub",
+        "bytes": 25188,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C043",
+        "format": "epub",
+        "bytes": 15846,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C044",
+        "format": "epub",
+        "bytes": 10692,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C045",
+        "format": "epub",
+        "bytes": 6446,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C046",
+        "format": "epub",
+        "bytes": 467813,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C047",
+        "format": "epub",
+        "bytes": 41331,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C048",
+        "format": "epub",
+        "bytes": 123542,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C049",
+        "format": "epub",
+        "bytes": 301882,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C050",
+        "format": "epub",
+        "bytes": 265844,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C051",
+        "format": "epub",
+        "bytes": 11332,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C052",
+        "format": "epub",
+        "bytes": 1368528,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C053",
+        "format": "epub",
+        "bytes": 1136922,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C054",
+        "format": "epub",
+        "bytes": 101741,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C055",
+        "format": "epub",
+        "bytes": 181683,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C056",
+        "format": "txt",
+        "bytes": 1579496,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C057",
+        "format": "txt",
+        "bytes": 6201481,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C058",
+        "format": "txt",
+        "bytes": 3232516,
+        "status": "open_error"
+      },
+      {
+        "id": "C059",
+        "format": "epub",
+        "bytes": 909849,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C060",
+        "format": "epub",
+        "bytes": 909849,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C061",
+        "format": "epub",
+        "bytes": 7287523,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C062",
+        "format": "epub",
+        "bytes": 5480518,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C063",
+        "format": "epub",
+        "bytes": 12544717,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C064",
+        "format": "epub",
+        "bytes": 417537,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C065",
+        "format": "epub",
+        "bytes": 604848,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C066",
+        "format": "epub",
+        "bytes": 3347215,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C067",
+        "format": "txt",
+        "bytes": 6675672,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C068",
+        "format": "epub",
+        "bytes": 199012,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C069",
+        "format": "txt",
+        "bytes": 3352972,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C070",
+        "format": "epub",
+        "bytes": 599731,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C071",
+        "format": "epub",
+        "bytes": 599729,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C072",
+        "format": "epub",
+        "bytes": 1433214,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C073",
+        "format": "epub",
+        "bytes": 802094,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C074",
+        "format": "epub",
+        "bytes": 248937,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C075",
+        "format": "epub",
+        "bytes": 14252310,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C076",
+        "format": "epub",
+        "bytes": 266940,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C077",
+        "format": "epub",
+        "bytes": 5721068,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C078",
+        "format": "epub",
+        "bytes": 421078,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C079",
+        "format": "epub",
+        "bytes": 233728,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C080",
+        "format": "epub",
+        "bytes": 405406,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C081",
+        "format": "epub",
+        "bytes": 583968,
+        "status": "opened_driver_confirmed"
+      },
+      {
+        "id": "C082",
+        "format": "epub",
+        "bytes": 945684,
+        "status": "opened_driver_confirmed"
+      }
+    ],
+    "counts": {
+      "success": 606,
+      "failure": 12,
+      "cancelled": 98,
+      "timeout": 0,
+      "unfinished": 0,
+      "command_failure": 0,
+      "command_timeout": 0,
+      "busy": 0
+    },
+    "memory_samples": {
+      "internal": {
+        "first": 80155,
+        "last": 80151,
+        "min": 71867
+      },
+      "largest_internal": {
+        "first": 31744,
+        "last": 31744,
+        "min": 31744
+      },
+      "psram": {
+        "first": 4325612,
+        "last": 3115340,
+        "min": 2436700
+      },
+      "largest_psram": {
+        "first": 2359296,
+        "last": 2359296,
+        "min": 1605632
+      },
+      "stack_bytes": {
+        "first": 3252,
+        "last": 3252,
+        "min": 3252
+      },
+      "input_stack_bytes": {
+        "first": 2640,
+        "last": 2640,
+        "min": 2640
+      },
+      "input_overflows": {
+        "first": 0,
+        "last": 0,
+        "min": 0
+      }
+    }
+  },
+  "ui": {
+    "status": "completed",
+    "steps": 57,
+    "font_draft_preserved": true,
+    "anchor_roundtrip": true,
+    "counts": {
+      "success": 67,
+      "failure": 0,
+      "cancelled": 4,
+      "timeout": 0,
+      "unfinished": 0,
+      "command_failure": 0,
+      "command_timeout": 0,
+      "busy": 0
+    },
+    "physical_touch_or_keys_tested": false
+  },
+  "sync": {
+    "requests": 4,
+    "successful_requests": 3,
+    "http_stage_failures": 1,
+    "http_failure_ms": 10008.206,
+    "failed_network_operation_ms": 18473.398,
+    "retry_same": true,
+    "saved_anchor_revision_unchanged_on_failure": true,
+    "actual_koreader_client_tested": false
+  },
+  "wifi_transfer": {
+    "http_page": 200,
+    "invalid_token": 403,
+    "preflight": 200,
+    "normal_upload": 200,
+    "duplicate_check": 409,
+    "bytes": 417537,
+    "crc32": "fc5965c9",
+    "content": "duplicate of existing sample A",
+    "readback_size_crc_verified": true,
+    "interrupted_upload_not_published": true,
+    "stopped_server_closed": true,
+    "phone_browser_tested": false
+  },
+  "reboot": {
+    "status": "completed",
+    "saved_anchor_restored": true,
+    "revision_restored": true,
+    "font_restored": true,
+    "k2_kept_saved_position": true
+  },
+  "display_observation": {
+    "status": "unresolved",
+    "photo_observed": true,
+    "user_confirmation": "停留的时候出现，后面全刷刷新就会没了",
+    "residual_persists_until_later_full_refresh": true,
+    "independently_captured_optical_clear": false,
+    "k2_clean_driver_verified": true,
+    "logical_canvas_clean": true,
+    "logical_canvas_crc_unchanged_on_k2": true,
+    "photo_frame_clock_alignment_verified": false,
+    "root_cause_confirmed": false,
+    "waveform_or_calibration_changed": false
+  },
+  "not_tested": [
+    "macOS LSan",
+    "Linux-only directory I/O fault injection",
+    "real KOReader client bidirectional continuation",
+    "factory-only hardware OTA slot installation/rollback",
+    "new-card physical onboarding",
+    "dictionary lookups with installed dictionaries",
+    "physical touch and electric key response",
+    "physical sleep/wake/power-off and power/current",
+    "slow card/removal/power-cut/low-memory device injection",
+    "quantitative optical quality and controlled residual A/B"
+  ],
+  "private_evidence": {
+    "root": ".local/baseline-20261026",
+    "manifest": "raw-manifest.json",
+    "manifest_sha256": "8576e377a6ae523a7318e9a50c15b2f42c73a456b2ad19f5c5ab99675a4691f6",
+    "files": 534,
+    "bytes": 247083960
+  },
+  "update_check": {
+    "status": "observed_completed_home",
+    "requested": "check only",
+    "download_or_install_requested": false,
+    "manifest_version_displayed": "0.4.0",
+    "final_canvas_no_error_notice": true,
+    "http_status": "not captured",
+    "network_trace": "not instrumented for this update path",
+    "evidence": [
+      "update-open/update-home.pgm",
+      "update-check/serial.bin",
+      "update-result/update-result.pgm",
+      "final-state/result.json"
+    ],
+    "cache_file_read": "not allowed by existing asset-only diagnostic interface"
+  },
+  "final_device": {
+    "view": "library",
+    "card": "1",
+    "saved": "1",
+    "pending": "0",
+    "frame_ok": "1",
+    "clean": "1",
+    "content_busy": "0",
+    "save_busy": "0",
+    "input_overflows": "0"
+  },
+  "verification": {
+    "handoff_checks_passed": 640,
+    "related_document_file_links_passed": 70,
+    "git_diff_check": "passed"
+  }
+}

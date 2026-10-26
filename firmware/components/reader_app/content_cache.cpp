@@ -11,7 +11,7 @@
 namespace pico_page {
 namespace {
 constexpr std::size_t limit = 2U * 1024 * 1024;
-constexpr char version[] = "content-reading-v3";
+constexpr char version[] = "content-reading-v4";
 bool room(std::size_t bytes) {
     // The document allocator keeps its existing reserve in addition to this allocation.
     const bool admitted = bytes <= limit && chapter_memory_available(bytes + 64);
@@ -182,9 +182,9 @@ bool decode(std::string_view bytes, const std::string& book_id, const std::strin
     return true;
 }
 bool load(const FileStore& store, const EpubDocument& doc, std::size_t index, std::uint32_t part,
-          Chapter& chapter, const std::function<bool()>& stop) {
+          Chapter& chapter, const std::function<bool()>& stop, ContentCacheEntry* loaded = nullptr) {
     return index < doc.spine().size() && load_content_cache(store, doc.metadata().book_id,
-        doc.spine()[index].resource, index, part, chapter, stop);
+        doc.spine()[index].resource, index, part, chapter, stop, nullptr, loaded);
 }
 void save_missing(const FileStore& store, const EpubDocument& doc, std::size_t index,
                   const Chapter& chapter, const std::function<bool()>& stop) {
@@ -201,8 +201,9 @@ bool content_cache_matches(const ContentCacheEntry& entry, const std::string& bo
 }
 bool load_content_cache(const FileStore& store, const std::string& book_id, const std::string& resource,
                         std::size_t index, std::uint32_t part, Chapter& chapter,
-                        const std::function<bool()>& stop, const ContentCacheEntry* retained) {
+                        const std::function<bool()>& stop, const ContentCacheEntry* retained, ContentCacheEntry* loaded) {
     release(chapter);
+    if (loaded) *loaded = {};
     if (book_id.empty() || resource.empty() || (stop && stop())) return false;
     const StageTimer timer{"content_cache_read", 0};
     std::string bytes;
@@ -210,6 +211,9 @@ bool load_content_cache(const FileStore& store, const std::string& book_id, cons
         store.load_cache(key(book_id, index, part), limit, bytes,
                          [](std::size_t size) { return room(size + 1); }) == StoreStatus::Ok;
     const bool hit = available && decode(retained ? retained->bytes : bytes, book_id, resource, part, chapter, stop);
+    if (hit && loaded && !retained)
+        *loaded = {key(book_id, index, chapter.part), chapter.last_part ? key(book_id, index, kLastChapterPart) : "",
+                   std::move(bytes), true};
 #if defined(ESP_PLATFORM) && defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
     ESP_LOGI("chapter_cache", "read=%s chapter=%u part=%u retained=%d", hit ? "hit" : "miss",
         static_cast<unsigned>(index), static_cast<unsigned>(part), retained != nullptr);
@@ -232,8 +236,8 @@ bool load_content(const FileStore& store, EpubDocument& doc, std::size_t index, 
     if (deferred) *deferred = {};
     release(chapter); error.clear();
     if (stop && stop()) { error = kChapterCancelled; return false; }
-    if (!cache_checked && detail != ChapterLoad::Mapping && load(store, doc, index, part, chapter, stop)) {
-        if (stop && stop()) { release(chapter); error = kChapterCancelled; return false; }
+    if (!cache_checked && detail != ChapterLoad::Mapping && load(store, doc, index, part, chapter, stop, deferred)) {
+        if (stop && stop()) { release(chapter); if (deferred) *deferred = {}; error = kChapterCancelled; return false; }
         if (detail == ChapterLoad::Layout) for (auto& run : chapter.runs) { run.source.resource.clear(); run.source.node.clear(); }
         return true;
     }
@@ -254,9 +258,10 @@ bool find_content(const FileStore& store, EpubDocument& doc, std::size_t index, 
         release(chapter); error.clear();
         for (std::uint32_t part = 0; part < 4096; ++part) {
             if (stop && stop()) { release(chapter); error = kChapterCancelled; return false; }
-            if (!load(store, doc, index, part, chapter, stop)) break;
+            if (!load(store, doc, index, part, chapter, stop, deferred)) break;
             cached_prefix = part + 1;
             if (match(chapter)) return true;
+            if (deferred) *deferred = {};
             if (chapter.last_part) break;
             release(chapter);
         }

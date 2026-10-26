@@ -190,6 +190,8 @@ def main():
     opening.add_argument("path")
     inspection = commands.add_parser("file")
     inspection.add_argument("path", help="Inspect a permitted EPUB, font, license or image resource")
+    head = commands.add_parser("file_head")
+    head.add_argument("path", help="Read at most 256 raw prefix bytes of a permitted resource")
     uploading = commands.add_parser("upload")
     uploading.add_argument("source", type=Path)
     uploading.add_argument("destination", help="New card-relative resource path; existing files are preserved")
@@ -214,7 +216,7 @@ def main():
             elif command == "key": command += f" {args.key}"
             elif command == "swipe": command += f" {args.direction}"
             elif command in ("tap", "hold"): command += f" {args.x} {args.y}"
-            elif command in ("open", "file"): command += f" {args.path}"
+            elif command in ("open", "file", "file_head"): command += f" {args.path}"
             state, entries = console.request(command)
             for entry in entries:
                 print(entry)

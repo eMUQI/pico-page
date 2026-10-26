@@ -28,7 +28,7 @@ bool build_changed_pixels_waveform(const std::uint8_t* source, std::size_t sourc
             const auto action = [&](std::size_t phase) {
                 return (source[phase * waveform_phase_bytes + cell] >> shift) & 3u;
             };
-            if (to == from) continue;
+            if (to == from && to != 15) continue;
             for (std::size_t phase = 0; phase < phases; ++phase) {
                 destination[phase * waveform_phase_bytes + cell] |=
                     static_cast<std::uint8_t>(action(phase) << shift);

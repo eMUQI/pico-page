@@ -15,6 +15,7 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <cstring>
 #include <thread>
 #include <cassert>
 #include <cstdlib>
@@ -3444,6 +3445,50 @@ int main(int argc, char** argv) {
         assert(app.pending_frame()->anchor == txt_saved.anchor);
         driver.present();
     }
+    for (const auto encoding : {TxtEncoding::Gb18030, TxtEncoding::Utf16Le, TxtEncoding::Utf16Be})
+    for (const bool async : {false, true}) {
+        const std::string name = encoding == TxtEncoding::Gb18030 ? "gb18030" :
+            encoding == TxtEncoding::Utf16Le ? "utf-16-le" : "utf-16-be";
+        const auto home = card / (name + (async ? "-async" : "-sync"));
+        fs::create_directories(home / "Books");
+        const std::string path = "Books/book.txt";
+        fs::copy_file(fixtures / (name + ".txt"), home / path);
+        const auto original = read(home / path);
+        EpubDocument source; Chapter part; std::string detail;
+        assert(source.open((home / path).string(), detail));
+        assert(source.metadata().txt_encoding == encoding && source.metadata().txt_offsets.front() == 0);
+        assert(source.metadata().txt_offsets.back() == original.size());
+        assert(source.load_chapter(0, part, detail, ChapterLoad::Reading, 1));
+        Anchor anchor;
+        assert(part.anchor_at(2, anchor) && anchor.node == "part:1" && anchor.offset == 2);
+        const std::string revision = encoding == TxtEncoding::Gb18030 ? "txt-gb18030-v1" :
+            encoding == TxtEncoding::Utf16Le ? "txt-utf16le-v1" : "txt-utf16be-v1";
+        const ReadingRecord seed{source.metadata().book_id, revision, "fixture", 1, anchor};
+        assert(FileStore(home.string()).save_progress(path, seed).status == StoreStatus::Ok);
+        ReaderApp app(home.string(), "txt-encoding", true, async); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, path); driver.present();
+        assert(app.saved_record()->anchor == anchor && app.saved_record()->content_revision == revision);
+        driver.key(Input::K1); driver.present(); driver.complete_content();
+        const auto saved = *app.saved_record();
+        assert(saved.anchor != anchor && saved.content_revision == revision);
+        driver.tap(342, 500); driver.present(); driver.tap(60, 50); driver.present(); driver.complete_content();
+        assert(app.view() == View::Library);
+        const auto hashes = identity_hash_count();
+        opened(app, path); driver.present();
+        assert(app.saved_record()->anchor == saved.anchor && app.saved_record()->content_revision == revision);
+        assert(identity_hash_count() == hashes && read(home / path) == original);
+        if (async) {
+            ContentJob::Request request;
+            request.kind = ContentJob::Kind::Chapter; request.root = home.string(); request.path = (home / path).string();
+            request.identity = source.metadata(); request.chapter_resource = source.spine()[0].resource;
+            request.part = 1;
+            ContentJob::delay_starts_for_test(request.kind, std::chrono::milliseconds(100));
+            ContentJob cancelled(request); assert(cancelled.start()); cancelled.cancel(); cancelled.wait();
+            ContentJob::delay_starts_for_test(request.kind, std::chrono::milliseconds{});
+            assert(cancelled.result.chapter.text.empty() && cancelled.result.error == kChapterCancelled);
+            assert(FileStore(home.string()).load_progress(path, saved.book_id, revision).record->anchor == saved.anchor);
+        }
+    }
     {
         ReaderApp app(card.string()); Driver driver{app};
         assert(app.initialize()); driver.present();
@@ -3499,14 +3544,57 @@ int main(int argc, char** argv) {
         assert(read(cached).size() > thumbnail_bytes);
         // A previous decoder's negative cache must not hide a newly supported cover.
         auto obsolete = read(cached);
-        assert(obsolete.find("PPCOVER2\n") == 0);
-        obsolete[7] = '1';
+        assert(obsolete.find("PPCOVER3\n") == 0);
+        obsolete[7] = '2';
         obsolete.resize(obsolete.size() - thumbnail_bytes);
         write(cached, obsolete);
         const auto decodes = graphics::image_decode_count();
         assert(grid_pixel(300, 560) == 0 && grid_pixel(270, 610) == 5);
         assert(graphics::image_decode_count() == decodes + 1);
-        assert(read(cached).find("PPCOVER2\n") == 0 && read(cached).size() > thumbnail_bytes);
+        assert(read(cached).find("PPCOVER3\n") == 0 && read(cached).size() > thumbnail_bytes);
+    }
+    for (const auto* fixture : {"gif-image-cover", "image-cover", "valid"}) {
+        const auto home = card / (std::string("CoverDecoderUpgrade-") + fixture);
+        fs::create_directories(home / "Books");
+        fs::copy_file(fixtures / (std::string(fixture) + ".epub"), home / "Books/book.epub");
+        write(home / "PicoPage/settings.toml", "schema_version=1\n[library]\nview='grid'\n");
+        {
+            ReaderApp app(home.string()); Driver driver{app};
+            assert(app.initialize()); driver.present();
+        }
+        const auto covers = home / "PicoPage/cache/covers";
+        const auto cache = fs::directory_iterator(covers)->path();
+        constexpr std::size_t thumbnail_bytes = 92 * 250;
+        const bool has_cover = std::string_view(fixture) != "valid";
+        const auto previous = read(cache);
+        const auto header_bytes = previous.size() - (has_cover ? thumbnail_bytes : 0);
+        auto obsolete = previous.substr(0, header_bytes);
+        obsolete[7] = '2';
+        write(cache, obsolete);
+        const auto decodes = graphics::image_decode_count();
+        if (std::string_view(fixture) == "gif-image-cover") {
+            set_chapter_memory_probe([](std::size_t) { return false; });
+            {
+                ReaderApp app(home.string()); Driver driver{app};
+                assert(app.initialize()); driver.present();
+            }
+            set_chapter_memory_probe(nullptr);
+            assert(read(cache) == obsolete && graphics::image_decode_count() == decodes);
+        }
+        {
+            ReaderApp app(home.string()); Driver driver{app};
+            assert(app.initialize()); driver.present();
+        }
+        assert(graphics::image_decode_count() == decodes + (has_cover ? 1 : 0));
+        const auto recovered = read(cache);
+        assert(recovered.find("PPCOVER3\n") == 0);
+        assert(recovered.size() == header_bytes + (has_cover ? thumbnail_bytes : 0));
+        {
+            ReaderApp app(home.string()); Driver driver{app};
+            assert(app.initialize()); driver.present();
+        }
+        assert(graphics::image_decode_count() == decodes + (has_cover ? 1 : 0));
+        assert(read(cache) == recovered);
     }
     {
         ReaderApp app(card.string(), "sleep-library", true, true); Driver driver{app};
@@ -5284,9 +5372,27 @@ int main(int argc, char** argv) {
         assert(doc.open((fixtures / "multi-part.epub").string(), error));
         Chapter original, cached;
         assert(load_content(store, doc, 0, original, error, ChapterLoad::Reading, 2));
-        const auto cache = card / "PicoPage/cache/content/content-reading-v3" / doc.metadata().book_id / "0/2";
+        const auto cache = card / "PicoPage/cache/content/content-reading-v4" / doc.metadata().book_id / "0/2";
         assert(fs::exists(cache));
         const auto data = read(cache);
+        const auto old_cache = card / "PicoPage/cache/content/content-reading-v3" / doc.metadata().book_id / "0/2";
+        auto old_data = data.substr(0, data.size() - 32);
+        old_data.replace(old_data.find("content-reading-v4"), std::strlen("content-reading-v4"), "content-reading-v3");
+        old_data += md5_hex(old_data);
+        write(old_cache, old_data); fs::remove(cache);
+        assert(!load_content_cache(store, doc.metadata().book_id, doc.spine()[0].resource, 0, 2, cached));
+        assert(cached.text.empty() && read(old_cache) == old_data);
+        assert(load_content(store, doc, 0, cached, error, ChapterLoad::Reading, 2));
+        assert(cached.text == original.text && read(cache) == data);
+        const std::string old_pages_header = "PPPAGES3\nepub-native-v1:pagination-v4\n";
+        const std::string pages_header = "PPPAGES3\nepub-native-v1:pagination-v5\n";
+        PageIndices page_indices(doc.spine().size());
+        std::vector<bool> pages_counted(doc.spine().size(), true);
+        for (auto& pages : page_indices) pages = {{0}};
+        assert(write_page_cache(store, "pages/version-check", old_pages_header, page_indices, pages_counted));
+        assert(!read_page_cache(store, "pages/version-check", pages_header, doc.spine()));
+        assert(write_page_cache(store, "pages/version-check", pages_header, page_indices, pages_counted));
+        assert(read_page_cache(store, "pages/version-check", pages_header, doc.spine()));
         for (std::uint32_t part = 0; part < 2; ++part) {
             assert(fs::exists(cache.parent_path() / std::to_string(part)));
             Chapter parsed, prior;
@@ -5324,7 +5430,7 @@ int main(int argc, char** argv) {
         fs::remove_all(cache.parent_path());
         ContentCacheEntry deferred;
         assert(load_content(store, doc, 0, cached, error, ChapterLoad::Reading, 2, {}, &deferred));
-        assert(cached.text == original.text && !deferred.bytes.empty() && !fs::exists(cache));
+        assert(cached.text == original.text && !deferred.bytes.empty() && !deferred.from_disk && !fs::exists(cache));
         assert(!save_content_cache(store, deferred, [] { return true; }) && !fs::exists(cache));
         write(card / "CacheBlocked", "not a directory");
         assert(!save_content_cache(FileStore((card / "CacheBlocked").string()), deferred));
@@ -5333,7 +5439,7 @@ int main(int argc, char** argv) {
         stops = 0;
         assert(find_content(store, doc, 0, cached, error, ChapterLoad::Reading,
             [](const Chapter& c) { return c.part == 2; }, [&] { ++stops; return false; }, &deferred));
-        assert(deferred.bytes.empty() && cached.text == original.text);
+        assert(deferred.from_disk && deferred.bytes == data && cached.text == original.text);
         fs::remove_all(cache.parent_path());
         assert(find_content(store, doc, 0, cached, error, ChapterLoad::Reading,
             [](const Chapter& c) { return c.part == 2; }, {}, &deferred));
@@ -5341,7 +5447,7 @@ int main(int argc, char** argv) {
         assert(fs::exists(cache.parent_path() / "0") && fs::exists(cache.parent_path() / "1"));
         assert(save_content_cache(store, deferred));
         assert(load_content(store, doc, 0, cached, error, ChapterLoad::Reading, 2, {}, &deferred));
-        assert(deferred.bytes.empty() && cached.text == original.text);
+        assert(deferred.from_disk && deferred.bytes == data && cached.text == original.text);
         write(cache, data.substr(0, data.size() / 2));
         assert(load_content(store, doc, 0, cached, error, ChapterLoad::Reading, 2));
         assert(cached.text == original.text && read(cache) == data);
@@ -5359,7 +5465,16 @@ int main(int argc, char** argv) {
         const auto opens = epub_open_count();
         ContentJob known(hot); assert(known.start()); known.wait();
         assert(known.result.error.empty() && known.result.offset == last.result.offset && known.result.history.empty());
+        assert(known.result.content_cache.from_disk && known.result.content_cache.bytes == data);
         assert(epub_open_count() == opens && known.result.chapter.text == original.text);
+        // A validated disk hit remains available after its cache file disappears.
+        hot.content_cache = std::make_shared<ContentCacheEntry>(std::move(known.result.content_cache));
+        fs::remove(cache);
+        ContentJob disk_retained(hot); assert(disk_retained.start()); disk_retained.wait();
+        assert(disk_retained.result.error.empty() && disk_retained.result.retained_cache_hit);
+        assert(disk_retained.result.chapter.text == original.text && epub_open_count() == opens);
+        hot.content_cache.reset();
+        assert(save_content_cache(store, *disk_retained.request.content_cache));
         hot.known_end = *hot.known_end + 1;
         ContentJob stale(hot); assert(stale.start()); stale.wait();
         assert(!stale.result.error.empty());
@@ -5385,8 +5500,8 @@ int main(int argc, char** argv) {
         // Cancellation inside a decoded part never publishes partial text or source anchors.
         stops = 0;
         assert(!load_content_cache(store, doc.metadata().book_id, doc.spine()[0].resource, 0, 2, cached,
-                                   [&] { return ++stops == 10; }));
-        assert(cached.text.empty());
+                                   [&] { return ++stops == 10; }, nullptr, &deferred));
+        assert(cached.text.empty() && deferred.bytes.empty() && !deferred.from_disk);
         // Re-reading a later cold part must not rewrite previously cached prefix files.
         const auto prefix = cache.parent_path() / "0";
         const auto timestamp = fs::file_time_type::clock::now() - std::chrono::hours(1);
@@ -5809,10 +5924,23 @@ int main(int argc, char** argv) {
         assert(app.view() == View::Reading && app.saved_record()->anchor.resource.find("chapter2") != std::string::npos);
         assert(app.cache_usage().bitmap_hits == 0);
     }
-    {
-        const auto root = card / "ChapterReturn";
+    for (const bool cached_source : {false, true}) {
+        const auto root = card / (cached_source ? "ChapterReturnCached" : "ChapterReturn");
         fs::create_directories(root / "Books");
         fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
+        std::vector<fs::path> cached_files;
+        const auto cache_timestamp = fs::file_time_type::clock::now() - std::chrono::hours(1);
+        if (cached_source) {
+            EpubDocument source; Chapter content; std::string detail;
+            assert(source.open((root / "Books/book.epub").string(), detail));
+            for (std::size_t index = 0; index < source.spine().size(); ++index)
+                assert(load_content(FileStore(root.string()), source, index, content, detail, ChapterLoad::Reading, 0));
+            for (const auto& entry : fs::recursive_directory_iterator(root / "PicoPage/cache/content"))
+                if (entry.is_regular_file()) {
+                    cached_files.push_back(entry.path());
+                    fs::last_write_time(entry.path(), cache_timestamp);
+                }
+        }
         ReaderApp app(root.string(), "chapter-return", true, true); Driver driver{app};
         assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
         const auto first = app.saved_record()->anchor;
@@ -5829,6 +5957,15 @@ int main(int argc, char** argv) {
             assert(std::equal(first_pixels.begin(), first_pixels.begin() + 342 * 1128, app.canvas().pixels().begin()));
             driver.key(Input::K3); driver.present(); driver.complete_content();
             assert(app.saved_record()->anchor.resource != first.resource && epub_open_count() == opens);
+        }
+        if (cached_source) {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+            while (app.background_due()) {
+                app.background_step(); app.poll_background();
+                assert(std::chrono::steady_clock::now() < deadline);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            for (const auto& path : cached_files) assert(fs::last_write_time(path) == cache_timestamp);
         }
         // The first source load is denied; retrying after evicting optional payloads restores reading.
         static std::uint64_t memory_retry_open;

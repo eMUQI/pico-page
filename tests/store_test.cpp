@@ -672,6 +672,33 @@ int main() {
     std::uint32_t asset_crc = 0;
     assert(store.inspect_asset("Books/Imported/check.epub", asset_size, asset_crc, error) == StoreStatus::Ok);
     assert(asset_size == 9 && asset_crc == import_crc);
+    std::string asset_head;
+    assert(store.read_asset_head("Books/Imported/check.epub", asset_size, asset_head, error) == StoreStatus::Ok);
+    assert(asset_size == 9 && asset_head == "123456789");
+    for (std::size_t size : {0u, 1u, 255u, 256u, 257u}) {
+        std::string payload(size, '\0');
+        for (std::size_t i = 0; i < size; ++i) payload[i] = static_cast<char>(i);
+        put(root / "Books/head.txt", payload);
+        assert(store.read_asset_head("Books/head.txt", asset_size, asset_head, error) == StoreStatus::Ok);
+        assert(asset_size == size && asset_head == payload.substr(0, 256));
+    }
+    for (const auto* path : {"../outside.epub", "/Books/head.txt", "Books/../head.txt",
+                             "PicoPage/network.toml", "PicoPage/cache/head.txt",
+                             "Books/Imported/check.epub.picopage/progress.json"}) {
+        assert(store.read_asset_head(path, asset_size, asset_head, error) == StoreStatus::UnsafePath);
+        assert(asset_size == 0 && asset_head.empty() && !error.empty());
+    }
+    fs::create_symlink(root / "Books/head.txt", root / "Books/head-link.txt");
+    assert(store.read_asset_head("Books/head-link.txt", asset_size, asset_head, error) == StoreStatus::UnsafePath);
+    fs::create_directories(root / "Books/head-dir.txt");
+    assert(store.read_asset_head("Books/head-dir.txt", asset_size, asset_head, error) == StoreStatus::Invalid);
+    fs::resize_file(root / "Books/head.txt", 64 * 1024 * 1024 + 1);
+    assert(store.read_asset_head("Books/head.txt", asset_size, asset_head, error) == StoreStatus::Invalid);
+    assert(asset_size == 0 && asset_head.empty());
+    assert(store.read_asset_head("Books/missing.txt", asset_size, asset_head, error) == StoreStatus::Missing);
+    assert(FileStore((root / "not-mounted").string()).read_asset_head(
+        "Books/head.txt", asset_size, asset_head, error) == StoreStatus::IoError);
+    assert(asset_size == 0 && asset_head.empty());
     auto txt_import = store.begin_import("Books/Imported/note.txt", 9, import_crc, error);
     assert(txt_import && txt_import->append(0, "123456789", 9, error) == StoreStatus::Ok);
     assert(txt_import->finish(error) == StoreStatus::Ok);
@@ -685,6 +712,7 @@ int main() {
     assert(!store.begin_import("Books/large.epub", 64 * 1024 * 1024 + 1, 0, error));
     fs::create_directory_symlink(root / "outside", root / "Books/linked");
     assert(!store.begin_import("Books/linked/book.epub", 9, import_crc, error));
+    assert(store.read_asset_head("Books/linked/book.epub", asset_size, asset_head, error) == StoreStatus::UnsafePath);
     assert(store.inspect_asset("PicoPage/network.toml", asset_size, asset_crc, error) == StoreStatus::UnsafePath);
     importing = store.begin_import("Fonts/reader.ttf", 9, import_crc, error);
     assert(importing && importing->append(0, "123456789", 9, error) == StoreStatus::Ok);

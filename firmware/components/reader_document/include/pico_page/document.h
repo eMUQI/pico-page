@@ -11,14 +11,16 @@
 
 namespace pico_page {
 
+enum class TxtEncoding { Utf8, Gb18030, Utf16Le, Utf16Be };
+
 struct DocumentMetadata {
     std::string title;
     std::string author;
     std::string language;
     std::string book_id;  // SHA-256 of the unchanged original file.
     std::string partial_md5;
-    bool txt_gb18030 = false;  // Selected decoder for a TXT source; false for EPUB and UTF-8 TXT.
-    std::vector<std::uint32_t> txt_offsets;  // GB18030 part starts and EOF in original file bytes.
+    TxtEncoding txt_encoding = TxtEncoding::Utf8;  // Selected decoder; EPUB retains the default.
+    std::vector<std::uint32_t> txt_offsets;  // Non-UTF-8 part starts and EOF, measured in original file bytes.
 };
 struct SpineItem {
     std::string resource;
@@ -189,7 +191,7 @@ struct DocumentReadStats {
     bool stream_active = false;
 };
 
-/** Bounded, read-only EPUB and UTF-8/GB18030 TXT access. XML source paths are not KOReader XPointer values. */
+/** Bounded, read-only EPUB and UTF-8/GB18030/BOM-marked UTF-16 TXT access. XML source paths are not KOReader XPointer values. */
 class EpubDocument {
 public:
     EpubDocument();
@@ -258,11 +260,11 @@ public:
     /** Owned payload capacities, excluding Expat pools and allocator bookkeeping. Read only between loads. */
     std::size_t retained_bytes() const;
     bool chapter_index_for(const std::string& resource, std::size_t& index) const;
-    /** Read an internal PNG/JPEG resource, at most 2 MiB; output is cleared on failure. */
+    /** Read an internal PNG/JPEG or GIF resource (GIF rendering uses its first frame), at most 2 MiB; output is cleared on failure. */
     bool read_image(const std::string& resource, std::vector<std::uint8_t>& bytes, std::string& error,
                     const std::function<bool()>& stop = {});
     /** Read a declared cover or single-image cover page without hashing the book or changing a reading session.
-     * PNG/JPEG output is bounded to 2 MiB and cleared on failure.
+     * PNG/JPEG/GIF output is bounded to 2 MiB and cleared on failure.
      */
     static bool read_cover(const std::string& path, std::vector<std::uint8_t>& bytes, std::string& error,
                            const std::function<bool()>& stop = {});

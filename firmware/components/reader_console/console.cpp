@@ -107,6 +107,7 @@ void error(std::uint32_t id, const char *reason) {
 
 const char *view_name(View view) {
     switch (view) {
+    case View::Onboarding: return "onboarding";
     case View::PageEffects: return "page_effects";
     case View::Dictionary: return "dictionary";
     case View::DictionarySettings: return "dictionary_settings";
@@ -428,7 +429,7 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
         reply("PP %lu OK ready=1 block=2048\n", static_cast<unsigned long>(id));
         return;
     }
-    if (word == "file") {
+    if (word == "file" || word == "file_head") {
         if (transfer || !actions_allowed) {
             error(id, "busy");
             return;
@@ -439,6 +440,17 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
         }
         std::string detail;
         std::uint64_t size = 0;
+        if (word == "file_head") {
+            std::string bytes;
+            if (FileStore(root).read_asset_head(std::string(input), size, bytes, detail) != StoreStatus::Ok) {
+                error(id, detail.c_str());
+                return;
+            }
+            const auto data = hex(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
+            reply("PP %lu OK bytes=%llu count=%u hex=%s\n", static_cast<unsigned long>(id),
+                  static_cast<unsigned long long>(size), static_cast<unsigned>(bytes.size()), data.c_str());
+            return;
+        }
         std::uint32_t crc = 0;
         if (FileStore(root).inspect_asset(std::string(input), size, crc, detail) !=
             StoreStatus::Ok) {
@@ -612,7 +624,7 @@ bool poll(ReaderApp &app, const char *card_root, std::uint64_t &input_sequence,
                 token(request, word); // request ID
                 token(request, word); // command
                 activity = word != "status" && word != "metrics" && word != "trace" && word != "trace_start" && word != "trace_stop" &&
-                           word != "screen" && word != "ls" && word != "file";
+                           word != "screen" && word != "ls" && word != "file" && word != "file_head";
                 execute(app, card_root, input_sequence, actions_allowed, input_allowed);
             }
             used = 0;

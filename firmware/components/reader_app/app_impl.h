@@ -45,7 +45,6 @@ inline constexpr int viewer_contrast_levels = 3;
 inline constexpr auto inline_image_delay = std::chrono::milliseconds(250);
 inline constexpr const char* kSleepFallbackNotice = "本次使用简洁屏保";
 inline constexpr const char *content_revision = "epub-native-v1";
-inline constexpr const char *txt_revision = "txt-utf8-v1";
 /** UI labels may borrow the body face without changing the next reading operation's size. */
 struct FontSizeRestore {
     graphics::Font* font;
@@ -230,7 +229,7 @@ inline bool book_name(std::string name) {
            (name.size() > 4 && name.substr(name.size() - 4) == ".txt");
 }
 inline const char* revision_for(const std::string& path, const DocumentMetadata& metadata) {
-    return txt_name(path) ? (metadata.txt_gb18030 ? kTxtGb18030Revision : txt_revision) : content_revision;
+    return txt_name(path) ? txt_content_revision(metadata.txt_encoding) : content_revision;
 }
 /**
  * Single-line display text of at most limit scalars: control and line-separator characters
@@ -1411,7 +1410,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         display.present({{"ui", 0, 0, ++ui_sequence}, visible ? visible->anchor : Anchor{},
                          FramePurpose::ManualRefresh, RefreshIntent::FullClean});
     }
-    /** Submits a whole-screen UI update; Display holds equal pixels unless a full clean is required. */
+    /** Submits a whole-screen UI update; Display holds equal nonwhite pixels unless a full clean is required. */
     void overlay(bool full = false) {
         display.present({{"ui", 0, 0, ++ui_sequence},
                          {},
@@ -1583,7 +1582,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         char name[64];
         std::snprintf(name, sizeof(name), "covers/%016llx-%dx%d%s", path_hash(relative),
                       width, height, crop ? "c" : "");
-        return {name, "PPCOVER2\n" + relative + "\n" + std::to_string(info.st_size) + " " +
+        return {name, "PPCOVER3\n" + relative + "\n" + std::to_string(info.st_size) + " " +
                           std::to_string(static_cast<long long>(info.st_mtime)) + "\n",
                 static_cast<std::size_t>((width + 1) / 2) * height};
     }
@@ -1605,8 +1604,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         std::string detail;
         const bool loaded = EpubDocument::read_cover(root + "/" + relative, encoded, detail) &&
             graphics::render_image(thumbnail, encoded, 0, 0, width, height, detail, crop);
-        // An allocation failure is transient and must not be remembered as a missing cover.
-        if (loaded || detail.find("allocation") == std::string::npos)
+        // Allocation and parser memory failures must not be remembered as missing covers.
+        if (loaded || (detail.find("allocation") == std::string::npos && detail.find("memory") == std::string::npos))
             store.save_cache(entry.name, loaded ? entry.header + std::string(thumbnail.pixels().begin(), thumbnail.pixels().end())
                                                 : entry.header);
         return loaded ? thumbnail.pixels() : std::vector<std::uint8_t>{};
@@ -1852,7 +1851,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                       spec.left, spec.top, spec.width, spec.height, spec.font_px, spec.line_height,
                       spec.indent_chars, spec.paragraph_gap, spine.size());
         pages_name = name;
-        pages_header = std::string("PPPAGES3\n") + revision_for(book_path, document.metadata()) + ":pagination-v4\n" + book_path + "\n" + font_file + "\n" + geometry +
+        pages_header = std::string("PPPAGES3\n") + revision_for(book_path, document.metadata()) + ":pagination-v5\n" + book_path + "\n" + font_file + "\n" + geometry +
             document.metadata().book_id + "\n" + font_identity + "\n";
         if (async_content) { pages_cache_pending = true; return; }
         if (auto cached = read_page_cache(store, pages_name, pages_header, spine)) adopt_pages(std::move(*cached));

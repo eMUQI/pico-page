@@ -42,10 +42,10 @@ sh tools/build_firmware.sh diagnostic
 |---|---|---|
 | 0 Frame | `platform::present` 开始至返回，所有成功和失败帧 | 驱动返回成功，不包括随后 App 回调，不证明物理屏幕 |
 | 1 Input | 实体输入经 App 的 Begin/End 分发 | 路由函数返回，不保证该输入被业务接受；不包括触摸采样等待 |
-| 2 Network | 同步 HTTP 请求的联网/校时/请求包装函数 | 无错误且 HTTP 2xx，不代表位置映射、保存或双向接续成功；不包括 Wi-Fi 管理和传书服务 |
+| 2 Network | 同步请求（detail=0）或更新任务（detail=1）的联网／校时／传输包装函数 | 同步为无错误且 HTTP 2xx，清单检查另要求 HTTP 200，下载要求镜像验证成功；不代表位置映射、保存、安装或双向接续成功，不包括 Wi-Fi 管理和传书服务 |
 | 3 Content | 首次 start 尝试至拒绝或 worker 返回，包含排队 | 无已报告错误/失败图片；保存任务另检查提交状态，不代表图片已用于画布 |
 | 4 ImagePatch | 正文渐进图片通过当前页身份检查后，复制像素至画布并请求局部刷新 | 所有图片均已采用且刷新请求被接收；必须再关联 Frame 成功，才确认驱动提交 |
-| 5 NetworkStage | 同步请求内的一个阶段：detail=1 联网，2 校时，3 HTTPS 请求；request 与所属 Network 相同 | 该阶段的包装函数返回成功；HTTP 阶段成功只表示传输完成，状态码仍由 Network 判断 |
+| 5 NetworkStage | 同步／更新任务的一个阶段：detail=1 联网，2 校时，3 HTTPS 请求，4 服务器解析，5 固件下载；request 与所属 Network 相同 | 该阶段的包装函数返回成功；HTTP 阶段成功只表示传输完成，状态码仍由 Network 判断 |
 
 内容任务拒绝创建、资源不足、失败、取消均纳入计数。重复调用已开始任务的 start 不产生第二次操作。取消以现有取消标志判断；对于不可取消的保存，这表示完成时观察到了取消请求，仍需检查实际保存状态。result 编码为 success=0、failure=1、cancelled=2、timeout=3。记录器支持显式超时，当前固件包装层没有独立的超时原因类型，网络超时计入 failure；主机命令超时独立统计。不能从 timeout=0 推断网络从未超时。
 
@@ -64,8 +64,9 @@ sh tools/build_firmware.sh diagnostic
 - `PP <id> trace_start`：在记录器临界区中开始新窗口，清空旧计数和事件；此前的任务 token 不计入新窗口。`trace_stop` 在同一临界区冻结事件与计数并返回含 `stopped=1` 的 metrics。仍在执行的业务任务正常继续，但在截止点计为 unfinished；后续操作不进入该窗口。主机收到截止序号后排空到该序号，才结束采集。
 - metrics 与 trace 的整次响应共用 20 ms 传输等待预算；计入 IDF 驱动对 TX 互斥锁和环形缓冲的两次等待。超出后非阻塞发送，失败计入 tx_failures；该预算不包含任务被抢占和格式化的墙钟时间。
 - status 新增 content_busy、save_busy、save_due、已保存位置的身份 anchor（资源、节点与偏移的 CRC32，不输出路径或正文）、生效正文字号 font_px，以及同步面板最近一次结果 sync（unchecked、no-record、same、different、unmapped、uploaded、uncertain、unauthorized、failed、link-failed、config-changed；开始检查时回到 unchecked）。sync 为 different 时，sync_order 为 1 表示远端位置在当前页之后，-1 表示在当前页之前，0 表示在当前页内；其他结果下为 0。pending=0 只说明无待呈现帧。
+- `PP <id> file_head <卡内相对路径>`：读取资源首部最多 256 字节，返回 `bytes=<文件总长度> count=<本次字节数> hex=<十六进制原始字节>`，短文件及空文件按实际长度返回；不接受偏移或自定读取长度，不扫描或解码其余内容。仅允许既有 `file`／导入规则中的 Books、Fonts 和 LockScreens 资源，拒绝目录穿越、符号链接、非普通文件、超过 64 MiB 的资源以及配置、凭据、缓存和进度路径。与 `file` 共用无卡、正在导入及卡访问忙碌门控；调用前由主循环确保卡与文件所有权安全。可用 `python3 tools/device_console.py --port <串口> file_head 'Books/sample.txt'` 定位 BOM 或编码；输出可能包含用户正文，仅保存在私有证据目录，不提交。
 
-`status/metrics/trace/trace_start/trace_stop/screen/ls/file` 是观察命令，不重置主循环空闲计时；否则连续采集会阻止延迟保存、分页和休眠。它们仍可能占用串口和 CRC 计算时间，Diagnostic 性能不等同于 Performance。保留原 `PP 0 FRAME` 主动通知和所有已有导入安全限制。trace 导出失败仍通过 tx_failures 和序号缺口暴露，不能悄悄丢失后显示通过。
+`status/metrics/trace/trace_start/trace_stop/screen/ls/file/file_head` 是观察命令，不重置主循环空闲计时；否则连续采集会阻止延迟保存、分页和休眠。它们仍可能占用串口和 CRC 计算时间，Diagnostic 性能不等同于 Performance。保留原 `PP 0 FRAME` 主动通知和所有已有导入安全限制。trace 导出失败仍通过 tx_failures 和序号缺口暴露，不能悄悄丢失后显示通过。
 
 翻页候选通过现有 `device_console.py waveform default|ripple` 或设备「翻页效果」页选择。它是改变选择的命令，不属于观察命令；忙态拒绝。单串口所有权不变，切换与工作台采集分开进行，不同时打开两个串口客户端。详见 [候选对比步骤](console-runtime.md#翻页效果候选对比)。
 

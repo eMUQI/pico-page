@@ -810,6 +810,38 @@ StoreStatus FileStore::inspect_asset(const std::string& path, std::uint64_t& siz
     return result;
 }
 
+StoreStatus FileStore::read_asset_head(const std::string& path, std::uint64_t& size,
+                                     std::string& bytes, std::string& error) const {
+    size = 0; bytes.clear(); error.clear();
+    if (!asset_path(path)) { error = "invalid_asset_path"; return StoreStatus::UnsafePath; }
+    const auto safe = store_internal::safe_path(root_, path);
+    if (safe != StoreStatus::Ok) { error = "asset_read_failed"; return safe; }
+    const int fd = open_no_follow(root_ + "/" + path, O_RDONLY);
+    if (fd < 0) { error = "asset_open_failed"; return StoreStatus::IoError; }
+    struct stat before{};
+    StoreStatus result = StoreStatus::Ok;
+    if (fstat(fd, &before) != 0) result = StoreStatus::IoError;
+    else if (!S_ISREG(before.st_mode) || before.st_size < 0 ||
+             static_cast<std::uint64_t>(before.st_size) > import_limit) result = StoreStatus::Invalid;
+    if (result == StoreStatus::Ok) {
+        size = static_cast<std::uint64_t>(before.st_size);
+        bytes.resize(static_cast<std::size_t>(std::min<std::uint64_t>(size, 256)));
+        std::size_t offset = 0;
+        while (offset < bytes.size()) {
+            const auto count = read(fd, bytes.data() + offset, bytes.size() - offset);
+            if (count < 0 && errno == EINTR) continue;
+            if (count <= 0) { result = StoreStatus::IoError; break; }
+            offset += static_cast<std::size_t>(count);
+        }
+        struct stat after{};
+        if (result == StoreStatus::Ok && (fstat(fd, &after) != 0 || after.st_size != before.st_size))
+            result = StoreStatus::ExternalChange;
+    }
+    if (close(fd) != 0 && result == StoreStatus::Ok) result = StoreStatus::IoError;
+    if (result != StoreStatus::Ok) { size = 0; bytes.clear(); error = "asset_read_failed"; }
+    return result;
+}
+
 ProgressResult FileStore::load_progress(const std::string& book_path, const std::string& book_id,
                                        const std::string& content_revision) const {
     const auto safe = store_internal::safe_path(root_, book_path);

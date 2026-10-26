@@ -32,9 +32,9 @@ void verify(const EpdWaveform& waveform, int white_tick) {
                 const int expected = x < 1128 || from != to || pair == 0xFF ? action : 0;
                 assert((action & allowed) == expected);
             }
-            // Overlay keeps every diagonal held, including white, independently of Body's mask.
+            // Overlay retains the BSP white maintenance without driving unchanged nonwhite pixels.
             const int overlay_action = (overlay[phase * 64 + to * 4 + from / 4] >> (6 - 2 * (from % 4))) & 3;
-            assert(overlay_action == (to == from ? 0 : action));
+            assert(overlay_action == (to == from && to != 15 ? 0 : action));
         }
     }
     assert(std::vector<std::uint8_t>(phases->luts, phases->luts + bytes) == original);

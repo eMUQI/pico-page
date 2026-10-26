@@ -10,6 +10,7 @@
 #include <fstream>
 #include <mutex>
 #include <thread>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace diagnostics = pico_page::diagnostics;
@@ -158,7 +159,7 @@ int main(int argc, char** argv) {
         ContentJob::Request cover;
         cover.kind = ContentJob::Kind::SleepCover;
         cover.root = root.string(); cover.path = (root / "book.epub").string();
-        cover.cache_name = "covers/sleep"; cover.cache_header = "PPCOVER2\nprobe\n";
+        cover.cache_name = "covers/sleep"; cover.cache_header = "PPCOVER3\nprobe\n";
         cover.layout.width = 684; cover.layout.height = 1040; cover.cover_crop = true;
         fs::copy_file(argv[1], cover.path);
         {
@@ -340,6 +341,10 @@ int main(int argc, char** argv) {
         ContentJob absent(cover); assert(absent.start()); finish(absent);
         assert(absent.result.cache_finished && !absent.result.image);
         assert(fs::file_size(root / "PicoPage/cache/covers/no-cover") == cover.cache_header.size());
+        psram_free = psram_largest = 512 * 1024;
+        ContentJob cached_absent(cover); assert(cached_absent.start()); finish(cached_absent);
+        assert(cached_absent.result.cache_finished && !cached_absent.result.image);
+        psram_free = 4 * 1024 * 1024; psram_largest = 3 * 1024 * 1024;
         for (const auto* kind : {"missing", "oversized", "unsupported"}) {
             cover.path = (fs::path(argv[1]).parent_path() / (std::string(kind) + "-image-cover.epub")).string();
             cover.cache_name = std::string("covers/") + kind;
@@ -347,6 +352,49 @@ int main(int argc, char** argv) {
             assert(invalid.result.cache_finished && !invalid.result.image);
             assert(fs::file_size(root / "PicoPage/cache" / cover.cache_name) == cover.cache_header.size());
         }
+        cover.path = (fs::path(argv[1]).parent_path() / "gif-image-cover.epub").string();
+        cover.cache_name = "covers/gif-upgrade";
+        const auto gif_cache = root / "PicoPage/cache" / cover.cache_name;
+        const std::string obsolete = "PPCOVER2\nprobe\n";
+        pico_page::FileStore cover_store(root.string());
+        assert(cover_store.save_cache(cover.cache_name, obsolete) == pico_page::StoreStatus::Ok);
+        std::string preserved;
+        const auto gif_decodes = pico_page::graphics::image_decode_count();
+        for (const bool fragmented : {false, true}) {
+            psram_free = fragmented ? 4 * 1024 * 1024 : 3 * 1024 * 1024 - 1;
+            psram_largest = fragmented ? 2 * 1024 * 1024 - 1 : 3 * 1024 * 1024;
+            ContentJob deferred_gif(cover); assert(deferred_gif.start()); finish(deferred_gif);
+            assert(!deferred_gif.result.cache_finished && !deferred_gif.result.image);
+            assert(cover_store.load_cache(cover.cache_name, obsolete.size(), preserved) == pico_page::StoreStatus::Ok && preserved == obsolete);
+            assert(pico_page::graphics::image_decode_count() == gif_decodes);
+        }
+        psram_free = 4 * 1024 * 1024; psram_largest = 3 * 1024 * 1024;
+        ContentJob cancelled_gif(cover); cancelled_gif.cancel(); assert(cancelled_gif.start()); finish(cancelled_gif);
+        assert(!cancelled_gif.result.cache_finished);
+        assert(cover_store.load_cache(cover.cache_name, obsolete.size(), preserved) == pico_page::StoreStatus::Ok && preserved == obsolete);
+        ContentJob recovered_gif(cover); assert(recovered_gif.start()); finish(recovered_gif);
+        assert(recovered_gif.result.cache_finished && !recovered_gif.result.image);
+        assert(fs::file_size(gif_cache) == cover.cache_header.size() + 684U * 1040U / 2);
+        assert(pico_page::graphics::image_decode_count() == gif_decodes + 1);
+        psram_free = psram_largest = 512 * 1024;
+        ContentJob cached_gif(cover); assert(cached_gif.start()); finish(cached_gif);
+        assert(cached_gif.result.cache_finished && !cached_gif.result.image);
+        assert(pico_page::graphics::image_decode_count() == gif_decodes + 1);
+        psram_free = 4 * 1024 * 1024; psram_largest = 3 * 1024 * 1024;
+        fs::copy_file(cover.path, root / "gif.epub");
+        struct stat gif_info{};
+        assert(stat((root / "gif.epub").c_str(), &gif_info) == 0);
+        ContentJob::Request library;
+        library.kind = ContentJob::Kind::LibraryCovers; library.root = root.string();
+        library.covers.push_back({"gif.epub", "covers/gif-library-upgrade", cover.cache_header, gif_info.st_size, gif_info.st_mtime});
+        assert(cover_store.save_cache(library.covers[0].cache_name, obsolete) == pico_page::StoreStatus::Ok);
+        pico_page::set_chapter_memory_probe([](std::size_t) { return false; });
+        ContentJob refused_library(library); assert(refused_library.start()); finish(refused_library);
+        pico_page::set_chapter_memory_probe(nullptr);
+        assert(refused_library.result.covers.size() == 1 && refused_library.result.covers[0].empty());
+        assert(cover_store.load_cache(library.covers[0].cache_name, obsolete.size(), preserved) == pico_page::StoreStatus::Ok && preserved == obsolete);
+        ContentJob recovered_library(library); assert(recovered_library.start()); finish(recovered_library);
+        assert(recovered_library.result.covers.size() == 1 && !recovered_library.result.covers[0].empty());
         fs::remove_all(root);
     }
     {

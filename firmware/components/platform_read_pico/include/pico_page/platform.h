@@ -68,7 +68,8 @@ bool stop_usb_storage(std::string& error);
  * The caller owns packed and keeps it immutable until this function returns.
  * full_clean always drives physical clearing, including for unchanged pixels.
  * region limits gray updates in portrait coordinates when the baseline is valid.
- * changed_pixels_only holds each equal old/new pixel during gray updates; clearing
+ * changed_pixels_only holds equal nonwhite pixels and retains the waveform's
+ * white-to-white maintenance during gray updates; clearing
  * and underrun recovery always ignore this mask and rebuild the full baseline.
  * hold_unchanged_footer holds equal nonwhite pixels at portrait y >= 1128 during
  * body updates, including directional effects; white-to-white retains the source

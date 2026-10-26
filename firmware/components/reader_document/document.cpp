@@ -3,6 +3,7 @@
 #include "gb18030.h"
 #include "expat.h"
 #include "miniz.h"
+#include "html_reader.h"
 
 #include <algorithm>
 #include <array>
@@ -55,6 +56,7 @@ constexpr std::uint64_t kMaxBook = 256ULL * 1024 * 1024;
 // XHTML is parsed as a stream and kept one part at a time, so these two bound parsing time
 // rather than memory.
 constexpr std::uint32_t kMaxXmlBytes = 16 * 1024 * 1024;
+constexpr std::uint32_t kNoHtmlRepair = std::numeric_limits<std::uint32_t>::max();
 constexpr std::uint32_t kMaxText = 2 * kChapterPartScalars;
 // A part is closed at the first block boundary past the first set of thresholds and inside a
 // block past the second; the record limits further below are therefore never reached by text.
@@ -79,6 +81,11 @@ bool (*memory_room)(std::size_t) = platform_memory_room;
 constexpr std::size_t kMaxNodes = 400000;
 constexpr std::size_t kMaxPath = 2048;
 constexpr std::size_t kMaxCssBytes = 256 * 1024;
+constexpr std::size_t kMaxInlineImageUri = 32 * 1024;
+bool optional_image_uri(std::string_view value) {
+    return value.size() <= kMaxInlineImageUri &&
+        (value.rfind("data:", 0) == 0 || value.rfind("denied:data:", 0) == 0);
+}
 
 bool fail(std::string& error, const std::string& message) { error = message; return false; }
 bool txt_path(std::string_view path) {
@@ -131,6 +138,38 @@ bool decode(const char* data, std::size_t size, std::u32string& out) {
         out.push_back(cp);
     }
     return true;
+}
+struct Utf16Decoder {
+    enum class Result { Pending, Complete, Invalid };
+    bool big_endian = false, has_byte = false;
+    std::uint8_t first_byte = 0;
+    std::uint16_t high = 0;
+    bool pending() const { return has_byte || high; }
+    Result feed(std::uint8_t byte, char32_t& scalar) {
+        if (!has_byte) { first_byte = byte; has_byte = true; return Result::Pending; }
+        has_byte = false;
+        const auto unit = static_cast<std::uint16_t>(big_endian ? first_byte * 256U + byte : byte * 256U + first_byte);
+        if (high) {
+            if (unit < 0xdc00 || unit > 0xdfff) return Result::Invalid;
+            scalar = 0x10000 + (high - 0xd800U) * 1024U + unit - 0xdc00U;
+            high = 0; return Result::Complete;
+        }
+        if (unit >= 0xd800 && unit <= 0xdbff) { high = unit; return Result::Pending; }
+        if (unit >= 0xdc00 && unit <= 0xdfff) return Result::Invalid;
+        scalar = unit;
+        return unit ? Result::Complete : Result::Invalid;
+    }
+};
+bool decode_utf16(std::string_view bytes, bool big_endian, std::u32string& text) {
+    text.clear();
+    Utf16Decoder decoder; decoder.big_endian = big_endian;
+    for (const auto byte : bytes) {
+        char32_t scalar = 0;
+        const auto result = decoder.feed(static_cast<std::uint8_t>(byte), scalar);
+        if (result == Utf16Decoder::Result::Invalid) return false;
+        if (result == Utf16Decoder::Result::Complete) text.push_back(scalar);
+    }
+    return !decoder.pending();
 }
 int hex_digit(char c) {
     if (c >= '0' && c <= '9') return c - '0';
@@ -226,12 +265,15 @@ struct Xml {
     std::function<void()> boundary;
     std::function<void()> complex_markup;
     bool foreign_namespace = false;
-    bool source_utf8 = false;
+    bool source_utf8 = false, in_cdata = false;
+    bool body_resource = false, allow_html = false, html_declared = false, html_fallback = false, html_final = false;
+    std::unique_ptr<HtmlReader> html;
     bool suspend_requested = false, suspended = false;
     std::string error;
     unsigned depth = 0;
     std::size_t nodes = 0, bytes = 0;
-    std::size_t pending_bytes = 0, pending_limit = 0;
+    std::size_t pending_bytes = 0, pending_limit = 0, completed_bytes = 0;
+    std::uint32_t html_prefix_bytes = 0;
     Xml() {
         parser = XML_ParserCreateNS(nullptr, '|');
         if (!parser) { error = "XML parser allocation failed"; return; }
@@ -259,7 +301,22 @@ struct Xml {
             if (++x.depth > 64 || ++x.nodes > kMaxNodes) { x.stop("XML structure limit exceeded"); return; }
             std::size_t attributes = 0;
             for (auto p = attrs; p && *p; p += 2) {
-                if (++attributes > 64 || std::strlen(p[0]) > kMaxPath || std::strlen(p[1]) > 8192) { x.stop("XML attribute limit exceeded"); return; }
+                const bool optional_image = x.body_resource && local_name(name) == "img" &&
+                    local_name(p[0]) == "src" && optional_image_uri(p[1]);
+                if (++attributes > 64 || std::strlen(p[0]) > kMaxPath ||
+                    (std::strlen(p[1]) > 8192 && !optional_image)) { x.stop("XML attribute limit exceeded"); return; }
+            }
+            if (x.html && XML_GetCurrentByteIndex(x.parser) < x.html_prefix_bytes) {
+                int offset = 0, available = 0;
+                const char* context = XML_GetInputContext(x.parser, &offset, &available);
+                if (!context || offset < 0 || offset >= available || context[offset] != '<') {
+                    x.stop("Cannot retain HTML source element name"); return;
+                }
+                auto end = offset + 1;
+                while (end < available && context[end] != ' ' && context[end] != '\t' && context[end] != '\r' &&
+                       context[end] != '\n' && context[end] != '/' && context[end] != '>') ++end;
+                if (end == available || end == offset + 1) { x.stop("Cannot retain HTML source element name"); return; }
+                x.html->observe_start(std::string(context + offset + 1, end - offset - 1));
             }
             const char* separator = std::strchr(name, '|');
             if (separator && std::string(name, separator - name) != "http://www.w3.org/1999/xhtml") x.foreign_namespace = true;
@@ -267,6 +324,9 @@ struct Xml {
             x.complete_event();
         }, [](void* opaque, const char* name) {
             auto& x = *static_cast<Xml*>(opaque);
+            const auto index = XML_GetCurrentByteIndex(x.parser);
+            if (x.html && index >= 0 && (index < x.html_prefix_bytes ||
+                (index == x.html_prefix_bytes && XML_GetCurrentByteCount(x.parser) == 0))) x.html->observe_end();
             if (x.end) x.end(local_name(name));
             --x.depth;
             x.complete_event();
@@ -293,7 +353,8 @@ struct Xml {
             x.complete_event();
         });
         XML_SetExternalEntityRefHandler(parser, [](XML_Parser, const char*, const char*, const char*, const char*) -> int { return XML_STATUS_ERROR; });
-        XML_SetStartCdataSectionHandler(parser, [](void* opaque) { auto& x = *static_cast<Xml*>(opaque); if (x.complex_markup) x.complex_markup(); });
+        XML_SetStartCdataSectionHandler(parser, [](void* opaque) { auto& x = *static_cast<Xml*>(opaque); x.in_cdata = true; if (x.complex_markup) x.complex_markup(); });
+        XML_SetEndCdataSectionHandler(parser, [](void* opaque) { auto& x = *static_cast<Xml*>(opaque); x.in_cdata = false; x.complete_event(); });
         XML_SetCommentHandler(parser, [](void* opaque, const char*) { auto& x = *static_cast<Xml*>(opaque); if (x.boundary) x.boundary(); x.complete_event(); });
         XML_SetProcessingInstructionHandler(parser, [](void* opaque, const char*, const char*) { auto& x = *static_cast<Xml*>(opaque); if (x.boundary) x.boundary(); x.complete_event(); });
     }
@@ -301,11 +362,13 @@ struct Xml {
     void stop(const std::string& message) { if (error.empty()) error = message; if (parser) XML_StopParser(parser, XML_FALSE); }
     // Expat may deliver additional callbacks after suspension; finish each event in full.
     void complete_event() {
-        if (pending_limit) {
+        if (!html || XML_GetCurrentByteIndex(parser) < html_prefix_bytes) {
             const auto index = XML_GetCurrentByteIndex(parser);
             const auto count = XML_GetCurrentByteCount(parser);
-            if (index >= 0 && count >= 0 && static_cast<std::size_t>(index) + count <= bytes)
-                pending_bytes = bytes - (static_cast<std::size_t>(index) + count);
+            if (index >= 0 && count >= 0 && static_cast<std::size_t>(index) + count <= bytes) {
+                completed_bytes = std::max(completed_bytes, static_cast<std::size_t>(index) + count);
+                if (pending_limit) pending_bytes = bytes - (static_cast<std::size_t>(index) + count);
+            }
         }
         if (!suspend_requested || suspended || !error.empty()) return;
         suspend_requested = false;
@@ -314,21 +377,52 @@ struct Xml {
     }
     bool parse_status(XML_Status status) {
         if (status != XML_STATUS_ERROR) return error.empty();
-        if (error.empty()) error = std::string("Invalid XML: ") + XML_ErrorString(XML_GetErrorCode(parser));
+        if (error.empty()) error = std::string("Invalid XML: ") + XML_ErrorString(XML_GetErrorCode(parser)) + " (line " + std::to_string(XML_GetCurrentLineNumber(parser)) + ", column " + std::to_string(XML_GetCurrentColumnNumber(parser)) + ")";
         return false;
+    }
+    bool html_syntax_error() const {
+        switch (XML_GetErrorCode(parser)) {
+        case XML_ERROR_SYNTAX:
+        case XML_ERROR_NO_ELEMENTS:
+        case XML_ERROR_INVALID_TOKEN:
+        case XML_ERROR_TAG_MISMATCH:
+        case XML_ERROR_DUPLICATE_ATTRIBUTE:
+        case XML_ERROR_UNDEFINED_ENTITY: return true;
+        default: return false;
+        }
     }
     bool resume() {
         suspended = false;
-        return parse_status(XML_ResumeParser(parser));
+        if (!parse_status(XML_ResumeParser(parser))) return false;
+        if (suspended) return true;
+        return !html || normalized_feed({}, html_final);
+    }
+    bool normalized_feed(std::string_view value, bool final) {
+        const bool ok = html->feed(value, final, [this](std::string_view token) {
+            return parse_status(XML_Parse(parser, token.data(), static_cast<int>(token.size()), XML_FALSE)) && !suspended;
+        });
+        if (!ok && !suspended && error.empty()) error = html->error;
+        if (!error.empty()) return false;
+        return !final || suspended || parse_status(XML_Parse(parser, "", 0, XML_TRUE));
     }
     bool feed(const char* value, std::size_t count, bool final) {
+        if (!bytes && allow_html && count >= 14) {
+            auto source = std::string_view(value, count);
+            if (source.substr(0, 3) == "\xef\xbb\xbf") source.remove_prefix(3);
+            const auto end = source.find('>');
+            std::string declaration(source.substr(0, end == std::string_view::npos ? 0 : end));
+            for (auto& c : declaration) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+            // XHTML PUBLIC/SYSTEM declarations retain Expat's source tree and strict entities.
+            html_declared = trim(declaration) == "<!doctype html";
+            if (html_declared && html_fallback) html = std::make_unique<HtmlReader>(html_prefix_bytes);
+        }
         if (!bytes && count >= 4) {
             source_utf8 = true;
             for (std::size_t i = 0; i < 4; ++i)
                 if (value[i] == '\0' || static_cast<unsigned char>(value[i]) >= 0xfe) source_utf8 = false;
         }
         if (!error.empty() || !parser) return false;
-        if (pending_limit) {
+        if (pending_limit && (!html || XML_GetCurrentByteIndex(parser) < html_prefix_bytes)) {
             if (pending_bytes > pending_limit || count > pending_limit - pending_bytes) {
                 stop("Sequential XML token budget exceeded"); return false;
             }
@@ -336,6 +430,11 @@ struct Xml {
         }
         bytes += count;
         if (bytes > kMaxXmlBytes) { stop("XML byte limit exceeded"); return false; }
+        if (html) {
+            if (!memory_room(512U * 1024)) { stop(kChapterMemoryError); return false; }
+            source_utf8 = false; html_final = final;
+            return normalized_feed(std::string_view(value, count), final);
+        }
         return parse_status(XML_Parse(parser, value, static_cast<int>(count), final ? XML_TRUE : XML_FALSE));
     }
 };
@@ -415,6 +514,10 @@ struct ChapterParser {
     BlockKind block_kind = BlockKind::Paragraph;
     ChapterParser(Chapter& value, const std::string& resource) : result(value) {
         chapter.resource = resource;
+        xml.body_resource = true;
+        auto extension = resource.substr(resource.find_last_of('.') == std::string::npos ? resource.size() : resource.find_last_of('.'));
+        for (auto& c : extension) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+        xml.allow_html = extension == ".html" || extension == ".htm";
         xml.start = [this](const std::string& name, const char** attrs) { start(name, attrs); };
         xml.end = [this](const std::string&) { end(); };
         xml.text = [this](const char* text, std::size_t count) { characters(text, count); };
@@ -588,6 +691,7 @@ struct ChapterParser {
             return aspect.empty() || aspect == "xMidYMid meet" || aspect == "none";
         };
         if (!room(0)) return;
+        if (xml.html) { chapter.plain_dom = false; warn(chapter, "HTML body uses repaired local source anchors"); }
         static const std::set<std::string> plain_elements = {"html", "head", "title", "meta", "link", "style", "body", "h1", "h2", "h3", "h4", "h5", "h6", "p", "div", "section", "article", "aside", "header", "footer", "nav", "blockquote", "span", "em", "strong", "b", "i", "u", "s", "a", "ul", "ol", "li", "br", "code", "small", "sub", "sup", "mark", "abbr", "cite", "q", "del", "ins", "img", "hr"};
         if (!plain_elements.count(name) || xml.foreign_namespace || !attr(attrs, "space").empty()) chapter.plain_dom = false;
         Frame frame; frame.name = name;
@@ -669,6 +773,8 @@ struct ChapterParser {
                     DocumentImage image{begin, static_cast<std::uint32_t>(chapter.text.size()), "", attr(attrs, "alt"), {chapter.resource, frame.path, 0}};
                     std::string fragment;
                     if (name != "svg" && (!resolve(chapter.resource, attr(attrs, name == "img" ? "src" : "href"), image.resource, fragment) || !fragment.empty())) image.resource.clear();
+                    if (name == "img" && optional_image_uri(attr(attrs, "src")))
+                        warn(chapter, "Inline or source-denied image uses an explicit placeholder");
                     retained_metadata_bytes += image.resource.size() + image.alt.size() + image.source.node.size();
                     if (retained_metadata_bytes > 512 * 1024) { xml.stop("Chapter image metadata limit exceeded"); return; }
                     frame.image = chapter.images.size();
@@ -864,6 +970,7 @@ struct EpubDocument::Impl {
         return path == name ? found : nullptr;
     }
     std::vector<SpineItem> spine;
+    std::vector<std::uint32_t> html_repair_offsets;
     std::vector<TocEntry> toc;
     std::string cover, cover_page;
     ~Impl() { chapter_stream.reset(); if (zip.m_pState) mz_zip_reader_end(&zip); if (file) std::fclose(file); }
@@ -884,6 +991,12 @@ struct EpubDocument::Impl {
 #endif
         self->source_read_bytes += count;
         return count;
+    }
+    bool enable_html_repair(std::size_t index, const Xml& xml) {
+        if (index >= spine.size() || xml.in_cdata || !xml.allow_html || !xml.html_declared || xml.html_fallback || !xml.html_syntax_error() || xml.error.rfind("Invalid XML:", 0) != 0) return false;
+        html_repair_offsets.resize(spine.size(), kNoHtmlRepair);
+        html_repair_offsets[index] = static_cast<std::uint32_t>(xml.completed_bytes);
+        return true;
     }
     bool load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
               std::uint32_t wanted, const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop,
@@ -1005,11 +1118,18 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
         if (identity) {
             next->metadata.book_id = identity->book_id;
             next->metadata.partial_md5 = identity->partial_md5;
-            next->metadata.txt_gb18030 = identity->txt_gb18030;
+            next->metadata.txt_encoding = identity->txt_encoding;
             next->metadata.txt_offsets = identity->txt_offsets;
-            if (identity->txt_gb18030 && (identity->txt_offsets.size() < 2 ||
+            if (identity->txt_encoding != TxtEncoding::Utf8 && identity->txt_encoding != TxtEncoding::Gb18030 &&
+                identity->txt_encoding != TxtEncoding::Utf16Le && identity->txt_encoding != TxtEncoding::Utf16Be)
+                return fail(error, "TXT 编码标识无效");
+            if ((identity->txt_encoding == TxtEncoding::Utf16Le || identity->txt_encoding == TxtEncoding::Utf16Be) &&
+                std::any_of(identity->txt_offsets.begin(), identity->txt_offsets.end(), [](auto offset) { return offset % 2; }))
+                return fail(error, "TXT UTF-16 阅读位置索引无效");
+            if (identity->txt_encoding != TxtEncoding::Utf8 && (identity->txt_offsets.size() < 2 ||
                 identity->txt_offsets.front() != 0 || identity->txt_offsets.back() != next->txt_bytes ||
-                !std::is_sorted(identity->txt_offsets.begin(), identity->txt_offsets.end())))
+                std::adjacent_find(identity->txt_offsets.begin(), identity->txt_offsets.end(),
+                    std::greater_equal<std::uint32_t>()) != identity->txt_offsets.end()))
                 return fail(error, "TXT 阅读位置索引无效");
         } else {
             identity_scans.fetch_add(1, std::memory_order_relaxed);
@@ -1021,15 +1141,42 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
             bool utf8_valid = true, utf8_has_text = false;
             bool gb_valid = true, gb_has_text = false;
             gb18030::Decoder gb_decoder;
+            Utf16Decoder utf16_decoder;
+            bool utf16 = false, utf16_has_text = false;
             char32_t previous_gb_scalar = 0;
-            std::vector<std::uint32_t> gb_offsets{0};
+            std::vector<std::uint32_t> part_offsets{0};
+            std::uint32_t utf16_cr_boundary = 0;
             std::uint32_t position = 0, next_boundary = kTxtPartBytes;
             for (;;) {
                 if (stop && stop()) return fail(error, "TXT 读取已取消");
                 const auto count = std::fread(buffer.data(), 1, buffer.size(), next->file);
                 if (count && !sha.update(buffer.data(), count)) return fail(error, "TXT SHA-256 failed");
+                if (!position && count >= 2 && ((buffer[0] == 0xff && buffer[1] == 0xfe) || (buffer[0] == 0xfe && buffer[1] == 0xff))) {
+                    utf16 = true; utf16_decoder.big_endian = buffer[0] == 0xfe;
+                    next->metadata.txt_encoding = utf16_decoder.big_endian ? TxtEncoding::Utf16Be : TxtEncoding::Utf16Le;
+                }
                 for (std::size_t i = 0; i < count; ++i) {
                     const auto byte = buffer[i];
+                    if (utf16) {
+                        if (position + i < 2) continue;
+                        char32_t scalar = 0;
+                        const auto result = utf16_decoder.feed(byte, scalar);
+                        if (result == Utf16Decoder::Result::Invalid) return fail(error, "TXT UTF-16 包含无效代理对或 NUL 字符");
+                        if (result == Utf16Decoder::Result::Complete) {
+                            if (!space(scalar) && scalar != 0xfeff) utf16_has_text = true;
+                            const auto end = static_cast<std::uint32_t>(position + i + 1);
+                            if (utf16_cr_boundary) {
+                                const auto split = scalar == U'\n' ? end : utf16_cr_boundary;
+                                if (split < next->txt_bytes) { part_offsets.push_back(split); next_boundary += kTxtPartBytes; }
+                                utf16_cr_boundary = 0;
+                            }
+                            if (end >= next_boundary && end < next->txt_bytes) {
+                                if (scalar == U'\r') utf16_cr_boundary = end;
+                                else { part_offsets.push_back(end); next_boundary += kTxtPartBytes; }
+                            }
+                        }
+                        continue;
+                    }
                     if (byte == 0) return fail(error, "TXT 文件包含 NUL 字节");
                     if (utf8_valid) {
                         if (remaining) {
@@ -1050,7 +1197,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
                         if (!gb_decoder.pending() && position + i >= next_boundary && next_boundary < next->txt_bytes) {
                             const auto split = static_cast<std::uint32_t>(position + i +
                                 (byte == '\n' && previous_gb_scalar == U'\r'));
-                            gb_offsets.push_back(split);
+                            part_offsets.push_back(split);
                             next_boundary += kTxtPartBytes;
                         }
                         char32_t scalar = 0;
@@ -1070,13 +1217,13 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
             }
             utf8_valid = utf8_valid && remaining == 0;
             gb_valid = gb_valid && !gb_decoder.pending();
-            if (utf8_valid ? !utf8_has_text : !gb_valid || !gb_has_text)
-                return fail(error, utf8_valid || gb_valid ? "TXT 没有可阅读的文字" :
-                    "TXT 编码不受支持（支持 UTF-8、GB18030）");
-            if (!utf8_valid) {
-                next->metadata.txt_gb18030 = true;
-                if (gb_offsets.back() != next->txt_bytes) gb_offsets.push_back(next->txt_bytes);
-                next->metadata.txt_offsets = std::move(gb_offsets);
+            if (utf16 ? utf16_decoder.pending() || !utf16_has_text : utf8_valid ? !utf8_has_text : !gb_valid || !gb_has_text)
+                return fail(error, utf16 ? "TXT UTF-16 长度无效或没有可阅读的文字" : utf8_valid || gb_valid ? "TXT 没有可阅读的文字" :
+                    "TXT 编码不受支持（支持 UTF-8、GB18030、带 BOM 的 UTF-16）");
+            if (utf16 || !utf8_valid) {
+                if (!utf16) next->metadata.txt_encoding = TxtEncoding::Gb18030;
+                if (part_offsets.back() != next->txt_bytes) part_offsets.push_back(next->txt_bytes);
+                next->metadata.txt_offsets = std::move(part_offsets);
             }
             if (!sha.finish(next->metadata.book_id)) return fail(error, "TXT SHA-256 failed");
             for (std::uint64_t offset = 0; offset < static_cast<std::uint64_t>(length); offset = offset == 0 ? 1024 : offset * 4) {
@@ -1490,13 +1637,14 @@ std::size_t EpubDocument::retained_bytes() const {
         metadata.title.capacity() + metadata.author.capacity() + metadata.language.capacity() +
         metadata.book_id.capacity() + metadata.partial_md5.capacity() + metadata.txt_offsets.capacity() * sizeof(std::uint32_t) +
         owner.spine.capacity() * sizeof(SpineItem) + owner.toc.capacity() * sizeof(TocEntry) +
-        owner.cover.capacity() + owner.cover_page.capacity();
+        owner.cover.capacity() + owner.cover_page.capacity() + owner.html_repair_offsets.capacity() * sizeof(std::uint32_t);
     for (const auto& item : owner.spine) bytes += item.resource.capacity() + item.id.capacity();
     for (const auto& item : owner.toc) bytes += item.label.capacity() + item.resource.capacity() + item.fragment.capacity();
     if (!owner.chapter_stream) return bytes;
     const auto& stream = *owner.chapter_stream;
     const auto& parser = stream.parser;
     bytes += sizeof(ChapterStream) + parser.frames.capacity() * sizeof(ChapterParser::Frame) + parser.xml.error.capacity();
+    if (parser.xml.html) bytes += parser.xml.html->retained_bytes();
     for (const auto& frame : parser.frames) {
         bytes += frame.name.capacity() + frame.path.capacity() + frame.node.capacity() + frame.background.capacity();
         for (const auto& child : frame.children) bytes += sizeof(child) + child.first.capacity();
@@ -1531,7 +1679,17 @@ bool EpubDocument::read_next_chapter_part(std::size_t index, Chapter& chapter, s
     release(chapter); error.clear();
     auto& owner = *impl_;
     const auto abort = [&](const std::string& message) {
-        error = message; owner.chapter_stream.reset(); release(chapter); return false;
+        const bool retry = owner.chapter_stream && owner.enable_html_repair(index, owner.chapter_stream->parser.xml);
+        const auto wanted = owner.chapter_stream ? owner.chapter_stream->parser.part : 0;
+        error = message; owner.chapter_stream.reset(); release(chapter);
+        if (retry) {
+            while (read_next_chapter_part(index, chapter, error, stop)) {
+                if (chapter.part == wanted) return true;
+                if (chapter.last_part) break;
+            }
+            release(chapter);
+        }
+        return false;
     };
     if (stop && stop()) return abort(kChapterCancelled);
     if (!owner.file || owner.txt || index >= owner.spine.size()) return abort("Invalid EPUB stream chapter");
@@ -1544,6 +1702,10 @@ bool EpubDocument::read_next_chapter_part(std::size_t index, Chapter& chapter, s
         if (!memory_room(sizeof(ChapterStream) + sizeof(mz_zip_reader_extract_iter_state) + 96U * 1024))
             return abort(kChapterMemoryError);
         auto stream = std::make_unique<ChapterStream>(index, resource);
+        if (index < owner.html_repair_offsets.size() && owner.html_repair_offsets[index] != kNoHtmlRepair) {
+            stream->parser.xml.html_fallback = true;
+            stream->parser.xml.html_prefix_bytes = owner.html_repair_offsets[index];
+        }
         stream->iterator = mz_zip_reader_extract_iter_new(&owner.zip, entry->member, 0);
         if (!stream->iterator) return abort("Cannot initialize EPUB stream");
         const auto scalars = std::min<std::size_t>(entry->bytes, kMaxText) + 1024;
@@ -1644,65 +1806,78 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
     if (stop && stop()) return fail(error, kChapterCancelled);
     if (!file || index >= spine.size()) return fail(error, "Invalid chapter index");
     if (txt) return load_txt(chapter, error, detail, wanted, match, stop, visit);
-    ChapterParser parser(chapter, spine[index].resource);
-    parser.wanted = wanted;
-    parser.match = match;
-    if (detail == ChapterLoad::Reading) parser.visit = &visit;
-    if (detail != ChapterLoad::Mapping) {
-        parser.keep_mapping = false;
-        parser.keep_anchors = detail == ChapterLoad::Reading;
-        // Reserve from the source-size and part bounds when memory permits, with room for separators.
-        // Reading can still grow incrementally if this reservation is not admitted.
-        const auto scalars = std::min<std::size_t>(spine[index].bytes, kMaxText) + 1024;
-        if (memory_room(scalars * sizeof(char32_t))) parser.chapter.text.reserve(scalars);
-        else if (detail == ChapterLoad::Layout) return fail(error, std::string(kChapterMemoryError) + ": " + spine[index].resource);
-    }
-    const bool parsed = parse(spine[index].resource, parser.xml, error, kMaxXmlBytes, stop);
-    if (!parsed && parser.xml.error != kPartComplete) { pico_page::release(chapter); return false; }
-    error.clear();
-    if (parsed) {
-        parser.finish_block();
-        if (!parser.seen_body || (parser.part == 0 && !parser.captured && parser.chapter.text.empty())) {
+    for (;;) {
+        ChapterParser parser(chapter, spine[index].resource);
+        if (index < html_repair_offsets.size() && html_repair_offsets[index] != kNoHtmlRepair) {
+            parser.xml.html_fallback = true;
+            parser.xml.html_prefix_bytes = html_repair_offsets[index];
+        }
+        parser.wanted = wanted;
+        parser.match = match;
+        if (detail == ChapterLoad::Reading) parser.visit = &visit;
+        if (detail != ChapterLoad::Mapping) {
+            parser.keep_mapping = false;
+            parser.keep_anchors = detail == ChapterLoad::Reading;
+            // Reserve from the source-size and part bounds when memory permits, with room for separators.
+            // Reading can still grow incrementally if this reservation is not admitted.
+            const auto scalars = std::min<std::size_t>(spine[index].bytes, kMaxText) + 1024;
+            if (memory_room(scalars * sizeof(char32_t))) parser.chapter.text.reserve(scalars);
+            else if (detail == ChapterLoad::Layout) return fail(error, std::string(kChapterMemoryError) + ": " + spine[index].resource);
+        }
+        const bool parsed = parse(spine[index].resource, parser.xml, error, kMaxXmlBytes, stop);
+        if (!parsed && parser.xml.error != kPartComplete) {
+            const bool retry = enable_html_repair(index, parser.xml);
             pico_page::release(chapter);
-            return fail(error, "Chapter contains no supported body content");
+            if (retry) continue;
+            return false;
         }
-        parser.visit_part(true);
-        if (!parser.captured && (wanted == kLastChapterPart || parser.selected())) parser.capture(true);
-    }
-    if (!parser.captured) { pico_page::release(chapter); return fail(error, "Chapter part is not available: " + spine[index].resource); }
-    if (detail == ChapterLoad::Mapping) {
-        for (const auto& path : parser.css_links) {
-            if (stop && stop()) { pico_page::release(chapter); return fail(error, kChapterCancelled); }
-            const auto* entry = find_member(path);
-            if (!entry || entry->bytes > kMaxCssBytes - parser.css_bytes) {
-                parser.chapter.plain_dom = false; warn(parser.chapter, "Missing or oversized stylesheet is not loaded"); continue;
+        error.clear();
+        if (parsed) {
+            parser.finish_block();
+            if (!parser.seen_body || (parser.part == 0 && !parser.captured && parser.chapter.text.empty())) {
+                pico_page::release(chapter);
+                return fail(error, "Chapter contains no supported body content");
             }
-            std::string css(entry->bytes, '\0');
-            if (!mz_zip_reader_extract_to_mem(&zip, entry->member, css.data(), css.size(), 0)) {
-                parser.chapter.plain_dom = false; warn(parser.chapter, "Invalid stylesheet is not loaded"); continue;
-            }
-            if (stop && stop()) { pico_page::release(chapter); return fail(error, kChapterCancelled); }
-            parser.retain_css(css);
+            parser.visit_part(true);
+            if (!parser.captured && (wanted == kLastChapterPart || parser.selected())) parser.capture(true);
         }
-        // Stylesheets and structure are properties of the whole document, known only now.
-        chapter.css_sources = std::move(parser.chapter.css_sources);
-        chapter.warnings = std::move(parser.chapter.warnings);
-        chapter.plain_dom = parser.chapter.plain_dom;
-        chapter.long_source_node = parser.chapter.long_source_node;
+        if (!parser.captured) { pico_page::release(chapter); return fail(error, "Chapter part is not available: " + spine[index].resource); }
+        if (detail == ChapterLoad::Mapping) {
+            for (const auto& path : parser.css_links) {
+                if (stop && stop()) { pico_page::release(chapter); return fail(error, kChapterCancelled); }
+                const auto* entry = find_member(path);
+                if (!entry || entry->bytes > kMaxCssBytes - parser.css_bytes) {
+                    parser.chapter.plain_dom = false; warn(parser.chapter, "Missing or oversized stylesheet is not loaded"); continue;
+                }
+                std::string css(entry->bytes, '\0');
+                if (!mz_zip_reader_extract_to_mem(&zip, entry->member, css.data(), css.size(), 0)) {
+                    parser.chapter.plain_dom = false; warn(parser.chapter, "Invalid stylesheet is not loaded"); continue;
+                }
+                if (stop && stop()) { pico_page::release(chapter); return fail(error, kChapterCancelled); }
+                parser.retain_css(css);
+            }
+            // Stylesheets and structure are properties of the whole document, known only now.
+            chapter.css_sources = std::move(parser.chapter.css_sources);
+            chapter.warnings = std::move(parser.chapter.warnings);
+            chapter.plain_dom = parser.chapter.plain_dom;
+            chapter.long_source_node = parser.chapter.long_source_node;
+        }
+        // Release substantial excess capacity only when the temporary copy fits the memory budget.
+        if (detail == ChapterLoad::Reading && chapter.text.capacity() - chapter.text.size() > 4096 &&
+            memory_room(chapter.text.size() * sizeof(char32_t))) {
+            std::u32string exact(chapter.text.begin(), chapter.text.end());
+            chapter.text.swap(exact);
+        }
+        return true;
     }
-    // Release substantial excess capacity only when the temporary copy fits the memory budget.
-    if (detail == ChapterLoad::Reading && chapter.text.capacity() - chapter.text.size() > 4096 &&
-        memory_room(chapter.text.size() * sizeof(char32_t))) {
-        std::u32string exact(chapter.text.begin(), chapter.text.end());
-        chapter.text.swap(exact);
-    }
-    return true;
 }
 bool EpubDocument::Impl::load_txt(Chapter& chapter, std::string& error, ChapterLoad detail,
                                   std::uint32_t wanted, const std::function<bool(const Chapter&)>* match,
                                   const std::function<bool()>& stop, const std::function<void(const Chapter&)>& visit) {
-    const bool gb = metadata.txt_gb18030;
-    auto last = gb ? static_cast<std::uint32_t>(metadata.txt_offsets.size() - 2) :
+    const bool gb = metadata.txt_encoding == TxtEncoding::Gb18030;
+    const bool utf16 = metadata.txt_encoding == TxtEncoding::Utf16Le || metadata.txt_encoding == TxtEncoding::Utf16Be;
+    const bool indexed = gb || utf16;
+    auto last = indexed ? static_cast<std::uint32_t>(metadata.txt_offsets.size() - 2) :
         (txt_bytes - 1) / kTxtPartBytes;
     const auto aligned = [this](std::uint32_t boundary, std::uint32_t& result) {
         result = std::min(boundary, txt_bytes);
@@ -1720,7 +1895,7 @@ bool EpubDocument::Impl::load_txt(Chapter& chapter, std::string& error, ChapterL
     };
     // A character or line ending that crosses the final boundary moves the aligned start of the
     // last part to the end of the file; the preceding part then holds the rest of the text.
-    if (!gb && last > 0) {
+    if (!indexed && last > 0) {
         std::uint32_t start = 0;
         if (!aligned(last * kTxtPartBytes, start)) return fail(error, "无法读取 TXT 文件");
         if (start >= txt_bytes) --last;
@@ -1730,7 +1905,7 @@ bool EpubDocument::Impl::load_txt(Chapter& chapter, std::string& error, ChapterL
     for (std::uint32_t part = match ? 0 : wanted == kLastChapterPart ? last : wanted; part <= last; ++part) {
         if (stop && stop()) { pico_page::release(chapter); return fail(error, kChapterCancelled); }
         std::uint32_t begin = 0, end = 0;
-        if (gb) { begin = metadata.txt_offsets[part]; end = metadata.txt_offsets[part + 1]; }
+        if (indexed) { begin = metadata.txt_offsets[part]; end = metadata.txt_offsets[part + 1]; }
         else if (!aligned(part * kTxtPartBytes, begin) || !aligned((part + 1) * kTxtPartBytes, end)) {
             pico_page::release(chapter); return fail(error, "无法读取 TXT 文件");
         }
@@ -1743,7 +1918,8 @@ bool EpubDocument::Impl::load_txt(Chapter& chapter, std::string& error, ChapterL
         if (read(this, begin, bytes.data(), size) != size) {
             pico_page::release(chapter); return fail(error, "无法读取 TXT 文件");
         }
-        if (!gb && part == 0 && bytes.size() >= 3 && bytes.compare(0, 3, "\xef\xbb\xbf") == 0) bytes.erase(0, 3);
+        if (!indexed && part == 0 && bytes.size() >= 3 && bytes.compare(0, 3, "\xef\xbb\xbf") == 0) bytes.erase(0, 3);
+        if (utf16 && part == 0 && bytes.size() >= 2) bytes.erase(0, 2);
         Chapter current;
         current.resource = "text";
         current.part = part;
@@ -1751,7 +1927,8 @@ bool EpubDocument::Impl::load_txt(Chapter& chapter, std::string& error, ChapterL
         current.split_node = part != 0 || !current.last_part;
         current.plain_dom = false;
         current.text.reserve(bytes.size());
-        if (!(gb ? gb18030::decode(bytes, current.text) : decode(bytes.data(), bytes.size(), current.text))) {
+        if (!(utf16 ? decode_utf16(bytes, metadata.txt_encoding == TxtEncoding::Utf16Be, current.text) :
+              gb ? gb18030::decode(bytes, current.text) : decode(bytes.data(), bytes.size(), current.text))) {
             pico_page::release(chapter); return fail(error, "TXT 内容解码失败");
         }
         if (!current.text.empty()) {
@@ -1806,7 +1983,8 @@ bool EpubDocument::read_image(const std::string& resource, std::vector<std::uint
     }
     const bool png = bytes.size() >= 8 && std::memcmp(bytes.data(), "\x89PNG\r\n\x1a\n", 8) == 0;
     const bool jpeg = bytes.size() >= 3 && bytes[0] == 0xff && bytes[1] == 0xd8 && bytes[2] == 0xff;
-    if (!png && !jpeg) { bytes.clear(); return fail(error, "Image format is not PNG or JPEG"); }
+    const bool gif = bytes.size() >= 6 && (!std::memcmp(bytes.data(), "GIF87a", 6) || !std::memcmp(bytes.data(), "GIF89a", 6));
+    if (!png && !jpeg && !gif) { bytes.clear(); return fail(error, "Image format is not PNG, JPEG or GIF"); }
     return true;
 }
 bool Chapter::anchor_at(std::uint32_t scalar_offset, Anchor& anchor) const {

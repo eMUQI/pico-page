@@ -74,8 +74,8 @@ bool ReaderApp::Impl::finish_open(const std::string& path, ContentJob::Result* l
         message = "原进度无法读取，未覆盖原记录";
     if (loaded) {
         if (!loaded->content_cache.bytes.empty()) {
+            chapter_cache_write_needed = !loaded->content_cache.from_disk;
             chapter_cache = std::make_shared<ContentCacheEntry>(std::move(loaded->content_cache));
-            chapter_cache_write_needed = true;
         }
         chapter = std::move(loaded->chapter);
         chapter_index = loaded->chapter_index;

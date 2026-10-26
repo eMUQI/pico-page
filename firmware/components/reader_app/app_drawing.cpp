@@ -94,8 +94,8 @@ std::pair<std::uint64_t, std::uint64_t> ReaderApp::Impl::estimated_position(std:
         if (i < index) read += spine[i].bytes;
         else if (i == index && size) {
             if (txt_name(book_path)) {
-                // Byte span of the part: recorded boundaries for GB18030, 48 KiB steps for
-                // UTF-8, both limited by the file size so that a short part is not overstated.
+                // Part byte spans use recorded GB18030/UTF-16 boundaries or 48 KiB UTF-8 steps,
+                // limited by the original file size so that a short part is not overstated.
                 const auto &offsets = document.metadata().txt_offsets;
                 std::uint64_t begin = static_cast<std::uint64_t>(at.part) * kTxtPartBytes, span = kTxtPartBytes;
                 if (at.part + 1 < offsets.size()) {

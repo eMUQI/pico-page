@@ -339,14 +339,15 @@ void run_portal(NetworkJob &job) {
         vSemaphoreDelete(session.lock);
 }
 /**
- * Records one phase of a sync request as its own operation: detail 1 station, 2 clock, 3 HTTP.
+ * Records a sync/update phase: detail 1 station, 2 clock, 3 HTTP, 4 resolver, 5 firmware download.
  * A request cancelled before its first phase therefore leaves no evidence that networking ran.
  */
 template <typename Call>
 bool network_stage([[maybe_unused]] const NetworkJob& job, [[maybe_unused]] std::uint32_t stage, Call&& call) {
-    PP_DIAGNOSTIC(const auto measurement = diag::begin(diag::Kind::NetworkStage, {0, 0, 0, job.operation.id, stage});)
+    PP_DIAGNOSTIC(const auto measurement = diag::begin(diag::Kind::NetworkStage,
+        {0, 0, 0, job.update ? job.update->id : job.operation.id, stage});)
     const bool okay = call();
-    PP_DIAGNOSTIC(diag::end(measurement, job.operation.cancelled->load() ? diag::Outcome::Cancelled
+    PP_DIAGNOSTIC(diag::end(measurement, (job.update ? job.update->cancelled : job.operation.cancelled)->load() ? diag::Outcome::Cancelled
         : okay ? diag::Outcome::Success : diag::Outcome::Failure);)
     return okay;
 }
@@ -402,13 +403,15 @@ void run_update(NetworkJob& job) {
     using pico_page::UpdateFailure;
     const auto& operation = *job.update;
     const auto& cancelled = *operation.cancelled;
+    PP_DIAGNOSTIC(const auto measurement = diag::begin(diag::Kind::Network, {0, 0, 0, operation.id, 1});)
     const auto perform = [&]() -> UpdateFailure {
         if (cancelled.load()) return UpdateFailure::Cancelled;
-        if (!ensure_station(operation.targets, cancelled, job.error, job.failure)) return UpdateFailure::Link;
+        if (!network_stage(job, 1, [&] { return ensure_station(operation.targets, cancelled, job.error, job.failure); }))
+            return UpdateFailure::Link;
         job.joined = station_target.ssid;
         publish_wifi(pico_page::WifiPhase::Clock, station_target.ssid);
         platform::ConnectFailure failure;
-        if (!platform::synchronize_clock(job.error, &failure, &cancelled)) {
+        if (!network_stage(job, 2, [&] { return platform::synchronize_clock(job.error, &failure, &cancelled); })) {
             if (failure.stage != platform::ConnectFailure::Stage::Clock) {
                 job.error = wifi_failure(station_target.ssid, failure);
                 return UpdateFailure::Link;
@@ -418,21 +421,25 @@ void run_update(NetworkJob& job) {
         }
         if (operation.kind == pico_page::UpdateOperation::Kind::Check) {
             // A failed lookup separates a network without internet access from a failing server.
-            if (!platform::resolve_host(operation.url, job.error, &cancelled)) {
+            if (!network_stage(job, 4, [&] { return platform::resolve_host(operation.url, job.error, &cancelled); })) {
                 ESP_LOGW(tag, "Update check: %s", job.error.c_str());
                 job.error = "找不到服务器";
                 return UpdateFailure::Internet;
             }
             publish_wifi(pico_page::WifiPhase::Request, station_target.ssid);
-            return platform::http_request("GET", operation.url, {}, "", job.body, job.status, job.error, &cancelled)
+            return network_stage(job, 3, [&] {
+                return platform::http_request("GET", operation.url, {}, "", job.body, job.status, job.error, &cancelled);
+            })
                 ? UpdateFailure::None : UpdateFailure::Network;
         }
         publish_wifi(pico_page::WifiPhase::Request, station_target.ssid);
         auto reason = platform::FirmwareFailure::None;
         std::uint64_t id = operation.id;
         const platform::FirmwareHooks hooks{update_written, guard_flash, &id};
-        platform::download_firmware({operation.url, operation.size, operation.sha256, operation.version}, hooks, reason,
-                                    job.error, &cancelled);
+        network_stage(job, 5, [&] {
+            return platform::download_firmware({operation.url, operation.size, operation.sha256, operation.version}, hooks,
+                                                reason, job.error, &cancelled);
+        });
         if (reason != platform::FirmwareFailure::None) ESP_LOGW(tag, "Firmware download: %s", job.error.c_str());
         switch (reason) {
         case platform::FirmwareFailure::None: return UpdateFailure::None;
@@ -449,6 +456,10 @@ void run_update(NetworkJob& job) {
     // Only link and internet failures carry text for the user; other diagnostics stay in the log.
     if (job.update_failure != UpdateFailure::Link && job.update_failure != UpdateFailure::Internet) job.error.clear();
     if (cancelled.load() && job.update_failure != UpdateFailure::None) job.update_failure = UpdateFailure::Cancelled;
+    PP_DIAGNOSTIC(diag::end(measurement, cancelled.load() ? diag::Outcome::Cancelled
+        : job.update_failure == UpdateFailure::None &&
+          (operation.kind != pico_page::UpdateOperation::Kind::Check || job.status == 200)
+            ? diag::Outcome::Success : diag::Outcome::Failure);)
 }
 #ifdef CONFIG_PICO_PAGE_PERF_METRICS
 void run_request(NetworkJob &job) {

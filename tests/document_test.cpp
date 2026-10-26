@@ -85,6 +85,138 @@ int main(int argc, char** argv) {
     {
         const std::string fixture = argv[1];
         const auto directory = fixture.substr(0, fixture.rfind('/') + 1);
+        {
+            EpubDocument html;
+            Chapter chapter;
+            assert(html.open(directory + "html-body.epub", error));
+            assert(html.load_chapter(0, chapter, error));
+            assert(chapter.text == U"甲\u00a0&乙 < 3\n尾 段\n末尾");
+            assert(!chapter.plain_dom && chapter.text.find(U"var") == std::u32string::npos);
+            assert(html.open(directory + "xhtml5-strict.epub", error));
+            assert(html.load_chapter(0, chapter, error) && chapter.plain_dom && chapter.text == U"严格源树");
+            assert(html.open(directory + "xhtml5-strict-html-extension.epub", error));
+            assert(html.load_chapter(0, chapter, error) && chapter.plain_dom && chapter.text == U"严格源树");
+            Anchor source;
+            assert(chapter.anchor_at(1, source) && source.node == "/html[1]/body[1]/p[1]/text()[1]" && source.offset == 1);
+
+            assert(html.open(directory + "xhtml5-unknown-entity.epub", error));
+            assert(!html.load_chapter(0, chapter, error) && chapter.text.empty());
+            assert(html.open(directory + "html-body-parts.epub", error));
+            std::u32string complete;
+            for (std::uint32_t part = 0;; ++part) {
+                Chapter ordinary, streamed;
+                assert(html.load_chapter(0, ordinary, error, ChapterLoad::Reading, part));
+                assert(html.load_chapter(0, streamed, error, ChapterLoad::Reading, part, {}, {}, true));
+                same_reading_part(ordinary, streamed);
+                if (!complete.empty()) complete += U'\n';
+                complete += streamed.text;
+                if (streamed.last_part) { assert(part >= 2); break; }
+            }
+            std::u32string expected;
+            for (unsigned i = 0; i < 20000; ++i) {
+                if (i) expected += U'\n';
+                expected += U"甲乙&丁\u00a0😀";
+                for (const auto digit : std::to_string(i)) expected += static_cast<char32_t>(digit);
+            }
+            assert(complete == expected);
+            EpubDocument late_ordinary, late_stream;
+            assert(late_ordinary.open(directory + "html-late-repair.epub", error));
+            assert(late_stream.open(directory + "html-late-repair.epub", error));
+            std::u32string late_text;
+            for (std::uint32_t part = 0;; ++part) {
+                Chapter ordinary, streamed;
+                assert(late_ordinary.load_chapter(0, ordinary, error, ChapterLoad::Reading, part));
+                assert(late_stream.read_next_chapter_part(0, streamed, error));
+                same_reading_part(ordinary, streamed);
+                if (!late_text.empty()) late_text += U'\n';
+                late_text += streamed.text;
+                if (streamed.last_part) { assert(part >= 2); break; }
+            }
+            std::u32string late_expected;
+            for (unsigned i = 0; i < 20000; ++i) {
+                if (i) late_expected += U'\n';
+                late_expected += U"甲乙丁😀";
+                for (const auto digit : std::to_string(i)) late_expected += static_cast<char32_t>(digit);
+            }
+            late_expected += U"\n尾部";
+            assert(late_text == late_expected);
+            for (const auto kind : {"tree", "comment", "void", "namespace", "cdata"}) {
+                EpubDocument repaired;
+                assert(repaired.open(directory + "html-late-" + kind + ".epub", error));
+                Chapter original;
+                assert(repaired.read_next_chapter_part(0, original, error) && !original.last_part);
+                for (;;) {
+                    Chapter tail;
+                    assert(repaired.read_next_chapter_part(0, tail, error));
+                    if (tail.last_part) break;
+                }
+                Chapter replayed;
+                assert(repaired.load_chapter(0, replayed, error, ChapterLoad::Reading, 0));
+                assert(original.text == replayed.text && original.part == replayed.part && original.last_part == replayed.last_part);
+                assert(original.blocks.size() == replayed.blocks.size());
+                for (std::size_t i = 0; i < original.blocks.size(); ++i) {
+                    const auto& a = original.blocks[i]; const auto& b = replayed.blocks[i];
+                    assert(std::tie(a.begin, a.end, a.kind) == std::tie(b.begin, b.end, b.kind));
+                }
+                for (const auto& run : original.runs) {
+                    Anchor saved;
+                    assert(original.anchor_at(run.begin, saved));
+                    std::uint32_t restored = 0;
+                    assert(replayed.offset_for(saved, restored) && restored == run.begin);
+                }
+            }
+            assert(html.open(directory + "html-bom.epub", error));
+            assert(html.load_chapter(0, chapter, error) && chapter.text == U"有 BOM 的正文");
+            for (const auto kind : {"script", "script-case", "script-ns", "style", "style-case", "style-ns", "closed", "after-repair",
+                                    "nested-script-inner", "nested-script-outer", "nested-style-inner", "nested-style-outer"}) {
+                const auto path = directory + "html-raw-" + kind + ".epub";
+                EpubDocument ordinary, sequential;
+                assert(ordinary.open(path, error) && sequential.open(path, error));
+                assert(ordinary.load_chapter(0, chapter, error));
+                assert(chapter.text == U"正文");
+                if (std::string(kind) == "style" || std::string(kind) == "style-ns") {
+                    assert(chapter.css_sources.size() == 1);
+                    assert(chapter.css_sources.front().find("&missing; </stylex> 甲😀 if(a<b)") != std::string::npos);
+                }
+                Chapter reading, streamed;
+                assert(ordinary.load_chapter(0, reading, error, ChapterLoad::Reading));
+                assert(sequential.read_next_chapter_part(0, streamed, error));
+                same_reading_part(reading, streamed);
+                assert(streamed.text == U"正文");
+            }
+            for (const auto kind : {"denied", "data", "limit", "entities"}) {
+                const auto path = directory + "html-image-" + kind + ".epub";
+                EpubDocument ordinary, sequential;
+                assert(ordinary.open(path, error) && sequential.open(path, error));
+                Chapter reading, streamed;
+                assert(ordinary.load_chapter(0, reading, error, ChapterLoad::Reading));
+                assert(sequential.read_next_chapter_part(0, streamed, error));
+                same_reading_part(reading, streamed);
+                assert(reading.text.find(U"前文") != std::u32string::npos && reading.text.find(U"后文") != std::u32string::npos);
+                assert(reading.images.size() == 1 && reading.images.front().resource.empty());
+            }
+            for (const auto name : {"html-image-oversized.epub", "html-image-external.epub",
+                                    "html-image-truncated.epub", "html-attribute-oversized.epub"}) {
+                assert(html.open(directory + name, error));
+                assert(!html.load_chapter(0, chapter, error) && chapter.text.empty());
+                assert(html.open(directory + name, error));
+                assert(!html.read_next_chapter_part(0, chapter, error) && chapter.text.empty());
+            }
+
+
+
+            for (const auto name : {"html-internal-dtd.epub", "html-token-limit.epub"}) {
+                assert(html.open(directory + name, error));
+                assert(!html.load_chapter(0, chapter, error));
+                assert(chapter.text.empty());
+            }
+            assert(html.open(directory + "denied-inline-image.epub", error));
+            assert(html.load_chapter(0, chapter, error));
+            assert(chapter.text.find(U"前文") != std::u32string::npos && chapter.text.find(U"后文") != std::u32string::npos);
+            assert(chapter.images.size() == 1 && chapter.images.front().resource.empty());
+            assert(!html.open(directory + "opf-unescaped-amp.epub", error));
+            assert(error.find("Invalid XML:") == 0 && error.find("line ") != std::string::npos);
+        }
         for (const char* name : {"opf-invalid-empty.epub", "opf-invalid-paired.epub", "opf-invalid-attribute.epub"}) {
             EpubDocument invalid;
             assert(!invalid.open(directory + name, error));
@@ -485,8 +617,51 @@ int main(int argc, char** argv) {
             assert(!crossing.load_chapter(0, piece, error, ChapterLoad::Reading, 1));
             assert(crossing.load_chapter(0, piece, error, ChapterLoad::Reading, kLastChapterPart) && piece.part == 0);
         }
+        for (const auto encoding : {TxtEncoding::Utf16Le, TxtEncoding::Utf16Be}) {
+            const std::string name = encoding == TxtEncoding::Utf16Le ? "utf-16-le" : "utf-16-be";
+            const auto path = directory + name + ".txt";
+            assert(txt.open(path, error));
+            assert(txt.metadata().txt_encoding == encoding && txt.metadata().book_id == sha256_file(path));
+            assert(txt.metadata().txt_offsets.size() == 4 && txt.metadata().txt_offsets[1] == 49154);
+            assert(verified.open_verified(path, txt.metadata(), error));
+            std::u32string text;
+            Anchor middle;
+            for (std::uint32_t part = 0;; ++part) {
+                Chapter piece;
+                assert(verified.load_chapter(0, piece, error, ChapterLoad::Reading, part));
+                assert(!piece.text.empty());
+                if (part == 1) assert(piece.anchor_at(2, middle));
+                text += piece.text;
+                if (piece.last_part) break;
+                assert(piece.text.back() != U'\r');
+            }
+            std::u32string expected(24574, U'甲');
+            expected += U"😀\r\n第二段"; expected.append(30000, U'乙'); expected += U"末尾";
+            assert(text == expected);
+            assert(verified.find_chapter_part(0, restored, error, ChapterLoad::Reading,
+                [&](const Chapter& part) { std::uint32_t offset = 0; return part.offset_for(middle, offset); }));
+            assert(restored.part == 1);
+            assert(txt.open(directory + name + "-cr-run.txt", error));
+            assert(txt.metadata().txt_offsets.size() >= 4);
+            for (std::size_t i = 1; i < txt.metadata().txt_offsets.size(); ++i)
+                assert(txt.metadata().txt_offsets[i] - txt.metadata().txt_offsets[i - 1] <= kTxtPartBytes + 6);
+            std::u32string cr_text;
+            for (std::uint32_t part = 0;; ++part) {
+                Chapter piece;
+                assert(txt.load_chapter(0, piece, error, ChapterLoad::Reading, part));
+                cr_text += piece.text;
+                if (piece.last_part) break;
+            }
+            assert(cr_text == U"甲" + std::u32string(60000, U'\r') + U"乙");
+            unsigned checks = 0;
+            assert(!txt.open(path, error, [&] { return ++checks >= 3; }) && txt.spine().empty());
+            for (const auto suffix : {"odd", "high", "low", "pair", "nul", "empty"}) {
+                assert(!txt.open(directory + name + "-" + suffix + ".txt", error));
+                assert(error.find("UTF-16") != std::string::npos && txt.spine().empty());
+            }
+        }
         assert(!txt.open(directory + "invalid.txt", error) && error.find("编码不受支持") != std::string::npos);
-        assert(txt.open(directory + "gb18030.txt", error) && txt.metadata().txt_gb18030);
+        assert(txt.open(directory + "gb18030.txt", error) && txt.metadata().txt_encoding == TxtEncoding::Gb18030);
         assert(txt.metadata().txt_offsets.size() == 3 && txt.metadata().txt_offsets[1] == 49154);
         assert(verified.open_verified(directory + "gb18030.txt", txt.metadata(), error));
         std::u32string decoded;

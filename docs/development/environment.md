@@ -87,7 +87,7 @@ python3 tools/check_koreader_mapping.py
 
 网站、发布说明、OTA 清单脚本及网站或共用路径脚本的改动执行 PR 网站构建与发布固件校验。分支 push 不单独触发工作流；main 仅在上述网站输入变更时构建并部署，发布 Release 和手动部署入口保留。host 合并后不自动重跑，直接推送 main 的代码需要手动补验；合并前应验证包含当前目标分支变更的结果。PR 新提交取消旧检查，正式部署继续串行并保留下载源比较及线上读回检查。COS 返回 403 时，仅允许候选清单与全部镜像均同官网现有副本逐字节一致的页面更新，并明确告警；新固件、内容变化、其他错误及认证发布失败仍阻止部署，不自动恢复桶权限。部署前通过共用路径脚本直接比较构建提交与最新 main 的网站输入：网站输入变化才让位给替代运行，只有文档或固件代码变化时仍完成当前部署；读取比较结果失败时停止部署。
 
-两个工作流固定 `ubuntu-24.04`，host 超时为 20 分钟，网站超时为 25 分钟（包含固件上传及完整公网读回）。host 保留固定 Python 3.12，复用镜像预装的 Clang、pkg-config 和 OpenSSL 开发文件，仅通过 apt 安装 ccache、SDL2 和 curl 开发文件。镜像清单见 [Ubuntu 24.04 runner 软件](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md)；镜像内工具仍会更新，固定系统版本不等于固定所有工具版本。
+两个工作流固定 `ubuntu-24.04`，host 超时为 20 分钟，网站超时为 25 分钟（包含固件上传及完整公网读回）。host 保留固定 Python 3.12，复用镜像预装的 Clang、pkg-config 和 OpenSSL 开发文件，仅通过 apt 安装 ccache、SDL2 和 curl 开发文件。runner 的优先镜像列表中移除 Azure 项，改由官方 Ubuntu archive 优先并保留 security fallback；依赖包、签名校验、测试集合和 20 分钟超时不变。列表格式核对固定镜像的[配置脚本](https://github.com/actions/runner-images/blob/ubuntu24/20261012.334/images/ubuntu/scripts/build/configure-apt-sources.sh)，不修改用户主机的包源。镜像清单见 [Ubuntu 24.04 runner 软件](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md)；镜像内工具仍会更新，固定系统版本不等于固定所有工具版本。
 
 Debug 保持原优化配置；CI sanitizer 使用 Debug 配置及 `-O1 -g`，保留断言、事件跟踪和原有 sanitizer 选项。两种构建通过 CMake compiler launcher 共用 ccache，编译器内容和编译参数参与命中判断，单份本地缓存上限为 256 MiB。缓存只影响编译，完整 CTest 每次仍执行。字体与 FreeType 仅缓存下载输入，`setup_fonts.py` 每次重新核对摘要并按需解包，不缓存测试结果或构建目录。新增缓存使用 GitHub 官方 `actions/cache@v5`，不提高仓库的缓存付费容量上限。
 

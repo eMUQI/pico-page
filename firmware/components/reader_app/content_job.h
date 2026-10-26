@@ -19,7 +19,19 @@
 #endif
 
 namespace pico_page {
+inline constexpr char kTxtUtf8Revision[] = "txt-utf8-v1";
 inline constexpr char kTxtGb18030Revision[] = "txt-gb18030-v1";
+inline constexpr char kTxtUtf16LeRevision[] = "txt-utf16le-v1";
+inline constexpr char kTxtUtf16BeRevision[] = "txt-utf16be-v1";
+inline const char* txt_content_revision(TxtEncoding encoding) {
+    switch (encoding) {
+    case TxtEncoding::Utf8: break;
+    case TxtEncoding::Gb18030: return kTxtGb18030Revision;
+    case TxtEncoding::Utf16Le: return kTxtUtf16LeRevision;
+    case TxtEncoding::Utf16Be: return kTxtUtf16BeRevision;
+    }
+    return kTxtUtf8Revision;
+}
 // Library card thumbnails are cropped to fill this frame; the size is part of the cache entry name.
 inline constexpr int kLibraryCoverWidth = 184, kLibraryCoverHeight = 250;
 inline constexpr auto kLockScreenPrepareBudget = std::chrono::seconds(20);

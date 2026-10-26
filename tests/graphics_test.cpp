@@ -121,6 +121,35 @@ int main(int argc, char** argv) {
         assert(!decode_png_layer(rgba, 685, 8, layer, alpha, image_error));
     }
     canvas.clear(7);
+    {
+        const std::vector<std::uint8_t> offset(std::begin(kOffsetGrayGif), std::end(kOffsetGrayGif));
+        Canvas background(8, 8);
+        assert(render_image(background, offset, 0, 0, 8, 8, image_error));
+        for (int y = 0; y < 8; ++y) for (int x = 0; x < 8; ++x) assert(background.pixel(x, y) == 8);
+        const std::vector<std::uint8_t> gif(std::begin(kPaletteGif), std::end(kPaletteGif));
+        const std::vector<std::uint8_t> interlaced(std::begin(kInterlacedGif), std::end(kInterlacedGif));
+        Canvas regular(16, 16), progressive(16, 16);
+        assert(render_image(regular, gif, 0, 0, 16, 16, image_error));
+        assert(render_image(progressive, interlaced, 0, 0, 16, 16, image_error));
+        assert(regular.pixels() == progressive.pixels());
+        for (int y = 0; y < 16; ++y) for (int x = 0; x < 16; ++x) {
+            const auto palette = (x / 4 + y / 4) % 4;
+            assert(regular.pixel(x, y) == (palette == 0 ? 0 : palette == 2 ? 5 : 15));
+        }
+        for (std::size_t size = 0; size < gif.size(); ++size) {
+            const std::vector<std::uint8_t> truncated(gif.begin(), gif.begin() + size);
+            Canvas unchanged(16, 16); unchanged.clear(7);
+            const auto pixels = unchanged.pixels();
+            assert(!render_image(unchanged, truncated, 0, 0, 16, 16, image_error));
+            assert(unchanged.pixels() == pixels);
+        }
+        auto invalid = gif;
+        invalid[6] = invalid[7] = 0xff;
+        assert(!render_image(regular, invalid, 0, 0, 16, 16, image_error));
+        unsigned checks = 0;
+        assert(!render_image(regular, gif, 0, 0, 16, 16, image_error, false, [&] { return ++checks >= 5; }));
+        assert(image_error == kImageCancelled);
+    }
     assert(render_image(canvas, rgba, 10, 20, 4, 4, image_error));
     assert(canvas.pixel(10, 20) == 0 && canvas.pixel(13, 20) == 15);
     assert(canvas.pixel(10, 23) == 5 && canvas.pixel(13, 23) == 15);

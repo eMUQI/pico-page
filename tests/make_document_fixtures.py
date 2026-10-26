@@ -13,8 +13,107 @@ def generate(directory: Path) -> None:
     (directory / "sample.txt").write_bytes(("\ufeff" + "甲" * 16384 + "\r\n第二段😀\n" +
                                             "长段文字。" * 12000).encode("utf-8"))
     (directory / "invalid.txt").write_bytes(b"valid\xffinvalid")
+    for encoding in ("utf-16-le", "utf-16-be"):
+        bom = b"\xff\xfe" if encoding.endswith("le") else b"\xfe\xff"
+        text = "甲" * 24574 + "😀\r\n第二段" + "乙" * 30000 + "末尾"
+        (directory / (encoding + ".txt")).write_bytes(bom + text.encode(encoding))
+        (directory / (encoding + "-cr-run.txt")).write_bytes(bom + ("甲" + "\r" * 60000 + "乙").encode(encoding))
+        for name, data in (("odd", bom + b"x"), ("high", bom + "\ud800".encode(encoding, "surrogatepass")),
+                           ("low", bom + "\udc00".encode(encoding, "surrogatepass")),
+                           ("pair", bom + "\ud800甲".encode(encoding, "surrogatepass")),
+                           ("nul", bom + "a\x00b".encode(encoding)), ("empty", bom)):
+            (directory / (encoding + "-" + name + ".txt")).write_bytes(data)
     (directory / "gb18030.txt").write_bytes(("甲" * 24575 + "😀\ue587" + "乙" * 500 + "\r\n末尾").encode("gb18030"))
     write_fixture(directory / "valid.epub")
+    html = {name.replace("chapter1.xhtml", "chapter1.html"):
+            value.replace("chapter1.xhtml", "chapter1.html") if isinstance(value, str) else value
+            for name, value in fixture_entries().items()}
+    html["EPUB/chapter1.html"] = ('<!doctype html><html><head><script>var a="<p>&missing;";</script></head>'
+        '<body><p disabled title=unquoted>甲&nbsp;&amp;乙 < 3<br>尾\v\f段<p>末尾</body></html>')
+    write_fixture(directory / "html-body.epub", html)
+    html["EPUB/chapter1.html"] = ('<!DOCTYPE HTML><html><body>' +
+        ''.join('<p disabled>甲乙&amp;丁&nbsp;😀' + str(i) for i in range(20000)) + '</body></html>')
+    write_fixture(directory / "html-body-parts.epub", html)
+    html["EPUB/chapter1.html"] = ('<!DOCTYPE html><html><body>' +
+        ''.join('<p>甲乙丁😀' + str(i) + '</p>' for i in range(20000)) +
+        '<input disabled><p>尾部</p></body></html>')
+    write_fixture(directory / "html-late-repair.epub", html)
+    for kind, prefix in (("tree", "<p><div>prefix{}</div></p>"),
+                         ("comment", "<p>a<!--boundary-->bb{}</p>"),
+                         ("void", "<p><br><span>prefix{}</span></br></p>"),
+                         ("namespace", '<p><q:span xmlns:q="urn:source">prefix{}</q:span></p>')):
+        html["EPUB/chapter1.html"] = ('<!DOCTYPE html><html><body>' +
+            ''.join(prefix.format(i) for i in range(25000)) +
+            '<br/><input disabled><p>尾部</p></body></html>')
+        write_fixture(directory / ("html-late-" + kind + ".epub"), html)
+    html["EPUB/chapter1.html"] = ('<!DOCTYPE html><html><body><p><![CDATA[' +
+        '甲<乙&😀' * 30000 + ']]></p><input disabled><p>尾部</p></body></html>')
+    write_fixture(directory / "html-late-cdata.epub", html)
+    html["EPUB/chapter1.html"] = '\ufeff<!DOCTYPE html><html><body><p disabled>有 BOM 的正文</p></body></html>'
+    write_fixture(directory / "html-bom.epub", html)
+    for kind, name in (("script", "script"), ("script-case", "ScRiPt"), ("script-ns", "x:script"),
+                       ("style", "style"), ("style-case", "StYlE"), ("style-ns", "x:style")):
+        local = "script" if kind.startswith("script") else "style"
+        payload = ('var x="&missing; </scriptx> 甲😀"; if (a<b) f();' if local == "script" else
+                   'a::before {content: "&missing; </stylex> 甲😀 if(a<b)";}')
+        before_close = '<!DOCTYPE html><html xmlns:x="urn:raw"><head><' + name + '>' + payload
+        before_close += ' ' * ((4093 - len(before_close.encode("utf-8"))) % 4096)
+        html["EPUB/chapter1.html"] = before_close + '</' + name.swapcase() + '></head><body><p>正文</p></body></html>'
+        write_fixture(directory / ("html-raw-" + kind + ".epub"), html)
+    html["EPUB/chapter1.html"] = ('<!DOCTYPE html><html><head><script>var x=1;</script>'
+        '<style>a {content: "&lt;safe&gt;";}</style><script/><style/></head><body><p disabled>正文</p></body></html>')
+    write_fixture(directory / "html-raw-closed.epub", html)
+    html["EPUB/chapter1.html"] = ('<!DOCTYPE html><html xmlns:x="urn:raw"><head><input disabled>'
+        '<x:script>var x="&missing;"; if(a<b) f();</x:script>'
+        '<x:style>a {content:"&missing; if(a<b)";}</x:style></head><body><p>正文</p></body></html>')
+    write_fixture(directory / "html-raw-after-repair.epub", html)
+    for name in ("script", "style"):
+        for location in ("inner", "outer"):
+            before = '<!DOCTYPE html><html><head><' + name + '><' + name + '>'
+            if location == "outer":
+                before += 'prefix</' + name + '>'
+            html["EPUB/chapter1.html"] = (before + '&missing; if(a<b)' +
+                ('</' + name + '>&missing; if(a<b)' if location == "inner" else '') +
+                '</' + name + '></head><body><p>正文</p></body></html>')
+            write_fixture(directory / ("html-raw-nested-" + name + "-" + location + ".epub"), html)
+
+    uri = "denied:data:image/svg+xml;base64,"
+    for kind, source in (("denied", uri + 'A' * 10000), ("data", 'data:image/svg+xml;base64,' + 'A' * 10000),
+                         ("limit", uri + 'A' * (32768 - len(uri))),
+                         ("entities", uri + 'A' * (32767 - len(uri)) + '&amp;'),
+                         ("oversized", uri + 'A' * (32769 - len(uri))),
+                         ("external", 'https://example.invalid/' + 'A' * 10000)):
+        html["EPUB/chapter1.html"] = ('<!DOCTYPE html><html><body><p disabled>前文</p><img src="' +
+            source + '"/><p>后文</p></body></html>')
+        write_fixture(directory / ("html-image-" + kind + ".epub"), html)
+    html["EPUB/chapter1.html"] = '<!doctype html><html><body><p disabled>前文</p><img src="' + uri + 'A' * 10000
+    write_fixture(directory / "html-image-truncated.epub", html)
+    html["EPUB/chapter1.html"] = '<!doctype html><html><body><p title="' + 'A' * 8193 + '">正文</p></body></html>'
+    write_fixture(directory / "html-attribute-oversized.epub", html)
+
+
+
+    html["EPUB/chapter1.html"] = '<!doctype html [<!ENTITY x "bad">]><html><body>&x;</body></html>'
+    write_fixture(directory / "html-internal-dtd.epub", html)
+    html["EPUB/chapter1.html"] = '<!doctype html><html><body><p title="' + 'x' * 65537 + '">正文</p></body></html>'
+    write_fixture(directory / "html-token-limit.epub", html)
+    xhtml5 = fixture_entries()
+    xhtml5["EPUB/chapter1.xhtml"] = '<!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><body><p>严格源树</p></body></html>'
+    write_fixture(directory / "xhtml5-strict.epub", xhtml5)
+    strict_html = {name.replace("chapter1.xhtml", "chapter1.html"):
+                   value.replace("chapter1.xhtml", "chapter1.html") if isinstance(value, str) else value
+                   for name, value in xhtml5.items()}
+    write_fixture(directory / "xhtml5-strict-html-extension.epub", strict_html)
+
+    xhtml5["EPUB/chapter1.xhtml"] = '<!DOCTYPE html><html><body><p>&unknown;</p></body></html>'
+    write_fixture(directory / "xhtml5-unknown-entity.epub", xhtml5)
+    inline = fixture_entries()
+    inline["EPUB/chapter1.xhtml"] = ('<html><body><p>前文</p><img src="denied:data:image/svg+xml;base64,' +
+        'A' * 10000 + '"/><p>后文</p></body></html>')
+    write_fixture(directory / "denied-inline-image.epub", inline)
+    invalid = fixture_entries()
+    invalid["EPUB/package.opf"] = invalid["EPUB/package.opf"].replace('Pico Page 合成位置样本', 'invalid & title')
+    write_fixture(directory / "opf-unescaped-amp.epub", invalid)
     for name, text in (("short", "甲" * 8191), ("boundary", "甲" * 8192),
                        ("long", "甲" * 20000), ("spaces", "word " * 2000),
                        ("entities", "&#x7532;" * 1100), ("crlf", "a\r\n" * 3000),
@@ -195,6 +294,11 @@ def generate(directory: Path) -> None:
     entries["EPUB/cover.png"] = bytes.fromhex("89504e470d0a1a0a0000000d494844520000000200000002080600000072b60d2400000006624b474400ff00ff00ffa0bda7930000001549444154789c63606060f80f020cff19408881010048c906fa001f0d6c0000000049454e44ae426082")
     entries["EPUB/large.png"] = b"\x89PNG\r\n\x1a\n" + bytes(range(256)) * 8192
     write_fixture(directory / "image-cover.epub", entries)
+    gif_cover = dict(entries)
+    gif_cover["EPUB/chapter1.xhtml"] = entries["EPUB/chapter1.xhtml"].replace("cover.png", "cover.gif")
+    del gif_cover["EPUB/cover.png"]
+    gif_cover["EPUB/cover.gif"] = bytes.fromhex("47494638396101000100800000000000ffffff2c00000000010001000002024401003b")
+    write_fixture(directory / "gif-image-cover.epub", gif_cover)
     for kind in ("missing", "oversized", "unsupported"):
         broken = dict(entries)
         if kind == "missing":

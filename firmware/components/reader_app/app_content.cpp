@@ -549,8 +549,8 @@ void ReaderApp::Impl::finish_chapter(ContentJob& job) {
         chapter_cache = job.request.content_cache;
         chapter_cache_write_needed = job.request.content_cache_write_needed;
     } else if (!job.result.content_cache.bytes.empty()) {
+        chapter_cache_write_needed = !job.result.content_cache.from_disk;
         chapter_cache = std::make_shared<ContentCacheEntry>(std::move(job.result.content_cache));
-        chapter_cache_write_needed = true;
     }
     chapter = std::move(job.result.chapter); chapter_index = job.request.chapter;
     offset = job.result.offset;

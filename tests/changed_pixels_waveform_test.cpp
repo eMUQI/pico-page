@@ -32,7 +32,7 @@ void exercise(std::size_t phases) {
     for (unsigned to = 0; to < 16; ++to) {
         for (unsigned from = 0; from < 16; ++from) {
             // Includes all-hold, full-length, internal holds, erase-only and action 3 sequences.
-            const unsigned pattern = (to * 16 + from) % 5;
+            const unsigned pattern = to == 15 && from == 15 ? 1 : (to * 16 + from) % 5;
             for (std::size_t f = 0; f < phases; ++f) {
                 unsigned value = 0;
                 if (pattern == 1) value = f % 2 + 1;
@@ -52,7 +52,7 @@ void exercise(std::size_t phases) {
         for (unsigned from = 0; from < 16; ++from)
             for (std::size_t phase = 0; phase < phases; ++phase)
                 assert(get(output.data(), phase, to, from) ==
-                       (to == from ? 0 : get(source.data(), phase, to, from)));
+                       (to == from && to != 15 ? 0 : get(source.data(), phase, to, from)));
 }
 }
 int main() {

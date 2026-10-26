@@ -2,6 +2,7 @@
 #include "pico_page/diagnostics.h"
 #include "rtc_clock.h"
 #include "firmware_resume.h"
+#include "http_request_recovery.h"
 
 #include <algorithm>
 #include <cctype>
@@ -124,13 +125,15 @@ Result http_step(Operation operation, Result pending, std::int64_t deadline_us, 
 // http_step returns its pending value only after cancellation or its deadline.
 esp_err_t step_error(std::int64_t value) { return value == -ESP_ERR_HTTP_EAGAIN ? ESP_ERR_TIMEOUT : ESP_FAIL; }
 
-// The open step keeps the full client timeout: esp-tls waits in select() for up to that
-// timeout while TCP connects and does not re-arm its descriptor sets after a select() timeout.
+// The open step uses the remaining connection budget: esp-tls waits in select() for up to
+// that timeout and does not re-arm its descriptor sets after a select() timeout.
 // IDF closes the connection when a request header write fails, so a retry opens a new request.
 // Later steps poll the socket in 50 ms intervals.
 esp_err_t http_open(esp_http_client_handle_t client, int length,
                     std::int64_t deadline_us, const std::atomic_bool* cancelled) {
-    esp_http_client_set_timeout_ms(client, 10000);
+    const auto remaining_us = deadline_us - esp_timer_get_time();
+    if (remaining_us <= 0) return ESP_ERR_TIMEOUT;
+    esp_http_client_set_timeout_ms(client, static_cast<int>(std::min<std::int64_t>(10000, (remaining_us + 999) / 1000)));
     const auto result = http_step([&] {
         errno = 0;
         const auto value = esp_http_client_open(client, length);
@@ -521,7 +524,15 @@ bool http_request(const std::string& method, const std::string& url,
     configuration.buffer_size_tx = 4096;
     auto* client = esp_http_client_init(&configuration);
     if (!client) return fail(error, "HTTP allocation", ESP_ERR_NO_MEM);
-    const auto deadline_us = esp_timer_get_time() + 25'000'000;
+    HttpRequestRecovery recovery(method, esp_timer_get_time());
+    const auto deadline_us = recovery.deadline_us();
+    bool transport_failed = false;
+    const auto transport_failure = [&](const char* stage, esp_err_t result) {
+        transport_failed = true;
+        ESP_LOGW("pico_network", "%s failed: result=%s socket_errno=%d", stage,
+                 esp_err_to_name(result), esp_http_client_get_errno(client));
+        return fail(error, stage, result);
+    };
     auto perform = [&]() -> bool {
         for (const auto& header : headers) {
             const auto result = esp_http_client_set_header(client, header.first.c_str(), header.second.c_str());
@@ -532,7 +543,7 @@ bool http_request(const std::string& method, const std::string& url,
         auto result = http_open(client, static_cast<int>(body.size()),
                                 std::min(deadline_us, esp_timer_get_time() + 10'000'000), cancelled);
         if (cancel_requested()) return false;
-        if (result != ESP_OK) return fail(error, "HTTPS connection", result);
+        if (result != ESP_OK) return transport_failure("HTTPS connection", result);
         std::size_t sent = 0;
         while (sent < body.size()) {
             if (cancel_requested()) return false;
@@ -542,13 +553,13 @@ bool http_request(const std::string& method, const std::string& url,
                 const auto value = esp_http_client_write(client, body.data() + sent, static_cast<int>(body.size() - sent));
                 return value == 0 || (value < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) ? -ESP_ERR_HTTP_EAGAIN : value;
             }, -ESP_ERR_HTTP_EAGAIN, std::min(deadline_us, esp_timer_get_time() + 10'000'000), cancelled);
-            if (count <= 0) return fail(error, "HTTP request write", step_error(count));
+            if (count <= 0) return transport_failure("HTTP request write", step_error(count));
             sent += static_cast<std::size_t>(count);
         }
         if (cancel_requested()) return false;
         const auto length = http_headers(client, status,
                                      std::min(deadline_us, esp_timer_get_time() + 10'000'000), cancelled);
-        if (length < 0) return fail(error, "HTTP response headers", step_error(length));
+        if (length < 0) return transport_failure("HTTP response headers", step_error(length));
         if (cancel_requested()) return false;
         if (length > static_cast<std::int64_t>(response_limit)) {
             error = "HTTP response exceeds 32 KiB";
@@ -564,10 +575,10 @@ bool http_request(const std::string& method, const std::string& url,
             const int count = http_step([&] { return esp_http_client_read(client, buffer, sizeof(buffer)); },
                                        -ESP_ERR_HTTP_EAGAIN, std::min(deadline_us, esp_timer_get_time() + 5'000'000), cancelled);
             if (cancel_requested()) return false;
-            if (count < 0) return fail(error, "HTTP response read", step_error(count));
+            if (count < 0) return transport_failure("HTTP response read", step_error(count));
             if (count == 0) {
                 if (esp_http_client_is_complete_data_received(client)) break;
-                return fail(error, "Incomplete HTTP response", ESP_FAIL);
+                return transport_failure("Incomplete HTTP response", ESP_FAIL);
             }
             if (response.size() + static_cast<std::size_t>(count) > response_limit) {
                 error = "HTTP response exceeds 32 KiB";
@@ -577,12 +588,27 @@ bool http_request(const std::string& method, const std::string& url,
         }
         return !cancel_requested();
     };
-    const bool complete = perform();
-    http_close(client, true);
-    if (!complete) {
+    bool complete = false;
+    for (;;) {
+        complete = perform();
+        http_close(client, true);
+        if (complete) break;
         response.clear();
-        if (request_started && method != "GET") error += "; remote write outcome is unknown";
+        if (!recovery.retry(transport_failed, esp_timer_get_time(), cancelled && cancelled->load())) break;
+        ESP_LOGW("pico_network", "Retrying read-only request after transport failure");
+        const auto retry_at_us = esp_timer_get_time() + HttpRequestRecovery::backoff_us;
+        while (esp_timer_get_time() < retry_at_us) {
+            if (cancel_requested()) return false;
+            vTaskDelay(pdMS_TO_TICKS(5));
+        }
+        if (cancel_requested() || esp_timer_get_time() >= deadline_us) return false;
+        client = esp_http_client_init(&configuration);
+        if (!client) return fail(error, "HTTP allocation", ESP_ERR_NO_MEM);
+        status = 0;
+        error.clear();
+        transport_failed = false;
     }
+    if (!complete && request_started && method != "GET") error += "; remote write outcome is unknown";
     return complete;
 }
 

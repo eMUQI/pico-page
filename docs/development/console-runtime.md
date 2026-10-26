@@ -32,6 +32,7 @@
 | `PP 6 open Books/example.epub` | 经正常 App API 开书；路径必须存在于卡内 |
 | `PP 7 screen 12 0 256` | 导出第 12 个已确认帧从字节 0 开始的 256 字节 packed 数据 |
 | `PP 8 file Fonts/reader.ttf` | 只返回白名单资源的长度与 CRC32 |
+| `PP 14 file_head Books/sample.txt` | 返回白名单资源首部最多 256 字节的 `hex`，以及总长度 `bytes` 和实际读取长度 `count`；无偏移或长度参数 |
 | `PP 9 begin 9 cbf43926 Books/check.epub` | 开始一个 9 字节、指定 CRC32 的新资源导入 |
 | `PP 10 data 0 313233343536373839` | 写入从偏移 0 开始的十六进制数据，每块最多 2048 字节 |
 | `PP 11 commit` | 校验、同步、读回并发布；无论成功或失败都结束事务 |
@@ -43,7 +44,7 @@
 
 每次真实显示提交另发 `PP 0 FRAME number=... success=... purpose=... clean=...`。`purpose` 对应正文 0、覆盖层 1、手动刷新 2；`clean=1` 表示请求全刷路径。输入命令的 `accepted` 只表示已交给 App，不能代替后续 `FRAME success=1`。`FRAME success=1` 是驱动结果，不证明像素的物理成像或完整硬件验收。
 
-`status` 中所有内存值和 `stack_bytes` 单位均为字节。`page`、`pages` 为全书页码与总页数，统计完成前为 0；`count` 为页数统计状态：`idle`（无书或已完成）、`counting`、`waiting`（内存不足以读取下一章）、`failed`；`largest_psram` 为 PSRAM 最大连续空闲块。`crc32` 为当前画布的标准 CRC-32，兼容 `zlib.crc32()`；`revision` 仅来自已确认保存记录。`importing` 表示当前是否有资源导入，`received` 是该事务已接收字节数。不输出书籍正文、源锚点、凭据、配置原文或任意文件内容。
+`status` 中所有内存值和 `stack_bytes` 单位均为字节。`page`、`pages` 为全书页码与总页数，统计完成前为 0；`count` 为页数统计状态：`idle`（无书或已完成）、`counting`、`waiting`（内存不足以读取下一章）、`failed`；`largest_psram` 为 PSRAM 最大连续空闲块。`crc32` 为当前画布的标准 CRC-32，兼容 `zlib.crc32()`；`revision` 仅来自已确认保存记录。`importing` 表示当前是否有资源导入，`received` 是该事务已接收字节数。状态不输出书籍正文、源锚点、凭据或配置原文。`file_head` 单独提供受限的资源首部诊断，沿用资源白名单与 `file` 的忙碌／无卡门控，不读取其余内容；输出可能含用户正文，仅保存在私有证据目录，不提交。它与 `file` 一样不重置空闲计时。
 
 ## 屏幕导出
 

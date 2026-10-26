@@ -150,10 +150,12 @@ PicoPage/cache/                  可重建缓存
 
 ## 格式与兼容范围
 
-- TXT 支持 UTF-8（可带 BOM）和 GB18030，不支持 UTF-16。无 BOM 时先尝试 UTF-8，再尝试 GB18030；其他编码可能误判或无法打开。
+- TXT 支持 UTF-8（可带 BOM）、GB18030，以及带 BOM 的 UTF-16LE／UTF-16BE。无 BOM 时先尝试 UTF-8，再尝试 GB18030；UTF-16 必须保留 BOM，其他编码可能误判或无法打开。
 - EPUB 使用统一正文排版，有效长章节按段处理，当前页优先，不等待整书排完。原始 EPUB 不被改写。
 - 图片与前后的文字可排在同一页，文字不环绕图片；仅含一张图片的章节使用整个正文区域。缺失、损坏或不支持的图片显示占位，允许继续阅读，具体范围见[图片说明](../development/image-runtime.md)。
 - 表格、复杂 SVG 和复杂 CSS 有降级或拒绝范围；不支持复杂文字塑形和双向文字。
 - PDF、批注、高亮、词典、插件、阅读统计和多主题尚不支持。计划见[路线图](../planning/roadmap.md)，不构成版本承诺。
 
 [返回项目首页](../../README.md) · [文档导航](../README.md) · [问题反馈](https://github.com/eMUQI/pico-page/issues)
+
+GIF 图片在 EPUB 中只显示首帧。Graphics Interchange Format 为 CompuServe 的格式，GIF 与 Graphics Interchange Format 是其服务标记；格式及资源边界见[图片说明](../development/image-runtime.md)。

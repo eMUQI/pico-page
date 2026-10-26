@@ -14,7 +14,7 @@ struct HelpPage {
 
 // Fixed screens keep the offline guide bounded and independent of a reading session.
 inline constexpr std::array<HelpPage, 12> kHelpPages{{
-    {"开始阅读", {{{"放入书籍", "将 EPUB 或 TXT 放入 TF 卡的 Books/。文章可放在 Books/Articles/；这是默认书库目录。TXT 支持 UTF-8 和 GB18030 编码。"},
+    {"开始阅读", {{{"放入书籍", "将 EPUB 或 TXT 放入 TF 卡的 Books/。文章可放在 Books/Articles/；这是默认书库目录。TXT 支持 UTF-8、GB18030 和带 BOM 的 UTF-16。"},
                        {"打开与继续", "在书库点按一本书开始阅读，点按文件夹查看其中的书。再次打开同一本书会恢复已保存的位置；主页的「继续阅读」可打开上次阅读的书。"},
                        {"调整排版", "触摸正文中部打开工具，选择「排版」调整字体、字号和间距。点「应用到此书」只用于本书，点「设为阅读默认」用于全局；取消不保存改动。"}}}},
     {"按键与触摸", {{{"机身按键", "K1 上一页，K3 下一页。书库、目录、书签和使用说明中用于翻屏；工具和排版面板中不翻动背后的正文。K2 在所有可交互页面全刷。"},

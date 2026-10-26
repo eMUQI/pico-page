@@ -59,4 +59,4 @@ build/host/chapter_stream_probe stream build/host/document-fixtures/stream-event
 
 显示补丁验证使用 `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug -DPICO_PAGE_TEST_BSP_WAVEFORM=ON`；sanitizer 配置同样开启该选项。配置会调用 `tools/setup_bsp.sh` 准备并校验固定 BSP，首次需要 GitHub 网络；准备失败直接停止，不能以跳过代替通过。CI 的 Debug 与 sanitizer 均启用。
 
-`footer_waveform` 编译实际 BSP 初始化及裁剪代码，遍历全部 256 种旧/新灰阶组合，核对默认 GL16 的第 33 相、完整 GL16 的第 45 相白→白维护驱动（从零计）、Gray8 无新增脉冲、变化像素序列及 Overlay 对角保持。`changed_pixels_waveform` 穷举掩码位序、边界、非法几何及禁用状态；`core` 验证 FullClean、ManualRefresh、失效基准及 Overlay 的实际帧路由。分配失败仍由既有驱动退回未掩码波形，本批不修改分配或恢复流程；真机低内存、闪烁、灰底和恢复效果按 DP10 验收。
+`footer_waveform` 编译实际 BSP 初始化及裁剪代码，遍历全部 256 种旧/新灰阶组合，核对默认 GL16 的第 33 相、完整 GL16 的第 45 相白→白维护驱动（从零计）、Gray8 无新增脉冲、变化像素序列及 Overlay 的非白对角保持与白底维护。`changed_pixels_waveform` 穷举掩码位序、边界、非法几何及禁用状态；`core` 验证 FullClean、ManualRefresh、失效基准及 Overlay 的实际帧路由。分配失败仍由既有驱动退回未掩码波形，本批不修改分配或恢复流程；真机低内存、闪烁、灰底和恢复效果按 DP08／DP10 验收。

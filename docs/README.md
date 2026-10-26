@@ -62,6 +62,7 @@
 | 定位具体实现 | [文档解析](development/document-runtime.md) · [字体与分页](development/graphics-runtime.md) · [图片](development/image-runtime.md) · [存储](development/store-implementation.md) · [界面](development/ui-implementation.md) · [平台](development/platform-runtime.md) |
 | 样本与兼容探针 | [公开 EPUB](development/public-books.md) · [EPUB/KOSync 探针](development/epub-kosync-probe.md) |
 | 设备诊断 | [诊断接口](development/console-runtime.md) · [诊断工作台](development/diagnostic-workbench.md) |
+| 周期性版本测试与历史对比 | [测试基准](development/testing-baselines.md) |
 | 版本、依赖和网站 | [版本管理](development/versioning.md) · [依赖审查](development/dependency-review.md) · [网站开发](../web/README.md) · [固件托管](development/firmware-hosting.md) |
 
 ## 状态与历史资料

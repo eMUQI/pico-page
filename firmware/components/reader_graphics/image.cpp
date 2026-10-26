@@ -178,6 +178,145 @@ bool png(const std::vector<std::uint8_t>& input, int width, int height, Raster& 
     return true;
 }
 
+struct GifLzw {
+    std::array<std::uint16_t, 4096> prefix{};
+    std::array<std::uint8_t, 4096> suffix{}, stack{};
+};
+/** Decodes the first GIF frame without allocating the source-sized index raster. */
+bool gif(const std::vector<std::uint8_t>& input, int width, int height, Raster& raster, std::string& error) {
+    const auto word = [&](std::size_t at) { return unsigned(input[at]) | unsigned(input[at + 1]) << 8; };
+    if (input.size() < 13) return fail(error, "Truncated GIF header");
+    const unsigned sw = word(6), sh = word(8);
+    if (!dimensions(sw, sh)) return fail(error, "GIF exceeds 4096-pixel side or 8-megapixel limit");
+    std::size_t at = 13;
+    const std::uint8_t* global = nullptr;
+    unsigned global_count = 0;
+    if (input[10] & 128) {
+        global_count = 2U << (input[10] & 7);
+        if (global_count * 3 > input.size() - at) return fail(error, "Truncated GIF palette");
+        global = input.data() + at; at += global_count * 3;
+    }
+    bool decoded = false;
+    int transparent = -1;
+    const auto blocks = [&]() {
+        while (at < input.size()) {
+            const auto count = input[at++];
+            if (!count) return true;
+            if (count > input.size() - at) return false;
+            at += count;
+        }
+        return false;
+    };
+    while (at < input.size()) {
+        if (raster.cancelled()) return fail(error, kImageCancelled);
+        const auto marker = input[at++];
+        if (marker == 0x3b) return decoded && at == input.size() ? true : fail(error, "Invalid GIF trailer");
+        if (marker == 0x21) {
+            if (at == input.size()) return fail(error, "Truncated GIF extension");
+            const auto type = input[at++];
+            if (type == 0xf9) {
+                if (input.size() - at < 6 || input[at] != 4 || input[at + 5]) return fail(error, "Invalid GIF graphic control");
+                transparent = input[at + 1] & 1 ? input[at + 4] : -1;
+                at += 6;
+            } else if (!blocks()) return fail(error, "Truncated GIF extension");
+            continue;
+        }
+        if (marker != 0x2c || input.size() - at < 9) return fail(error, "Invalid GIF image descriptor");
+        const unsigned left = word(at), top = word(at + 2), fw = word(at + 4), fh = word(at + 6);
+        const auto flags = input[at + 8]; at += 9;
+        if (!fw || !fh || left > sw || fw > sw - left || top > sh || fh > sh - top || (flags & 0x18))
+            return fail(error, "Invalid GIF frame bounds");
+        const auto* palette = global;
+        auto colors = global_count;
+        if (flags & 128) {
+            colors = 2U << (flags & 7);
+            if (colors * 3 > input.size() - at) return fail(error, "Truncated GIF palette");
+            palette = input.data() + at; at += colors * 3;
+        }
+        if (!palette || at == input.size()) return fail(error, "Missing GIF palette or image data");
+        const unsigned minimum = input[at++];
+        if (minimum < 2 || minimum > 8) return fail(error, "Invalid GIF LZW minimum code size");
+        if (decoded) { if (!blocks()) return fail(error, "Truncated GIF animation frame"); continue; }
+        if (!raster.create(sw, sh, width, height)) return fail(error, "Image canvas allocation failed");
+        if (transparent < 0 && global && input[11] < global_count) {
+            const auto* rgb = global + input[11] * 3;
+            const unsigned gray = (((77U * rgb[0] + 150U * rgb[1] + 29U * rgb[2] + 128U) >> 8) * 15U + 127U) / 255U;
+            std::memset(raster.pixels.get(), gray | gray << 4, std::size_t(raster.stride) * raster.height);
+        }
+        std::unique_ptr<GifLzw> table(new (std::nothrow) GifLzw);
+        if (!table) return fail(error, "GIF decoder allocation failed");
+        unsigned block_left = 0, buffer = 0, buffered_bits = 0;
+        bool ended_blocks = false;
+        const auto byte = [&]() -> int {
+            if (!block_left) {
+                if (at == input.size()) return -1;
+                block_left = input[at++];
+                if (!block_left) { ended_blocks = true; return -1; }
+                if (block_left > input.size() - at) return -1;
+            }
+            --block_left; return input[at++];
+        };
+        const unsigned clear = 1U << minimum, end = clear + 1;
+        unsigned next = end + 1, bits = minimum + 1, previous = 4096, first = 0;
+        std::size_t pixels = 0;
+        unsigned x = 0, y = 0, pass = 0;
+        bool cleared = false, ended = false;
+        const auto pixel = [&](unsigned index) {
+            if (index >= colors || pixels >= std::size_t(fw) * fh || y >= fh) return false;
+            raster.sample(left + x, top + y, 1, 1, palette + index * 3, static_cast<int>(index) == transparent ? 0 : 255);
+            ++pixels;
+            if (++x == fw) {
+                x = 0;
+                if (!(flags & 64)) ++y;
+                else {
+                    static constexpr unsigned starts[]{0, 4, 2, 1}, steps[]{8, 8, 4, 2};
+                    y += steps[pass];
+                    while (y >= fh && pass < 3) y = starts[++pass];
+                }
+            }
+            return true;
+        };
+        for (;;) {
+            if (raster.cancelled()) return fail(error, kImageCancelled);
+            while (buffered_bits < bits) {
+                const auto value = byte();
+                if (value < 0) return fail(error, "Truncated GIF LZW stream");
+                buffer |= unsigned(value) << buffered_bits; buffered_bits += 8;
+            }
+            const unsigned code = buffer & ((1U << bits) - 1);
+            buffer >>= bits; buffered_bits -= bits;
+            if (code == clear) { next = end + 1; bits = minimum + 1; previous = 4096; cleared = true; continue; }
+            if (!cleared) return fail(error, "GIF LZW stream has no initial clear code");
+            if (code == end) { ended = true; break; }
+            unsigned value = code, count = 0;
+            if (code >= next) {
+                if (code != next || previous == 4096) return fail(error, "Invalid GIF LZW code");
+                table->stack[count++] = static_cast<std::uint8_t>(first); value = previous;
+            }
+            while (value >= clear) {
+                if (value >= next || count >= table->stack.size()) return fail(error, "Invalid GIF LZW dictionary");
+                table->stack[count++] = table->suffix[value]; value = table->prefix[value];
+            }
+            first = value;
+            if (count >= table->stack.size()) return fail(error, "Invalid GIF LZW sequence");
+            table->stack[count++] = static_cast<std::uint8_t>(first);
+            while (count) if (!pixel(table->stack[--count])) return fail(error, "Invalid GIF pixel stream");
+            if (previous != 4096 && next < 4096) {
+                table->prefix[next] = static_cast<std::uint16_t>(previous);
+                table->suffix[next++] = static_cast<std::uint8_t>(first);
+                if (next == (1U << bits) && bits < 12) ++bits;
+            }
+            previous = code;
+        }
+        if (!ended || pixels != std::size_t(fw) * fh || ended_blocks || block_left > input.size() - at)
+            return fail(error, "Incomplete GIF pixel stream");
+        at += block_left;
+        if (!blocks()) return fail(error, "Truncated GIF image terminator");
+        decoded = true;
+    }
+    return fail(error, "Missing GIF trailer");
+}
+
 struct JpegInput {
     const std::vector<std::uint8_t>& bytes;
     std::size_t offset = 0;
@@ -405,7 +544,9 @@ bool render_image(Canvas& canvas, const std::vector<std::uint8_t>& encoded,
         success = png(encoded, width, height, raster, error);
     else if (encoded.size() >= 3 && encoded[0] == 0xff && encoded[1] == 0xd8 && encoded[2] == 0xff)
         success = jpeg(encoded, width, height, raster, error);
-    else return fail(error, "Image format is not PNG or JPEG");
+    else if (encoded.size() >= 6 && (!std::memcmp(encoded.data(), "GIF87a", 6) || !std::memcmp(encoded.data(), "GIF89a", 6)))
+        success = gif(encoded, width, height, raster, error);
+    else return fail(error, "Image format is not PNG, JPEG or GIF");
     if (!success) return false;
     if (raster.cancelled()) return fail(error, kImageCancelled);
     x += (width - static_cast<int>(raster.width)) / 2;

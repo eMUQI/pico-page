@@ -185,11 +185,11 @@ std::uint64_t image_decode_count();
 
 inline constexpr char kImageCancelled[] = "Image decode cancelled";
 
-/** Decode PNG/JPEG centered in the box. Progressive JPEG uses a reduced-detail DC preview.
+/** Decode PNG/JPEG or the first GIF frame centered in the box. Progressive JPEG uses a reduced-detail DC preview.
  * Crop fills the box; otherwise fit the whole image.
  * Validation and decode failures leave the canvas unchanged. Temporary pixels are bounded by
  * the box dimensions; scaling tables hold one 16-bit entry per source column and row.
- * Cancellation is checked between PNG input chunks, JPEG blocks and output rows; it returns
+ * Cancellation is checked between PNG input chunks, JPEG blocks, GIF LZW codes and output rows; it returns
  * false with kImageCancelled and may leave partial pixels after output begins. When stop is
  * provided, use an unpublished destination and discard its contents on cancellation.
  */

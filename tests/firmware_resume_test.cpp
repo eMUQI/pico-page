@@ -1,4 +1,5 @@
 #include "firmware_resume.h"
+#include "http_request_recovery.h"
 
 #include <cassert>
 #include <cstdint>
@@ -9,6 +10,23 @@ using pico_page::platform::FirmwareRange;
 using pico_page::platform::FirmwareRecovery;
 
 int main() {
+    using pico_page::platform::HttpRequestRecovery;
+    constexpr std::int64_t request_started_us = 1'000'000;
+    HttpRequestRecovery read("GET", request_started_us);
+    assert(!read.retry(false, request_started_us + 100, false));
+    assert(!read.retry(true, request_started_us + 100, true));
+    assert(read.retry(true, request_started_us + 10'000'000, false));
+    assert(!read.retry(true, request_started_us + 11'000'000, false));
+    assert(read.deadline_us() == request_started_us + 25'000'000);
+    for (const auto method : {"PUT", "POST"}) {
+        HttpRequestRecovery write(method, request_started_us);
+        assert(!write.retry(true, request_started_us + 1, false));
+    }
+    HttpRequestRecovery late("GET", request_started_us);
+    assert(!late.retry(true, late.deadline_us() - HttpRequestRecovery::backoff_us, false));
+    assert(!late.retry(true, late.deadline_us(), false));
+    assert(!late.retry(true, late.deadline_us() + 1, false));
+
     FirmwareRange range;
     assert(range.accepts(200, 8192, 0, 8192));
     assert(range.accepts(200, 0, 0, 8192));

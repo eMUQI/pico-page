@@ -320,6 +320,14 @@ public:
     StoreStatus inspect_asset(const std::string& path, std::uint64_t& size,
                               std::uint32_t& crc32, std::string& error) const;
 
+    /** Reads at most the first 256 raw bytes of an inspect_asset-permitted resource.
+     * Reports its observed total size without scanning or decoding the remainder.
+     * The caller serializes card access as for inspect_asset. Unsafe paths, nonregular
+     * files and resources above 64 MiB are refused. Failure clears size and bytes.
+     */
+    StoreStatus read_asset_head(const std::string& path, std::uint64_t& size,
+                               std::string& bytes, std::string& error) const;
+
     /** Captures the original book digest and exact progress slots before a management confirmation. */
     StoreStatus book_snapshot(const std::string& path, BookSnapshot& snapshot) const;
 

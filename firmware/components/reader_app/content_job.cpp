@@ -856,7 +856,7 @@ void ContentJob::prepare_cover() {
     } else if ((read && error.find("allocation") == std::string::npos && error.find("memory") == std::string::npos) ||
                error == "EPUB has no supported cover" || error == "Invalid internal image path" ||
                error == "Missing EPUB image" || error == "EPUB image exceeds 2 MiB limit" ||
-               error == "Image format is not PNG or JPEG" || error == "Invalid compressed EPUB image") {
+               error == "Image format is not PNG, JPEG or GIF" || error == "Invalid compressed EPUB image") {
         // Read failures may be transient; only a confirmed unusable cover gets a negative entry.
         result.cache_finished = store.save_cache(request.cache_name, request.cache_header) == StoreStatus::Ok;
     }
@@ -872,11 +872,11 @@ void ContentJob::open_book() {
           document.open_verified(request.path, request.identity, result.error, stop)) || stop()) return;
     FileStore store(request.root);
     result.configuration = store.load_settings(request.relative_path);
-    result.progress = store.load_progress(request.relative_path, document.metadata().book_id,
-        document.metadata().txt_gb18030 ? kTxtGb18030Revision : request.content_revision);
+    const auto revision = document.metadata().txt_encoding == TxtEncoding::Utf8 ? request.content_revision :
+        txt_content_revision(document.metadata().txt_encoding);
+    result.progress = store.load_progress(request.relative_path, document.metadata().book_id, revision);
     if (request.kind == Kind::Open && !stop())
-        result.bookmarks = store.load_bookmarks(request.relative_path, document.metadata().book_id,
-            document.metadata().txt_gb18030 ? kTxtGb18030Revision : request.content_revision);
+        result.bookmarks = store.load_bookmarks(request.relative_path, document.metadata().book_id, revision);
     if (request.kind != Kind::Inspect && result.progress.status != StoreStatus::Ok && result.progress.status != StoreStatus::Missing &&
         result.progress.status != StoreStatus::Cleared) {
         result.error = "Reading progress cannot be read; original record preserved"; return;
@@ -943,7 +943,7 @@ void ContentJob::load_chapter() {
             cached = result.retained_cache_hit = load_content_cache(store, request.identity.book_id,
                 request.chapter_resource, request.chapter, request.part, result.chapter, stop, request.content_cache.get());
         if (!cached && !stop()) cached = load_content_cache(store, request.identity.book_id,
-            request.chapter_resource, request.chapter, request.part, result.chapter, stop);
+            request.chapter_resource, request.chapter, request.part, result.chapter, stop, nullptr, &result.content_cache);
     }
     if (stop()) { result.error = kChapterCancelled; return; }
     if (!cached && document.metadata().book_id.empty() &&
@@ -1011,7 +1011,7 @@ void ContentJob::library_covers() {
         if (stat((request.root + "/" + source.path).c_str(), &info) != 0 ||
             info.st_size != source.size || info.st_mtime != source.modified) continue;
         if (loaded) result.covers.back() = thumbnail.pixels();
-        if (loaded || error.find("allocation") == std::string::npos)
+        if (loaded || (error.find("allocation") == std::string::npos && error.find("memory") == std::string::npos))
             store.save_cache(source.cache_name, source.cache_header +
                 std::string(result.covers.back().begin(), result.covers.back().end()));
     }

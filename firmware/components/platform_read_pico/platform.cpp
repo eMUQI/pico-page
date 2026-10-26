@@ -131,8 +131,8 @@ PageWaveform page_waveform = PageWaveform::Gray16;
 bool reverse_page_effect = false;
 PresentTiming timing{};
 PageWaveform selected_effect = PageWaveform::Gray16;
-// Row/column damage masks cover unchanged pixels between keys. Hold their
-// diagonal transitions while retaining every changed pixel's source sequence.
+// Row/column damage masks cover unchanged pixels between keys. Hold equal
+// nonwhite transitions while retaining the BSP's white maintenance sequence.
 // Separate immutable tables keep the driver's phase cache valid for both modes.
 template<std::size_t Phases>
 struct ChangedPixelsTable {
