@@ -2140,14 +2140,15 @@ struct ReaderApp::Impl final : DisplayBackend {
     int typography_preview_bottom() const { return font_picker_open ? 500 : preview_bottom; }
     void draw_font_picker();
     void cancel_font_picker() {
+        abandon_content();
         draft.font = font_entry;
         draft.font_weight = font_entry_weight;
         reset_overrides = font_entry_reset;
         font_picker_open = false;
-        draw_typography();
+        draw_typography(false);
     }
     void font_picker_control(int id);
-    void draw_typography();
+    void draw_typography(bool prepare_images = true);
     static std::string weight_name(const std::string &weight) {
         return weight == "light" ? "细" : weight == "medium" ? "中粗" : weight == "bold" ? "粗" : "常规";
     }

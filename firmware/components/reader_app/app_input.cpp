@@ -1009,7 +1009,10 @@ void ReaderApp::Impl::input(const AppInput &input) {
     } else release_counting();
     if (content_loading) {
         if (!input.touch && input.event.input == Input::K2) force_refresh();
-        else if (!input.queued && input.touch && loading_cancel.contains(input.x, input.y)) {
+        else if (!input.queued && input.touch && (loading_cancel.contains(input.x, input.y) ||
+                 (font_picker_open && std::any_of(hits.begin(), hits.end(), [&](const Hit& hit) {
+                     return hit.id == FontCancel && hit.contains(input.x, input.y);
+                 })))) {
             const auto& request = pending_content ? *pending_content : foreground_job->request;
             const auto kind = request.kind;
             const bool preview = request.preview;
@@ -1021,6 +1024,7 @@ void ReaderApp::Impl::input(const AppInput &input) {
             if (kind == ContentJob::Kind::Chapter && sync_return) { recover_body(); return; }
             if (kind == ContentJob::Kind::LockScreenList || kind == ContentJob::Kind::LockScreenPreview) draw_power();
             else if (mapping) { sync_cancelled(false); draw_sync(); }
+            else if (preview && font_picker_open) cancel_font_picker();
             else if (preview) draw_tools();
             else draw_library();
             overlay();

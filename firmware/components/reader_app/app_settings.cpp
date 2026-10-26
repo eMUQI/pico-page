@@ -129,14 +129,16 @@ void ReaderApp::Impl::font_picker_control(int id) {
 }
 
 
-void ReaderApp::Impl::draw_typography() {
+void ReaderApp::Impl::draw_typography(bool prepare_images) {
     view = View::Typography;
     hits.clear();
     canvas.clear();
     load_fonts(&draft);
     const auto spec = layout(draft, 64, typography_preview_bottom());
     const auto preview = plan_page(offset, spec);
-    if (async_content && !image_prepared && preview.error.empty() && !preview.images.empty()) {
+    if (!prepare_images && !preview.images.empty()) {
+        text("预览暂不可用", 36, 96, 28);
+    } else if (async_content && !image_prepared && preview.error.empty() && !preview.images.empty()) {
         // The worker prepares the image; the panel stays visible and only cancelling is accepted.
         begin_image(offset, preview, true);
         text("正在准备图片…", 36, 300, 26, 400, 3);

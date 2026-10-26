@@ -407,6 +407,10 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
                 foreground_job->result.error = "Image worker unavailable";
                 complete_inline_image(*foreground_job); foreground_job.reset(); return;
             }
+            if (foreground_job->request.preview && font_picker_open) {
+                foreground_job.reset(); content_loading = false;
+                draw_typography(false); overlay(); return;
+            }
             foreground_job.reset(); content_loading = false;
             error("内容任务无法启动，请返回后重试。");
         }

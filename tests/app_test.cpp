@@ -766,6 +766,37 @@ static void font_picker_image_test(const fs::path& root, const fs::path& fixture
     assert(std::equal(selected.begin(), selected.begin() + 500 * app.canvas().stride(), app.canvas().pixels().begin()));
     d.tap(150, 1140); d.present(); d.complete_content();
     assert(app.view() == View::Typography);
+    // Keep earlier size/weight edits across queued, running, completed and failed previews.
+    d.tap(580, 1020); d.present(); d.complete_content();
+    d.tap(240, 820); d.present(); d.complete_content();
+    d.tap(580, 1020); d.present(); d.complete_content();
+    const auto draft_pixels = app.canvas().pixels();
+    auto assert_draft = [&] {
+        assert(app.view() == View::Typography);
+        assert(std::equal(draft_pixels.begin() + 605 * app.canvas().stride(), draft_pixels.end(),
+                          app.canvas().pixels().begin() + 605 * app.canvas().stride()));
+        assert(app.saved_record() == saved);
+        assert(read(root / "Books/book.epub.picopage/progress.json") == progress);
+        assert(!fs::exists(root / "PicoPage/settings.toml"));
+    };
+    for (int mode = 0; mode < 4; ++mode) {
+        d.tap(90, 820); d.present(); d.complete_content();
+        if (mode == 1) ContentJob::delay_starts_for_test(ContentJob::Kind::Image, std::chrono::seconds(30));
+        if (mode == 3) ContentJob::fail_starts_for_test(ContentJob::Kind::Image, 1, ContentJob::StartFailure::InternalMemory);
+        d.tap(300, 760); d.present();
+        if (mode == 1) app.poll_background();
+        if (mode >= 2) d.complete_content();
+        // Both the central loading cancel and the footer cancel return to the draft.
+        d.tap(mode == 1 ? 300 : 150, mode == 1 ? 400 : 1140); d.present();
+        assert_draft();
+        d.complete_content();
+        assert_draft();
+        assert(!app.pending_frame());
+        ContentJob::delay_starts_for_test(ContentJob::Kind::Image, std::chrono::milliseconds{});
+        const auto cancelled = app.canvas().pixels();
+        d.refresh();
+        assert(app.canvas().pixels() == cancelled && !app.content_busy());
+    }
     d.close(); d.present(); d.complete_content();
     assert(app.view() == View::Reading && app.saved_record() == saved);
     assert(!fs::exists(root / "PicoPage/settings.toml"));
