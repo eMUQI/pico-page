@@ -287,7 +287,6 @@
   "required_files": [
     "AGENTS.md",
     "README.md",
-    "CODEX_START.md",
     "docs/planning/decisions.md",
     "docs/development/architecture.md",
     "docs/development/storage.md",

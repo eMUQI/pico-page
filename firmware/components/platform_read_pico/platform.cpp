@@ -814,11 +814,7 @@ bool poll(Event& event, std::string& error) {
             return true;
         }
     }
-    // A controller read must not make the application wait for its I/O timeout.
-    if (xSemaphoreTake(touch_lock, 0) == pdTRUE) {
-        if (xQueueReceive(touch_events, &event, 0) == pdTRUE) touch_moves.receive(event);
-        xSemaphoreGive(touch_lock);
-    }
+    if (xQueueReceive(touch_events, &event, 0) == pdTRUE) touch_moves.receive(event);
     return true;
 }
 
