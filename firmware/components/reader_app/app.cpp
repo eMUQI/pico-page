@@ -241,7 +241,9 @@ void ReaderApp::complete_frame(bool success) {
             impl_->close_power_menu();
         } else {
             const auto origin = impl_->origin_for(impl_->view);
-            const auto destination = origin == Impl::Origin::Reading ? "恢复已确认位置。" :
+            const bool return_help = (impl_->view == View::Onboarding && impl_->onboarding_from_help) ||
+                (impl_->view == View::Error && impl_->error_onboarding_help);
+            const auto destination = return_help ? "回到使用说明。" : origin == Impl::Origin::Reading ? "恢复已确认位置。" :
                                      origin == Impl::Origin::Settings ? "回到设置首页。" : "回到书库。";
             impl_->error(std::string(frame.region ? "屏幕局部更新失败。返回将" : "屏幕更新失败。返回将") + destination);
         }
@@ -603,6 +605,7 @@ void ReaderApp::show_power_off_help() {
 bool ReaderApp::begin_sleep() {
     if (impl_->display.busy() || impl_->power_menu_wait || impl_->usb_prepared ||
         impl_->view == View::PowerMenu || impl_->view == View::PowerOff || update_busy()) return false;
+    impl_->sleep_onboarding = impl_->view == View::Onboarding;
     impl_->sleep_origin = impl_->origin_for(impl_->view);
     impl_->sleep_destination_captured = true;
     impl_->show_sleep_wait();
@@ -655,6 +658,7 @@ bool ReaderApp::prepare_sleep() {
     if (impl_->network_worker_id || impl_->portal_live || impl_->usb_prepared || impl_->view == View::Portal || impl_->view == View::PowerMenu || impl_->view == View::PowerOff) return false;
     if (impl_->display.busy() || impl_->active_network) return false;
     if (!impl_->sleep_destination_captured) {
+        impl_->sleep_onboarding = impl_->view == View::Onboarding;
         impl_->sleep_origin = impl_->origin_for(impl_->view);
         impl_->sleep_destination_captured = true;
     }
@@ -725,7 +729,9 @@ void ReaderApp::wake(bool slept) {
     impl_->custom_notice_pending = slept && impl_->settings.sleep_screen == "custom" && !impl_->custom_notice.empty();
     if (slept) impl_->sleep_wifi_target.reset();
     else cancel_sleep();
-    if (impl_->sleep_origin == Impl::Origin::Reading && impl_->has_book()) {
+    if (impl_->sleep_onboarding) {
+        impl_->draw_onboarding(); impl_->overlay(true);
+    } else if (impl_->sleep_origin == Impl::Origin::Reading && impl_->has_book()) {
         if (impl_->async_content) impl_->open(impl_->book_path);
         else impl_->recover_body();
     } else {
@@ -748,7 +754,9 @@ void ReaderApp::card_removed() {
     impl_->ui.open_fallback();
     impl_->body.open_fallback();
     impl_->effective_font.clear();
-    impl_->error("TF 卡已移除。请重新插卡并重启设备。");
+    if (impl_->view == View::Onboarding) {
+        impl_->draw_onboarding(); impl_->overlay();
+    } else impl_->error("TF 卡已移除。请重新插卡并重启设备。");
 }
 bool ReaderApp::save_due() const {
     return !impl_->portal_live && impl_->view != View::PowerMenu && impl_->view != View::PowerOff &&

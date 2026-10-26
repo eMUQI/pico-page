@@ -21,7 +21,7 @@
 | R9 | 书签 | [界面](../development/ui-implementation.md#书签)与[存储](../development/storage.md) |
 | R10 | 可选翻页效果 | [界面](../development/ui-implementation.md#翻页效果)；持久化与单书覆盖后置 |
 | R11 | OTA 升级 | [设备更新实现](../development/platform-runtime.md#固件更新)；[后续候选](#r11--ota-升级) |
-| R12 | 内置使用说明 | [使用说明界面](../development/ui-implementation.md#使用说明) |
+| R12 | 首次引导与内置使用说明 | [使用说明界面](../development/ui-implementation.md#使用说明) |
 | R13 | 双设备近场文件传输 | [R13](#r13--双设备近场文件传输)，技术方式待评估 |
 | R14 | 左右轻扫翻屏／翻页 | [输入规则](../development/ui-implementation.md#输入与刷新) |
 | R15 | 离线词典与正文取词 | [计划](dictionary-plan.md)；[界面](../development/ui-implementation.md#离线词典)；[后置范围](#r15--离线词典与正文取词) |
@@ -191,7 +191,7 @@ TF 卡升级暂不推进；候选为把固件放入 `PicoPage/update/` 后在设
 
 ## R12 · 首次开机引导或内置使用说明
 
-采用固定入口的内置说明，当前行为见[使用说明界面](../development/ui-implementation.md#使用说明)。未来 R7 等操作改变时核对设备帮助，不将未实现功能写为可用。
+2026-10-26 按 S00 设计新增三屏首次引导，与固定入口的 12 屏内置说明并存，取代原先不增加首次开机流程的方案。首次引导只教翻页和打开工具；放书仍由空书库说明负责。使用说明首页可重看，返回说明且不改完成标记。当前行为与兼容策略见[首次开机引导](../development/ui-implementation.md#首次开机引导)，设备验收见 ONB01–ONB07。未来 R7 等操作改变时核对设备帮助，不将未实现功能写为可用。
 
 ## R13 · 双设备近场文件传输
 

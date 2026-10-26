@@ -116,9 +116,11 @@ def main() -> int:
     check(len(agents.encode('utf-8')) < 16000, 'Root AGENTS is too long for this handoff')
     font_ext = {'.ttf', '.otf', '.ttc', '.otc', '.woff', '.woff2', '.dfont'}
     licensed_fallback = ROOT / 'firmware/components/reader_graphics/fonts/PicoPageFallback.otf'
+    welcome_subset = licensed_fallback.parent / "PicoPageWelcome.ttf"
+    check((licensed_fallback.parent / "LXGW-OFL.txt").is_file(), "Missing welcome font license")
     web_sample = ROOT / 'web/public/assets/fonts/PicoPageWenKaiSample.woff'
-    check(all(p in (licensed_fallback, web_sample) for p in project_files() if p.suffix.lower() in font_ext),
-          'Unexpected font file outside the reviewed embedded UI subset and the website sample')
+    check(all(p in (licensed_fallback, welcome_subset, web_sample) for p in project_files() if p.suffix.lower() in font_ext),
+          'Unexpected font file outside the reviewed embedded UI/welcome subsets and the website sample')
     check((ROOT / 'web/public/downloads/LXGWWenKai-v1.520-OFL.txt').is_file(), 'Missing website sample font license')
     check((licensed_fallback.parent / 'Noto-OFL.txt').is_file(), 'Missing embedded font license')
 

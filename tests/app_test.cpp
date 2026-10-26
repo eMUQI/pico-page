@@ -201,6 +201,13 @@ struct Driver {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
         }
+        // These scenarios start from the library. Exercise the explicit skip when their
+        // fresh fixture now boots into onboarding; onboarding_test owns guide assertions.
+        if (app.view() == View::Onboarding) {
+            tap(300, 1120);
+            assert(app.pending_frame());
+            present_at(line);
+        }
     }
     void complete_content() {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
@@ -780,6 +787,7 @@ static void font_picker_image_test(const fs::path& root, const fs::path& fixture
         fs::create_hard_link(local_font, root / ("Fonts/Picker" + std::to_string(i) + ".ttf"));
     ReaderApp app(root.string(), "font-picker-image", true, true); Driver d{app};
     assert(app.initialize()); d.present(); opened(app, "Books/book.epub"); d.present(); d.complete_content();
+    const auto global_before = read(root / "PicoPage/settings.toml");
     const auto saved = app.saved_record();
     const auto progress = read(root / "Books/book.epub.picopage/progress.json");
     d.tap(342, 500); d.present();
@@ -824,7 +832,7 @@ static void font_picker_image_test(const fs::path& root, const fs::path& fixture
                           app.canvas().pixels().begin() + 605 * app.canvas().stride()));
         assert(app.saved_record() == saved);
         assert(read(root / "Books/book.epub.picopage/progress.json") == progress);
-        assert(!fs::exists(root / "PicoPage/settings.toml"));
+        assert(read(root / "PicoPage/settings.toml") == global_before);
     };
     for (int mode = 0; mode < 4; ++mode) {
         d.tap(90, 820); d.present(); d.complete_content();
@@ -846,7 +854,7 @@ static void font_picker_image_test(const fs::path& root, const fs::path& fixture
     }
     d.close(); d.present(); d.complete_content();
     assert(app.view() == View::Reading && app.saved_record() == saved);
-    assert(!fs::exists(root / "PicoPage/settings.toml"));
+    assert(read(root / "PicoPage/settings.toml") == global_before);
 }
 
 static void layout_review_test(const fs::path& root, const fs::path& fixtures, const fs::path& font, bool async) {

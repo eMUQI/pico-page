@@ -141,7 +141,7 @@ enum Control {
     PortalStop,
     WifiSettings,
     WifiToggle,
-    Help, About,
+    Help, About, OnboardingReplay, OnboardingStart, OnboardingFinish,
     HelpPrevious, HelpTools, HelpNext, HelpPosition, HelpDevice,
     HelpKey1, HelpKey2, HelpKey3, ResumeDetails,
     SyncCancel,
@@ -341,6 +341,15 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void prepare_next(const std::function<bool()>& stop);
     ReaderSettings settings, draft;
+    enum class OnboardingStep { Welcome, PageTurn, Tools };
+    OnboardingStep onboarding_step = OnboardingStep::Welcome;
+    bool onboarding_from_help = false, onboarding_middle_hint = false;
+    bool sleep_onboarding = false, error_onboarding_help = false;
+    void draw_onboarding();
+    void start_onboarding(bool from_help);
+    void finish_onboarding();
+    void onboarding_input(const AppInput& input);
+    void draw_turn_regions(int x, int y, int width, int height, int selected, bool labels, std::uint8_t divider = 1);
     std::size_t help_page = 0;
     int help_zone = HelpTools, help_key = HelpKey2, help_position = 0, help_device = 0;
     SettingsSnapshot edit_snapshot;
@@ -673,7 +682,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     PageEffect page_effect = PageEffect::Off;
     bool refresh_from_settings = false, import_from_settings = false, help_from_settings = false, typography_from_settings = false;
     Origin origin_for(View source) const;
-    static const char *return_label(Origin origin) {
+    const char *return_label(Origin origin) const {
+        if (view == View::Error && error_onboarding_help) return "返回使用说明";
         switch (origin) {
         case Origin::Reading: return "恢复阅读";
         case Origin::Library: return "返回书库";
@@ -682,6 +692,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         return "返回书库";
     }
     void return_to_origin(Origin origin, bool full = false) {
+        if (view == View::Error && error_onboarding_help) {
+            error_onboarding_help = false; help_page = 0; draw_help(); overlay(full); return;
+        }
         if (origin == Origin::Reading && has_book()) { recover_body(); return; }
         if (origin == Origin::Settings) {
             draft = {}; edit_snapshot = {}; reset_overrides = false;
@@ -1164,12 +1177,12 @@ struct ReaderApp::Impl final : DisplayBackend {
         canvas.fill_rect(x + w - weight, y, weight, h, gray);
     }
     void button(int id, const std::string &title, int x, int y, int w, int h = 88,
-                bool selected = false, int size = 28) {
+                bool selected = false, int size = 28, bool bold = false) {
         if (selected)
             canvas.fill_rect(x, y, w, h, 1);
         else
             outline(x, y, w, h);
-        center(title, x, y + (h - size) / 2 - 3, w, size, selected ? 15 : 1);
+        center(title, x, y + (h - size) / 2 - 3, w, size, selected ? 15 : 1, bold);
         hits.push_back({x, y, w, h, id});
     }
     /**
@@ -1462,6 +1475,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             fonts.push_back(settings.font);
     }
     bool initialize() {
+        const bool first_boot = store.needs_onboarding();
         refresh_badge_config();
         if (!ui.open(root + "/Fonts/NotoSansSC-Regular.otf") && !ui.open_fallback())
             return false;
@@ -1479,6 +1493,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         scan_library();
         draw_library();
         update_boot();
+        if (first_boot && view == View::Library) start_onboarding(false);
         overlay(true);
         return true;
     }
@@ -2788,13 +2803,14 @@ struct ReaderApp::Impl final : DisplayBackend {
         const std::array<Hit, 5> zones{{{x, y, left, foot, HelpPrevious},
             {x + left, y, right - left, foot, HelpTools}, {x + right, y, width - right, foot, HelpNext},
             {x, y + foot, device, height - foot, HelpPosition}, {x + device, y + foot, width - device, height - foot, HelpDevice}}};
+        draw_turn_regions(x, y, width, foot, help_zone, false, 9);
         for (const auto& zone : zones) {
             const bool hidden = help_page == 3 && ((zone.id == HelpPosition && help_position == 4) ||
                 (zone.id == HelpDevice && help_device == 2));
-            canvas.fill_rect(zone.x, zone.y, zone.w, zone.h, zone.id == help_zone && !hidden ? 1 : 15);
+            if (zone.id >= HelpPosition)
+                canvas.fill_rect(zone.x, zone.y, zone.w, zone.h, zone.id == help_zone && !hidden ? 1 : 15);
             hits.push_back(zone);
         }
-        for (int split : {left, right}) canvas.line(x + split, y, x + split, y + foot, 9, 2);
         canvas.line(x, y + foot, x + width, y + foot, 9, 2);
         canvas.line(x + device, y + foot, x + device, y + height, 9, 2);
         outline(x, y, width, height);
@@ -2814,6 +2830,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             y += 48;
             y += wrapped(section.body, 36, y, 612, 26);
             y += 36;
+        }
+        if (help_page == 0) {
+            value_row(OnboardingReplay, "重新观看开机引导", "", "", 1000, 82);
         }
         if (help_page == 1) text("下一屏可直接点按试一试", 36, 1058, 24, 612, 3);
         footer_bar("", help_page, kHelpPages.size());

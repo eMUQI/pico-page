@@ -7,6 +7,7 @@ void ReaderApp::Impl::error(const std::string &text_in, const std::string &retry
     sleep_wait_footer.reset();
     sleep_wait_restore_pending = false;
     // Repainting an error must retain the destination captured when it first appeared.
+    if (view != View::Error) error_onboarding_help = view == View::Onboarding && onboarding_from_help;
     error_origin = origin_for(view);
     image_viewing = false;
     viewer_original.reset();
@@ -48,11 +49,11 @@ void ReaderApp::Impl::error(const std::string &text_in, const std::string &retry
         text(title, 36, 784, 32, 612, 1, true);
         title_lines(body, 36, 850, 612, 26, false, 3);
         note(error_origin == Origin::Reading ? "保留最后确认的位置。" :
-             error_origin == Origin::Settings ? "返回将回到设置首页。" : "返回将回到书库。", 1012);
+             error_onboarding_help ? "返回将回到使用说明。" : error_origin == Origin::Settings ? "返回将回到设置首页。" : "返回将回到书库。", 1012);
     } else {
         canvas.clear();
         header(retry.empty() ? "暂时无法继续" : "无法打开", unsaved || resumes ? 0 : Back,
-               error_origin == Origin::Settings ? "设置" : "书库");
+               error_onboarding_help ? "使用说明" : error_origin == Origin::Settings ? "设置" : "书库");
         title_lines(title, 36, 160, 612, 40, true);
         int y = 160 + std::min(wrapped(title, 0, 0, 612, 40, false), 96) + 28;
         if (!body.empty()) y += wrapped(body, 36, y, 612, 28) + 28;
@@ -496,6 +497,8 @@ void ReaderApp::Impl::control(int id) {
         return;
     }
     switch (id) {
+    case OnboardingReplay:
+        start_onboarding(true); break;
     case Help:
         help_from_settings = view == View::Settings;
         message.clear(); help_page = 0; draw_help();
@@ -999,6 +1002,7 @@ void ReaderApp::Impl::input(const AppInput &input) {
     if (accepted && view == View::TextEntry && key_input(input)) return;
     if (!accepted || display.busy() || view == View::Sleeping || view == View::PowerOff)
         return;
+    if (view == View::Onboarding) { onboarding_input(input); return; }
     if (view == View::Dictionary || view == View::DictionarySettings) {
         if (input.queued) return;
         if (!input.touch) {

@@ -154,6 +154,8 @@ ReaderApp::Impl::Origin ReaderApp::Impl::origin_for(View source) const {
         return typography_from_settings ? Origin::Settings : body_origin;
     case View::Refresh: case View::RefreshConfirm: case View::RefreshInterval: case View::PageEffects:
         return refresh_from_settings ? Origin::Settings : body_origin;
+    case View::Onboarding:
+        return onboarding_from_help ? Origin::Settings : Origin::Library;
     case View::Help:
         return help_from_settings ? Origin::Settings : Origin::Library;
     case View::Import: case View::UsbTransfer: case View::Portal:

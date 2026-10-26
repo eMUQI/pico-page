@@ -77,11 +77,12 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
         return false;
     }
     if (!(book ? allowed_fields(table, {"schema_version", "reader", "display"}, "", diagnostic)
-               : allowed_fields(table, {"schema_version", "reader", "display", "library", "power", "network", "dictionary"}, "", diagnostic)) ||
+               : allowed_fields(table, {"schema_version", "reader", "display", "library", "power", "network", "dictionary", "onboarding"}, "", diagnostic)) ||
         !allowed_fields(toml_get(table, "reader"), {"font", "font_weight", "font_size_px", "line_height", "margin_x_px", "paragraph_gap_lines", "indent_chars"}, "reader", diagnostic) ||
         !allowed_fields(toml_get(table, "display"), {"refresh_preset", "balanced_full_refresh_pages", "fast_full_refresh_pages"}, "display", diagnostic) ||
         !allowed_fields(toml_get(table, "library"), {"roots", "view", "sort", "folders"}, "library", diagnostic) ||
         !allowed_fields(toml_get(table, "dictionary"), {"enabled"}, "dictionary", diagnostic) ||
+        !allowed_fields(toml_get(table, "onboarding"), {"done"}, "onboarding", diagnostic) ||
         !allowed_fields(toml_get(table, "network"), {"wifi_enabled"}, "network", diagnostic) ||
         !allowed_fields(toml_get(table, "power"), {"auto_sleep_minutes", "sleep_screen", "sleep_image", "sleep_overlay"}, "power", diagnostic)) return false;
 
@@ -139,6 +140,13 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
         if (value.type != TOML_INT64 || value.u.int64 < 1 || value.u.int64 > 30) return false;
         (std::strcmp(field, "display.fast_full_refresh_pages") == 0 ? settings.fast_full_refresh_pages
                                                                  : settings.balanced_full_refresh_pages) = static_cast<int>(value.u.int64);
+    }
+    value = toml_seek(table, "onboarding.done");
+    if (value.type != TOML_UNKNOWN) {
+        diagnostic.field = "onboarding.done";
+        diagnostic.detail = "expected a boolean";
+        if (value.type != TOML_BOOLEAN) return false;
+        settings.onboarding_done = value.u.boolean;
     }
     value = toml_seek(table, "network.wifi_enabled");
     if (value.type != TOML_UNKNOWN) {
@@ -293,6 +301,7 @@ SettingValues setting_values(const ReaderSettings& values, bool global = false) 
             enabled += quoted(path);
         }
         fields.emplace_back("dictionary.enabled", enabled + "]");
+        fields.emplace_back("onboarding.done", values.onboarding_done ? "true" : "false");
         fields.emplace_back("network.wifi_enabled", values.wifi_enabled ? "true" : "false");
         fields.emplace_back("library.view", quoted(values.library_view));
         fields.emplace_back("library.sort", quoted(values.library_sort));
@@ -486,6 +495,7 @@ StoreStatus save_settings(const std::string& root, const SettingsSnapshot& snaps
                        values.library_folders != effective.library_folders ||
                        values.dictionary_enabled != effective.dictionary_enabled ||
                        values.wifi_enabled != effective.wifi_enabled ||
+                       values.onboarding_done != effective.onboarding_done ||
                        values.auto_sleep_minutes != effective.auto_sleep_minutes || values.sleep_screen != effective.sleep_screen || values.sleep_image != effective.sleep_image ||
                        values.sleep_overlay != effective.sleep_overlay))) {
         error = "library.roots is read-only; library.view, library.sort, library.folders, power, network and dictionary fields are global only";
