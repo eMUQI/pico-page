@@ -54,3 +54,9 @@ build/host/chapter_stream_probe stream build/host/document-fixtures/stream-event
 ## 首次引导
 
 `onboarding_test` 覆盖新卡三屏、两处跳过、K2／左右键和轻扫、排队及重复尾部、同屏休眠恢复、重看不写标记及错误返回、无卡与提交失败重启、旧配置／历史／书旁进度与备份、扫描上限和符号链接保守回退。可传输出目录导出四张 PGM（欢迎、练习、工具、说明首页）供视觉检查。既有 app 场景的 Driver 在全新夹具首次呈现后显式跳过引导，继续原场景；字体取消仍比较进入编辑前的完整配置字节，不再假定配置文件必须不存在。
+
+## 页脚白底维护驱动
+
+显示补丁验证使用 `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug -DPICO_PAGE_TEST_BSP_WAVEFORM=ON`；sanitizer 配置同样开启该选项。配置会调用 `tools/setup_bsp.sh` 准备并校验固定 BSP，首次需要 GitHub 网络；准备失败直接停止，不能以跳过代替通过。CI 的 Debug 与 sanitizer 均启用。
+
+`footer_waveform` 编译实际 BSP 初始化及裁剪代码，遍历全部 256 种旧/新灰阶组合，核对默认 GL16 的第 33 相、完整 GL16 的第 45 相白→白维护驱动（从零计）、Gray8 无新增脉冲、变化像素序列及 Overlay 对角保持。`changed_pixels_waveform` 穷举掩码位序、边界、非法几何及禁用状态；`core` 验证 FullClean、ManualRefresh、失效基准及 Overlay 的实际帧路由。分配失败仍由既有驱动退回未掩码波形，本批不修改分配或恢复流程；真机低内存、闪烁、灰底和恢复效果按 DP10 验收。

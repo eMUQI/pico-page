@@ -70,8 +70,9 @@ bool stop_usb_storage(std::string& error);
  * region limits gray updates in portrait coordinates when the baseline is valid.
  * changed_pixels_only holds each equal old/new pixel during gray updates; clearing
  * and underrun recovery always ignore this mask and rebuild the full baseline.
- * hold_unchanged_footer holds equal pixels at portrait y >= 1128 during body
- * updates, including directional effects. Clearing and recovery ignore it.
+ * hold_unchanged_footer holds equal nonwhite pixels at portrait y >= 1128 during
+ * body updates, including directional effects; white-to-white retains the source
+ * waveform maintenance drive. Clearing and recovery ignore it.
  * A line-queue underrun with healthy power gets one full-clean retry before returning.
  * false means that the physical display state is no longer a valid baseline.
  */

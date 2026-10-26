@@ -5,7 +5,7 @@
  void epd_set_line_phase_luts(const uint8_t* const* luts, const int8_t* rows, unsigned count);
 
 +/**
-+ * Hold equal old/new grayscale pixels from first_column to the native right edge
++ * Hold equal nonwhite grayscale pixels from first_column to the native right edge
 + * during full-width S3 1ppB difference draws. Negative values disable the mask.
 + * Display owner only: enable before one logical update and disable after all
 + * synchronous draws return, including on failure. The full-screen difference

@@ -55,6 +55,7 @@ jobs:
       - if: steps.changes.outputs.host == 'true'
         run: >-
           cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug
+          -DPICO_PAGE_TEST_BSP_WAVEFORM=ON
           -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - if: steps.changes.outputs.host == 'true'
         run: cmake --build build/host --parallel 2
@@ -64,6 +65,7 @@ jobs:
         if: steps.changes.outputs.host == 'true'
         run: >-
           cmake -S . -B build/sanitized -DCMAKE_BUILD_TYPE=Debug
+          -DPICO_PAGE_TEST_BSP_WAVEFORM=ON
           -DPICO_PAGE_HOST_TRACE_EVENTS=ON
           -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
