@@ -24,6 +24,9 @@
 #include <iterator>
 #include <limits>
 #include <fcntl.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <cerrno>
 #include <sys/resource.h>
 #include <unistd.h>
 #include <utility>
@@ -41,6 +44,42 @@ extern "C" void* __wrap_malloc(std::size_t size) {
         ++failed_wait_footer_mallocs; return nullptr;
     }
     return __real_malloc(size);
+}
+#endif
+
+#ifdef PICO_PAGE_WRAP_LIBRARY_IO_TEST
+static thread_local ino_t library_fault_inode = 0;
+static thread_local dev_t library_fault_device = 0;
+static thread_local int library_read_failure_after = -1, library_read_entries = 0;
+static thread_local bool library_dirty_errno = false;
+static thread_local std::string library_stat_failure_path;
+static thread_local int library_stat_failure = 0;
+extern "C" dirent* __real_readdir(DIR* directory);
+extern "C" dirent* __wrap_readdir(DIR* directory) {
+    bool target = false;
+    if (library_fault_inode) {
+        const int prior_errno = errno;
+        struct stat info{};
+        target = fstat(dirfd(directory), &info) == 0 && info.st_ino == library_fault_inode &&
+                 info.st_dev == library_fault_device;
+        errno = prior_errno;
+    }
+    if (target && library_read_failure_after >= 0 && library_read_entries >= library_read_failure_after) {
+        errno = EIO; return nullptr;
+    }
+    auto* item = __real_readdir(directory);
+    if (target && item) {
+        if (item->d_name[0] != '.') ++library_read_entries;
+        if (library_dirty_errno) errno = EIO;
+    }
+    return item;
+}
+extern "C" int __real_lstat(const char* path, struct stat* info);
+extern "C" int __wrap_lstat(const char* path, struct stat* info) {
+    if (library_stat_failure && library_stat_failure_path == path) {
+        errno = library_stat_failure; return -1;
+    }
+    return __real_lstat(path, info);
 }
 #endif
 
@@ -1049,6 +1088,48 @@ static void release_review_test(const fs::path& root, const fs::path& fixtures, 
     assert(trimmed == first_use("RootB", std::string(40, 'b') + "/Shelf/Books"));
     assert(trimmed != first_use("RootC", std::string(40, 'a') + "/Shelf/Texts"));
 }
+#ifdef PICO_PAGE_WRAP_LIBRARY_IO_TEST
+static void library_scan_failure_test(const fs::path& base) {
+    for (int mode = 0; mode < 7; ++mode) {
+        const auto root = base / std::to_string(mode);
+        fs::create_directories(root / "Books");
+        write(root / "PicoPage/settings.toml", "schema_version=1\n[library]\nsort='name'\nview='list'\n");
+        const auto config = read(root / "PicoPage/settings.toml");
+        if (mode != 5) {
+            write(root / "Books/a.txt", "first book");
+            write(root / "Books/b.txt", "second book");
+        }
+        if (mode == 6) for (int i = 0; i < 511; ++i)
+            write(root / ("Books/extra" + std::to_string(i) + ".txt"), "book");
+        struct stat info{};
+        assert(stat((root / "Books").c_str(), &info) == 0);
+        library_fault_inode = info.st_ino; library_fault_device = info.st_dev;
+        library_read_entries = 0; library_read_failure_after = mode < 2 ? mode : -1;
+        library_stat_failure_path = (root / "Books/a.txt").string();
+        library_stat_failure = mode == 2 ? EIO : mode == 3 ? ENOENT : 0;
+        library_dirty_errno = mode == 4 || mode == 5;
+        ReaderApp app(root.string(), "library-scan-failure", true, true); Driver d{app};
+        assert(app.initialize()); d.present();
+        if (mode < 3) {
+            assert(app.status() == (mode == 0 ? "无法读取目录，请检查 TF 卡后重试" : "目录读取不完整，请检查 TF 卡后重试"));
+            const auto failed = app.canvas().pixels();
+            const auto scanned = library_read_entries;
+            d.refresh();
+            assert(app.canvas().pixels() == failed && library_read_entries == scanned);
+            library_read_failure_after = -1; library_stat_failure = 0;
+            d.tap(460, 50); d.present();
+            assert(app.view() == View::Library && app.status().empty());
+            assert(app.canvas().pixels() != failed);
+        } else if (mode == 6) {
+            assert(app.status() == "当前目录仅显示前 512 项，请分目录存放");
+            assert(library_read_entries == 512);
+        } else assert(app.status().empty());
+        assert(read(root / "PicoPage/settings.toml") == config);
+        library_fault_inode = 0; library_stat_failure = 0; library_dirty_errno = false;
+    }
+}
+#endif
+
 static void library_resume_pagination_test(const fs::path& root, const fs::path& fixtures, bool grid, bool async) {
     fs::create_directories(root / "Books");
     fs::create_directories(root / "Archive");
@@ -3178,6 +3259,9 @@ int main(int argc, char** argv) {
     font_picker_test(card / "FontPickerSync", fixtures, argv[2], false);
     font_picker_test(card / "FontPickerAsync", fixtures, argv[2], true);
     font_picker_image_test(card / "FontPickerImage", fixtures, argv[2]);
+#ifdef PICO_PAGE_WRAP_LIBRARY_IO_TEST
+    library_scan_failure_test(card / "LibraryScanFailure");
+#endif
     for (bool async : {false, true})
         for (bool grid : {false, true})
             library_resume_pagination_test(card / (std::string("ResumePages") + (grid ? "Grid" : "List") +

@@ -99,6 +99,7 @@ enum Control {
     RefreshBalanced,
     RefreshFast,
     SaveRetry,
+    LibraryRetry,
     Dismiss,
     LinkReturn,
     SyncCheck,
@@ -660,7 +661,12 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::string library_home_root;
     // The open folder is one of the configured library roots; its parent is the library.
     bool folder_root = false;
-    bool library_directory_unavailable = false;
+    enum class LibraryScan { Complete, Limited, Partial, Unavailable };
+    LibraryScan library_scan = LibraryScan::Complete;
+    bool library_scan_failed() const {
+        return library_scan == LibraryScan::Partial || library_scan == LibraryScan::Unavailable;
+    }
+    const char* library_scan_notice() const;
     reading_footer::Position footer_position = reading_footer::Position::Pages;
     reading_footer::Device footer_device = reading_footer::Device::Battery;
     bool footer_charging = false;

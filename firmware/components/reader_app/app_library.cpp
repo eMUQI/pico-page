@@ -2,11 +2,22 @@
 
 namespace pico_page {
 
+const char* ReaderApp::Impl::library_scan_notice() const {
+    switch (library_scan) {
+    case LibraryScan::Limited: return "当前目录仅显示前 512 项，请分目录存放";
+    case LibraryScan::Partial: return "目录读取不完整，请检查 TF 卡后重试";
+    case LibraryScan::Unavailable: return "无法读取目录，请检查 TF 卡后重试";
+    default: return "";
+    }
+}
+
 void ReaderApp::Impl::scan_library() {
+    if (message == library_scan_notice()) message.clear();
+    library_scan = LibraryScan::Complete;
+    library_resume_omitted = false;
     entries.clear();
     folder_root = false;
     library_home_root = settings.library_roots.size() == 1 ? settings.library_roots.front() : "";
-    library_directory_unavailable = false;
     if (!card_available)
         return;
     const auto cfg = store.load_settings();
@@ -20,18 +31,28 @@ void ReaderApp::Impl::scan_library() {
     if (listing.empty()) {
         for (const auto &path : roots) {
             struct stat st{};
-            if (safe_existing(root, path) && stat((root + "/" + path).c_str(), &st) == 0 &&
-                S_ISDIR(st.st_mode))
-                entries.push_back({path, basename(path), true});
+            errno = 0;
+            if (!safe_existing(root, path) || stat((root + "/" + path).c_str(), &st) != 0) {
+                if (errno != ENOENT) library_scan = LibraryScan::Partial;
+                continue;
+            }
+            if (S_ISDIR(st.st_mode)) entries.push_back({path, basename(path), true});
         }
     } else {
         DIR *dir = safe_existing(root, listing) ? opendir((root + "/" + listing).c_str()) : nullptr;
         if (!dir) {
-            library_directory_unavailable = true;
-            message = "无法读取目录，请检查 TF 卡";
+            library_scan = LibraryScan::Unavailable;
+            message = library_scan_notice();
             return;
         }
-        while (const auto *item = readdir(dir)) {
+        for (;;) {
+            errno = 0;
+            const auto* item = readdir(dir);
+            const int read_error = errno;
+            if (!item) {
+                if (read_error) library_scan = LibraryScan::Partial;
+                break;
+            }
             const std::string name = item->d_name;
             if (name.empty() || name[0] == '.' || name.size() > 240 ||
                 name.find(".picopage") != std::string::npos)
@@ -43,17 +64,22 @@ void ReaderApp::Impl::scan_library() {
 #else
             const int result = lstat((root + "/" + path).c_str(), &st);
 #endif
-            if (result != 0)
+            const int stat_error = errno;
+            if (result != 0) {
+                // A name may disappear between directory enumeration and metadata lookup.
+                if (stat_error != ENOENT) library_scan = LibraryScan::Partial;
                 continue;
+            }
             if (S_ISDIR(st.st_mode) || (S_ISREG(st.st_mode) && book_name(name)))
                 entries.push_back({path, name, S_ISDIR(st.st_mode)});
             if (entries.size() >= 512) {
-                message = "当前目录仅显示前 512 项，请分目录存放";
+                if (library_scan != LibraryScan::Partial) library_scan = LibraryScan::Limited;
                 break;
             }
         }
-        closedir(dir);
+        if (closedir(dir) != 0) library_scan = LibraryScan::Partial;
     }
+    if (library_scan == LibraryScan::Partial && entries.empty()) library_scan = LibraryScan::Unavailable;
     std::string history_error;
     const auto recent = library_sort == "recent" ? store.load_recent_books(history_error) : std::vector<RecentBook>{};
     library_recent = library_sort == "recent" && history_error.empty();
@@ -83,6 +109,7 @@ void ReaderApp::Impl::scan_library() {
         return library_sort == "name_desc" ? a.name > b.name : a.name < b.name;
     });
     library_page = std::min(library_page, library_pages() - 1);
+    if (library_scan != LibraryScan::Complete) message = library_scan_notice();
 }
 
 
@@ -172,9 +199,9 @@ void ReaderApp::Impl::draw_library(bool decode) {
         hits.back() = {0, 0, 396, 104, Back};
     }
     for (int x : {396, 540}) canvas.line(x, 0, x, 102, 1, 2);
-    center("导入", 396, 32, 144, 26);
+    center(library_scan_failed() ? "重试" : "导入", 396, 32, 144, 26);
     center("设置", 540, 32, 144, 26);
-    hits.push_back({396, 0, 144, 104, Import});
+    hits.push_back({396, 0, 144, 104, library_scan_failed() ? LibraryRetry : Import});
     hits.push_back({540, 0, 144, 104, Settings});
     // The card appears where reading normally starts and only when there is a book to resume.
     int top = 104;
@@ -203,22 +230,22 @@ void ReaderApp::Impl::draw_library(bool decode) {
         top = 354;
     }
     if (entries.empty() && !library_resume_omitted) {
-        if (card_available && !library_directory_unavailable && folder.empty() && top == 104) {
+        if (card_available && !library_scan_failed() && folder.empty() && top == 104) {
             draw_first_use();
-            footer_bar(notice());
+            footer_bar(library_scan == LibraryScan::Complete ? notice() : library_scan_notice());
             return;
         }
         const int y = top + 120;
-        text(!card_available ? "存储卡不可用" : library_directory_unavailable ? "无法读取书库目录" :
+        text(!card_available ? "存储卡不可用" : library_scan_failed() ? "无法读取书库目录" :
              folder.empty() ? "书库里还没有书" : "这个文件夹是空的", 36, y, 40, 612, 1, true);
-        if (!card_available || library_directory_unavailable)
+        if (!card_available || library_scan_failed())
             wrapped(!card_available ? "这不代表书籍已被删除。" : "请检查书库目录和 TF 卡。", 36, y + 76, 612, 28);
         else {
             const int height = wrapped(folder.empty() ? "把 EPUB 或 TXT 放入" + library_location() + "，或使用“导入”。"
                                                       : "用“导入”把 EPUB 或 TXT 复制到存储卡，或返回上一级。", 36, y + 76, 612, 28);
             button(Import, "导入", 24, y + 104 + height, 636, 96);
         }
-        footer_bar(notice());
+        footer_bar(library_scan == LibraryScan::Complete ? notice() : library_scan_notice());
         return;
     }
     const auto folders = static_cast<std::size_t>(std::count_if(entries.begin(), entries.end(), [](const Entry &entry) { return entry.directory; }));
@@ -290,7 +317,7 @@ void ReaderApp::Impl::draw_library(bool decode) {
             hits.push_back({24, y, 636, 126, EntryBase + static_cast<int>(i)});
         }
     }
-    footer_bar(undecoded ? "正在生成封面…" : notice(), library_page, library_pages());
+    footer_bar(library_scan != LibraryScan::Complete ? library_scan_notice() : undecoded ? "正在生成封面…" : notice(), library_page, library_pages());
     if (undecoded && async_content) {
         ContentJob::Request request;
         request.kind = ContentJob::Kind::LibraryCovers; request.root = root;

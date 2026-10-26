@@ -566,6 +566,10 @@ void ReaderApp::Impl::control(int id) {
             overlay();
         }
         return;
+    case LibraryRetry:
+        scan_library();
+        draw_library();
+        break;
     case Retry:
         if (!retry_path.empty()) open(retry_path);
         return;
