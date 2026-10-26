@@ -104,6 +104,7 @@ struct ReaderSettings {
     std::string library_folders = "first";  // Global only: first or recent.
     std::string library_sort = "recent";  // Global only: recent, name or name_desc.
     std::vector<std::string> dictionary_enabled;  // Global only; ordered metadata paths below Dictionaries/.
+    bool onboarding_done = false;  // Global only; successful first-boot completion.
     bool wifi_enabled = true;  // Global only; applies to station and access-point sessions.
     int auto_sleep_minutes = 10;  // Global only; 0 disables idle sleep.
     std::string sleep_screen = "cover";  // Global only: cover, reading, simple or custom.
@@ -271,6 +272,8 @@ public:
      * A missing layer is normal. Font availability is resolved by the renderer.
      */
     ConfigResult load_settings(const std::string& book_path = "") const;
+    /** Boot-only metadata check; ambiguous or bounded-out legacy scans suppress onboarding. */
+    bool needs_onboarding() const;
 
     /** Captures both configuration layers and their effective values for editing. */
     SettingsSnapshot settings_snapshot(const std::string& book_path = "") const;

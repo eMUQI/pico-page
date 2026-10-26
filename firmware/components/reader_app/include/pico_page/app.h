@@ -12,6 +12,7 @@
 namespace pico_page {
 enum class View {
     Library,
+    Onboarding,
     Reading,
     Tools,
     Contents,

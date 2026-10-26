@@ -125,6 +125,11 @@ add_dependencies(image_cache_bench document_fixtures_target)
 target_link_libraries(image_cache_bench PRIVATE reader_app)
 target_compile_options(image_cache_bench PRIVATE -Wall -Wextra -Werror)
 
+add_executable(onboarding_test tests/onboarding_test.cpp)
+target_link_libraries(onboarding_test PRIVATE reader_app)
+target_compile_options(onboarding_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME onboarding COMMAND onboarding_test)
+
 add_executable(app_test tests/app_test.cpp)
 add_dependencies(app_test document_fixtures_target dictionary_fixtures_target)
 target_link_libraries(app_test PRIVATE reader_app)

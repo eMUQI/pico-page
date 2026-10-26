@@ -89,3 +89,9 @@ fonttools 只用于维护生成步骤，普通构建不需要它。字体子集�
 常规字重（`regular`）保留所选字体文件的原有字重，旧配置显式指定 `-Bold`、`-Medium` 或 `-Light` 文件时不会自动替换成 Regular 文件；重新选择字体也恢复到该文件的原有字重。其他字重选择仍优先使用已安装的同族文件。
 
 请求 Medium/Bold 而无对应同族文件时，优先以 Regular 同族文件合成；若仅有已加权的字体文件，则标记请求字重不可用，不在其上再次加粗。字重不可用单独提示「所选字重不可用，保留字体原有字重」，不报告字体文件缺失。
+
+## 欢迎页文楷子集
+
+首次引导副标题使用 `fonts/PicoPageWelcome.ttf`，由 `tools/setup_fonts.py` 已固定 SHA-256 的 LXGWWenKai v1.520 生成，只保留「花一分钟，学会翻页和打开工具。」的字形。生成入口为 `python3 tools/setup_onboarding_font.py`，名称改为 Pico Page Welcome，保留原版权与 OFL 元数据，分发时保留 `LXGW-OFL.txt`。本批使用环境现有 fontTools 4.61.1，普通构建不依赖 fontTools。
+
+更新 UI 子集时保留 `fallback_characters.txt` 全部旧字符，再合入 `app_onboarding.cpp`；本批仅补入缺失符号「≡」，「‹ ›」及中文原已覆盖。验证字体 cmap 包含所有引导文案和欢迎副标题；内置 UI 字库仍使用现有 Regular／合成粗体。新子集映射 Flash，不复制整个文件到 RAM；只在欢迎绘制期间打开临时 face，绘制后释放。

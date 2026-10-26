@@ -1248,6 +1248,56 @@ std::vector<RecentBook> FileStore::load_recent_books(std::string& error) const {
     return {};
 }
 
+bool FileStore::needs_onboarding() const {
+    struct stat root_info{};
+    if (inspect(root_.c_str(), &root_info) != 0) return errno == ENOENT;
+    if (!S_ISDIR(root_info.st_mode)) return false;
+    const auto exists_or_unknown = [&](const std::string& path) {
+        struct stat info{};
+        return inspect((root_ + "/" + path).c_str(), &info) == 0 || errno != ENOENT;
+    };
+    for (const char* path : {"PicoPage/settings.toml", "PicoPage/settings.toml.bak",
+                            "PicoPage/network.toml", "PicoPage/network.toml.bak",
+                            "PicoPage/sync.toml", "PicoPage/sync.toml.bak",
+                            "PicoPage/data/last-book.txt", "PicoPage/data/last-book.txt.bak",
+                            "PicoPage/data/recent-books.txt", "PicoPage/data/recent-books.txt.bak"})
+        if (exists_or_unknown(path)) return false;
+    // Without global settings the only configured library root is Books. A bounded
+    // metadata walk also recognizes moved books that retain only their sidecars.
+    const auto safety = store_internal::safe_path(root_, "Books");
+    if (safety != StoreStatus::Ok && safety != StoreStatus::Missing) return false;
+    unsigned remaining = 2000;
+    const auto legacy = [&](const auto& self, const std::string& path, unsigned depth) -> bool {
+        if (depth >= 6 || path.size() > 512) return true;
+        struct stat info{};
+        if (inspect((root_ + "/" + path).c_str(), &info) != 0) return errno != ENOENT;
+        if (!S_ISDIR(info.st_mode)) return true;
+        DIR* dir = opendir((root_ + "/" + path).c_str());
+        if (!dir) return true;
+        bool found = false;
+        while (!found) {
+            errno = 0;
+            const auto* entry = readdir(dir);
+            if (!entry) { found = errno != 0; break; }
+            const std::string name = entry->d_name;
+            if (name == "." || name == "..") continue;
+            if (!remaining) { found = true; break; }
+            --remaining;
+            const auto child = path + "/" + name;
+            if (inspect((root_ + "/" + child).c_str(), &info) != 0) { found = true; break; }
+            if (!S_ISDIR(info.st_mode)) continue;
+            if (name.size() >= 9 && name.compare(name.size() - 9, 9, ".picopage") == 0) {
+                found = exists_or_unknown(child + "/progress.json") ||
+                        exists_or_unknown(child + "/progress.json.bak") ||
+                        exists_or_unknown(child + "/settings.toml");
+            } else if (name.front() != '.') found = self(self, child, depth + 1);
+        }
+        if (closedir(dir) != 0) found = true;
+        return found;
+    };
+    return !legacy(legacy, "Books", 0);
+}
+
 StoreStatus FileStore::save_last_book(const std::string& book_path, std::string& error, std::int64_t utc) const {
     error.clear();
     const auto safe = store_internal::safe_path(root_, book_path);

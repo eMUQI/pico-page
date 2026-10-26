@@ -73,7 +73,7 @@ void ReaderApp::Impl::draw_sleep(const std::string &sync_state) {
     load_fonts();
     if (has_book() && !restore_confirmed_position()) return;
     const auto position = has_book() ? book_position(offset, offset) : std::string("位置已保存");
-    const char *resume_hint = sleep_origin == Origin::Settings ? "按电源键返回设置" :
+    const char *resume_hint = sleep_onboarding ? "按电源键继续引导" : sleep_origin == Origin::Settings ? "按电源键返回设置" :
                               sleep_origin == Origin::Library ? "按电源键返回书库" : "按电源键继续阅读";
     if (settings.sleep_screen == "custom" && custom_sleep_image) {
         canvas = *custom_sleep_image;
