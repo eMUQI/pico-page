@@ -14,6 +14,7 @@
 #include "esp_attr.h"
 #include "ripple.h"
 #include "rtc_clock.h"
+#include "sleep_io.h"
 
 #include <algorithm>
 #include <atomic>
@@ -89,6 +90,7 @@ QueueHandle_t touch_events = nullptr;
 TouchMoves touch_moves;
 // Serializes controller reads, contact publication/reception and sleep mode changes.
 SemaphoreHandle_t touch_lock = nullptr;
+SleepIo sleep_io;
 // Asks the sampler to cancel the contact in progress and ignore input until release.
 std::atomic<bool> suppress_touch{true};
 // Faster sampling is limited to contacts and their settling interval to reduce idle CPU use.
@@ -172,6 +174,38 @@ bool on_owner(std::string& error) {
         return false;
     }
     return true;
+}
+
+// All register restoration and touch resets run under the sampler lock. Failed
+// restoration stays pending so neither sampling nor panel control can use parked I/O.
+bool restore_sleep_io_locked(std::string& error) {
+    const auto result = sleep_io.resume();
+    if (result == ESP_OK) return true;
+    std::string detail;
+    failure(detail, "Sleep I/O resume", result);
+    if (!error.empty()) error += "; ";
+    error += detail;
+    return false;
+}
+
+bool restore_sleep_io(std::string& error) {
+    if (!sleep_io.pending()) return true;
+    xSemaphoreTake(touch_lock, portMAX_DELAY);
+    const bool restored = restore_sleep_io_locked(error);
+    xSemaphoreGive(touch_lock);
+    return restored;
+}
+
+bool suspend_sleep_io_locked(bool host_off, std::string& error) {
+    if (!restore_sleep_io_locked(error)) return false;
+    suppress_touch = true;
+    xQueueReset(touch_events);
+    touch_moves.clear();
+    const auto result = sleep_io.suspend(touch, host_off);
+    if (result == ESP_OK) return true;
+    failure(error, "Sleep I/O suspend", result);
+    restore_sleep_io_locked(error);
+    return false;
 }
 
 void copy_portrait(const std::uint8_t* packed) {
@@ -391,6 +425,10 @@ void sample_touch(void*) {
         }
         cst836u_touch_t sample{};
         xSemaphoreTake(touch_lock, portMAX_DELAY);
+        if (sleep_io.pending()) {
+            xSemaphoreGive(touch_lock);
+            continue;
+        }
         // Publish the sampled event before sleep can acquire the controller boundary.
         set_touch_pending(false);
         const auto result = cst836u_read(touch, &sample);
@@ -594,6 +632,7 @@ Battery battery() { return battery_state; }
 bool finish_power(std::string& error) {
     error.clear();
     if (!on_owner(error) || !ready || usb_owns_card) return false;
+    if (!restore_sleep_io(error)) return false;
     epd_poweroff(); rails_deadline = 0;
     if (mounted) {
         const auto result = read_pico_sd_release();
@@ -612,9 +651,18 @@ bool power_off(std::string& error) {
     const auto* snapshot = read_pico_pmu_get();
     if (!snapshot->identity_ok || !(snapshot->caps & PMU_CAP_HOST_EN_CONTROL))
         return failure(error, "PMU power-off unavailable", ESP_ERR_NOT_SUPPORTED);
+    xSemaphoreTake(touch_lock, portMAX_DELAY);
+    if (!suspend_sleep_io_locked(true, error)) {
+        xSemaphoreGive(touch_lock);
+        return false;
+    }
     const auto result = read_pico_pmu_power_off();
-    if (result != ESP_OK) return failure(error, "PMU power-off", result);
-    return true;
+    if (result != ESP_OK) {
+        failure(error, "PMU power-off", result);
+        restore_sleep_io_locked(error);
+    }
+    xSemaphoreGive(touch_lock);
+    return result == ESP_OK;
 }
 
 bool refresh_card(std::string& error) {
@@ -662,6 +710,10 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
     if (!display_ready || packed == nullptr || size != framebuffer_bytes ||
         (region && !region->fits(width, height))) {
         return failure(error, "Panel frame", ESP_ERR_INVALID_ARG);
+    }
+    if (!restore_sleep_io(error)) {
+        baseline_valid = false;
+        return false;
     }
     const bool clear = full_clean || !baseline_valid;
     const EpdWaveform* pixel_table = nullptr;
@@ -772,6 +824,7 @@ bool poll(Event& event, std::string& error) {
         InputGuard() { xSemaphoreTake(touch_lock, portMAX_DELAY); }
         ~InputGuard() { xSemaphoreGive(touch_lock); }
     } input_guard;
+    if (!restore_sleep_io_locked(error)) return false;
     if (sleep_report.due && now >= sleep_report.due) {
         sleep_report.due = 0;
         ESP_LOGI(tag, "Light sleep: wakes=%d rejected=%d pmu_retries=%d touch_edges=%d touch_low=%d "
@@ -852,19 +905,16 @@ bool sleep(std::string& error, bool& entered_sleep) {
         error = "USB storage must stop before sleep";
         return false;
     }
+    if (!restore_sleep_io(error)) return false;
     epd_poweroff();
     rails_deadline = 0;
     sleep_report = {};
     // The sampler must not address the controller between standby and its reset on wake.
     xSemaphoreTake(touch_lock, portMAX_DELAY);
     // Contacts during preparation do not veto sleep and must not survive a cancelled handoff.
-    suppress_touch = true;
-    xQueueReset(touch_events);
-    touch_moves.clear();
-    auto result = cst836u_set_mode(touch, CST836U_MODE_DEEPSLEEP);
-    if (result != ESP_OK) {
+    if (!suspend_sleep_io_locked(false, error)) {
         xSemaphoreGive(touch_lock);
-        return failure(error, "Touch standby", result);
+        return false;
     }
 
     const auto irq = static_cast<gpio_num_t>(READ_PICO_IOE_INT_GPIO);
@@ -872,7 +922,7 @@ bool sleep(std::string& error, bool& entered_sleep) {
     config.pin_bit_mask = 1ULL << READ_PICO_IOE_INT_GPIO;
     config.mode = GPIO_MODE_INPUT;
     config.pull_up_en = GPIO_PULLUP_ENABLE;
-    result = gpio_config(&config);
+    auto result = gpio_config(&config);
     bool slept = false;
     const auto idle_deadline = esp_timer_get_time() + 2'000'000;
     while (result == ESP_OK && esp_timer_get_time() < idle_deadline) {
@@ -923,7 +973,8 @@ bool sleep(std::string& error, bool& entered_sleep) {
     }
     gpio_wakeup_disable(irq);
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
-    const auto touch_result = cst836u_wake(touch);
+    if (result != ESP_OK) failure(error, "Light sleep", result);
+    const bool restored = restore_sleep_io_locked(error);
     if (entered_sleep) {
         suppress_touch = true;
         xQueueReset(touch_events);
@@ -934,14 +985,12 @@ bool sleep(std::string& error, bool& entered_sleep) {
     if (entered_sleep) power_ignore_until = esp_timer_get_time() + 300'000;
     // Reconnect outside touch_lock, including when wake cleanup failed.
     if (entered_sleep) reconnect_usb_console();
-    if (touch_result != ESP_OK) failure(error, "Touch resume", touch_result);
-    else if (result != ESP_OK) failure(error, "Light sleep", result);
-    else if (!slept && error.empty()) error = "Power key or wake interrupt did not become idle";
+    if (!slept && error.empty()) error = "Power key or wake interrupt did not become idle";
     if (entered_sleep) {
         sleep_report.result = error;
         sleep_report.due = esp_timer_get_time() + sleep_report_delay_us;
     }
-    return slept && touch_result == ESP_OK;
+    return slept && restored;
 }
 
 } // namespace pico_page::platform

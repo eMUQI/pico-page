@@ -163,12 +163,18 @@ Battery battery();
  * An aborted preparation preserves a cancelling long press for the next poll.
  * USB storage must be stopped. After an actual sleep, the USB console is briefly
  * disconnected to request host enumeration; existing host handles must reopen.
+ * Panel/TF pins use sleep-only pulldowns. Saved IO-expander registers are restored
+ * before touch reset on wake, cancellation or preparation failure. Incomplete
+ * recovery is retried before sampling or display control can resume.
  */
 bool sleep(std::string& error, bool& entered_sleep);
 
 /** Drops panel rails and attempts TF release after all file consumers stop. Failure does not resume I/O. */
 bool finish_power(std::string& error);
-/** Requests PMU power-off after a final-frame and finish_power attempt, including release failure. */
+/** Parks touch/IO-expander and requests PMU power-off after a final-frame and
+ * finish_power attempt, including release failure. On failure restores peripherals
+ * for the manual-off frame; files stay closed and application work must not resume.
+ * A failed restoration remains pending and blocks sampling/display until retried. */
 bool power_off(std::string& error);
 
 /** Attempts deferred RTC persistence on the application task at an idle boundary.

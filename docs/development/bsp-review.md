@@ -77,3 +77,10 @@ ESP-IDF 锁为 v6.1 commit `fff9895c82d744c7237be8847347bdd1b07c6643`，本机�
 实现前核对锁定官方源码的 `main/apps/app_pmu.c`、`main/factory/pmu_selftest.c`、`components/read_pico_pmu/read_pico_pmu.c` 与协议文档。官方演示通过 `TIME_SYNC` 写 UTC 秒并用 `TIME_GET` 读回；自检检查 `time_ok`、`time_synced` 和秒差。Pico Page 使用相同公开协议，时钟来源采用真实 SNTP 回包，不移植工厂自检的时间来源。官方文档的 PMU 复位失效与 LSI 漂移限制保留。
 
 `firmware/patches/read-pico-rtc-response.patch` 仅修改构建副本的 `read_pico_pmu.c`：每次 `TIME_GET` 开始清除 `time_ok`；成功响应必须恰为协议规定的 8 字节才更新快照，否则返回 `ESP_ERR_INVALID_RESPONSE`。防止旧快照或 CRC 正确但长度不足的响应被当作本次有效时间。官方 commit、下载原件和组件 tree SHA 不变。组件仍为 Apache-2.0，保留源文件版权与许可证；新增适配由项目实现，不引入新依赖或复制工厂校准代码。
+
+
+## 2026-10-26 · 睡眠 IO 停放移植
+
+保留 BSP 锁定 `5f3406deec33304de8801046db583dec7c49e55b` 及原有五个构建补丁。`platform_read_pico/sleep_io.cpp` 参考上游 [read_pico_board.c](https://github.com/MindReset/read_pico_firmware/blob/a2a63a6a2c606540be72156a6567392d948d65fc/components/read_pico/read_pico_board.c) 的睡眠引脚、MODE／Port1 停放与关机 CW_INT 设置；来源 commit 为 `a2a63a6a2c606540be72156a6567392d948d65fc`，原组件 Apache-2.0，保留版权与许可标识，沿用平台目录完整 LICENSE。另加 `read-pico-sd-busy.patch`，在 `state_lock` 内读取 BSP 的 `probe_state`，仅暴露探卡／挂载／卸载是否进行中；不代表应用文件工作已停止，也不预约卡所有权。浅睡在此状态为忙时拒绝交接，拔卡不能把忙状态掩盖。该补丁不改变原有五个补丁或原件；同为 Apache-2.0。没有引入官方 main 应用、CPU 私有休眠接口、音频或默认锁屏策略。
+
+本项目通过原有 GPIO、FCA9555 及 CST836U 公开接口实现：停放前读取运行寄存器快照，恢复时先释放 CW_INT，再恢复输出；全部扩展器恢复完成后才复位触摸。与上游不同，任一步写入或恢复失败都保留可重试状态，既有采样锁排除 BSP 输出缓存与直接寄存器写入交错。未修改 VCOM、波形、校准或 PMU 协议。适配和资源边界见 [运行时说明](platform-runtime.md#睡眠-gpio-与外设恢复)，实测状态见开发记录。

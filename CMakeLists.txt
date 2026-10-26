@@ -200,6 +200,12 @@ target_compile_definitions(rtc_clock_test PRIVATE time=rtc_test_time settimeofda
 target_compile_options(rtc_clock_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME rtc_clock COMMAND rtc_clock_test)
 
+add_executable(sleep_io_test tests/sleep_io_test.cpp firmware/components/platform_read_pico/sleep_io.cpp)
+target_include_directories(sleep_io_test PRIVATE tests/sleep_io_stubs firmware/components/platform_read_pico)
+target_compile_features(sleep_io_test PRIVATE cxx_std_17)
+target_compile_options(sleep_io_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME sleep_io COMMAND sleep_io_test)
+
 add_executable(portal_server_test tests/portal_server_test.cpp
     firmware/components/platform_read_pico/portal_server.cpp)
 target_include_directories(portal_server_test PRIVATE tests/portal_stubs

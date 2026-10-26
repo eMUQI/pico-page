@@ -25,7 +25,8 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_LIST_DIR}/patches/epdiy-row-phases.patch"
     "${CMAKE_CURRENT_LIST_DIR}/patches/epdiy-footer-hold.patch"
     "${CMAKE_CURRENT_LIST_DIR}/patches/epdiy-unchanged-pixels.h"
-    "${CMAKE_CURRENT_LIST_DIR}/patches/read-pico-rtc-response.patch")
+    "${CMAKE_CURRENT_LIST_DIR}/patches/read-pico-rtc-response.patch"
+    "${CMAKE_CURRENT_LIST_DIR}/patches/read-pico-sd-busy.patch")
 set(READ_PICO_ADAPTED "${CMAKE_CURRENT_BINARY_DIR}/pico_bsp")
 file(REMOVE_RECURSE "${READ_PICO_ADAPTED}/read_pico")
 file(MAKE_DIRECTORY "${READ_PICO_ADAPTED}")
@@ -35,6 +36,12 @@ execute_process(COMMAND git apply --unsafe-paths
     WORKING_DIRECTORY "${READ_PICO_ADAPTED}/read_pico" RESULT_VARIABLE patch_result)
 if(NOT patch_result EQUAL 0)
     message(FATAL_ERROR "Cannot apply checked SD ownership patch")
+endif()
+execute_process(COMMAND git apply --unsafe-paths
+    "${CMAKE_CURRENT_LIST_DIR}/patches/read-pico-sd-busy.patch"
+    WORKING_DIRECTORY "${READ_PICO_ADAPTED}/read_pico" RESULT_VARIABLE sd_busy_patch_result)
+if(NOT sd_busy_patch_result EQUAL 0)
+    message(FATAL_ERROR "Cannot apply SD busy-state patch")
 endif()
 list(APPEND EXTRA_COMPONENT_DIRS "${READ_PICO_ADAPTED}/read_pico")
 file(REMOVE_RECURSE "${READ_PICO_ADAPTED}/epdiy")
