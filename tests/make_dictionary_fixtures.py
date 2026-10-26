@@ -51,6 +51,7 @@ def main():
     records += [('duplicate', f'meaning {i:03} '.encode() + b'x' * 100) for i in range(600)]
     records += [('omega', ('long ' + '中文' * 700).encode()), ('中文', '词条释义'.encode())]
     make(root, 'compressed', records, synonyms=[('alias', 0), ('alias', 2), ('alias', 2), ('别名', 604)])
+    make(root, 'query-short', [('中', '单字释义'.encode())])
     make(root, 'ui-entries', [('sample', f'entry {i:02d}'.encode()) for i in range(33)])
     make(root, 'repetitive', [('sample', b'a' * 100000)], block_size=60000)
     make(root, 'han-short', [('中', b'short match')])

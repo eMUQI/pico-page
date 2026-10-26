@@ -761,6 +761,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::chrono::steady_clock::time_point mapping_start_retry{};
     std::optional<ContentJob::Request> pending_content;
     std::shared_ptr<DictionarySession> dictionary_session;
+    std::shared_ptr<DictionaryQuery> dictionary_query;
     std::vector<DictionaryItem> dictionary_items;
     std::vector<std::string> dictionary_ready;
     std::size_t dictionary_list_page = 0, dictionary_source = 0, dictionary_entry = 0, dictionary_entry_base = 0;

@@ -5,6 +5,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -27,6 +28,8 @@ bool fail_queue = false, fail_task = false;
 unsigned allocations = 0, creations = 0;
 #ifdef PICO_PAGE_WRAP_CALLOC_TEST
 std::atomic<unsigned> fail_calloc_on{0}, failed_callocs{0};
+std::string counted_dictionary;
+std::atomic<unsigned> preparation_attempts{0};
 #endif
 std::size_t internal_free = 128 * 1024, internal_largest = 64 * 1024;
 std::size_t psram_free = 4 * 1024 * 1024, psram_largest = 3 * 1024 * 1024;
@@ -39,6 +42,11 @@ void finish(pico_page::ContentJob& job) {
 }
 }
 #ifdef PICO_PAGE_WRAP_CALLOC_TEST
+extern "C" FILE* __real_fopen(const char*, const char*);
+extern "C" FILE* __wrap_fopen(const char* path, const char* mode) {
+    if (path == counted_dictionary) ++preparation_attempts;
+    return __real_fopen(path, mode);
+}
 extern "C" void* __real_calloc(std::size_t count, std::size_t size);
 extern "C" void* __wrap_calloc(std::size_t count, std::size_t size) {
     auto remaining = fail_calloc_on.load();
@@ -404,6 +412,93 @@ int main(int argc, char** argv) {
         query.relative_path = "../main.ifo";
         ContentJob unsafe(query); assert(unsafe.start()); finish(unsafe);
         assert(unsafe.result.dictionary_status.status == dict::Status::InvalidFormat);
+        // Full preparation of a bad IDX tail is attempted once across all eight lengths.
+        const auto copy_dictionary = [&](const char* fixture, const char* name) {
+            for (const auto* suffix : {".ifo", ".idx", ".dict.dz"})
+                fs::copy_file(fs::path(argv[2]) / (std::string(fixture) + suffix),
+                              dictionaries / (std::string(name) + suffix), fs::copy_options::overwrite_existing);
+        };
+        copy_dictionary("query-short", "short");
+        copy_dictionary("query-short", "tail");
+        const auto tail_index = dictionaries / "tail.idx";
+        { std::fstream index(tail_index, std::ios::binary | std::ios::in | std::ios::out);
+          index.seekp(-1, std::ios::end); index.put(static_cast<char>(255)); }
+        const std::vector<std::string> words = {"中", "中文", "中文甲", "中文甲乙", "中文甲乙丙",
+            "中文甲乙丙丁", "中文甲乙丙丁戊", "中文甲乙丙丁戊己"};
+        for (const bool remember : {false, true}) {
+            query.dictionary_query = remember ? std::make_shared<pico_page::DictionaryQuery>() : nullptr;
+#ifdef PICO_PAGE_WRAP_CALLOC_TEST
+            counted_dictionary = (dictionaries / "tail.dict.dz").string(); preparation_attempts = 0;
+#endif
+            for (std::size_t length = 8; length; --length) {
+                query.relative_path = "tail.ifo";
+                query.dictionary_candidates = {{{0, length}, words[length - 1], false}};
+                ContentJob bad_tail(query); assert(bad_tail.start()); finish(bad_tail);
+                assert(bad_tail.result.dictionary_status.status == dict::Status::InvalidFormat);
+                query.relative_path = "short.ifo";
+                ContentJob good_source(query); assert(good_source.start()); finish(good_source);
+                assert(good_source.result.dictionary_status.status ==
+                       (length == 1 ? dict::Status::Ok : dict::Status::NotFound));
+                if (length == 1) assert(good_source.result.dictionary_match->word == "中");
+            }
+#ifdef PICO_PAGE_WRAP_CALLOC_TEST
+            assert(preparation_attempts == (remember ? 1U : 8U));
+            counted_dictionary.clear();
+#endif
+        }
+        assert(query.dictionary_query->preparation_failures.size() == 1);
+        // Repair alone does not change this query's decision; explicit retry does.
+        copy_dictionary("query-short", "tail"); query.relative_path = "tail.ifo";
+        ContentJob same_query(query); assert(same_query.start()); finish(same_query);
+        assert(same_query.result.dictionary_status.status == dict::Status::InvalidFormat);
+        query.dictionary_query = std::make_shared<pico_page::DictionaryQuery>();
+        ContentJob retry(query); assert(retry.start()); finish(retry);
+        assert(retry.result.dictionary_status && query.dictionary_query->preparation_failures.empty());
+        // Temporary source I/O and individual entry errors are not source preparation failures.
+        copy_dictionary("query-short", "temporary");
+        fs::rename(dictionaries / "temporary.dict.dz", dictionaries / "held.dict.dz");
+        query.relative_path = "temporary.ifo";
+        ContentJob io_error(query); assert(io_error.start()); finish(io_error);
+        assert(io_error.result.dictionary_status.status == dict::Status::IoError);
+        assert(query.dictionary_query->preparation_failures.empty());
+        fs::rename(dictionaries / "held.dict.dz", dictionaries / "temporary.dict.dz");
+        ContentJob io_retry(query); assert(io_retry.start()); finish(io_retry); assert(io_retry.result.dictionary_status);
+        copy_dictionary("invalid-field", "entry"); query.relative_path = "entry.ifo";
+        query.dictionary_candidates = {{{0, 6}, "sample", false}};
+        ContentJob entry_error(query); assert(entry_error.start()); finish(entry_error);
+        assert(entry_error.result.dictionary_status.status == dict::Status::InvalidFormat);
+        assert(query.dictionary_query->preparation_failures.empty());
+        copy_dictionary("query-short", "limited"); query.relative_path = "limited.ifo";
+        const auto limited_metadata = dictionaries / "limited.ifo";
+        std::ifstream metadata_input(limited_metadata);
+        std::string metadata{std::istreambuf_iterator<char>(metadata_input), std::istreambuf_iterator<char>()};
+        metadata_input.close();
+        const auto size_at = metadata.find("idxfilesize="); assert(size_at != std::string::npos);
+        metadata.replace(size_at, metadata.find('\n', size_at) - size_at, "idxfilesize=67108865");
+        { std::ofstream output(limited_metadata); output << metadata; }
+        ContentJob resource_error(query); assert(resource_error.start()); finish(resource_error);
+        assert(resource_error.result.dictionary_status.status == dict::Status::ResourceLimit);
+        assert(query.dictionary_query->preparation_failures.empty());
+        copy_dictionary("query-short", "limited"); query.dictionary_candidates = {{{0, 1}, "中", false}};
+        ContentJob resource_retry(query); assert(resource_retry.start()); finish(resource_retry);
+        assert(resource_retry.result.dictionary_status);
+        copy_dictionary("offset64", "unsupported"); query.relative_path = "unsupported.ifo";
+        ContentJob unsupported(query); assert(unsupported.start()); finish(unsupported);
+        assert(unsupported.result.dictionary_status.status == dict::Status::Unsupported);
+        assert(query.dictionary_query->preparation_failures.size() == 1);
+        query.dictionary_query = std::make_shared<pico_page::DictionaryQuery>();
+        query.relative_path = "short.ifo"; query.dictionary_candidates = {{{0, 1}, "中", false}};
+        ContentJob cancelled_query(query); assert(!cancelled_query.pause()); assert(cancelled_query.start());
+        while (!cancelled_query.pause() && !cancelled_query.done()) std::this_thread::yield();
+        assert(cancelled_query.pause()); cancelled_query.cancel(); finish(cancelled_query);
+        assert(cancelled_query.result.dictionary_status.status == dict::Status::Cancelled);
+        assert(query.dictionary_query->preparation_failures.empty());
+        ContentJob after_cancel(query); assert(after_cancel.start()); finish(after_cancel);
+        assert(after_cancel.result.dictionary_status);
+        internal_free = 31 * 1024;
+        ContentJob no_memory(query); assert(!no_memory.start());
+        assert(query.dictionary_query->preparation_failures.empty());
+        internal_free = 40 * 1024;
         ContentJob::Request layout;
         layout.kind = ContentJob::Kind::DictionaryPage;
         std::string rich = "<b>";

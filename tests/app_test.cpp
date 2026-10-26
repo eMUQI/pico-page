@@ -18,6 +18,7 @@
 #include <thread>
 #include <cassert>
 #include <cstdlib>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -36,6 +37,13 @@ namespace fs = std::filesystem;
 using namespace pico_page;
 
 #ifdef PICO_PAGE_WRAP_MALLOC_TEST
+static std::string counted_dictionary;
+static std::atomic<unsigned> dictionary_preparations{0};
+extern "C" FILE* __real_fopen(const char*, const char*);
+extern "C" FILE* __wrap_fopen(const char* path, const char* mode) {
+    if (path == counted_dictionary) ++dictionary_preparations;
+    return __real_fopen(path, mode);
+}
 static std::atomic<bool> fail_wait_footer_malloc{false};
 static std::atomic<unsigned> failed_wait_footer_mallocs{0};
 extern "C" void* __real_malloc(std::size_t size);
@@ -2748,6 +2756,46 @@ static void body_image_cache_checks(const fs::path& root, const fs::path& fixtur
     fs::remove(path.string() + ".tmp");
 }
 
+static void dictionary_query_failure_test(const fs::path& root, const fs::path& fixtures, const char* font) {
+#ifdef PICO_PAGE_WRAP_MALLOC_TEST
+    fs::create_directories(root / "Fonts"); fs::copy_file(font, root / "Fonts/LXGWWenKai-Regular.ttf");
+    write(root / "Books/query.txt", "中文甲乙丙丁戊己\n");
+    fs::create_directories(root / "Dictionaries");
+    const auto dict = fixtures.parent_path() / "dictionary-fixtures";
+    for (const auto* name : {"bad", "good"})
+        for (const auto* suffix : {".ifo", ".idx", ".dict.dz"})
+            fs::copy_file(dict / (std::string("query-short") + suffix),
+                          root / "Dictionaries" / (std::string(name) + suffix));
+    { std::fstream index(root / "Dictionaries/bad.idx", std::ios::binary | std::ios::in | std::ios::out);
+      index.seekp(-1, std::ios::end); index.put(static_cast<char>(255)); }
+    write(root / "PicoPage/settings.toml", "schema_version=1\n[dictionary]\nenabled=['bad.ifo','good.ifo']\n");
+    counted_dictionary = (root / "Dictionaries/bad.dict.dz").string(); dictionary_preparations = 0;
+    ReaderApp app(root.string(), "dictionary-query", true, true); Driver driver{app};
+    assert(app.initialize()); driver.present(); opened(app, "Books/query.txt"); driver.present();
+    const auto saved = app.saved_record();
+    int hit_x = -1, hit_y = -1;
+    for (int y = 64; y < 150 && hit_x < 0; ++y)
+        for (int x = 36; x < 640; ++x) if (app.can_long_press_at(x, y)) { hit_x = x; hit_y = y; break; }
+    assert(hit_x >= 0);
+    driver.hold(hit_x, hit_y); driver.present(); driver.complete_content();
+    assert(app.view() == View::Dictionary && dictionary_preparations == 1);
+    const auto short_hit = app.canvas().pixels();
+    // Choosing a source and explicit retry each start a new logical lookup.
+    driver.tap(100, 660); driver.present(); driver.complete_content();
+    driver.tap(100, 230); driver.present(); driver.complete_content();
+    assert(dictionary_preparations == 2 && app.canvas().pixels() != short_hit);
+    driver.tap(300, 1090); driver.present(); driver.complete_content();
+    assert(dictionary_preparations == 3);
+    driver.tap(600, 600); driver.present();
+    driver.hold(hit_x, hit_y); driver.present(); driver.complete_content();
+    assert(dictionary_preparations == 4 && app.canvas().pixels() == short_hit);
+    assert(app.saved_record() == saved);
+    counted_dictionary.clear();
+#else
+    (void)root; (void)fixtures; (void)font;
+#endif
+}
+
 static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, const char* font) {
     fs::create_directories(root / "Fonts"); fs::copy_file(font, root / "Fonts/LXGWWenKai-Regular.ttf");
     write(root / "Books/dictionary.txt", "omega apple alias duplicate 中文\nReading continues on the same page.\n");
@@ -3200,6 +3248,7 @@ int main(int argc, char** argv) {
     char temporary[] = "/tmp/pico-app-XXXXXX";
     const char* directory = mkdtemp(temporary); assert(directory);
     const fs::path card(directory), fixtures(argv[1]);
+    dictionary_query_failure_test(card / "DictionaryQuery", fixtures, argv[2]);
     dictionary_ui_test(card / "Dictionary", fixtures, argv[2]);
     body_image_cache_checks(card / "body-image-cache", fixtures);
     bool tested_origin = false;

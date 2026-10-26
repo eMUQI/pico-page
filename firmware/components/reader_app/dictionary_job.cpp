@@ -112,6 +112,13 @@ void ContentJob::read_dictionary() {
     if (request.kind == Kind::DictionaryLookup && (request.dictionary_candidates.empty() || request.dictionary_candidates.size() > 36)) {
         finish({dictionary::Status::InvalidFormat, "Invalid dictionary candidates"}); return;
     }
+    auto* query = request.kind == Kind::DictionaryLookup ? request.dictionary_query.get() : nullptr;
+    if (query) {
+        const auto& failures = query->preparation_failures;
+        const auto found = std::find_if(failures.begin(), failures.end(),
+            [&](const auto& entry) { return entry.first == request.relative_path; });
+        if (found != failures.end()) { finish(found->second); return; }
+    }
     dictionary::Verification temporary;
     auto* verification = &temporary;
     if (request.dictionary_session) {
@@ -126,7 +133,12 @@ void ContentJob::read_dictionary() {
     }
     dictionary::Dictionary reader;
     auto status = reader.open_prepared(path, store, *verification, stop);
-    if (!status) { finish(std::move(status)); return; }
+    if (!status) {
+        if (query && query->preparation_failures.size() < 32 &&
+            (status.status == dictionary::Status::InvalidFormat || status.status == dictionary::Status::Unsupported))
+            query->preparation_failures.emplace_back(request.relative_path, status);
+        finish(std::move(status)); return;
+    }
     result.dictionary_info = reader.info(); result.dictionary_reused = reader.reused_index();
     if (request.kind == Kind::DictionaryPrepare) return;
     if (request.kind == Kind::DictionaryRead) {

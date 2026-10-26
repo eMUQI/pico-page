@@ -82,6 +82,13 @@ struct ChapterSession {
 struct DictionarySession {
     std::vector<std::pair<std::string, dictionary::Verification>> verified;
 };
+/** One logical lookup, shared by its sequential candidate/source jobs only.
+ * Remember definitive source preparation failures, never entry or transient failures.
+ * A new selection or explicit retry gets a new instance; cancelled jobs retain theirs.
+ */
+struct DictionaryQuery {
+    std::vector<std::pair<std::string, dictionary::Result>> preparation_failures;
+};
 struct DictionaryItem {
     std::string id;
     dictionary::Info info;
@@ -149,6 +156,7 @@ public:
         std::shared_ptr<PaginationSession> session;
         std::shared_ptr<ChapterSession> chapter_session;
         std::shared_ptr<DictionarySession> dictionary_session;
+        std::shared_ptr<DictionaryQuery> dictionary_query;
         /** One dictionary per job: relative_path identifies its metadata below Dictionaries. */
         std::vector<dictionary::Candidate> dictionary_candidates;
         std::uint32_t dictionary_ordinal = 0;
