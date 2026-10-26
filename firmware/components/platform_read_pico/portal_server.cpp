@@ -6,6 +6,7 @@
 #include <charconv>
 #include <cstdio>
 #include <iterator>
+#include <optional>
 #include <vector>
 
 #include <atomic>
@@ -25,6 +26,7 @@ httpd_handle_t server = nullptr;
 UploadServer upload_session;
 std::string upload_token, upload_path;
 std::atomic_bool resolver_running{false};
+std::atomic_bool upload_stopping{true};
 SemaphoreHandle_t resolver_stopped = nullptr;
 std::uint32_t portal_address = 0;  // Network byte order.
 
@@ -106,7 +108,8 @@ esp_err_t upload(httpd_req_t* request) {
         ~Activity() {
             if (upload_session.activity) upload_session.activity(upload_session.context, false);
         }
-    } activity;
+    };
+    std::optional<Activity> activity;
     std::unique_ptr<FileImport> transaction;
     auto fail = [&](Refusal refusal) {
         std::string cleanup_error;
@@ -122,7 +125,9 @@ esp_err_t upload(httpd_req_t* request) {
         return ESP_FAIL; // An unread request body requires closing the connection.
     };
     const auto* cancelled = upload_session.cancelled;
-    if (header(request, "X-Pico-Token", 32) != upload_token) return fail(session_ended);
+    if (upload_stopping.load() || (cancelled && cancelled->load())) return fail(closed);
+    if (upload_token.empty() || header(request, "X-Pico-Token", 32) != upload_token) return fail(session_ended);
+    activity.emplace();
     const auto encoded = header(request, "X-Pico-Name", 720);
     std::string name;
     for (std::size_t i = 0; i < encoded.size(); ++i) {
@@ -360,18 +365,31 @@ bool start_upload_server(const UploadServer& session, std::string& error) {
     check.uri = "/check";
     check.method = HTTP_POST;
     check.handler = upload;
+    upload_stopping.store(false);
     return start_server({page, save, check}, access_point ? redirect : address_required, access_point, error);
 }
 
 void stop_portal_server() {
+    upload_stopping.store(true);
     if (resolver_stopped) {
         resolver_running.store(false);
         xSemaphoreTake(resolver_stopped, portMAX_DELAY);
         vSemaphoreDelete(resolver_stopped);
         resolver_stopped = nullptr;
     }
-    if (server) httpd_stop(server);
-    server = nullptr;
+    bool reported = false;
+    while (server) {
+        const auto result = httpd_stop(server);
+        if (result == ESP_OK) { server = nullptr; break; }
+        // A failed stop leaves handlers able to access the caller's session and mutex.
+        // Keep both the handle and borrowed resources alive until the SDK confirms exit.
+        if (!reported) ESP_LOGE("pico_portal", "Server stop failed, retaining session and retrying: %s", esp_err_to_name(result));
+        reported = true;
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    upload_session = {};
+    upload_token.clear();
+    upload_path.clear();
 }
 
 } // namespace pico_page::platform

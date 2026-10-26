@@ -199,3 +199,11 @@ target_compile_features(rtc_clock_test PRIVATE cxx_std_17)
 target_compile_definitions(rtc_clock_test PRIVATE time=rtc_test_time settimeofday=rtc_test_settimeofday)
 target_compile_options(rtc_clock_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME rtc_clock COMMAND rtc_clock_test)
+
+add_executable(portal_server_test tests/portal_server_test.cpp
+    firmware/components/platform_read_pico/portal_server.cpp)
+target_include_directories(portal_server_test PRIVATE tests/portal_stubs
+    firmware/components/platform_read_pico/include)
+target_link_libraries(portal_server_test PRIVATE reader_store reader_core)
+target_compile_options(portal_server_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME portal_server COMMAND portal_server_test)

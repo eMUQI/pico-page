@@ -331,6 +331,7 @@ void run_portal(NetworkJob &job) {
         }
     }
     job.operation.cancelled->store(true);
+    // Stop retries retain this stack session and its mutex until every HTTP handler exits.
     platform::stop_portal_server();
     if (!job.station || !retained_station())
         release_radio(holds.manual_suspended ? manual_paused : "");

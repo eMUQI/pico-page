@@ -256,8 +256,9 @@ struct UploadServer {
     /** Called on the server task after each file is committed and verified; may be null. */
     void (*saved)(void* context, const std::string& name) = nullptr;
     void* context = nullptr;
-    /** Every upload/check handler starts with true and ends with false, after file cleanup.
-     * Called on the single server task, including failed requests; may be null.
+    /** Authenticated upload/check handlers start with true and end with false after cleanup.
+     * Called on the server task, including subsequent validation/transfer failures; may be null.
+     * Invalid tokens and requests received while stopping do not count as activity.
      */
     void (*activity)(void* context, bool active) = nullptr;
 };
@@ -270,7 +271,12 @@ struct UploadServer {
  */
 bool start_upload_server(const UploadServer& session, std::string& error);
 
-/** Stops the name service and the server, waiting for a running handler to return. */
+/** Stops the name service and server on the single network owner task.
+ * Returns only after handlers have exited. SDK stop failures retain the handle and borrowed
+ * session, reject new uploads and retry after one second. Keep callbacks, cancellation flag,
+ * context and its mutex alive until return; neither SDK blocking calls nor retries have a
+ * total deadline. Do not call from an HTTP handler or while holding a callback's mutex.
+ */
 void stop_portal_server();
 
 /**
