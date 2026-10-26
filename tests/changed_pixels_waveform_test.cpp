@@ -67,7 +67,7 @@ int main() {
             drive.fill(0xFF);
             hold_suffix(difference.data(), drive.data(), first, native_width);
             for (int x = 0; x < native_width; ++x) {
-                const bool hold = first >= 0 && x >= first && (pair & 15) == (pair >> 4);
+                const bool hold = first >= 0 && x >= first && pair != 0xFF && (pair & 15) == (pair >> 4);
                 assert(((drive[x / 4] >> (2 * (x % 4))) & 3) == (hold ? 0 : 3));
             }
             assert(drive.back() == 0xFF);

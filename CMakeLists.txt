@@ -191,6 +191,28 @@ target_compile_features(changed_pixels_waveform_test PRIVATE cxx_std_17)
 target_compile_options(changed_pixels_waveform_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME changed_pixels_waveform COMMAND changed_pixels_waveform_test)
 
+# This opt-in test compiles the pinned BSP tables, not synthetic waveform fixtures.
+option(PICO_PAGE_TEST_BSP_WAVEFORM "Test footer drive against the pinned BSP" OFF)
+if(PICO_PAGE_TEST_BSP_WAVEFORM)
+    set(bsp_source "${CMAKE_CURRENT_SOURCE_DIR}/.local/read_pico_firmware")
+    execute_process(COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/tools/setup_bsp.sh"
+        RESULT_VARIABLE bsp_result)
+    if(NOT bsp_result EQUAL 0)
+        message(FATAL_ERROR "Cannot prepare pinned BSP waveform tests")
+    endif()
+    set(waveform_source "${bsp_source}/components/e0470_epaper_waveform")
+    add_executable(footer_waveform_test tests/footer_waveform_test.cpp
+        "${waveform_source}/e0470_epaper_waveform.c" "${waveform_source}/e0470_waveform_trim.c"
+        firmware/components/platform_read_pico/changed_pixels_waveform.cpp)
+    target_include_directories(footer_waveform_test PRIVATE tests/waveform_stubs
+        "${waveform_source}/include" "${waveform_source}/waveforms"
+        "${bsp_source}/components/epdiy/include" "${bsp_source}/components/epdiy/src"
+        firmware/components/platform_read_pico/include)
+    target_compile_features(footer_waveform_test PRIVATE cxx_std_17)
+    target_compile_options(footer_waveform_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+    add_test(NAME footer_waveform COMMAND footer_waveform_test)
+endif()
+
 add_executable(ripple_test tests/ripple_test.cpp firmware/components/platform_read_pico/ripple.cpp)
 target_include_directories(ripple_test PRIVATE tests/ripple_stubs firmware/components/platform_read_pico/include)
 target_link_libraries(ripple_test PRIVATE reader_core)
