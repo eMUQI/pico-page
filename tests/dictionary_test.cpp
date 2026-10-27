@@ -155,6 +155,11 @@ int main(int argc, char** argv) {
     assert(entries[0].synonym && entries[1].headword == "apple");
     found("别名"); read(entries[0].ordinal); assert(fields[0].text == "词条释义");
     found("omega"); read(entries[0].ordinal); assert(fields[0].text.size() == 4205);
+    // Scans that reach either end of the index bound later lookups without hiding boundary words.
+    assert(dictionary.lookup("龥", entries, more).status == Status::NotFound);
+    assert(dictionary.lookup("龥", entries, more).status == Status::NotFound);
+    assert(dictionary.lookup("0", entries, more).status == Status::NotFound);
+    found("中文"); found("APPLE"); found("别名");
     unsigned count = 0;
     std::uint32_t next = 0;
     do {

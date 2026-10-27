@@ -82,6 +82,13 @@ struct Index {
     // binary-search levels, so the memo avoids repeating those random card reads.
     static constexpr std::size_t kMaxProbes = 128;
     std::vector<std::pair<std::uint32_t, std::string>> probes;
+    // The first and last headwords once a scan has read them. A word outside this range has no
+    // entry, which lets other-script candidates skip the index without reading the card.
+    std::string first_word, last_word;
+    bool first_known = false, last_known = false;
+    bool outside(const std::string& word) const {
+        return (first_known && compare(word, first_word) < 0) || (last_known && compare(last_word, word) < 0);
+    }
     Result prepare(std::uint32_t expected, std::uint32_t data_limit, const Stop& stop) {
         count = expected;
         checkpoint_count = expected / kStride + (expected % kStride != 0);
@@ -394,13 +401,15 @@ Result Dictionary::lookup(const std::string& word, std::vector<Entry>& entries, 
     auto& state = *impl_;
     state.data.discard_decoded();
     for (auto* source : {&state.index, &state.synonyms}) {
-        if (!source->count) continue;
+        if (!source->count || source->outside(word)) continue;
         std::uint32_t offset = 0, ordinal = 0;
         auto result = source->start(word, offset, ordinal, stop); if (!result) { entries.clear(); return result; }
         Cursor cursor(source->file, offset, stop);
         Record record;
         for (; ordinal < source->count; ++ordinal) {
             if (!(result = cursor.record(record, source->synonym))) { entries.clear(); return result; }
+            if (!ordinal && !source->first_known) { source->first_word = record.word; source->first_known = true; }
+            if (ordinal + 1 == source->count && !source->last_known) { source->last_word = record.word; source->last_known = true; }
             const auto order = compare(record.word, word);
             if (order > 0) break;
             if (order < 0) continue;
