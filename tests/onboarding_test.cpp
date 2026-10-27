@@ -76,6 +76,10 @@ int main(int argc, char** argv) {
             d.tap(300, 500); d.present(); d.tap(300, 900); d.present();
             d.capture((shots / "practice-done.pgm").string()); d.refresh();
             const auto done = app.canvas().pixels();
+            // The toolbar reopened after the practice covers the next-step button and its hit.
+            d.tap(300, 500); d.present(); d.tap(300, 1150); d.present();
+            assert(app.view() == View::Onboarding && app.canvas().pixels() != done);
+            d.tap(300, 700); d.present(); assert(app.canvas().pixels() == done);
             d.swipe(true); d.present(); d.swipe(false); d.present(); assert(app.canvas().pixels() == done);
             d.tap(300, 1130); d.present(); d.capture((shots / "tools.pgm").string()); d.refresh(); d.sleep();
             d.tap(600, 50); d.tap(300, 420); assert(!app.pending_frame());

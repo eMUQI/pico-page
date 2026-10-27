@@ -157,13 +157,14 @@ void ReaderApp::Impl::draw_practice(const std::string& finish) {
     }
     canvas.line(0, 1064, 683, 1064, 1, 3);
     const bool last = onboarding_page + 1 == kPracticePageCount;
-    if (onboarding_task == OnboardingTask::Done) button(OnboardingNext, "下一步", 36, 1088, 612, 96, true, 30, true);
+    // The open toolbar covers the footer, so its controls are not drawn or registered.
+    if (onboarding_tools_open) draw_toolbar();
+    else if (onboarding_task == OnboardingTask::Done) button(OnboardingNext, "下一步", 36, 1088, 612, 96, true, 30, true);
     else {
         center(last ? "最后一页，再往后翻进入下一步" : "第 " + std::to_string(onboarding_page + 1) + " / " +
                std::to_string(kPracticePageCount) + " 页", 0, 1092, 684, 24, 3);
         center("K1 上一页　K2 全刷　K3 下一页", 0, 1144, 684, 22, 3);
     }
-    if (onboarding_tools_open) draw_toolbar();
 }
 
 void ReaderApp::Impl::onboarding_input(const AppInput& input) {

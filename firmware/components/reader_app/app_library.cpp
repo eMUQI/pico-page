@@ -89,7 +89,8 @@ void ReaderApp::Impl::scan_library() {
         if (default_root != roots.end()) {
             int error_number = 0;
             const auto created = store.create_library_directory(*default_root, error_number);
-            if (created == StoreStatus::IoError && error_number) {
+            // With several roots the others stay listed; the missing one is skipped as before.
+            if (created == StoreStatus::IoError && error_number && listing == *default_root) {
                 library_scan = LibraryScan::CreateFailed;
                 // FatFs reports both a full card and write protection as EACCES.
                 std::uint64_t total = 0, available = 1;

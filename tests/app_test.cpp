@@ -1140,7 +1140,34 @@ static void library_root_state_test(const fs::path& base, bool async) {
     const auto file_pixels = open(file, "library-not-directory")->canvas().pixels();
     assert(read(file / "Books") == "not a directory" && file_pixels != fresh_pixels && file_pixels != custom_pixels);
 
+    // A recent-sorted library that omits the resumed book still explains a removed card.
+    const auto recent = base / "Recent"; write(recent / "Books/a.txt", "book");
+    write(recent / "PicoPage/settings.toml", "schema_version=1\n[library]\nsort='recent'\n[onboarding]\ndone=true\n");
+    { std::string detail; assert(FileStore(recent.string()).save_last_book("Books/a.txt", detail) == StoreStatus::Ok); }
+    {
+        auto app = open(recent, "library-recent");
+        Driver driver{*app};
+        app->card_unavailable(CardIssue::Removed); driver.present();
+        for (int y = 400; y < 1000 && app->view() != View::PowerMenu; y += 24) {
+            driver.tap(300, y);
+            if (app->pending_frame()) driver.present();
+        }
+        assert(app->view() == View::PowerMenu);
+    }
+
     if (geteuid() != 0) {
+        // A Books directory that cannot be created does not hide the other configured roots.
+        const auto shared = base / "SharedLocked"; write(shared / "Shelf/b.txt", "book");
+        write(shared / "PicoPage/settings.toml", "schema_version=1\n[library]\nroots=['Books','Shelf']\n[onboarding]\ndone=true\n");
+        fs::permissions(shared, fs::perms::owner_read | fs::perms::owner_exec);
+        {
+            auto app = open(shared, "library-roots-read-only");
+            Driver driver{*app};
+            driver.tap(300, 250); assert(app->pending_frame());
+        }
+        fs::permissions(shared, fs::perms::owner_all);
+        assert(!fs::exists(shared / "Books"));
+
         const auto locked = base / "Locked"; fs::create_directories(locked);
         write(locked / "PicoPage/settings.toml", "schema_version=1\n[onboarding]\ndone=true\n");
         fs::permissions(locked, fs::perms::owner_read | fs::perms::owner_exec);

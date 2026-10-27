@@ -759,6 +759,9 @@ void ReaderApp::card_unavailable(CardIssue issue) {
     if (impl_->usb_prepared) { show_usb_transfer(false, "TF 卡已移除。请退出 USB 传输，插回 TF 卡后重启。"); return; }
     impl_->cancel_sync();
     impl_->covers.clear();
+    // The library drawn later must not list entries of the removed card.
+    impl_->entries.clear();
+    impl_->library_resume_omitted = false;
     const bool unsaved = impl_->card_available && impl_->session.needs_save();
     impl_->card_available = false;
     impl_->library_font.close();
@@ -770,7 +773,6 @@ void ReaderApp::card_unavailable(CardIssue issue) {
         impl_->draw_onboarding(); impl_->overlay();
     } else if (issue != CardIssue::Removed || impl_->view == View::Library) {
         // The library page itself explains the card state and offers a restart.
-        impl_->entries.clear();
         impl_->draw_library(); impl_->overlay();
     } else {
         impl_->error(unsaved ? "TF 卡已移除。最近的阅读位置没有保存。插回 TF 卡后，请重启设备。"
