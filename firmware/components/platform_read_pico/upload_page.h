@@ -58,7 +58,7 @@ const row=(item,i)=>{
  switch(item.state){
  case 'wait':return '<div class="row wait"><div>'+name+'</div><span>等待</span></div>';
  case 'check':case 'upload':case 'verify':{
-  const label=item.state==='check'?'校验中':item.state==='verify'?'保存并回读':'上传中 · '+item.percent+'%';
+  const label=item.state==='check'?'校验中':item.state==='verify'?'保存并核对':'上传中 · '+item.percent+'%';
   const width=item.state==='check'?0:item.state==='verify'?100:item.percent;
   return '<div class="row now"><div class="line"><b>'+name+'</b><span>'+label+'</span></div><div class="bar"><i style="width:'+width+'%"></i></div></div>';}
  case 'saved':return '<div class="row"><div>'+name+'<small>'+formatFileSize(item.file.size)+' · 已存入 '+kind(item.file)[1]+'</small></div><span class="tag">已保存</span></div>';
@@ -112,10 +112,11 @@ const send=async item=>{
   item.state='saved';return true;
  }catch(e){
   if(e.stop){item.state='stopped';item.why='已停止，未上传。';return false;}
-  if(e.status&&skip.has(e.status)){item.state='rejected';item.why=e.why;return true;}
+  // A same-name refusal after an unconfirmed upload proves only that the name exists.
+  if(e.status&&skip.has(e.status)){item.state='rejected';item.why=e.status===409&&item.unconfirmed?'设备上已有同名文件，没有再次上传。可能是中断前已保存的这一份，请在设备书库中核对。':e.why;return true;}
   if(e.status){item.state='failed';item.why=e.why;return false;}
   item.state=sending?'unconfirmed':'failed';
-  item.why=sending?'连接中断，结果未确认。点“重试”核对：已经保存时会提示已有同名文件。':e.aborted?'已停止，未上传。':'连接中断，未上传。请检查与设备的连接。';
+  item.why=sending?'连接中断，结果未确认。可以点“重试”；若提示已有同名文件，请在设备书库中核对。':e.aborted?'已停止，未上传。':'连接中断，未上传。请检查与设备的连接。';
   return false;
  }finally{xhr=null;}
 };
@@ -137,7 +138,7 @@ const add=chosen=>{if(!chosen.length)return;for(const file of chosen)items.push(
 files.onchange=()=>{const done=add(files.files);files.value='';return done;};
 stop.onclick=()=>{stopped=true;if(xhr)xhr.abort();};
 again.onclick=()=>files.click();
-list.onclick=e=>{const i=e.target&&e.target.dataset&&e.target.dataset.retry;if(i===undefined)return;items[Number(i)].state='wait';render();return pump();};
+list.onclick=e=>{const i=e.target&&e.target.dataset&&e.target.dataset.retry;if(i===undefined)return;const item=items[Number(i)];item.unconfirmed=item.state==='unconfirmed';item.state='wait';render();return pump();};
 const drop=$('drop');
 document.ondragover=e=>{e.preventDefault();drop.className='drop over';};
 document.ondragleave=()=>{drop.className='drop';};

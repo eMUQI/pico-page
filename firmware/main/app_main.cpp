@@ -816,7 +816,7 @@ extern "C" void app_main() {
             if (portal_stop || !worker_ready || usb_mode || network_busy || sleep_requested ||
                 pico_page::console::transfer_active() || !app->prepare_portal(station)) {
                 pico_page::PortalStatus refused{pico_page::PortalPhase::Closed, "", "", "",
-                    "设备正忙或无法开启网络会话，请稍后重试。", "", 0, "", app->portal_generation()};
+                    "设备正忙或暂时无法联网，请稍后重试。", "", 0, "", app->portal_generation()};
                 if (network_busy || pico_page::console::transfer_active())
                     deferred_portal_failure = std::move(refused);
                 else app->show_portal(refused);
@@ -879,8 +879,8 @@ extern "C" void app_main() {
                 if (worker_ready) {
                     auto* job = new NetworkJob{}; job->wifi = *wifi;
                     if (xQueueSend(requests, &job, 0) == pdTRUE) network_busy = true;
-                    else { delete job; app->complete_wifi(wifi->id, {}, "网络任务暂时不可用。"); }
-                } else app->complete_wifi(wifi->id, {}, "网络任务创建失败。");
+                    else { delete job; app->complete_wifi(wifi->id, {}, "设备暂时无法联网，请稍后重试。"); }
+                } else app->complete_wifi(wifi->id, {}, "设备暂时无法联网，请稍后重试。");
                 present(*app);
             }
         }
@@ -898,7 +898,7 @@ extern "C" void app_main() {
                 if (job && xQueueSend(requests, &job, 0) == pdTRUE) network_busy = true;
                 else {
                     delete job;
-                    app->complete_update(id, pico_page::UpdateFailure::Link, 0, "", "网络任务暂时不可用。");
+                    app->complete_update(id, pico_page::UpdateFailure::Link, 0, "", "设备暂时无法联网，请稍后重试。");
                     present(*app);
                 }
             }
@@ -912,11 +912,11 @@ extern "C" void app_main() {
                         network_busy = true;
                     else {
                         delete job;
-                        app->complete_network(request->id, 0, "", "网络任务暂时不可用");
+                        app->complete_network(request->id, 0, "", "设备暂时无法联网，请稍后重试。");
                         present(*app);
                     }
                 } else {
-                    app->complete_network(request->id, 0, "", "网络任务创建失败");
+                    app->complete_network(request->id, 0, "", "设备暂时无法联网，请稍后重试。");
                     present(*app);
                 }
             }

@@ -63,14 +63,14 @@ open();
 handler=r=>r.url==='/upload'&&r.headers['X-Pico-Name']===encodeURIComponent('b.epub')?'error':200;
 await choose(book('a.epub'),book('b.epub'),book('c.epub'));
 assert.deepEqual(requests.map(r=>r.url),['/check','/upload','/check','/upload']);
-assert.ok(list().includes('结果未确认。点“重试”核对')&&list().includes('data-retry="1"'));
+assert.ok(list().includes('结果未确认。可以点“重试”')&&list().includes('data-retry="1"'));
 assert.ok(list().includes('整批已停止，未上传。')&&list().includes('data-retry="2"'));
 assert.equal(elements['result-title'].textContent,'已保存 1 个，2 个没有完成');
-// Retrying runs that one book again; a copy that did arrive is reported as a same-name refusal.
+// Retrying runs that one book again; a same-name refusal asks to check the copy on the device.
 requests=[];handler=r=>r.url==='/check'?409:200;
 await elements.list.onclick({target:{dataset:{retry:'1'}}});
 assert.deepEqual(requests.map(r=>r.url),['/check']);
-assert.ok(list().includes('拒绝 409')&&list().includes('data-retry="2"'));
+assert.ok(list().includes('可能是中断前已保存的这一份')&&list().includes('data-retry="2"'));
 
 // A refusal that is not about one book stops the batch.
 open();handler=()=>403;
@@ -138,7 +138,7 @@ let retried=null;
 handler=r=>{if(r.url==='/upload'&&!retried)retried=elements.list.onclick({target:{dataset:{retry:'0'}}});return r.url==='/check'&&r.headers['X-Pico-Name']==='m.epub'?409:200;};
 await choose(book('n.epub'));await retried;
 assert.deepEqual(requests.slice(2).map(r=>r.headers['X-Pico-Name']+r.url),['n.epub/check','n.epub/upload','m.epub/check']);
-assert.ok(list().includes('拒绝 409')&&!list().includes('data-retry'));
+assert.ok(list().includes('可能是中断前已保存的这一份')&&!list().includes('data-retry'));
 console.log('Wi-Fi page: adding files during and after a transfer passed');
 console.log('Wi-Fi page: file kinds and image limits passed');
 console.log('Wi-Fi page: per-book rows, refusals, unconfirmed retry, batch stop and escaping passed');

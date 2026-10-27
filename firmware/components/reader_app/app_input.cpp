@@ -448,7 +448,7 @@ void ReaderApp::Impl::control(int id) {
             return;
         }
         std::uint32_t target = 0;
-        if (!seek_fragment(index, link.fragment, target, "链接锚点不存在"))
+        if (!seek_fragment(index, link.fragment, target, "链接指向的位置不存在"))
             return;
         if (!link_return)
             link_return = origin->anchor;
@@ -472,7 +472,7 @@ void ReaderApp::Impl::control(int id) {
             return;
         }
         std::uint32_t position = 0;
-        if (!seek_fragment(target, item.fragment, position, "目录锚点不存在"))
+        if (!seek_fragment(target, item.fragment, position, "目录项指向的位置不存在"))
             return;
         show_page(position);
         return;

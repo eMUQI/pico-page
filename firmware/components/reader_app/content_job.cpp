@@ -627,7 +627,9 @@ void ContentJob::prepare_lock_screen() {
     }
     const auto status = store.lock_screen_files(result.lock_screens, stop);
     if (status != StoreStatus::Ok && status != StoreStatus::Missing) {
-        result.error = "图片目录不可读或超过数量限制"; return;
+        result.error = status == StoreStatus::Invalid ? "LockScreens/ 中的文件过多，最多支持 256 张图片"
+                     : status == StoreStatus::UnsafePath ? "LockScreens 不是普通文件夹" : "无法读取 LockScreens/ 目录";
+        return;
     }
     if (request.kind == Kind::LockScreenList) return;
     if (result.lock_screens.empty()) { result.error = "LockScreens 中没有可用图片"; return; }
@@ -656,7 +658,7 @@ void ContentJob::prepare_lock_screen() {
         }
         const auto identity = sha256_file(path, stop);
         if (identity.empty() || stop()) {
-            result.retryable_failure = true; result.error = "图片身份校验失败或已取消"; return;
+            result.retryable_failure = true; result.error = "图片读取失败或已取消"; return;
         }
         const std::string cache = "lockscreens/current";
         const auto header = "PPLOCK4\n" + identity + "\n" + result.lock_screen + "\n" + std::to_string(before.st_size) + "\n" +

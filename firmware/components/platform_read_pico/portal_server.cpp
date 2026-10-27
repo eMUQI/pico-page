@@ -68,7 +68,7 @@ struct Refusal {
     const char* status;
     const char* message;
 };
-constexpr Refusal session_ended{"403 Forbidden", "会话无效，请重新打开传书页。"};
+constexpr Refusal session_ended{"403 Forbidden", "这个页面已失效，请按设备屏幕上的提示重新打开传书页。"};
 constexpr Refusal bad_name{"400 Bad Request", "文件名无效或过长。"};
 constexpr Refusal bad_characters{"400 Bad Request", "文件名包含不支持的字符。"};
 constexpr Refusal bad_type{"415 Unsupported Media Type", "仅支持 EPUB、TXT、TTF、OTF、PNG 和 JPEG 文件。"};

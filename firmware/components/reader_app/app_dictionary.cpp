@@ -311,7 +311,7 @@ void ReaderApp::Impl::draw_dictionary() {
     const bool missing_glyphs = dictionary_missing_glyphs || std::any_of(heading_scalars.begin(), heading_scalars.end(),
         [&](char32_t scalar) { return body.missing(scalar); });
     const auto warning = !dictionary_notice.empty() && !dictionary_page.glyphs.empty() ? dictionary_notice :
-        dictionary_omitted_fields ? (missing_glyphs ? "部分字段不支持，且存在缺字。" : "部分字段不支持，未显示全部内容。") :
+        dictionary_omitted_fields ? (missing_glyphs ? "部分内容无法显示，且有缺字。" : "部分内容无法显示。") :
         missing_glyphs ? "部分字符缺字，请更换支持音标和生僻字的字体。" :
         dictionary_next.degraded && dictionary_definition ? "部分格式已简化显示。" :
         dictionary_partial_error ? "部分词典不可用，结果可能不完整。" : "";

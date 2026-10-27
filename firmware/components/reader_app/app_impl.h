@@ -2036,8 +2036,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     void count_pages(const std::function<bool()>& stop);
     void draw_image_error(const graphics::ImageBox& box) {
         outline(box.x, box.y + 12, box.width, box.height - 24, 2);
-        center("图片无法显示", box.x + 8, box.y + box.height / 2 - 36, box.width - 16, 28);
-        center("图片缺失、损坏或内存不足", box.x + 8, box.y + box.height / 2 + 16, box.width - 16, 22, 3);
+        // The cause is not recorded per image, so none is claimed.
+        center("图片无法显示", box.x + 8, box.y + box.height / 2 - 14, box.width - 16, 28);
     }
     bool draw_page_content(const graphics::Page& planned, const graphics::LayoutSpec& spec, bool progressive = false);
     bool body_reusable(std::size_t start, const graphics::LayoutSpec& spec) const {
@@ -3119,7 +3119,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         view = View::BookManagement;
         confirm_page("书籍管理", remove ? "删除这本书？" : "清除本地进度？",
                      detail_metadata.title.empty() ? basename(detail_path) : detail_metadata.title, detail_path,
-                     remove ? "将删除 TF 卡中的原书文件。阅读记录和排版设置会保留，放回同一本书后可以恢复。服务器上的记录不受影响。"
+                     remove ? "将删除 TF 卡中的原书文件。阅读记录和排版设置会保留；把同一本书放回原文件夹并使用原文件名，即可恢复。服务器上的记录不受影响。"
                             : "将清除本书在本机的阅读位置及其备份，下次打开从头开始。原书和排版设置会保留。服务器上的记录不受影响。");
         button(Back, "取消", 24, 1080, 306, 96, true);
         danger_button(ManageConfirm, remove ? "删除原书" : "清除进度", 354, 1080, 306);

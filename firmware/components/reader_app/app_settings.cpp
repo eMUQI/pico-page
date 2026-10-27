@@ -404,19 +404,22 @@ void ReaderApp::Impl::draw_storage() {
     if (!bookmark_io_ready()) return;
     view = View::StorageSettings;
     hits.clear(); canvas.clear(); header("存储", Back, "设置");
-    std::optional<std::uint64_t> books = 0;
+    std::uint64_t book_bytes = 0;
+    bool books_known = true;
     const auto roots = store.load_settings().settings.library_roots;
     for (const auto &path : roots) {
         struct stat st{};
         errno = 0;
         // A missing root holds no books; any other failure leaves the total unknown.
         if (stat((root + "/" + path).c_str(), &st) != 0 || !safe_existing(root, path)) {
-            if (errno != ENOENT) books.reset();
+            if (errno != ENOENT) books_known = false;
             continue;
         }
         const auto bytes = tree_bytes(path, true);
-        books = books && bytes ? std::optional<std::uint64_t>(*books + *bytes) : std::nullopt;
+        if (bytes) book_bytes += *bytes;
+        else books_known = false;
     }
+    const auto books = books_known ? std::optional<std::uint64_t>(book_bytes) : std::nullopt;
     struct stat cache_directory{};
     errno = 0;
     const auto cache = stat((root + "/PicoPage/cache").c_str(), &cache_directory) == 0 ? tree_bytes("PicoPage/cache", false)
