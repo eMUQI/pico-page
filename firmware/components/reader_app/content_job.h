@@ -173,10 +173,12 @@ public:
         /** relative_path names one dictionary below Dictionaries. A lookup may instead search
          * dictionary_sources in order, opening each at most once. Candidates are ordered best
          * first: exact before inflected forms, then longer selections. A later source replaces
-         * a match only with a strictly better candidate.
+         * a match only with a strictly better candidate unless dictionary_navigation is set.
          */
         std::vector<std::string> dictionary_sources;
         std::vector<dictionary::Candidate> dictionary_candidates;
+        /** Lookup navigation: -1 or 1 stops at the first matching source in the supplied order. */
+        int dictionary_navigation = 0;
         std::uint32_t dictionary_ordinal = 0;
         std::shared_ptr<const std::vector<dictionary::Field>> dictionary_definition;
         dictionary::TextCursor dictionary_cursor;
@@ -216,6 +218,8 @@ public:
         std::string error, font_identity, xpointer;
         std::vector<std::string> lock_screens;
         std::vector<DictionaryItem> dictionaries;
+        /** Lookup: definitive source-open failures, bounded by the requested sources. */
+        std::vector<DictionaryItem> dictionary_failed_sources;
         dictionary::Result dictionary_status;
         dictionary::Info dictionary_info;
         std::optional<dictionary::Candidate> dictionary_match;

@@ -11,6 +11,7 @@
 | epdiy 与板级波形 | 官方 BSP 的 `components/epdiy` / `e0470_epaper_waveform` | 同官方 BSP commit | LGPL-3.0-or-later / Apache-2.0 分别核查 | 构建副本应用 epdiy 欠载诊断及清屏检查补丁 | 已集成；部分设备证据见开发状态，完整显示验收仍需实测 |
 | tomlc17 | cktan/tomlc17 | `8a4564e0b257b010c24c973d4353e0c1ebf33f80` | MIT；C17；32 KiB 输入上限，UTF-8 校验；不支持无损写回 | Xtensa `PRIx32` 打印格式修正；内存页大小使用 `offsetof`，避免空指针成员访问 | 纳入 reader_store，仅解析配置 |
 | cJSON | DaveGamble/cJSON v1.7.19 | `c859b25da02955fef659d658b8f324b5cde87be3` | MIT；16 KiB 输入及 16 层嵌套上限；大修订号用字符串 | 源码无修改 | 纳入 reader_store，进度 JSON |
+| Phosphor 词典图标 | phosphor-icons/core | `2b75f3ad12b420c9504ef05df8d2564a28f8500e` | MIT；无运行时依赖，分发保留版权及许可证 | 七个 regular SVG 原样保留，预栅格为 40 × 40、4 位透明度掩码，共 5,600 字节 | 纳入 reader_app；[来源与生成说明](../../firmware/components/reader_app/third_party/phosphor/README.md) |
 | FreeType | freetype/freetype | `526ec5c47b9ebccc4754c85ac0c0cdf7c85a5e9b` | FTL、MIT 及 Adobe CFF 附加条款 | 模块/选项配置 | 固定下载到 .local，纳入 reader_graphics |
 | JPEGDEC 渐进式缩略图 | bitbank2/JPEGDEC；CrossPoint 的三个修复补丁 | `86282979224c8a32fd51e091ed5a35b0c699a52b`；补丁源 `43694c9018d26446ab30cce2fa65ee608355ae50` | Apache-2.0；补丁保留来源 MIT 声明；不引入 Arduino 或其他阅读器应用代码 | 修复未对齐读取及未定义移位，禁用 SIMD，保持位读取器宽度 | 纳入 reader_graphics，仅渐进式 DC 预览；[来源、补丁与分发义务](../../firmware/components/reader_graphics/third_party/jpegdec/README.md) |
 | 文楷 / Noto Sans SC | 官方发布与官方仓库 | 固定 SHA-256，见 graphics-runtime | OFL 1.1；随附两份许可证 | Noto 子集改名 Pico Page Fallback | 全字体在 .local，内置子集纳入组件 |

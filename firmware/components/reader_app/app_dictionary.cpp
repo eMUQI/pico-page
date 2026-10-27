@@ -1,4 +1,5 @@
 #include "app_impl.h"
+#include "third_party/phosphor/dictionary_icons.h"
 
 namespace pico_page {
 namespace {
@@ -12,7 +13,7 @@ std::string dictionary_error(const dictionary::Result& status) {
     case dictionary::Status::Ok: return {};
     case dictionary::Status::NotFound: return "未找到词条，可调整选词或切换词典。";
     case dictionary::Status::Cancelled: return "查询已取消，可重试。";
-    case dictionary::Status::IoError: return "词典读取或缓存写入失败，请检查文件和 TF 卡。";
+    case dictionary::Status::IoError: return "无法使用词典，请检查文件和 TF 卡后重试。";
     case dictionary::Status::InvalidFormat: return "词典数据或格式无效。";
     case dictionary::Status::Unsupported: return "暂不支持此词典格式。";
     case dictionary::Status::ResourceLimit: return "词典内容超出资源限制或可用内存不足。";
@@ -37,7 +38,7 @@ void ReaderApp::Impl::open_dictionary_settings(bool from_lookup) {
     dictionary_settings_source = dictionary_source < settings.dictionary_enabled.size() ? settings.dictionary_enabled[dictionary_source] : "";
     if (from_lookup && !dictionary_choosing) dictionary_return_notice = dictionary_notice;
     dictionary_choosing = false;
-    abandon_content(); dictionary_session.reset(); dictionary_ready.clear();
+    abandon_content(); dictionary_session.reset();
     edit_snapshot = store.settings_snapshot();
     settings.dictionary_enabled = edit_snapshot.global_settings.dictionary_enabled;
     dictionary_notice.clear(); dictionary_items.clear(); dictionary_list_page = 0;
@@ -59,9 +60,8 @@ void ReaderApp::Impl::draw_dictionary_settings() {
         const bool enabled = found != settings.dictionary_enabled.end();
         const int y = 164 + static_cast<int>(row) * 184;
         title_lines(item.info.name.empty() ? basename(item.id) : item.info.name, 36, y, 450, 26, true, 2);
-        const bool ready = std::find(dictionary_ready.begin(), dictionary_ready.end(), item.id) != dictionary_ready.end();
         const auto label = item.status.message == kMissingDictionary ? "找不到这套词典的文件" :
-                           !item.status ? dictionary_error(item.status) : ready ? "已准备" : "待准备";
+                           !item.status ? dictionary_error(item.status) : enabled ? "已启用" : "未启用";
         text(label, 36, y + 62, 22, 612, 3);
         if (!content_loading) button(DictionaryToggleBase + static_cast<int>(index), enabled ? "停用" : "启用", 516, y, 144, 60, enabled, 23);
         if (!content_loading && enabled) {
@@ -69,7 +69,6 @@ void ReaderApp::Impl::draw_dictionary_settings() {
             if (order) button(DictionaryUpBase + static_cast<int>(index), "上移", 24, y + 100, 198, 60, false, 23);
             if (order + 1 < settings.dictionary_enabled.size()) button(DictionaryDownBase + static_cast<int>(index), "下移", 234, y + 100, 198, 60, false, 23);
         }
-        if (!content_loading && item.status) button(DictionaryPrepareBase + static_cast<int>(index), "准备词典", 444, y + 100, 216, 60, false, 23);
         canvas.line(36, y + 176, 648, y + 176, 10);
     }
     // A failed scan reports its cause below instead of claiming that no dictionary exists.
@@ -79,7 +78,7 @@ void ReaderApp::Impl::draw_dictionary_settings() {
     if (!content_loading && dictionary_list_page) button(Prev, "上一页", 24, 928, 198, 68, false, 24);
     center(std::to_string(dictionary_list_page + 1) + " / " + std::to_string(screens), 222, 950, 240, 24);
     if (!content_loading && dictionary_list_page + 1 < screens) button(Next, "下一页", 462, 928, 198, 68, false, 24);
-    const auto status = content_loading ? "正在读取词典，可关闭取消…" : !dictionary_notice.empty() ? dictionary_notice :
+    const auto status = content_loading ? "正在查找词典，可返回取消…" : !dictionary_notice.empty() ? dictionary_notice :
         !dictionary_list_complete ? "已达到扫描上限，部分目录未扫描。" : "已启用词典按列表顺序查询。";
     title_lines(status, 36, 1010, 612, 23, false, 2);
     button(DictionaryScan, "重新扫描", 24, 1104, 306, 80, false, 26);
@@ -103,8 +102,8 @@ graphics::LayoutSpec ReaderApp::Impl::dictionary_layout(bool full) const {
     const int top = dictionary_top(full);
     const int height = full ? 1216 : kDictionaryPanelHeight;
     const int entry_height = dictionary_entry_base || dictionary_entries.size() > 1 || dictionary_more_entries ? 48 : 0;
-    spec.left = 36; spec.top = top + 148 + entry_height; spec.width = 612;
-    spec.height = height - 232 - entry_height;
+    spec.left = 36; spec.top = top + 200 + entry_height; spec.width = 612;
+    spec.height = height - 284 - entry_height;
     spec.font_px = 28; spec.line_height = 42; spec.indent_chars = 0;
     return spec;
 }
@@ -189,7 +188,7 @@ void ReaderApp::Impl::submit_dictionary_selection() {
         if (a.inflection != b.inflection) return !a.inflection;
         return a.selection.end - a.selection.begin > b.selection.end - b.selection.begin;
     });
-    dictionary_source = 0; dictionary_search_all = true; dictionary_partial_error = false;
+    dictionary_source = 0; dictionary_search_all = true;
     query_dictionary(false, previewed);
 }
 
@@ -205,7 +204,6 @@ void ReaderApp::Impl::begin_dictionary(int x, int y, bool selecting) {
     dictionary_touch_y = y; dictionary_full = false; dictionary_source = 0;
     dictionary_choosing = dictionary_settings_from_lookup = false;
     dictionary_search_all = true;
-    dictionary_partial_error = false;
     dictionary_page = {}; dictionary_definition.reset(); dictionary_entries.clear(); dictionary_pages.clear();
     dictionary_headword.clear(); dictionary_name.clear(); dictionary_notice.clear();
     view = View::Dictionary;
@@ -214,6 +212,15 @@ void ReaderApp::Impl::begin_dictionary(int x, int y, bool selecting) {
 }
 
 void ReaderApp::Impl::query_dictionary(bool retry, bool defer_panel) {
+    dictionary_retry_direction = 0;
+    dictionary_previous_exhausted = dictionary_next_exhausted = false;
+    if (retry) {
+        dictionary_failed_sources.erase(std::remove_if(dictionary_failed_sources.begin(), dictionary_failed_sources.end(),
+            [&](const auto& item) {
+                return dictionary_search_all || (dictionary_source < settings.dictionary_enabled.size() &&
+                       item.id == settings.dictionary_enabled[dictionary_source]);
+            }), dictionary_failed_sources.end());
+    }
     dictionary_definition.reset(); dictionary_page = {}; dictionary_pages.clear(); dictionary_entry = 0; dictionary_entry_base = 0;
     dictionary_entries.clear(); dictionary_headword.clear(); dictionary_name.clear();
     dictionary_missing_glyphs = dictionary_omitted_fields = false;
@@ -242,6 +249,7 @@ void ReaderApp::Impl::poll_dictionary_panel() {
 
 void ReaderApp::Impl::page_dictionary(int movement, bool redraw) {
     if (!dictionary_definition || dictionary_pages.empty()) return;
+    dictionary_retry_direction = 0;
     ContentJob::Request request; request.kind = ContentJob::Kind::DictionaryPage;
     request.dictionary_definition = dictionary_definition;
     request.dictionary_cursor = dictionary_pages.back(); request.layout = dictionary_layout(dictionary_full);
@@ -293,37 +301,49 @@ void ReaderApp::Impl::draw_dictionary() {
     canvas.fill_rect(0, top, 684, height, 15); canvas.line(0, top, 683, top, 1, 2);
     const auto selected = snippet(std::u32string_view(chapter.text).substr(dictionary_selection.begin, dictionary_selection.end - dictionary_selection.begin), 64);
     const auto heading = dictionary_headword.empty() ? selected : dictionary_headword;
-    text(body, heading, 24, top + 16, 30, 402, 1, true);
-    button(DictionaryEdit, "选词", 444, top + 12, 96, 48, false, 23);
-    button(DictionaryClose, "关闭", 552, top + 12, 108, 48, false, 23);
+    const auto icon = [&](int id, const std::uint8_t* pixels, int cx, int cy, int width, int height, bool enabled = true) {
+        for (int y = 0; y < dictionary_icons::kSize; ++y)
+            for (int x = 0; x < dictionary_icons::kSize; ++x) {
+                const int offset = y * dictionary_icons::kSize + x;
+                const int alpha = (pixels[offset / 2] >> ((offset % 2) * 4)) & 15;
+                if (alpha) canvas.pixel(cx - dictionary_icons::kSize / 2 + x,
+                                        cy - dictionary_icons::kSize / 2 + y,
+                                        15 - alpha * (enabled ? 14 : 7) / 15);
+            }
+        if (enabled) hits.push_back({cx - width / 2, cy - height / 2, width, height, id});
+    };
+    text(body, heading, 24, top + 16, 30, 540, 1, true);
+    icon(DictionaryClose, dictionary_icons::kClose, 636, top + 36, 96, 72);
     if (!settings.dictionary_enabled.empty()) {
         const auto index = std::min(dictionary_source, settings.dictionary_enabled.size() - 1);
         const auto& id = settings.dictionary_enabled[index];
         const auto found = std::find_if(dictionary_items.begin(), dictionary_items.end(), [&](const auto& item) { return item.id == id; });
         const auto name = !dictionary_name.empty() ? dictionary_name : found != dictionary_items.end() && !found->info.name.empty() ? found->info.name : basename(id);
-        outline(24, top + 68, 636, 52);
-        text(body, name, 36, top + 80, 23, 466, 1, false);
-        text(std::to_string(index + 1) + "/" + std::to_string(settings.dictionary_enabled.size()), 514, top + 80, 23, 80);
-        canvas.line(622, top + 89, 632, top + 99, 1, 2); canvas.line(632, top + 99, 642, top + 89, 1, 2);
-        if (!content_loading) hits.push_back({24, top + 68, 636, 52, DictionarySources});
+        text(body, name, 24, top + 112, 24, 236, 1, false);
+        icon(DictionaryPreviousSource, dictionary_icons::kPreviousSource, 316, top + 128, 88, 72,
+             !content_loading && index != 0 && !dictionary_previous_exhausted);
+        center(std::to_string(index + 1) + "/" + std::to_string(settings.dictionary_enabled.size()), 368, top + 114, 96, 23);
+        icon(DictionaryNextSource, dictionary_icons::kNextSource, 516, top + 128, 88, 72,
+             !content_loading && index + 1 < settings.dictionary_enabled.size() && !dictionary_next_exhausted);
+        if (!content_loading) hits.push_back({24, top + 92, 236, 72, DictionarySources});
     }
+    canvas.line(0, top + 164, 683, top + 164, 10);
     const auto heading_scalars = decode_utf8(heading);
     const bool missing_glyphs = dictionary_missing_glyphs || std::any_of(heading_scalars.begin(), heading_scalars.end(),
         [&](char32_t scalar) { return body.missing(scalar); });
     const auto warning = !dictionary_notice.empty() && !dictionary_page.glyphs.empty() ? dictionary_notice :
         dictionary_omitted_fields ? (missing_glyphs ? "部分内容无法显示，且有缺字。" : "部分内容无法显示。") :
         missing_glyphs ? "部分字符缺字，请更换支持音标和生僻字的字体。" :
-        dictionary_next.degraded && dictionary_definition ? "部分格式已简化显示。" :
-        dictionary_partial_error ? "部分词典不可用，结果可能不完整。" : "";
-    if (warning.empty() && heading != selected) text(body, selected + " → " + heading, 36, top + 124, 20, 612, 3, false);
-    else text(warning, 36, top + 124, 20, 612, 3);
+        dictionary_next.degraded && dictionary_definition ? "部分格式已简化显示。" : "";
+    if (warning.empty() && heading != selected) text(body, selected + " → " + heading, 36, top + 172, 20, 612, 3, false);
+    else text(warning, 36, top + 172, 20, 612, 3);
     if (dictionary_entry_base || dictionary_entries.size() > 1 || dictionary_more_entries) {
         const auto number = dictionary_entry_base + dictionary_entry + 1;
-        text("词条 " + std::to_string(number), 36, top + 156, 23, 380);
-        if (!content_loading) button(DictionaryNextEntry, "下一词条", 480, top + 148, 180, 44, false, 22);
+        text("词条 " + std::to_string(number), 36, top + 208, 23, 380);
+        if (!content_loading) button(DictionaryNextEntry, "下一词条", 480, top + 200, 180, 44, false, 22);
     }
     const auto area = dictionary_layout(dictionary_full);
-    if (content_loading) wrapped("正在读取，可关闭取消…", 36, area.top + 8, 612, 24);
+    if (content_loading) wrapped("正在查词，可关闭取消…", 36, area.top + 8, 612, 24);
     else if (!dictionary_page.glyphs.empty()) {
         if (!graphics::render_page(canvas, body, dictionary_page)) {
             canvas.fill_rect(area.left, area.top, area.width, area.height, 15);
@@ -332,13 +352,13 @@ void ReaderApp::Impl::draw_dictionary() {
     } else wrapped(dictionary_notice.empty() ? "暂无可显示释义。" : dictionary_notice, 36, area.top + 8, 612, 24);
     if (!content_loading) {
         if (dictionary_definition) {
-            if (dictionary_page_number) button(Prev, "上一页", 24, bottom - 76, 144, 64, false, 23);
-            else center("上一页", 24, bottom - 58, 144, 23, 8);
+            canvas.line(12, bottom - 84, 672, bottom - 84, 10);
+            icon(Prev, dictionary_icons::kPreviousPage, 96, bottom - 44, 144, 72, dictionary_page_number != 0);
             if (!dictionary_notice.empty()) button(DictionaryRetry, "重试", 180, bottom - 76, 144, 64, false, 23);
             else center("第 " + std::to_string(dictionary_page_number + 1) + " 页", 180, bottom - 58, 144, 23);
-            if (!dictionary_page_end) button(Next, "下一页", 348, bottom - 76, 144, 64, false, 23);
-            else center("下一页", 348, bottom - 58, 144, 23, 8);
-            button(DictionaryExpand, dictionary_full ? "收起" : "展开", 516, bottom - 76, 144, 64, false, 23);
+            icon(Next, dictionary_icons::kNextPage, 444, bottom - 44, 144, 72, !dictionary_page_end);
+            icon(DictionaryExpand, dictionary_full ? dictionary_icons::kCollapse : dictionary_icons::kExpand,
+                 636, bottom - 44, 96, 72);
         } else if (settings.dictionary_enabled.empty()) button(DictionaryManage, "设置词典", 24, bottom - 76, 636, 64, false, 24);
         else button(DictionaryRetry, "重新查询", 24, bottom - 76, 636, 64, false, 24);
     }
@@ -380,8 +400,20 @@ void ReaderApp::Impl::cancel_dictionary_sources() {
 
 void ReaderApp::Impl::select_dictionary(std::size_t source) {
     dictionary_choosing = false; dictionary_source = source;
-    dictionary_partial_error = false; dictionary_search_all = false;
+    dictionary_search_all = false;
     query_dictionary();
+}
+
+void ReaderApp::Impl::navigate_dictionary(int direction) {
+    ContentJob::Request request; request.kind = ContentJob::Kind::DictionaryLookup;
+    request.dictionary_navigation = direction;
+    request.dictionary_candidates = dictionary_candidates;
+    for (int source = static_cast<int>(dictionary_source) + direction;
+         source >= 0 && source < static_cast<int>(settings.dictionary_enabled.size()); source += direction)
+        request.dictionary_sources.push_back(settings.dictionary_enabled[static_cast<std::size_t>(source)]);
+    if (request.dictionary_sources.empty()) return;
+    dictionary_retry_direction = direction; dictionary_notice.clear();
+    queue_dictionary(std::move(request)); draw_dictionary(); overlay();
 }
 
 void ReaderApp::Impl::leave_dictionary_settings() {
@@ -397,16 +429,37 @@ void ReaderApp::Impl::leave_dictionary_settings() {
 
 void ReaderApp::Impl::finish_dictionary(ContentJob& job) {
     if (view != View::Dictionary && view != View::DictionarySettings) return;
+    if (job.request.kind == ContentJob::Kind::DictionaryLookup &&
+        (view != View::Dictionary || job.request.chapter != chapter_index ||
+         job.request.part != chapter.part || job.request.offset != page.start)) return;
     auto& result = job.result;
+    if (job.request.kind == ContentJob::Kind::DictionaryLookup) {
+        for (auto& failed : result.dictionary_failed_sources) {
+            const auto existing = std::find_if(dictionary_failed_sources.begin(), dictionary_failed_sources.end(),
+                [&](const auto& item) { return item.id == failed.id; });
+            if (existing != dictionary_failed_sources.end()) *existing = std::move(failed);
+            else if (dictionary_failed_sources.size() < 32) dictionary_failed_sources.push_back(std::move(failed));
+        }
+    }
+    if (job.request.dictionary_navigation && !result.dictionary_status) {
+        dictionary_retry_direction = 0;
+        if (job.request.dictionary_navigation < 0) dictionary_previous_exhausted = true;
+        else dictionary_next_exhausted = true;
+        if (dictionary_definition && !dictionary_page.glyphs.empty()) {
+            draw_dictionary(); overlay(); return;
+        }
+    }
     dictionary_notice = dictionary_error(result.dictionary_status);
     if (job.request.kind == ContentJob::Kind::DictionaryList) {
         dictionary_items = std::move(result.dictionaries); dictionary_list_complete = result.dictionary_complete;
+        for (auto& item : dictionary_items) {
+            const auto failed = std::find_if(dictionary_failed_sources.begin(), dictionary_failed_sources.end(),
+                [&](const auto& error) { return error.id == item.id; });
+            if (item.status && failed != dictionary_failed_sources.end()) item.status = failed->status;
+        }
         for (const auto& id : settings.dictionary_enabled)
             if (std::none_of(dictionary_items.begin(), dictionary_items.end(), [&](const auto& item) { return item.id == id; }))
                 dictionary_items.push_back({id, {}, {dictionary::Status::IoError, kMissingDictionary}});
-    } else if (job.request.kind == ContentJob::Kind::DictionaryPrepare) {
-        if (result.dictionary_status && std::find(dictionary_ready.begin(), dictionary_ready.end(), job.request.relative_path) == dictionary_ready.end())
-            dictionary_ready.push_back(job.request.relative_path);
     } else if (view == View::Dictionary && job.request.chapter == chapter_index && job.request.part == chapter.part && job.request.offset == page.start) {
         if (job.request.kind == ContentJob::Kind::DictionaryPage) {
             if (result.dictionary_status) {
@@ -429,8 +482,21 @@ void ReaderApp::Impl::finish_dictionary(ContentJob& job) {
             }
         } else if (result.dictionary_status) {
             if (job.request.kind == ContentJob::Kind::DictionaryLookup) {
-                if (!job.request.dictionary_sources.empty()) dictionary_source = result.dictionary_source;
-                if (!job.request.dictionary_entry_lookup) dictionary_partial_error = result.dictionary_partial;
+                if (!job.request.dictionary_sources.empty()) {
+                    const auto& source = job.request.dictionary_sources[result.dictionary_source];
+                    const auto found = std::find(settings.dictionary_enabled.begin(), settings.dictionary_enabled.end(), source);
+                    if (found == settings.dictionary_enabled.end()) return;
+                    dictionary_source = static_cast<std::size_t>(found - settings.dictionary_enabled.begin());
+                }
+                dictionary_failed_sources.erase(std::remove_if(dictionary_failed_sources.begin(), dictionary_failed_sources.end(),
+                    [&](const auto& item) { return item.id == settings.dictionary_enabled[dictionary_source]; }),
+                    dictionary_failed_sources.end());
+                if (job.request.dictionary_navigation) {
+                    dictionary_search_all = false;
+                    dictionary_previous_exhausted = dictionary_next_exhausted = false;
+                    dictionary_entry_base = 0; dictionary_layout_anchor = 0; dictionary_page = {};
+                    dictionary_missing_glyphs = false;
+                }
                 if (job.request.dictionary_entry_lookup)
                     dictionary_entry_base = job.request.dictionary_ordinal ? dictionary_entry_base + dictionary_entries.size() : 0;
                 dictionary_entries = std::move(result.dictionary_entries); dictionary_entry = 0;
@@ -442,12 +508,13 @@ void ReaderApp::Impl::finish_dictionary(ContentJob& job) {
             dictionary_omitted_fields = result.dictionary_status.omitted_fields;
             dictionary_headword = dictionary_entries[dictionary_entry].headword;
             dictionary_definition = std::make_shared<const std::vector<dictionary::Field>>(std::move(result.dictionary_fields));
+            dictionary_next = {}; dictionary_page_end = true;
             dictionary_pages.assign(1, {}); dictionary_page_number = 0; dictionary_layout_anchor = 0; page_dictionary(0, false); return;
         } else if (job.request.kind == ContentJob::Kind::DictionaryLookup && !job.request.dictionary_entry_lookup &&
                    result.dictionary_status.status != dictionary::Status::Cancelled) {
-            dictionary_partial_error = result.dictionary_partial || result.dictionary_status.status != dictionary::Status::NotFound;
-            // A single failure keeps its own cause; several sources may have failed differently.
-            if (result.dictionary_partial) dictionary_notice = "没有找到词条；部分词典无法使用，结果可能不完整。";
+            // A real miss and a failed source cannot establish absence across the full query.
+            if (result.dictionary_partial && result.dictionary_status.status == dictionary::Status::NotFound)
+                dictionary_notice = "没有查到可用释义，可重试或检查词典设置。";
         }
     }
     if (view == View::DictionarySettings) {
@@ -475,6 +542,7 @@ void ReaderApp::Impl::dictionary_control(int id) {
     if (id == Back || id == DictionaryClose) { back(); return; }
     if (view == View::DictionarySettings) {
         if (id == DictionaryScan) {
+            dictionary_failed_sources.clear();
             const bool changed = dictionary_settings_changed;
             const auto source = dictionary_settings_source;
             const auto notice = dictionary_return_notice;
@@ -486,13 +554,9 @@ void ReaderApp::Impl::dictionary_control(int id) {
             if (id == Prev && dictionary_list_page) --dictionary_list_page;
             else if (id == Next) ++dictionary_list_page;
         } else {
-            const int base = id >= DictionaryPrepareBase ? DictionaryPrepareBase : id >= DictionaryDownBase ? DictionaryDownBase : id >= DictionaryUpBase ? DictionaryUpBase : DictionaryToggleBase;
+            const int base = id >= DictionaryDownBase ? DictionaryDownBase : id >= DictionaryUpBase ? DictionaryUpBase : DictionaryToggleBase;
             if (id < base || static_cast<std::size_t>(id - base) >= dictionary_items.size()) return;
             const auto& item = dictionary_items[static_cast<std::size_t>(id - base)];
-            if (base == DictionaryPrepareBase) {
-                ContentJob::Request request; request.kind = ContentJob::Kind::DictionaryPrepare; request.relative_path = item.id;
-                queue_dictionary(std::move(request)); draw_dictionary_settings(); overlay(); return;
-            }
             auto values = edit_snapshot.global_settings;
             auto& enabled = values.dictionary_enabled;
             auto found = std::find(enabled.begin(), enabled.end(), item.id);
@@ -536,18 +600,20 @@ void ReaderApp::Impl::dictionary_control(int id) {
         ContentJob::Request request; request.kind = ContentJob::Kind::DictionaryList;
         queue_dictionary(std::move(request)); draw_dictionary(); overlay(); return;
     }
-    if (id == DictionaryEdit) {
-        abandon_content(); dictionary_selecting = true; dictionary_manual = true;
-        dictionary_notice.clear(); draw_dictionary(); overlay(); return;
-    }
     if (dictionary_selecting) {
         if (id == DictionaryRetry && !dictionary_contact) submit_dictionary_selection();
         return;
     }
     if (content_loading) return;
+    if (id == DictionaryPreviousSource && dictionary_source && !dictionary_previous_exhausted) {
+        navigate_dictionary(-1); return;
+    }
+    if (id == DictionaryNextSource && dictionary_source + 1 < settings.dictionary_enabled.size() && !dictionary_next_exhausted) {
+        navigate_dictionary(1); return;
+    }
     if (id == DictionaryRetry) {
+        if (dictionary_retry_direction) { navigate_dictionary(dictionary_retry_direction); return; }
         if (dictionary_definition) { page_dictionary(); return; }
-        dictionary_partial_error = false;
         query_dictionary(true); return;
     }
     if (id == DictionaryExpand) {

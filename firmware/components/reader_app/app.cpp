@@ -102,7 +102,8 @@ void ReaderApp::invalidate_identity_cache() {
     impl_->clear_prefetch(); impl_->stop_counting_job(); impl_->identities.clear();
     impl_->font_identity.clear(); impl_->font_scan.reset(); impl_->effective_font.clear();
     impl_->reset_dictionary_contact();
-    impl_->dictionary_session.reset(); impl_->dictionary_ready.clear(); impl_->dictionary_definition.reset();
+    impl_->dictionary_session.reset(); impl_->dictionary_definition.reset();
+    impl_->dictionary_failed_sources.clear();
     impl_->dictionary_pages.clear(); impl_->dictionary_page = {};
 }
 ReaderApp::~ReaderApp() { network::release(impl_->manual_hold); impl_->cancel_sync(); impl_->drain_save(); }

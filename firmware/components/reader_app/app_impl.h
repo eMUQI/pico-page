@@ -173,8 +173,9 @@ enum Control {
     UpdateRetry, UpdateLater, UpdateRestart, UpdateDismiss,
     FontEntryBase = 54000, FontAccept = 54300, FontCancel,
     DictionaryOpen = 55000, DictionaryScan, DictionaryClose, DictionaryExpand, DictionaryRetry,
-    DictionarySources, DictionaryNextEntry, DictionaryEdit, DictionaryStart, DictionaryEnd, DictionaryManage,
-    DictionaryToggleBase = 56000, DictionaryUpBase = 56100, DictionaryDownBase = 56200, DictionaryPrepareBase = 56300, DictionarySourceBase = 56400
+    DictionarySources, DictionaryNextEntry, DictionaryStart = 55008, DictionaryEnd, DictionaryManage,
+    DictionaryPreviousSource, DictionaryNextSource,
+    DictionaryToggleBase = 56000, DictionaryUpBase = 56100, DictionaryDownBase = 56200, DictionarySourceBase = 56400
 };
 static_assert(ContentsBookmarks < EntryBase);
 inline std::string basename(const std::string &path) {
@@ -804,10 +805,12 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::shared_ptr<DictionarySession> dictionary_session;
     std::chrono::steady_clock::time_point dictionary_panel_due{};
     std::vector<DictionaryItem> dictionary_items;
-    std::vector<std::string> dictionary_ready;
+    std::vector<DictionaryItem> dictionary_failed_sources;
     std::size_t dictionary_list_page = 0, dictionary_source = 0, dictionary_entry = 0, dictionary_entry_base = 0;
     bool dictionary_list_complete = true, dictionary_full = false, dictionary_search_all = true;
-    bool dictionary_partial_error = false, dictionary_missing_glyphs = false, dictionary_omitted_fields = false;
+    bool dictionary_missing_glyphs = false, dictionary_omitted_fields = false;
+    bool dictionary_previous_exhausted = false, dictionary_next_exhausted = false;
+    int dictionary_retry_direction = 0;
     std::size_t dictionary_layout_anchor = 0, dictionary_picker_page = 0;
     bool dictionary_choosing = false, dictionary_settings_from_lookup = false, dictionary_settings_changed = false;
     std::string dictionary_return_notice, dictionary_settings_source;
@@ -835,6 +838,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     void draw_dictionary_sources();
     void cancel_dictionary_sources();
     void select_dictionary(std::size_t source);
+    void navigate_dictionary(int direction);
     void draw_dictionary_settings();
     void begin_dictionary(int x, int y, bool selecting = false);
     bool dictionary_contact_input(const AppInput& input, bool accepted);

@@ -178,15 +178,21 @@ void ContentJob::search_dictionaries(FileStore& store, const dictionary::Stop& s
     };
     const std::vector<std::string> single{request.relative_path};
     const auto& sources = request.dictionary_sources.empty() ? single : request.dictionary_sources;
+    if (sources.size() > 32) {
+        result.dictionary_status = {dictionary::Status::ResourceLimit, "Too many dictionary sources"};
+        result.error = result.dictionary_status.message; return;
+    }
     // Candidates arrive best first. A source may only replace the current match with a
     // strictly better candidate, so equal candidates keep the earlier source.
     std::size_t limit = candidates.size();
     dictionary::Result failure;
-    bool found = false;
+    bool found = false, absent_candidate = false;
     for (std::size_t source = 0; source < sources.size() && limit; ++source) {
         if (stop()) break;
         dictionary::Dictionary reader;
         auto status = open_dictionary(store, sources[source], reader, stop);
+        if (status.status == dictionary::Status::InvalidFormat || status.status == dictionary::Status::Unsupported)
+            result.dictionary_failed_sources.push_back({sources[source], {}, status});
         std::vector<dictionary::Entry> entries, matched;
         std::vector<dictionary::Field> fields;
         bool more = false, matched_more = false;
@@ -221,6 +227,7 @@ void ContentJob::search_dictionaries(FileStore& store, const dictionary::Stop& s
                 bool extensible = true;
                 auto lookup = reader.lookup(candidate.word, entries, more, request.dictionary_ordinal, stop, &extensible);
                 if (lookup.status == dictionary::Status::NotFound) {
+                    absent_candidate = true;
                     settled[index] = true;
                     if (!candidate.inflection && !extensible) closed.push_back(&candidate);
                     continue;
@@ -245,6 +252,10 @@ void ContentJob::search_dictionaries(FileStore& store, const dictionary::Stop& s
         result.dictionary_entries = std::move(entries); result.dictionary_more = more;
         result.dictionary_fields = std::move(fields);
         result.dictionary_status = std::move(status);  // Retains omitted_fields from the read.
+        if (request.dictionary_navigation) {
+            if (stop()) break;
+            return;
+        }
         limit = hit;
         while (limit && same_rank(candidates[limit - 1], candidates[hit])) --limit;
     }
@@ -254,8 +265,10 @@ void ContentJob::search_dictionaries(FileStore& store, const dictionary::Stop& s
         result.error = result.dictionary_status.message; return;
     }
     if (found) return;
-    // One explicitly chosen source reports its own failure; a search of several reports a partial miss.
-    if (sources.size() == 1 && !failure) { result.dictionary_status = std::move(failure); result.error = result.dictionary_status.message; }
+    // Report a read failure when no source could establish a genuine absence.
+    if (!failure && (sources.size() == 1 || !absent_candidate)) {
+        result.dictionary_status = std::move(failure); result.error = result.dictionary_status.message;
+    }
     else result.dictionary_status = {dictionary::Status::NotFound, "No dictionary entry found"};
 }
 

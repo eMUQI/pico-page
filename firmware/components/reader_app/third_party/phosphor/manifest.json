@@ -1,0 +1,12 @@
+{
+  "commit": "2b75f3ad12b420c9504ef05df8d2564a28f8500e",
+  "sha256": {
+    "arrows-in-simple.svg": "07f22540ba343ad71cb9afab17d3bf62c1475c899a1ba6379bcafb738c7a750f",
+    "arrows-out-simple.svg": "df766bb615bf2ec178d2fa0e095684b4da0ecc6eba1f228ffba00139f16a4611",
+    "caret-left.svg": "623bf248fe21a8170344e168aaac2e174119cea5d7c5d0fb0dc84f581009475f",
+    "caret-right.svg": "e6dec01e074807965b7f3146b976a9b5e82c31d9c2c88aeb52e77cc2ab16c1d7",
+    "fast-forward.svg": "81893a7203a6ff8ea2ff8fb294413ed5bc059ade85e141cc547ae61f1b9eb667",
+    "rewind.svg": "98d15fb0be07114297bfdcbd14a346b12b759c91e3b6644d1fd3ae4d2f7f99c1",
+    "x.svg": "7397b15e1fa66eaf6ff9b59fe91d483cb5c3bcf75b2fe052097ab6f0593b513a"
+  }
+}

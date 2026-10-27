@@ -489,6 +489,7 @@ int main(int argc, char** argv) {
         auto found = search();
         assert(found.dictionary_status && found.dictionary_match->word == "中");
         assert(found.dictionary_source == 1 && found.dictionary_partial);
+        assert(found.dictionary_failed_sources.size() == 1 && found.dictionary_failed_sources[0].id == "tail.ifo");
         // A later lookup in the same session reuses the definitive failure.
         found = search();
         assert(found.dictionary_status && found.dictionary_source == 1 && found.dictionary_partial);
@@ -503,6 +504,7 @@ int main(int argc, char** argv) {
         found = search();
         assert(found.dictionary_status && found.dictionary_source == 0 && !found.dictionary_partial);
         assert(query.dictionary_session->preparation_failures.empty());
+        assert(found.dictionary_failed_sources.empty());
         query.dictionary_retry = false;
 #ifdef PICO_PAGE_WRAP_CALLOC_TEST
         counted_dictionary.clear();
@@ -516,6 +518,28 @@ int main(int argc, char** argv) {
         assert(found.dictionary_fields[0].text == "long match" && !found.dictionary_partial);
         query.dictionary_sources = {"second.ifo", "first.ifo"};
         found = search(); assert(found.dictionary_source == 0 && found.dictionary_match->word == "中文");
+        // Navigation stops at the first usable source and skips broken, missing and empty sources.
+        const auto ranked_session = query.dictionary_session;
+        query.dictionary_session = std::make_shared<pico_page::DictionarySession>();
+        query.dictionary_navigation = 1;
+        query.dictionary_sources = {"first.ifo", "second.ifo", "third.ifo"};
+        found = search(); assert(found.dictionary_source == 0 && found.dictionary_match->word == "中");
+        query.dictionary_navigation = -1;
+        query.dictionary_sources = {"third.ifo", "second.ifo", "first.ifo"};
+        found = search(); assert(found.dictionary_source == 0 && found.dictionary_match->word == "中文");
+        copy_dictionary("query-short", "navigation-bad");
+        { std::fstream index(dictionaries / "navigation-bad.idx", std::ios::binary | std::ios::in | std::ios::out);
+          index.seekp(-1, std::ios::end); index.put(static_cast<char>(255)); }
+        query.dictionary_candidates = {{{0, 2}, "中文", false}};
+        query.dictionary_sources = {"navigation-bad.ifo", "missing.ifo", "first.ifo", "second.ifo", "third.ifo"};
+        found = search(); assert(found.dictionary_status && found.dictionary_source == 3);
+        assert(found.dictionary_failed_sources.size() == 1 && found.dictionary_failed_sources[0].id == "navigation-bad.ifo");
+        query.dictionary_navigation = 0;
+        query.dictionary_sources = {"missing.ifo", "navigation-bad.ifo"};
+        found = search(); assert(found.dictionary_status.status == dict::Status::IoError && !found.error.empty());
+        query.dictionary_sources.assign(33, "first.ifo");
+        found = search(); assert(found.dictionary_status.status == dict::Status::ResourceLimit);
+        query.dictionary_session = ranked_session; query.dictionary_candidates = han;
         // An unreadable longer entry still lets a shorter candidate in the same source match.
         copy_dictionary("han-broken", "broken");
         query.dictionary_sources = {"broken.ifo"};
