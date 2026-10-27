@@ -668,6 +668,15 @@ int main() {
     assert(!fs::exists(root / "Books/Imported/check.epub"));
     assert(importing->finish(error) == StoreStatus::Ok);
     importing.reset();
+    for (const auto* path : {"Dictionaries/a/a.ifo", "Dictionaries/a/a.idx", "Dictionaries/a/a.dict.dz",
+                             "Dictionaries/a/a.syn.dz", "Dictionaries/a/a.ifo.gz"}) {
+        auto dictionary = store.begin_import(path, 9, import_crc, error);
+        assert(dictionary && error.empty());
+        assert(dictionary->append(0, "123456789", 9, error) == StoreStatus::Ok && dictionary->finish(error) == StoreStatus::Ok);
+        assert(fs::exists(root / path));
+    }
+    assert(!store.begin_import("Dictionaries/a/a.toml", 9, import_crc, error) && !error.empty());
+    fs::remove_all(root / "Dictionaries");
     std::uint64_t asset_size = 0;
     std::uint32_t asset_crc = 0;
     assert(store.inspect_asset("Books/Imported/check.epub", asset_size, asset_crc, error) == StoreStatus::Ok);

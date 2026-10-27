@@ -306,8 +306,8 @@ public:
 
     /**
      * Starts a new resource import of 1 byte through 64 MiB. Allowed destinations
-     * are EPUB or TXT books in Books/, fonts or license text in Fonts/, and PNG or JPEG
-     * images of at most 2 MiB directly in LockScreens/.
+     * are EPUB or TXT books in Books/, fonts or license text in Fonts/, PNG or JPEG
+     * images of at most 2 MiB directly in LockScreens/, and StarDict files in Dictionaries/.
      * Existing destinations are preserved. An abandoned regular staging file for this
      * destination is removed before starting; unsafe paths are refused.
      * No settings, credentials or reading records are importable.
