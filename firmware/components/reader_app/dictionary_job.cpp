@@ -201,35 +201,41 @@ void ContentJob::search_dictionaries(FileStore& store, const dictionary::Stop& s
             return x.selection.end < y.selection.end;
         });
         std::vector<const dictionary::Candidate*> closed;  // Candidates no headword extends.
-        for (const auto index : order) {
-            if (!status) break;
-            const auto& candidate = candidates[index];
-            if (index > hit) continue;  // Cannot outrank this source's current match.
-            if (!candidate.inflection && std::any_of(closed.begin(), closed.end(), [&](const auto* prefix) {
-                    return prefix->selection.begin == candidate.selection.begin &&
-                           candidate.word.size() > prefix->word.size() &&
-                           candidate.word.compare(0, prefix->word.size(), prefix->word) == 0;
-                })) continue;
-            bool extensible = true;
-            status = reader.lookup(candidate.word, entries, more, request.dictionary_ordinal, stop, &extensible);
-            if (status.status == dictionary::Status::NotFound) {
-                status = {};
-                if (!candidate.inflection && !extensible) closed.push_back(&candidate);
-                continue;
+        std::vector<bool> settled(limit);  // Candidates known absent or unusable in this source.
+        const auto fail = [&](dictionary::Result error) {
+            if (failure) failure = std::move(error);  // Keep the first failure.
+            result.dictionary_partial = true;
+        };
+        // A failed lookup or entry read leaves lower-ranked candidates in this source available.
+        while (status) {
+            hit = limit;
+            for (const auto index : order) {
+                const auto& candidate = candidates[index];
+                if (index > hit || settled[index]) continue;  // Cannot outrank the current match.
+                if (!candidate.inflection && std::any_of(closed.begin(), closed.end(), [&](const auto* prefix) {
+                        return prefix->selection.begin == candidate.selection.begin &&
+                               candidate.word.size() > prefix->word.size() &&
+                               candidate.word.compare(0, prefix->word.size(), prefix->word) == 0;
+                    })) continue;
+                bool extensible = true;
+                auto lookup = reader.lookup(candidate.word, entries, more, request.dictionary_ordinal, stop, &extensible);
+                if (lookup.status == dictionary::Status::NotFound) {
+                    settled[index] = true;
+                    if (!candidate.inflection && !extensible) closed.push_back(&candidate);
+                    continue;
+                }
+                if (lookup.status == dictionary::Status::Cancelled) { status = std::move(lookup); break; }
+                if (!lookup) { settled[index] = true; fail(std::move(lookup)); continue; }
+                hit = index; matched = std::move(entries); matched_more = more;
             }
-            if (!status) break;
-            hit = index; matched = std::move(entries); matched_more = more;
-        }
-        if (status && hit < limit) {
-            entries = std::move(matched); more = matched_more;
-            status = reader.read(entries.front().ordinal, fields, stop);
+            if (!status || hit == limit) break;
+            auto read = reader.read(matched.front().ordinal, fields, stop);
+            if (read) { entries = std::move(matched); more = matched_more; status = std::move(read); break; }
+            if (read.status == dictionary::Status::Cancelled) { status = std::move(read); break; }
+            settled[hit] = true; fail(std::move(read));
         }
         if (status.status == dictionary::Status::Cancelled || stop()) break;
-        if (!status) {
-            if (failure) failure = std::move(status);  // Keep the first failure.
-            result.dictionary_partial = true;
-            continue;
-        }
+        if (!status) { fail(std::move(status)); continue; }
         if (hit == limit) continue;
         found = true;
         result.dictionary_source = source;
