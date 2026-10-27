@@ -92,7 +92,12 @@ struct ChapterSession {
  * No dictionary files remain open between jobs.
  */
 struct DictionarySession {
-    std::vector<std::pair<std::string, dictionary::Verification>> verified;
+    /** path is the checked absolute .ifo path, kept only after a successful open. */
+    struct Source {
+        std::string relative_path, path;
+        dictionary::Verification verification;
+    };
+    std::vector<Source> verified;
     /** At most 32 definitive InvalidFormat/Unsupported preparation results, never entry,
      * I/O, memory or cancellation failures. Explicit retry and preparation clear an entry.
      */

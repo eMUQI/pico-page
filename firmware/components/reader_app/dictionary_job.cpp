@@ -117,12 +117,10 @@ void ContentJob::read_dictionary() {
 
 dictionary::Result ContentJob::open_dictionary(FileStore& store, const std::string& relative_path,
                                                dictionary::Dictionary& reader, const dictionary::Stop& stop) {
-    std::string path;
-    const auto resolved = store.dictionary_path(relative_path, path);
-    if (resolved != StoreStatus::Ok) return path_error(resolved);
+    // Sources cannot change within a mount session: USB and remount reset it. Remembered
+    // results therefore skip path checks; explicit retry and preparation re-read the source.
     auto* session = request.dictionary_session.get();
     if (session) {
-        // Sources cannot change within a verified mount session; explicit retry and preparation re-read them.
         auto& failures = session->preparation_failures;
         const auto found = std::find_if(failures.begin(), failures.end(),
             [&](const auto& entry) { return entry.first == relative_path; });
@@ -131,22 +129,32 @@ dictionary::Result ContentJob::open_dictionary(FileStore& store, const std::stri
             failures.erase(found);
         }
     }
-    dictionary::Verification temporary;
-    auto* verification = &temporary;
+    DictionarySession::Source temporary;
+    auto* source = &temporary;
     if (session) {
-        auto& entries = session->verified;
-        auto found = std::find_if(entries.begin(), entries.end(), [&](const auto& entry) { return entry.first == relative_path; });
-        if (found == entries.end()) {
-            if (entries.size() == 32) return {dictionary::Status::ResourceLimit, "Too many verified dictionaries"};
-            entries.emplace_back(relative_path, dictionary::Verification{});
-            found = std::prev(entries.end());
+        auto& sources = session->verified;
+        auto found = std::find_if(sources.begin(), sources.end(), [&](const auto& entry) { return entry.relative_path == relative_path; });
+        if (found == sources.end()) {
+            if (sources.size() == 32) return {dictionary::Status::ResourceLimit, "Too many verified dictionaries"};
+            sources.push_back({relative_path, {}, {}});
+            found = std::prev(sources.end());
         }
-        verification = &found->second;
+        source = &*found;
     }
-    auto status = reader.open_prepared(path, store, *verification, stop);
-    if (!status && session && session->preparation_failures.size() < 32 &&
-        (status.status == dictionary::Status::InvalidFormat || status.status == dictionary::Status::Unsupported))
-        session->preparation_failures.emplace_back(relative_path, status);
+    if (source->path.empty() || request.kind == Kind::DictionaryPrepare) {
+        source->path.clear();
+        std::string path;
+        const auto resolved = store.dictionary_path(relative_path, path);
+        if (resolved != StoreStatus::Ok) return path_error(resolved);
+        source->path = std::move(path);
+    }
+    auto status = reader.open_prepared(source->path, store, source->verification, stop);
+    if (!status) {
+        source->path.clear();
+        if (session && session->preparation_failures.size() < 32 &&
+            (status.status == dictionary::Status::InvalidFormat || status.status == dictionary::Status::Unsupported))
+            session->preparation_failures.emplace_back(relative_path, status);
+    }
     return status;
 }
 
