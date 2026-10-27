@@ -35,6 +35,16 @@ esp_err_t configure_sleep_pins() {
     }
     return ESP_OK;
 }
+
+// The FCA9555 register pointer only alternates within a register pair during a burst read, so
+// a burst from IN0 returns the inputs in place of OUT/CFG. Each register is read on its own.
+esp_err_t read_register_pair(fca9555_handle_t ioe, std::uint8_t first, std::uint16_t& value) {
+    std::uint8_t low = 0, high = 0;
+    auto result = fca9555_read_reg(ioe, first, &low);
+    if (result == ESP_OK) result = fca9555_read_reg(ioe, static_cast<std::uint8_t>(first + 1), &high);
+    if (result == ESP_OK) value = static_cast<std::uint16_t>(low | (high << 8));
+    return result;
+}
 }
 
 esp_err_t SleepIo::suspend(cst836u_handle_t touch, bool host_off) {
@@ -42,17 +52,18 @@ esp_err_t SleepIo::suspend(cst836u_handle_t touch, bool host_off) {
     if (!host_off && read_pico_sd_busy()) return ESP_ERR_NOT_FINISHED;
     const auto ioe = read_pico_fca9555();
     if (!ioe) return ESP_ERR_INVALID_STATE;
-    read_pico_status_t status{};
-    auto result = read_pico_get_ioe_status_full(&status);
+    std::uint16_t running_output = 0, running_config = 0;
+    auto result = read_register_pair(ioe, FCA9555_REG_OUT0, running_output);
+    if (result == ESP_OK) result = read_register_pair(ioe, FCA9555_REG_CFG0, running_config);
     if (result != ESP_OK) return result;
-    if ((status.ioe_config & input_pins) != input_pins) return ESP_ERR_INVALID_STATE;
-    if (status.ioe_output & panel_power) return ESP_ERR_INVALID_STATE;
+    if ((running_config & input_pins) != input_pins) return ESP_ERR_INVALID_STATE;
+    if (running_output & panel_power) return ESP_ERR_INVALID_STATE;
     if (!host_off) {
         result = configure_sleep_pins();
         if (result != ESP_OK) return result;
     }
-    output_ = status.ioe_output;
-    config_ = status.ioe_config;
+    output_ = running_output;
+    config_ = running_config;
     ioe_pending_ = true;
     // A failed command can still have reached the controller; reset it on cleanup.
     touch_ = touch;
