@@ -45,9 +45,12 @@ int gpio_step(int phase, int pin) {
 bool read_pico_rails_on() { return rails_on; }
 bool read_pico_sd_busy() { return sd_busy; }
 fca9555_handle_t read_pico_fca9555() { return missing ? nullptr : device; }
-esp_err_t read_pico_get_ioe_status_full(read_pico_status_t* status) {
-    const auto result = step("snapshot");
-    if (result == ESP_OK) *status = {output, config};
+// Single-register reads only: a burst from IN0 on the real expander repeats the input pair.
+esp_err_t fca9555_read_reg(fca9555_handle_t handle, std::uint8_t reg, std::uint8_t* value) {
+    assert(handle == device && reg >= FCA9555_REG_OUT0 && reg <= FCA9555_REG_CFG0 + 1 && reg != 4 && reg != 5);
+    const auto result = step("read" + std::to_string(reg));
+    const auto pair = reg >= FCA9555_REG_CFG0 ? config : output;
+    if (result == ESP_OK) *value = static_cast<std::uint8_t>(pair >> ((reg & 1) * 8));
     return result;
 }
 esp_err_t fca9555_set_output(fca9555_handle_t handle, int port, std::uint8_t value) {

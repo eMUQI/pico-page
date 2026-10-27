@@ -670,3 +670,13 @@ PR #157 Codex review（`cd625f4d`）提出三项 P2，均核实属实并修正�
 验证沿用上一批本机环境与既有 SDK 修改，依赖锁、BSP、sdkconfig 和工具链未变。host Debug 重新配置、构建、核对 CTest 注册并完整运行，31/31 通过；标准 `sh tools/build_firmware.sh` 构建及来源检查通过，产物与来源记录位于 `firmware/build/`。交接检查与 `git diff --check` 通过。日志为 `/tmp/pico-directory-dictionaries-host-*.log`、`/tmp/pico-directory-dictionaries-firmware.log` 和 `/tmp/pico-directory-dictionaries-handoff.log`。未新增测试目标，未重复 sanitizer；未进行真机验收、刷写、提交、推送或发布。下一步在实际 FAT 卡核对缺失词典目录补建、大小写目录复用、原词典内容保持及只读／满卡回退。
 
 PR 整理时修正上一批替换造成的传书说明误写：Wi-Fi 传书仍只接受 `Books/`、`Fonts/` 和 `LockScreens/`，启动补建 `Dictionaries/` 不扩大上传支持范围。此次仅修正文档，重新执行交接检查与差异检查，均通过；沿用上文已通过的相同 C++ 源码回归与固件构建结果。
+
+## 2026-10-27 · 休眠与关机的 IO 扩展器读取修复
+
+用户在新设备上测试 `b74b722` 时发现：按休眠后立即被唤醒，关机落到「请长按电源键强制关机」。用户授权烧录本机连接的第三台设备（MAC 末段 `d1:7d:38`，单 4 MiB `factory` 分区）测试，只写入 `0x10000` 的应用。
+
+临时探针在主循环同一任务上执行 `sleep()`／`power_off()` 前的准备并调用 `SleepIo::suspend()`，两种路径都返回 `ESP_ERR_INVALID_STATE`。原因是 PR #146 使用 `read_pico_get_ioe_status_full()` 读取 FCA9555：该函数从 IN0 连续读取八个寄存器，而这颗扩展器在突发读取中只在寄存器对内交替，OUT／INV／CFG 实际都是输入寄存器的副本（设备上读出 `cfg=0xff85 out=0xff85`，启动自检逐个读取的 CFG0 为 `0x64`）。「P0.2/5/6 为输入」检查因此失败，浅睡和关机都被拒绝。host 测试的替身直接返回正确值，没有暴露此问题；#146 的记录也写明尚未做真机休眠／关机验收。
+
+`SleepIo::suspend()` 改为逐个读取 OUT0/OUT1/CFG0/CFG1，不修改 BSP。替身改为只提供单寄存器读取，覆盖每次读取失败。设备上用探针各执行浅睡与关机的 suspend／resume，均成功且设备继续响应；探针与临时控制台命令未提交。host Debug 30/30（本工作树未启用 BSP 波形测试项）、固件构建通过。
+
+未测：实际进入浅睡后的电源键唤醒、实际关机（设备由 USB 供电且无人按键），以及休眠电流；需在用户设备上按 PW02／PW04 复验。测试期间本机检出中另有会话的未提交词典改动，修复在独立工作树完成，未触碰这些改动。
