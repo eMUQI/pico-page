@@ -81,9 +81,11 @@ public:
     /** Exact UTF-8 headword lookup, including synonyms. At most 32 distinct
      * entries are returned. Continue with entries.back().ordinal + 1 when more
      * is true; results are ordered by original index ordinal.
+     * extensible, when supplied, becomes false only if no other headword begins with
+     * word (ASCII case folded), so no longer word with this prefix can be found.
      */
     Result lookup(const std::string& word, std::vector<Entry>& entries, bool& more,
-                  std::uint32_t first_ordinal = 0, const Stop& stop = {});
+                  std::uint32_t first_ordinal = 0, const Stop& stop = {}, bool* extensible = nullptr);
     /** Decode textual fields without stripping markup. Binary fields are
      * skipped by their declared lengths. Oversized entries fail explicitly.
      */

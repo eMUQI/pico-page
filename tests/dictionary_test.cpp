@@ -160,6 +160,14 @@ int main(int argc, char** argv) {
     assert(dictionary.lookup("龥", entries, more).status == Status::NotFound);
     assert(dictionary.lookup("0", entries, more).status == Status::NotFound);
     found("中文"); found("APPLE"); found("别名");
+    // extensible reports whether any longer headword (or synonym) begins with the word.
+    bool extensible = false;
+    assert(dictionary.lookup("dupl", entries, more, 0, {}, &extensible).status == Status::NotFound && extensible);
+    assert(dictionary.lookup("duplicates", entries, more, 0, {}, &extensible).status == Status::NotFound && !extensible);
+    assert(dictionary.lookup("中", entries, more, 0, {}, &extensible).status == Status::NotFound && extensible);
+    assert(dictionary.lookup("别", entries, more, 0, {}, &extensible).status == Status::NotFound && extensible);
+    assert(dictionary.lookup("龥", entries, more, 0, {}, &extensible).status == Status::NotFound && !extensible);
+    assert(dictionary.lookup("ap", entries, more, 0, {}, &extensible).status == Status::NotFound && extensible);
     unsigned count = 0;
     std::uint32_t next = 0;
     do {

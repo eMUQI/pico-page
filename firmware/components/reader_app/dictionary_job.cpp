@@ -186,15 +186,43 @@ void ContentJob::search_dictionaries(FileStore& store, const dictionary::Stop& s
         if (stop()) break;
         dictionary::Dictionary reader;
         auto status = open_dictionary(store, sources[source], reader, stop);
-        std::vector<dictionary::Entry> entries;
+        std::vector<dictionary::Entry> entries, matched;
         std::vector<dictionary::Field> fields;
-        bool more = false;
+        bool more = false, matched_more = false;
         std::size_t hit = limit;
-        for (std::size_t index = 0; status && index < limit; ++index) {
-            status = reader.lookup(candidates[index].word, entries, more, request.dictionary_ordinal, stop);
-            if (status.status == dictionary::Status::NotFound) { status = {}; continue; }
-            if (status) { hit = index; status = reader.read(entries.front().ordinal, fields, stop); }
-            break;
+        // Exact candidates sharing a start are prefixes of each other. Querying them from
+        // short to long lets a prefix that no headword extends rule out every longer one.
+        std::vector<std::size_t> order(limit);
+        for (std::size_t index = 0; index < limit; ++index) order[index] = index;
+        std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+            const auto& x = candidates[a]; const auto& y = candidates[b];
+            if (x.inflection != y.inflection) return !x.inflection;
+            if (x.selection.begin != y.selection.begin) return x.selection.begin < y.selection.begin;
+            return x.selection.end < y.selection.end;
+        });
+        std::vector<const dictionary::Candidate*> closed;  // Candidates no headword extends.
+        for (const auto index : order) {
+            if (!status) break;
+            const auto& candidate = candidates[index];
+            if (index > hit) continue;  // Cannot outrank this source's current match.
+            if (!candidate.inflection && std::any_of(closed.begin(), closed.end(), [&](const auto* prefix) {
+                    return prefix->selection.begin == candidate.selection.begin &&
+                           candidate.word.size() > prefix->word.size() &&
+                           candidate.word.compare(0, prefix->word.size(), prefix->word) == 0;
+                })) continue;
+            bool extensible = true;
+            status = reader.lookup(candidate.word, entries, more, request.dictionary_ordinal, stop, &extensible);
+            if (status.status == dictionary::Status::NotFound) {
+                status = {};
+                if (!candidate.inflection && !extensible) closed.push_back(&candidate);
+                continue;
+            }
+            if (!status) break;
+            hit = index; matched = std::move(entries); matched_more = more;
+        }
+        if (status && hit < limit) {
+            entries = std::move(matched); more = matched_more;
+            status = reader.read(entries.front().ordinal, fields, stop);
         }
         if (status.status == dictionary::Status::Cancelled || stop()) break;
         if (!status) {

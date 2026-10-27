@@ -432,15 +432,28 @@ Result Dictionary::open_impl(const std::string& ifo_path, FileStore* store, Veri
     return {};
 }
 Result Dictionary::lookup(const std::string& word, std::vector<Entry>& entries, bool& more,
-                          std::uint32_t first_ordinal, const Stop& stop) {
+                          std::uint32_t first_ordinal, const Stop& stop, bool* extensible) {
     entries.clear(); more = false;
+    if (extensible) *extensible = false;
     if (!impl_ || !impl_->ready) return failure(Status::InvalidFormat, "Dictionary is not prepared");
     if (word.empty() || word.size() > kMaxWord || !valid_utf8(word)) return failure(Status::InvalidFormat, "Invalid dictionary query");
     if (!memory_room(64 * 1024)) return failure(Status::ResourceLimit, "Insufficient memory for dictionary lookup");
     auto& state = *impl_;
     state.data.discard_decoded();
+    // Headwords that fold-extend word sort directly after it, so the first greater record decides.
+    const auto extends = [&](const std::string& head) {
+        if (head.size() < word.size()) return false;
+        for (std::size_t i = 0; i < word.size(); ++i)
+            if (fold(static_cast<unsigned char>(head[i])) != fold(static_cast<unsigned char>(word[i]))) return false;
+        return true;
+    };
     for (auto* source : {&state.index, &state.synonyms}) {
-        if (!source->count || source->outside(word)) continue;
+        if (!source->count) continue;
+        if (source->outside(word)) {
+            // Below the first headword the following records are unknown; keep longer words possible.
+            if (extensible && source->first_known && compare(word, source->first_word) < 0) *extensible = true;
+            continue;
+        }
         std::uint32_t offset = 0, ordinal = 0;
         auto result = source->start(word, offset, ordinal, stop); if (!result) { entries.clear(); return result; }
         Cursor cursor(source->file, offset, stop);
@@ -450,7 +463,7 @@ Result Dictionary::lookup(const std::string& word, std::vector<Entry>& entries, 
             if (!ordinal && !source->first_known) { source->first_word = record.word; source->first_known = true; }
             if (ordinal + 1 == source->count && !source->last_known) { source->last_word = record.word; source->last_known = true; }
             const auto order = compare(record.word, word);
-            if (order > 0) break;
+            if (order > 0) { if (extensible && extends(record.word)) *extensible = true; break; }
             if (order < 0) continue;
             const auto target = source->synonym ? record.offset : ordinal;
             if (target < first_ordinal || std::any_of(entries.begin(), entries.end(), [target](const Entry& e) { return e.ordinal == target; })) continue;
