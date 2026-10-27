@@ -458,6 +458,10 @@ bool asset_path(const std::string& path) {
         return extension == ".ttf" || extension == ".otf" || extension == ".txt";
     // Lock screen images are listed from the directory root only.
     if (path.compare(0, 12, "LockScreens/") == 0) return valid_lock_screen_name(path.substr(12));
+    // StarDict files: .ifo/.idx/.dict/.syn and their .gz/.dz compressed forms.
+    if (path.compare(0, 13, "Dictionaries/") == 0)
+        return extension == ".ifo" || extension == ".idx" || extension == ".dict" || extension == ".syn" ||
+               extension == ".gz" || extension == ".dz";
     return false;
 }
 

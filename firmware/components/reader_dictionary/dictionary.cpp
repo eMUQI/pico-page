@@ -27,12 +27,14 @@ bool number(const std::string& text, std::uint32_t& out) {
 struct Record { std::string word; std::uint32_t offset = 0, length = 0; };
 class Cursor {
 public:
-    Cursor(File& file, std::uint32_t position, const Stop& stop) : file_(file), position_(position), stop_(stop) {}
+    /** read_bytes bounds each refill; a smaller value suits reading a single record. */
+    Cursor(File& file, std::uint32_t position, const Stop& stop, std::size_t read_bytes = 4096)
+        : file_(file), position_(position), stop_(stop), read_bytes_(std::min(read_bytes, buffer_.size())) {}
     std::uint32_t position() const { return position_; }
     Result byte(unsigned char& out) {
         if (position_ >= file_.size()) return failure(Status::InvalidFormat, "Truncated dictionary index record");
         if (available_ == used_) {
-            available_ = std::min<std::uint32_t>(buffer_.size(), file_.size() - position_);
+            available_ = std::min<std::uint32_t>(read_bytes_, file_.size() - position_);
             auto result = file_.read(position_, buffer_.data(), available_, stop_);
             if (!result) return result;
             used_ = 0;
@@ -68,7 +70,7 @@ private:
     std::uint32_t position_;
     const Stop& stop_;
     std::array<unsigned char, 4096> buffer_{};
-    std::size_t used_ = 0, available_ = 0;
+    std::size_t read_bytes_, used_ = 0, available_ = 0;
 };
 
 struct Index {
@@ -76,6 +78,17 @@ struct Index {
     std::unique_ptr<std::uint32_t[]> checkpoints;
     std::uint32_t count = 0, checkpoint_count = 0;
     bool synonym = false;
+    // First headwords of probed checkpoints. Lookups through one open reader share the upper
+    // binary-search levels, so the memo avoids repeating those random card reads.
+    static constexpr std::size_t kMaxProbes = 128;
+    std::vector<std::pair<std::uint32_t, std::string>> probes;
+    // The first and last headwords once a scan has read them. A word outside this range has no
+    // entry, which lets other-script candidates skip the index without reading the card.
+    std::string first_word, last_word;
+    bool first_known = false, last_known = false;
+    bool outside(const std::string& word) const {
+        return (first_known && compare(word, first_word) < 0) || (last_known && compare(last_word, word) < 0);
+    }
     Result prepare(std::uint32_t expected, std::uint32_t data_limit, const Stop& stop) {
         count = expected;
         checkpoint_count = expected / kStride + (expected % kStride != 0);
@@ -110,9 +123,16 @@ struct Index {
         Record record;
         while (low < high) {
             const auto middle = low + (high - low) / 2;
-            Cursor cursor(file, checkpoints[middle], stop);
-            auto result = cursor.record(record, synonym); if (!result) return result;
-            if (compare(record.word, word) < 0) low = middle + 1;
+            const auto memo = std::find_if(probes.begin(), probes.end(), [&](const auto& probe) { return probe.first == middle; });
+            const std::string* head = memo == probes.end() ? nullptr : &memo->second;
+            if (!head) {
+                // One short read holds a typical record; longer headwords refill the cursor.
+                Cursor cursor(file, checkpoints[middle], stop, 512);
+                auto result = cursor.record(record, synonym); if (!result) return result;
+                if (probes.size() < kMaxProbes) probes.emplace_back(middle, record.word);
+                head = &record.word;
+            }
+            if (compare(*head, word) < 0) low = middle + 1;
             else high = middle;
         }
         // Start before the first equal checkpoint so duplicate heads cannot be skipped.
@@ -381,13 +401,15 @@ Result Dictionary::lookup(const std::string& word, std::vector<Entry>& entries, 
     auto& state = *impl_;
     state.data.discard_decoded();
     for (auto* source : {&state.index, &state.synonyms}) {
-        if (!source->count) continue;
+        if (!source->count || source->outside(word)) continue;
         std::uint32_t offset = 0, ordinal = 0;
         auto result = source->start(word, offset, ordinal, stop); if (!result) { entries.clear(); return result; }
         Cursor cursor(source->file, offset, stop);
         Record record;
         for (; ordinal < source->count; ++ordinal) {
             if (!(result = cursor.record(record, source->synonym))) { entries.clear(); return result; }
+            if (!ordinal && !source->first_known) { source->first_word = record.word; source->first_known = true; }
+            if (ordinal + 1 == source->count && !source->last_known) { source->last_word = record.word; source->last_known = true; }
             const auto order = compare(record.word, word);
             if (order > 0) break;
             if (order < 0) continue;

@@ -92,13 +92,15 @@ struct ChapterSession {
  * No dictionary files remain open between jobs.
  */
 struct DictionarySession {
-    std::vector<std::pair<std::string, dictionary::Verification>> verified;
-};
-/** One logical lookup, shared by its sequential candidate/source jobs only.
- * Remember definitive source preparation failures, never entry or transient failures.
- * A new selection or explicit retry gets a new instance; cancelled jobs retain theirs.
- */
-struct DictionaryQuery {
+    /** path is the checked absolute .ifo path, kept only after a successful open. */
+    struct Source {
+        std::string relative_path, path;
+        dictionary::Verification verification;
+    };
+    std::vector<Source> verified;
+    /** At most 32 definitive InvalidFormat/Unsupported preparation results, never entry,
+     * I/O, memory or cancellation failures. Explicit retry and preparation clear an entry.
+     */
     std::vector<std::pair<std::string, dictionary::Result>> preparation_failures;
 };
 struct DictionaryItem {
@@ -168,8 +170,12 @@ public:
         std::shared_ptr<PaginationSession> session;
         std::shared_ptr<ChapterSession> chapter_session;
         std::shared_ptr<DictionarySession> dictionary_session;
-        std::shared_ptr<DictionaryQuery> dictionary_query;
-        /** One dictionary per job: relative_path identifies its metadata below Dictionaries. */
+        /** relative_path names one dictionary below Dictionaries. A lookup may instead search
+         * dictionary_sources in order, opening each at most once. Candidates are ordered best
+         * first: exact before inflected forms, then longer selections. A later source replaces
+         * a match only with a strictly better candidate.
+         */
+        std::vector<std::string> dictionary_sources;
         std::vector<dictionary::Candidate> dictionary_candidates;
         std::uint32_t dictionary_ordinal = 0;
         std::shared_ptr<const std::vector<dictionary::Field>> dictionary_definition;
@@ -180,6 +186,8 @@ public:
         // Split the page before this scalar anchor so both layouts resume at the same text.
         std::size_t dictionary_layout_anchor = 0;
         bool dictionary_entry_lookup = false;
+        /** Re-prepare sources whose definitive failure this session remembers. */
+        bool dictionary_retry = false;
         bool save_last_book = false, cover_crop = false, preview = false;
         /** LockScreen: prepare the disk cache without retaining a result canvas. */
         bool lock_screen_prepare = false;
@@ -214,6 +222,9 @@ public:
         std::vector<dictionary::Entry> dictionary_entries;
         std::vector<dictionary::Field> dictionary_fields;
         bool dictionary_complete = false, dictionary_more = false, dictionary_reused = false;
+        /** Lookup: index of the matching source; partial when another source failed. */
+        std::size_t dictionary_source = 0;
+        bool dictionary_partial = false;
         bool dictionary_missing_glyphs = false;
         graphics::Page dictionary_page;
         dictionary::TextCursor dictionary_next;
@@ -313,6 +324,9 @@ private:
 #endif
     void render_image();
     void read_dictionary();
+    dictionary::Result open_dictionary(FileStore& store, const std::string& relative_path,
+                                       dictionary::Dictionary& reader, const dictionary::Stop& stop);
+    void search_dictionaries(FileStore& store, const dictionary::Stop& stop);
     void prepare_lock_screen();
     void open_book();
     void prepare_cover();

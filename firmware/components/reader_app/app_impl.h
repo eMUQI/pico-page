@@ -773,13 +773,11 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::chrono::steady_clock::time_point mapping_start_retry{};
     std::optional<ContentJob::Request> pending_content;
     std::shared_ptr<DictionarySession> dictionary_session;
-    std::shared_ptr<DictionaryQuery> dictionary_query;
     std::vector<DictionaryItem> dictionary_items;
     std::vector<std::string> dictionary_ready;
     std::size_t dictionary_list_page = 0, dictionary_source = 0, dictionary_entry = 0, dictionary_entry_base = 0;
-    bool dictionary_list_complete = true, dictionary_full = false, dictionary_inflections = false, dictionary_search_all = true;
+    bool dictionary_list_complete = true, dictionary_full = false, dictionary_search_all = true;
     bool dictionary_partial_error = false, dictionary_missing_glyphs = false, dictionary_omitted_fields = false;
-    std::size_t dictionary_candidate_length = 0;
     std::size_t dictionary_layout_anchor = 0, dictionary_picker_page = 0;
     bool dictionary_choosing = false, dictionary_settings_from_lookup = false, dictionary_settings_changed = false;
     std::string dictionary_return_notice, dictionary_settings_source;
@@ -813,8 +811,9 @@ struct ReaderApp::Impl final : DisplayBackend {
     void submit_dictionary_selection();
     void flush_dictionary_selection();
     void reset_dictionary_contact();
-    void query_dictionary();
-    void page_dictionary(int movement = 0);
+    /** Queues one lookup of the current candidates; retry re-prepares remembered failed sources. */
+    void query_dictionary(bool retry = false);
+    void page_dictionary(int movement = 0, bool redraw = true);
     void draw_dictionary();
     void finish_dictionary(ContentJob& job);
     void dictionary_control(int id);

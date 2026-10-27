@@ -56,6 +56,7 @@ def main():
     make(root, 'repetitive', [('sample', b'a' * 100000)], block_size=60000)
     make(root, 'han-short', [('中', b'short match')])
     make(root, 'han-long', [('中文', b'long match')])
+    make(root, 'han-broken', [('中', b'mshort match\0'), ('中文', b'tmissing-terminator')], types='')
     make(root, 'plain', [('apple', b'lower <literal>')], compressed=False)
     (root / 'long-name.ifo').write_text((root / 'plain.ifo').read_text().replace('Synthetic fixture', 'x' * 513))
     make(root, 'fields', [('sample', b'tphonetic\0mplain <literal>\0h<p>HTML</p>\0g<b>Pango</b>\0x<k>word</k>\0W\0\0\0\3\0\1\2')], types='')
