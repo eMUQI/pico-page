@@ -170,7 +170,6 @@ void ReaderApp::Impl::flush_dictionary_selection() {
 }
 
 void ReaderApp::Impl::submit_dictionary_selection() {
-    dictionary_query = std::make_shared<DictionaryQuery>();
     const auto status = dictionary::selection_candidates(chapter.text, {page.start, page.end}, dictionary_selection,
                                                          dictionary_trigger, dictionary_manual, dictionary_candidates);
     dictionary_selection_dirty = false;
@@ -179,11 +178,12 @@ void ReaderApp::Impl::submit_dictionary_selection() {
         dictionary_selecting = true; draw_dictionary(); overlay(); return;
     }
     dictionary_selecting = false;
-    dictionary_source = 0; dictionary_inflections = false; dictionary_search_all = true; dictionary_partial_error = false;
-    dictionary_candidate_length = 0;
-    for (const auto& candidate : dictionary_candidates)
-        if (candidate.selection.end - candidate.selection.begin != dictionary_selection.end - dictionary_selection.begin)
-            dictionary_candidate_length = std::max(dictionary_candidate_length, candidate.selection.end - candidate.selection.begin);
+    // Exact forms precede inflections; longer Chinese candidates precede shorter ones.
+    std::stable_sort(dictionary_candidates.begin(), dictionary_candidates.end(), [](const auto& a, const auto& b) {
+        if (a.inflection != b.inflection) return !a.inflection;
+        return a.selection.end - a.selection.begin > b.selection.end - b.selection.begin;
+    });
+    dictionary_source = 0; dictionary_search_all = true; dictionary_partial_error = false;
     query_dictionary();
 }
 
@@ -198,7 +198,7 @@ void ReaderApp::Impl::begin_dictionary(int x, int y, bool selecting) {
     dictionary_trigger = *hit; dictionary_manual = false; dictionary_selecting = selecting;
     dictionary_touch_y = y; dictionary_full = false; dictionary_source = 0;
     dictionary_choosing = dictionary_settings_from_lookup = false;
-    dictionary_inflections = false; dictionary_search_all = true;
+    dictionary_search_all = true;
     dictionary_partial_error = false;
     dictionary_page = {}; dictionary_definition.reset(); dictionary_entries.clear(); dictionary_pages.clear();
     dictionary_headword.clear(); dictionary_name.clear(); dictionary_notice.clear();
@@ -207,7 +207,7 @@ void ReaderApp::Impl::begin_dictionary(int x, int y, bool selecting) {
     else submit_dictionary_selection();
 }
 
-void ReaderApp::Impl::query_dictionary(bool redraw) {
+void ReaderApp::Impl::query_dictionary(bool retry) {
     dictionary_definition.reset(); dictionary_page = {}; dictionary_pages.clear(); dictionary_entry = 0; dictionary_entry_base = 0;
     dictionary_entries.clear(); dictionary_headword.clear(); dictionary_name.clear();
     dictionary_missing_glyphs = dictionary_omitted_fields = false;
@@ -218,15 +218,11 @@ void ReaderApp::Impl::query_dictionary(bool redraw) {
     }
     dictionary_source %= settings.dictionary_enabled.size();
     ContentJob::Request request; request.kind = ContentJob::Kind::DictionaryLookup;
-    request.relative_path = settings.dictionary_enabled[dictionary_source];
-    request.dictionary_query = dictionary_query;
-    for (const auto& candidate : dictionary_candidates)
-        if (candidate.inflection == dictionary_inflections && (!dictionary_candidate_length ||
-            candidate.selection.end - candidate.selection.begin == dictionary_candidate_length))
-            request.dictionary_candidates.push_back(candidate);
+    if (dictionary_search_all) { dictionary_source = 0; request.dictionary_sources = settings.dictionary_enabled; }
+    else request.relative_path = settings.dictionary_enabled[dictionary_source];
+    request.dictionary_candidates = dictionary_candidates; request.dictionary_retry = retry;
     if (request.dictionary_candidates.empty()) { dictionary_notice = "未找到词条。"; draw_dictionary(); overlay(); return; }
-    queue_dictionary(std::move(request));
-    if (redraw) { draw_dictionary(); overlay(); }
+    queue_dictionary(std::move(request)); draw_dictionary(); overlay();
 }
 
 void ReaderApp::Impl::page_dictionary(int movement, bool redraw) {
@@ -368,14 +364,8 @@ void ReaderApp::Impl::cancel_dictionary_sources() {
 }
 
 void ReaderApp::Impl::select_dictionary(std::size_t source) {
-    dictionary_query = std::make_shared<DictionaryQuery>();
     dictionary_choosing = false; dictionary_source = source;
     dictionary_partial_error = false; dictionary_search_all = false;
-    dictionary_inflections = false; dictionary_candidate_length = 0;
-    for (const auto& candidate : dictionary_candidates)
-        if (candidate.selection.begin != dictionary_candidates.front().selection.begin ||
-            candidate.selection.end != dictionary_candidates.front().selection.end)
-            dictionary_candidate_length = dictionary_candidates.front().selection.end - dictionary_candidates.front().selection.begin;
     query_dictionary();
 }
 
@@ -424,6 +414,8 @@ void ReaderApp::Impl::finish_dictionary(ContentJob& job) {
             }
         } else if (result.dictionary_status) {
             if (job.request.kind == ContentJob::Kind::DictionaryLookup) {
+                if (!job.request.dictionary_sources.empty()) dictionary_source = result.dictionary_source;
+                if (!job.request.dictionary_entry_lookup) dictionary_partial_error = result.dictionary_partial;
                 if (job.request.dictionary_entry_lookup)
                     dictionary_entry_base = job.request.dictionary_ordinal ? dictionary_entry_base + dictionary_entries.size() : 0;
                 dictionary_entries = std::move(result.dictionary_entries); dictionary_entry = 0;
@@ -438,19 +430,7 @@ void ReaderApp::Impl::finish_dictionary(ContentJob& job) {
             dictionary_pages.assign(1, {}); dictionary_page_number = 0; dictionary_layout_anchor = 0; page_dictionary(0, false); return;
         } else if (job.request.kind == ContentJob::Kind::DictionaryLookup && !job.request.dictionary_entry_lookup &&
                    result.dictionary_status.status != dictionary::Status::Cancelled) {
-            dictionary_partial_error = dictionary_partial_error || result.dictionary_status.status != dictionary::Status::NotFound;
-            // The loading panel stays on screen while the search continues; only the final result is presented.
-            if (dictionary_search_all && ++dictionary_source < settings.dictionary_enabled.size()) { query_dictionary(false); return; }
-            if (dictionary_candidate_length > 1) {
-                --dictionary_candidate_length;
-                if (dictionary_search_all) dictionary_source = 0;
-                query_dictionary(false); return;
-            }
-            if (!dictionary_inflections && std::any_of(dictionary_candidates.begin(), dictionary_candidates.end(), [](const auto& candidate) { return candidate.inflection; })) {
-                if (dictionary_search_all) dictionary_source = 0;
-                dictionary_inflections = true; query_dictionary(false); return;
-            }
-            if (dictionary_search_all) dictionary_source = 0;
+            dictionary_partial_error = result.dictionary_partial || result.dictionary_status.status != dictionary::Status::NotFound;
             if (dictionary_partial_error) dictionary_notice = "没有可用结果；部分词典读取失败，请检查文件或 TF 卡。";
         }
     }
@@ -466,7 +446,6 @@ void ReaderApp::Impl::finish_dictionary(ContentJob& job) {
 }
 
 void ReaderApp::Impl::close_dictionary() {
-    dictionary_query.reset();
     reset_dictionary_contact(); dictionary_choosing = dictionary_settings_from_lookup = false;
     abandon_content(); dictionary_definition.reset(); dictionary_page = {}; dictionary_pages.clear();
     dictionary_entries.clear(); dictionary_candidates.clear();
@@ -550,15 +529,8 @@ void ReaderApp::Impl::dictionary_control(int id) {
     if (content_loading) return;
     if (id == DictionaryRetry) {
         if (dictionary_definition) { page_dictionary(); return; }
-        dictionary_query = std::make_shared<DictionaryQuery>();
         dictionary_partial_error = false;
-        if (dictionary_search_all) dictionary_source = 0;
-        dictionary_candidate_length = 0;
-        for (const auto& candidate : dictionary_candidates)
-            if (candidate.selection.begin != dictionary_candidates.front().selection.begin ||
-                candidate.selection.end != dictionary_candidates.front().selection.end)
-                dictionary_candidate_length = dictionary_candidates.front().selection.end - dictionary_candidates.front().selection.begin;
-        dictionary_inflections = false; query_dictionary(); return;
+        query_dictionary(true); return;
     }
     if (id == DictionaryExpand) {
         if (!dictionary_definition || dictionary_pages.empty()) return;
@@ -581,7 +553,6 @@ void ReaderApp::Impl::dictionary_control(int id) {
     if (id == DictionaryNextEntry && !dictionary_entries.empty()) {
         dictionary_definition.reset(); dictionary_page = {}; dictionary_pages.clear();
         ContentJob::Request request; request.relative_path = settings.dictionary_enabled[dictionary_source];
-        request.dictionary_query = dictionary_query;
         if (dictionary_entry + 1 == dictionary_entries.size()) {
             request.kind = ContentJob::Kind::DictionaryLookup;
             request.dictionary_ordinal = dictionary_more_entries ? dictionary_entries.back().ordinal + 1 : 0;

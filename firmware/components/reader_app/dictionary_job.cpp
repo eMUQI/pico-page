@@ -106,58 +106,113 @@ void ContentJob::read_dictionary() {
         }
         return;
     }
+    if (request.kind == Kind::DictionaryLookup) { search_dictionaries(store, stop); return; }
+    dictionary::Dictionary reader;
+    auto status = open_dictionary(store, request.relative_path, reader, stop);
+    if (!status) { finish(std::move(status)); return; }
+    result.dictionary_info = reader.info(); result.dictionary_reused = reader.reused_index();
+    if (request.kind == Kind::DictionaryPrepare) return;
+    finish(reader.read(request.dictionary_ordinal, result.dictionary_fields, stop));
+}
+
+dictionary::Result ContentJob::open_dictionary(FileStore& store, const std::string& relative_path,
+                                               dictionary::Dictionary& reader, const dictionary::Stop& stop) {
     std::string path;
-    const auto resolved = store.dictionary_path(request.relative_path, path);
-    if (resolved != StoreStatus::Ok) { finish(path_error(resolved)); return; }
-    if (request.kind == Kind::DictionaryLookup && (request.dictionary_candidates.empty() || request.dictionary_candidates.size() > 36)) {
-        finish({dictionary::Status::InvalidFormat, "Invalid dictionary candidates"}); return;
-    }
-    auto* query = request.kind == Kind::DictionaryLookup ? request.dictionary_query.get() : nullptr;
-    if (query) {
-        const auto& failures = query->preparation_failures;
+    const auto resolved = store.dictionary_path(relative_path, path);
+    if (resolved != StoreStatus::Ok) return path_error(resolved);
+    auto* session = request.dictionary_session.get();
+    if (session) {
+        // Sources cannot change within a verified mount session; explicit retry and preparation re-read them.
+        auto& failures = session->preparation_failures;
         const auto found = std::find_if(failures.begin(), failures.end(),
-            [&](const auto& entry) { return entry.first == request.relative_path; });
-        if (found != failures.end()) { finish(found->second); return; }
+            [&](const auto& entry) { return entry.first == relative_path; });
+        if (found != failures.end()) {
+            if (!request.dictionary_retry && request.kind != Kind::DictionaryPrepare) return found->second;
+            failures.erase(found);
+        }
     }
     dictionary::Verification temporary;
     auto* verification = &temporary;
-    if (request.dictionary_session) {
-        auto& entries = request.dictionary_session->verified;
-        auto found = std::find_if(entries.begin(), entries.end(), [&](const auto& entry) { return entry.first == request.relative_path; });
+    if (session) {
+        auto& entries = session->verified;
+        auto found = std::find_if(entries.begin(), entries.end(), [&](const auto& entry) { return entry.first == relative_path; });
         if (found == entries.end()) {
-            if (entries.size() == 32) { finish({dictionary::Status::ResourceLimit, "Too many verified dictionaries"}); return; }
-            entries.emplace_back(request.relative_path, dictionary::Verification{});
+            if (entries.size() == 32) return {dictionary::Status::ResourceLimit, "Too many verified dictionaries"};
+            entries.emplace_back(relative_path, dictionary::Verification{});
             found = std::prev(entries.end());
         }
         verification = &found->second;
     }
-    dictionary::Dictionary reader;
     auto status = reader.open_prepared(path, store, *verification, stop);
-    if (!status) {
-        if (query && query->preparation_failures.size() < 32 &&
-            (status.status == dictionary::Status::InvalidFormat || status.status == dictionary::Status::Unsupported))
-            query->preparation_failures.emplace_back(request.relative_path, status);
-        finish(std::move(status)); return;
+    if (!status && session && session->preparation_failures.size() < 32 &&
+        (status.status == dictionary::Status::InvalidFormat || status.status == dictionary::Status::Unsupported))
+        session->preparation_failures.emplace_back(relative_path, status);
+    return status;
+}
+
+void ContentJob::search_dictionaries(FileStore& store, const dictionary::Stop& stop) {
+    const auto& candidates = request.dictionary_candidates;
+    if (candidates.empty() || candidates.size() > 36) {
+        result.dictionary_status = {dictionary::Status::InvalidFormat, "Invalid dictionary candidates"};
+        result.error = result.dictionary_status.message; return;
     }
-    result.dictionary_info = reader.info(); result.dictionary_reused = reader.reused_index();
-    if (request.kind == Kind::DictionaryPrepare) return;
-    if (request.kind == Kind::DictionaryRead) {
-        finish(reader.read(request.dictionary_ordinal, result.dictionary_fields, stop)); return;
-    }
-    for (const auto& candidate : request.dictionary_candidates) {
+    for (const auto& candidate : candidates)
         if (candidate.word.size() > 255 || candidate.selection.begin >= candidate.selection.end ||
             candidate.selection.end - candidate.selection.begin > 64) {
-            finish({dictionary::Status::InvalidFormat, "Invalid dictionary candidate"}); return;
+            result.dictionary_status = {dictionary::Status::InvalidFormat, "Invalid dictionary candidate"};
+            result.error = result.dictionary_status.message; return;
         }
-        status = reader.lookup(candidate.word, result.dictionary_entries, result.dictionary_more,
-                               request.dictionary_ordinal, stop);
-        if (status.status == dictionary::Status::NotFound) continue;
-        if (!status) { finish(std::move(status)); return; }
-        result.dictionary_match = candidate;
-        finish(reader.read(result.dictionary_entries.front().ordinal, result.dictionary_fields, stop));
-        return;
+    const auto same_rank = [](const dictionary::Candidate& a, const dictionary::Candidate& b) {
+        return a.inflection == b.inflection &&
+               a.selection.end - a.selection.begin == b.selection.end - b.selection.begin;
+    };
+    const std::vector<std::string> single{request.relative_path};
+    const auto& sources = request.dictionary_sources.empty() ? single : request.dictionary_sources;
+    // Candidates arrive best first. A source may only replace the current match with a
+    // strictly better candidate, so equal candidates keep the earlier source.
+    std::size_t limit = candidates.size();
+    dictionary::Result failure;
+    bool found = false;
+    for (std::size_t source = 0; source < sources.size() && limit; ++source) {
+        if (stop()) break;
+        dictionary::Dictionary reader;
+        auto status = open_dictionary(store, sources[source], reader, stop);
+        std::vector<dictionary::Entry> entries;
+        std::vector<dictionary::Field> fields;
+        bool more = false;
+        std::size_t hit = limit;
+        for (std::size_t index = 0; status && index < limit; ++index) {
+            status = reader.lookup(candidates[index].word, entries, more, request.dictionary_ordinal, stop);
+            if (status.status == dictionary::Status::NotFound) { status = {}; continue; }
+            if (status) { hit = index; status = reader.read(entries.front().ordinal, fields, stop); }
+            break;
+        }
+        if (status.status == dictionary::Status::Cancelled || stop()) break;
+        if (!status) {
+            if (failure) failure = std::move(status);  // Keep the first failure.
+            result.dictionary_partial = true;
+            continue;
+        }
+        if (hit == limit) continue;
+        found = true;
+        result.dictionary_source = source;
+        result.dictionary_info = reader.info(); result.dictionary_reused = reader.reused_index();
+        result.dictionary_match = candidates[hit];
+        result.dictionary_entries = std::move(entries); result.dictionary_more = more;
+        result.dictionary_fields = std::move(fields);
+        result.dictionary_status = std::move(status);  // Retains omitted_fields from the read.
+        limit = hit;
+        while (limit && same_rank(candidates[limit - 1], candidates[hit])) --limit;
     }
-    finish({dictionary::Status::NotFound, "No dictionary entry found"});
+    if (stop()) {
+        result.dictionary_match.reset(); result.dictionary_entries.clear(); result.dictionary_fields.clear();
+        result.dictionary_status = {dictionary::Status::Cancelled, "Dictionary operation cancelled"};
+        result.error = result.dictionary_status.message; return;
+    }
+    if (found) return;
+    // One explicitly chosen source reports its own failure; a search of several reports a partial miss.
+    if (sources.size() == 1 && !failure) { result.dictionary_status = std::move(failure); result.error = result.dictionary_status.message; }
+    else result.dictionary_status = {dictionary::Status::NotFound, "No dictionary entry found"};
 }
 
 }  // namespace pico_page

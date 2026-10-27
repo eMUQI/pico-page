@@ -2789,15 +2789,15 @@ static void dictionary_query_failure_test(const fs::path& root, const fs::path& 
     driver.hold(hit_x, hit_y); driver.present(); driver.complete_content();
     assert(app.view() == View::Dictionary && dictionary_preparations == 1);
     const auto short_hit = app.canvas().pixels();
-    // Choosing a source and explicit retry each start a new logical lookup.
+    // The mount session remembers the definitive failure; only explicit retry prepares it again.
     driver.tap(100, 660); driver.present(); driver.complete_content();
     driver.tap(100, 230); driver.present(); driver.complete_content();
-    assert(dictionary_preparations == 2 && app.canvas().pixels() != short_hit);
+    assert(dictionary_preparations == 1 && app.canvas().pixels() != short_hit);
     driver.tap(300, 1090); driver.present(); driver.complete_content();
-    assert(dictionary_preparations == 3);
+    assert(dictionary_preparations == 2);
     driver.tap(600, 600); driver.present();
     driver.hold(hit_x, hit_y); driver.present(); driver.complete_content();
-    assert(dictionary_preparations == 4 && app.canvas().pixels() == short_hit);
+    assert(dictionary_preparations == 2 && app.canvas().pixels() == short_hit);
     assert(app.saved_record() == saved);
     counted_dictionary.clear();
 #else
