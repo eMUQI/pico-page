@@ -62,8 +62,7 @@ void ReaderApp::Impl::draw_library_problem(int top) {
         y += height;
         canvas.line(36, y - 1, 647, y - 1, 12, 2);
     }
-    // The control keeps the position of the guide button on the empty library.
-    if (problem.action) button(problem.action, problem.action_label, 24, std::max(796, y + 56), 636, 96, false, 30);
+    if (problem.action) button(problem.action, problem.action_label, 24, y + kSectionGap, 636, 96, false, 30);
 }
 
 void ReaderApp::Impl::scan_library() {

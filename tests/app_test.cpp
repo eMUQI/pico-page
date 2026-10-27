@@ -1036,7 +1036,7 @@ static void release_review_test(const fs::path& root, const fs::path& fixtures, 
     // An empty root library lists the ways to add books; the third row only describes one.
     driver.tap(300, 620); assert(!app.pending_frame() && app.view() == View::Library);
     driver.tap(300, 350); assert(app.take_usb_transfer_action() == UsbTransferAction::Start);
-    driver.tap(300, 840); driver.present(); assert(app.view() == View::Help);
+    driver.tap(300, 790); driver.present(); assert(app.view() == View::Help);
     driver.tap(60, 50); driver.present(); assert(app.view() == View::Library);
     driver.tap(600, 50); driver.present(); assert(app.view() == View::Settings);
     driver.tap(300, 1030); driver.present(); assert(app.view() == View::About);
@@ -1160,7 +1160,12 @@ static void library_root_state_test(const fs::path& base, bool async) {
         shot(names[static_cast<int>(issue)], *app);
         pages.push_back(app->canvas().pixels());
         driver.tap(450, 50); assert(!app->pending_frame());
-        driver.tap(300, 840); driver.present(); assert(app->view() == View::PowerMenu);
+        // The button follows the steps, whose number differs between states.
+        for (int y = 400; y < 1000 && app->view() != View::PowerMenu; y += 24) {
+            driver.tap(300, y);
+            if (app->pending_frame()) driver.present();
+        }
+        assert(app->view() == View::PowerMenu);
     }
     for (std::size_t i = 0; i < pages.size(); ++i)
         for (std::size_t j = i + 1; j < pages.size(); ++j) assert(pages[i] != pages[j]);
@@ -1196,7 +1201,7 @@ static void library_scan_failure_test(const fs::path& base) {
             d.refresh();
             assert(app.canvas().pixels() == failed && library_read_entries == scanned);
             library_read_failure_after = -1; library_stat_failure = 0;
-            d.tap(300, 840); d.present();
+            d.tap(300, 570); d.present();
             assert(app.view() == View::Library && app.status().empty());
             assert(app.canvas().pixels() != failed);
         } else if (mode < 3) {

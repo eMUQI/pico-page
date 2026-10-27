@@ -1708,6 +1708,8 @@ struct ReaderApp::Impl final : DisplayBackend {
      * Body of the root library without any book or resume card: the ways to add books, the
      * guide and the limit of the built-in font. The row without an id is a description.
      */
+    // Space between the last row of a library list and the control that follows it.
+    static constexpr int kSectionGap = 56;
     void draw_first_use() {
         text("书库里还没有书", 36, 160, 40, 612, 1, true);
         text("选一种方式放入 EPUB 或 TXT", 36, 222, 26, 612, 3);
@@ -1715,10 +1717,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         settings_row(UsbStart, "USB 连接电脑", "电脑直接管理 TF 卡，退出时重启", 288, 1);
         settings_row(WifiUpload, "Wi-Fi 传书", "经设备热点，手机扫码上传，不需要路由器", 420, 1);
         settings_row(0, "直接放入 TF 卡", direct_copy_hint(), 552, 1);
-        text("第一次使用", 36, 760, 22, 612, 3);
-        button(Help, "查看使用说明", 24, 796, 636, 96, false, 30);
+        // The list ends at 684; the button follows after kSectionGap and the note after 40.
+        button(Help, "查看使用说明", 24, 684 + kSectionGap, 636, 96, false, 30);
         wrapped(std::string("内置字体只含 3,500 个常用字，生僻字会显示为方框。官网 ") + kProjectHome +
-                " 可下载完整的文楷字体，放入 TF 卡 Fonts/，重启后在「排版」中选择。", 36, 924, 612, 22, true, 3);
+                " 可下载完整的文楷字体，放入 TF 卡 Fonts/，重启后在「排版」中选择。", 36, 684 + kSectionGap + 96 + 40, 612, 22, true, 3);
     }
     /**
      * Draws the library. Covers that still need decoding first appear as titles with a status
