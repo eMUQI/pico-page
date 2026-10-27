@@ -6,7 +6,7 @@
 
 卡根目录分成用户自行放置的文件与固件管理的数据。`PicoPage/` 用于设备数据，`<原书完整文件名>.picopage/` 用于该书的设置和进度。固件内部统一使用「卡根目录相对路径」，不得把 host 的 `/mnt/...` 编入数据。
 
-默认配置下，用户把 EPUB、TXT 放入 `Books/` 或其子目录；若已自定义书库扫描根目录，则放入配置的目录。TTF、OTF 及对应许可文本放入 `Fonts/`。`PicoPage/` 由设备管理，手工编辑配置时只修改需要的 TOML 文件；清理缓存使用设备上的「清理全部缓存」。移动书籍时一并移动同名的 `.picopage/` 目录，才能保留该书的进度和单书设置。`LockScreens/` 保存用户管理的 PNG/JPEG 休眠图片；在电源与休眠设置中启用「自定义图片」后使用。转换缓存放入 `PicoPage/cache/lockscreens/`，轮播记录放入 `PicoPage/data/last-lock-screen.txt`；清缓存不删除原图和轮播记录。格式与大小限制见 [自定义锁屏](platform-runtime.md#自定义锁屏)。
+启动时，固件尝试补建缺少的 `Fonts/`、`LockScreens/` 和 `Dictionaries/`，不覆盖已有目录或同名文件；创建失败不阻止阅读。默认书库 `Books/` 按下文规则补建，自定义扫描根不自动创建。默认配置下，用户把 EPUB、TXT 放入 `Books/` 或其子目录；若已自定义书库扫描根目录，则放入配置的目录。TTF、OTF 及对应许可文本放入 `Fonts/`。`PicoPage/` 由设备管理，手工编辑配置时只修改需要的 TOML 文件；清理缓存使用设备上的「清理全部缓存」。移动书籍时一并移动同名的 `.picopage/` 目录，才能保留该书的进度和单书设置。`LockScreens/` 保存用户管理的 PNG/JPEG 休眠图片；在电源与休眠设置中启用「自定义图片」后使用。转换缓存放入 `PicoPage/cache/lockscreens/`，轮播记录放入 `PicoPage/data/last-lock-screen.txt`；清缓存不删除原图和轮播记录。格式与大小限制见 [自定义锁屏](platform-runtime.md#自定义锁屏)。
 
 ```text
 TF 根目录/

@@ -360,10 +360,10 @@ public:
     /** Delete only PicoPage/cache children after users of those files stop. */
     StoreStatus clear_cache() const;
     /**
-     * Creates a missing top-level library directory such as Books; never replaces an existing
-     * entry. On IoError, error_number holds the creation errno (EROFS, ENOSPC, ...), else 0.
+     * Creates a missing top-level directory such as Books or Fonts; never replaces an existing
+     * entry. error_number reports a failed mkdir call (EROFS, ENOSPC, ...); otherwise it is 0.
      */
-    StoreStatus create_library_directory(const std::string& name, int& error_number) const;
+    StoreStatus create_top_level_directory(const std::string& name, int& error_number) const;
     /** Lists metadata IDs below Dictionaries, excluding hidden and res folders.
      * Bounds: 32 dictionaries, 256 directories, four nested directory levels and
      * 8192 directory entries. Ok with complete=false retains a partial list.

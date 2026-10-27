@@ -1081,7 +1081,7 @@ StoreStatus FileStore::manage_book(const BookSnapshot& snapshot, bool delete_ori
     return store_internal::commit_file(root_, path, snapshot.progress, bytes, progress_limit, error, true);
 }
 
-StoreStatus FileStore::create_library_directory(const std::string& name, int& error_number) const {
+StoreStatus FileStore::create_top_level_directory(const std::string& name, int& error_number) const {
     error_number = 0;
     if (name.find('/') != std::string::npos) return StoreStatus::UnsafePath;
     const auto safe = store_internal::safe_path(root_, name);

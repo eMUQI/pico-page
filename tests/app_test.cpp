@@ -1126,15 +1126,40 @@ static void library_root_state_test(const fs::path& base, bool async) {
     };
     const auto fresh = base / "Fresh"; fs::create_directories(fresh);
     const auto fresh_pixels = open(fresh, "library-new-card")->canvas().pixels();
-    assert(fs::is_directory(fresh / "Books"));
-    // The created directory is indistinguishable from one the user made.
+    for (const auto* directory : {"Books", "Fonts", "LockScreens", "Dictionaries"})
+        assert(fs::is_directory(fresh / directory));
+    // Existing resource directories and their contents survive repeated initialization.
     const auto existing = base / "Existing"; fs::create_directories(existing / "Books");
-    assert(open(existing, "library-empty")->canvas().pixels() == fresh_pixels);
+    write(existing / "Fonts/license.txt", "font license");
+    write(existing / "LockScreens/notes.txt", "lock screen notes");
+    write(existing / "Dictionaries/license.txt", "dictionary license");
+    for (int i = 0; i < 2; ++i) {
+        assert(open(existing, "library-empty")->canvas().pixels() == fresh_pixels);
+        assert(read(existing / "Fonts/license.txt") == "font license");
+        assert(read(existing / "LockScreens/notes.txt") == "lock screen notes");
+        assert(read(existing / "Dictionaries/license.txt") == "dictionary license");
+    }
 
     const auto custom = base / "Custom";
     write(custom / "PicoPage/settings.toml", "schema_version=1\n[library]\nroots=['Shelf']\n[onboarding]\ndone=true\n");
     const auto custom_pixels = open(custom, "library-custom-missing")->canvas().pixels();
     assert(!fs::exists(custom / "Shelf") && !fs::exists(custom / "Books") && custom_pixels != fresh_pixels);
+
+    for (const auto* directory : {"Fonts", "LockScreens", "Dictionaries"})
+        assert(fs::is_directory(custom / directory));
+
+    for (const auto* directory : {"Fonts", "LockScreens", "Dictionaries"}) {
+        const auto blocked = base / (std::string("Blocked-") + directory);
+        write(blocked / directory, "not a directory");
+        assert(open(blocked, "library-asset-file")->canvas().pixels() == fresh_pixels);
+        assert(read(blocked / directory) == "not a directory");
+        for (const auto* other : {"Fonts", "LockScreens", "Dictionaries"})
+            if (std::string(other) != directory) assert(fs::is_directory(blocked / other));
+    }
+
+    const auto absent = base / "Absent";
+    { ReaderApp app(absent.string(), "library-no-card", true, async); assert(app.initialize()); }
+    assert(!fs::exists(absent));
 
     const auto file = base / "File"; write(file / "Books", "not a directory");
     const auto file_pixels = open(file, "library-not-directory")->canvas().pixels();
@@ -1167,6 +1192,14 @@ static void library_root_state_test(const fs::path& base, bool async) {
         }
         fs::permissions(shared, fs::perms::owner_all);
         assert(!fs::exists(shared / "Books"));
+
+        const auto asset_locked = base / "AssetsLocked"; fs::create_directories(asset_locked / "Books");
+        write(asset_locked / "PicoPage/settings.toml", "schema_version=1\n[onboarding]\ndone=true\n");
+        fs::permissions(asset_locked, fs::perms::owner_read | fs::perms::owner_exec);
+        assert(open(asset_locked, "library-assets-read-only")->canvas().pixels() == fresh_pixels);
+        fs::permissions(asset_locked, fs::perms::owner_all);
+        for (const auto* directory : {"Fonts", "LockScreens", "Dictionaries"})
+            assert(!fs::exists(asset_locked / directory));
 
         const auto locked = base / "Locked"; fs::create_directories(locked);
         write(locked / "PicoPage/settings.toml", "schema_version=1\n[onboarding]\ndone=true\n");

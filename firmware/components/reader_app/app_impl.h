@@ -1522,6 +1522,13 @@ struct ReaderApp::Impl final : DisplayBackend {
         scan_fonts();
         load_fonts();
         scan_library();
+        // Optional asset directories must not block reading when the card rejects creation.
+        if (card_available) {
+            for (const auto* directory : {"Fonts", "LockScreens", "Dictionaries"}) {
+                int error_number = 0;
+                store.create_top_level_directory(directory, error_number);
+            }
+        }
         draw_library();
         update_boot();
         if (first_boot && view == View::Library) start_onboarding(false);
