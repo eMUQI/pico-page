@@ -68,7 +68,8 @@ public:
     /** Restores a verified sparse index or prepares it through FileStore.
      * First use in each Verification scope identifies the source files. Like sdcv's offset
      * cache, unchanged sizes and modification times reuse the source digest recorded by the
-     * last full check; otherwise, or with full_check, the current files are hashed.
+     * last full check; otherwise, or with full_check, the current files are hashed even when
+     * verification already holds a result.
      * The size/time identity is not a content check: a replacement that keeps both is not
      * detected until the next full check. Compressed indexes are streamed to cache with
      * CRC and SHA-256 readback.

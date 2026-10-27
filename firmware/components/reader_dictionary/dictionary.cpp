@@ -336,7 +336,7 @@ Result Dictionary::open_impl(const std::string& ifo_path, FileStore* store, Veri
     bool verified = false;
     if (store) {
         cache = "dictionaries/" + md5_hex(ifo_path) + "/";
-        verified = verification->source_ == ifo_path && !verification->fingerprint_.empty();
+        verified = !full_check && verification->source_ == ifo_path && !verification->fingerprint_.empty();
         if (verified) fingerprint = verification->fingerprint_;
         else {
             identity = source_identity({ifo_path, index_path, synonym_path});

@@ -2896,7 +2896,22 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     const auto preview = app.canvas().pixels();
     contact(Phase::End, hit_x, hit_y);
     assert(!app.content_busy() && app.canvas().pixels() == preview);
-    driver.present(); app.poll_background();
+    driver.present(); app.poll_background(); driver.complete_content();
+    driver.tap(480, 600); driver.present();
+    // A fast lookup followed by slow page layout still shows the loading panel after the delay.
+    ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryPage, std::chrono::milliseconds(800));
+    contact(Phase::Begin, hit_x, hit_y, true); driver.present();
+    contact(Phase::End, hit_x, hit_y); app.poll_background();
+    assert(!app.pending_frame());
+    std::this_thread::sleep_for(std::chrono::milliseconds(550));
+    app.poll_background(); app.poll_background();
+    assert(app.pending_frame() && app.content_busy());
+    driver.present();
+    ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryPage, std::chrono::milliseconds(0));
+    driver.complete_content();
+    driver.tap(480, 600); driver.present();
+    contact(Phase::Begin, hit_x, hit_y, true); driver.present();
+    contact(Phase::End, hit_x, hit_y);
     // A fast lookup replaces the preview with its result without a loading panel.
     assert(app.content_busy() && !app.pending_frame());
     unsigned fast_frames = 0;

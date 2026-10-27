@@ -118,15 +118,17 @@ void ContentJob::read_dictionary() {
 dictionary::Result ContentJob::open_dictionary(FileStore& store, const std::string& relative_path,
                                                dictionary::Dictionary& reader, const dictionary::Stop& stop) {
     // Sources cannot change within a mount session: USB and remount reset it. Remembered
-    // results therefore skip path checks; explicit retry and preparation re-read the source.
+    // results therefore skip path checks. Preparation always hashes the source; explicit retry
+    // hashes only a source whose definitive failure it clears.
     auto* session = request.dictionary_session.get();
+    bool full_check = request.kind == Kind::DictionaryPrepare;
     if (session) {
         auto& failures = session->preparation_failures;
         const auto found = std::find_if(failures.begin(), failures.end(),
             [&](const auto& entry) { return entry.first == relative_path; });
         if (found != failures.end()) {
             if (!request.dictionary_retry && request.kind != Kind::DictionaryPrepare) return found->second;
-            failures.erase(found);
+            failures.erase(found); full_check = true;
         }
     }
     DictionarySession::Source temporary;
@@ -148,8 +150,7 @@ dictionary::Result ContentJob::open_dictionary(FileStore& store, const std::stri
         if (resolved != StoreStatus::Ok) return path_error(resolved);
         source->path = std::move(path);
     }
-    auto status = reader.open_prepared(source->path, store, source->verification, stop,
-                                       request.dictionary_retry || request.kind == Kind::DictionaryPrepare);
+    auto status = reader.open_prepared(source->path, store, source->verification, stop, full_check);
     if (!status) {
         source->path.clear();
         if (session && session->preparation_failures.size() < 32 &&

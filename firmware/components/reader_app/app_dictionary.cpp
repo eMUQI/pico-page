@@ -390,7 +390,6 @@ void ReaderApp::Impl::leave_dictionary_settings() {
 }
 
 void ReaderApp::Impl::finish_dictionary(ContentJob& job) {
-    dictionary_panel_due = {};
     if (view != View::Dictionary && view != View::DictionarySettings) return;
     auto& result = job.result;
     dictionary_notice = dictionary_error(result.dictionary_status);
@@ -452,6 +451,8 @@ void ReaderApp::Impl::finish_dictionary(ContentJob& job) {
         });
         draw_dictionary_settings();
     } else draw_dictionary();
+    // A successful lookup returns earlier and keeps the deadline while its first page is laid out.
+    dictionary_panel_due = {};
     overlay();
 }
 

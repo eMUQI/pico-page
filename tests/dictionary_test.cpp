@@ -226,7 +226,8 @@ int main(int argc, char** argv) {
         { std::fstream f(index, std::ios::in | std::ios::out | std::ios::binary); assert(f); f.put('B'); }
         fs::last_write_time(index, written);
         verified.clear(); assert(dictionary.open_prepared(main, store, verified) && dictionary.reused_index());
-        verified.clear(); assert(dictionary.open_prepared(main, store, verified, {}, true).status == Status::InvalidFormat);
+        // A full check ignores the stale result already held for this mount.
+        assert(dictionary.open_prepared(main, store, verified, {}, true).status == Status::InvalidFormat);
         fs::last_write_time(index, written + std::chrono::seconds(10));
         verified.clear(); assert(dictionary.open_prepared(main, store, verified).status == Status::InvalidFormat);
         verified.clear();

@@ -29,7 +29,7 @@
 | `PP 4 key K2` | 经正常 App API 发送按下和释放；正文仍为立即全刷 |
 | `PP 5 tap 342 600` | 发送屏幕内一次触摸；坐标范围为 x 0–683、y 0–1215 |
 | `PP 5 hold 128 560` | 发送一次长按；参数与 `tap` 相同。只验证应用对长按的处理，不经过触摸采样和时长判定 |
-| `PP 8 press 128 560`／`PP 9 release 128 560` | 分别发送连续接触的长按开始与松手，与触摸采样器的连续接触相同，用于选词预览后松手查词；`release` 须对应先前的 `press`，否则返回 `no_contact`。同样不经过时长判定 |
+| `PP 8 press 128 560`／`PP 9 release 128 560` | 分别发送连续接触的长按开始与松手，与触摸采样器的连续接触相同，用于选词预览后松手查词；`release` 须对应先前的 `press`，否则返回 `no_contact`；未松手时再次 `press` 返回 `contact_active`。同样不经过时长判定 |
 | `PP 6 open Books/example.epub` | 经正常 App API 开书；路径必须存在于卡内 |
 | `PP 7 screen 12 0 256` | 导出第 12 个已确认帧从字节 0 开始的 256 字节 packed 数据 |
 | `PP 8 file Fonts/reader.ttf` | 只返回白名单资源的长度与 CRC32 |

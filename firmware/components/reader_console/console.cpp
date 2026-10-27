@@ -563,6 +563,8 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
             return;
         }
         if (word == "press") {
+            // The router still owns an unreleased contact; replacing it would strand that sequence.
+            if (contact) { error(id, "contact_active"); return; }
             if (sequence == std::numeric_limits<std::uint64_t>::max()) { error(id, "sequence_exhausted"); return; }
             contact = ++sequence;
         } else if (!contact) { error(id, "no_contact"); return; }
