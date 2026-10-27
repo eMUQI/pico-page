@@ -774,7 +774,7 @@ void ReaderApp::Impl::control(int id) {
             library_page = 0;
             message.clear();
         } else
-            message = "“书库默认视图”未保存，仍按原设置（" + previous + "）生效。请检查存储卡。";
+            message = "「书库默认视图」未保存，仍按原设置（" + previous + "）生效。请检查 TF 卡。";
         draw_input_settings();
         break;
     }
@@ -784,7 +784,7 @@ void ReaderApp::Impl::control(int id) {
         values.wifi_enabled = !values.wifi_enabled;
         std::string detail;
         if (store.apply_settings(edit_snapshot, values, false, detail) != StoreStatus::Ok)
-            wifi_notice = "Wi-Fi 开关未保存，仍按原设置生效。请检查存储卡。";
+            wifi_notice = "Wi-Fi 开关未保存，仍按原设置生效。请检查 TF 卡。";
         else {
             settings.wifi_enabled = values.wifi_enabled;
             if (!values.wifi_enabled) {

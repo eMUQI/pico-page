@@ -693,8 +693,16 @@ struct ReaderApp::Impl final : DisplayBackend {
                library_scan != LibraryScan::Partial;
     }
     const char* library_scan_notice() const;
-    /** Title and next step for an unavailable card or a library that cannot be listed. */
-    std::pair<std::string, std::string> library_problem() const;
+    /** What happened, the steps that resolve it and the one control that helps, for an unavailable card or library. */
+    struct LibraryProblem {
+        std::string title, summary;
+        std::vector<std::string> steps;
+        int action = 0;
+        const char* action_label = "";
+    };
+    LibraryProblem library_problem() const;
+    /** Draws a library problem in the layout of the empty library, starting at top. */
+    void draw_library_problem(int top);
     CardIssue card_issue = CardIssue::Removed;
     reading_footer::Position footer_position = reading_footer::Position::Pages;
     reading_footer::Device footer_device = reading_footer::Device::Battery;
@@ -2368,7 +2376,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto cfg = store.load_settings();
         return cfg.diagnostics.empty() && cfg.settings.wifi_enabled;
     }
-    static std::string quoted_name(const std::string& name) { return "“" + name + "”"; }
+    static std::string quoted_name(const std::string& name) { return "「" + name + "」"; }
     bool wifi_online() const {
         return wifi_status.phase == WifiPhase::Connected || wifi_status.phase == WifiPhase::Clock ||
                wifi_status.phase == WifiPhase::Request;
@@ -3067,7 +3075,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         else if (status != 200) account_notice = "同步服务返回 HTTP " + std::to_string(status) + "，无法确认账户。" + account_kept();
         else if (store.save_private("sync.toml", provision::sync_toml(checked), detail) != StoreStatus::Ok)
-            account_notice = "账户已通过验证，但没有写入存储卡。请检查 TF 卡。";
+            account_notice = "账户已通过验证，但没有写入 TF 卡。请检查 TF 卡。";
         else {
             open_account();
             account.check = AccountDraft::Check::Accepted;

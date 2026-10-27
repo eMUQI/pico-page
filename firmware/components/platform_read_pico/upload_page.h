@@ -50,7 +50,7 @@ const imageSizeProblem=file=>new Promise(resolve=>{
  image.src=url;
 });
 let items=[],running=false,stopped=false,xhr=null;
-$('route').innerHTML=route.hotspot?'已连接设备热点 <span class="mono">'+esc(route.network)+'</span>':'经已保存的 Wi-Fi“'+esc(route.network)+'”';
+$('route').innerHTML=route.hotspot?'已连接设备热点 <span class="mono">'+esc(route.network)+'</span>':'经已保存的 Wi-Fi「'+esc(route.network)+'」';
 $('keep').textContent=route.hotspot?'请保持本页打开并连着热点。关闭页面会中断当前这个文件。':'请保持本页打开。关闭页面会中断当前这个文件。';
 if(globalThis.innerWidth>=520)$('drop-label').textContent='选择或拖入书籍、字体、锁屏图片';
 const row=(item,i)=>{
@@ -116,7 +116,7 @@ const send=async item=>{
   if(e.status&&skip.has(e.status)){item.state='rejected';item.why=e.status===409&&item.unconfirmed?'设备上已有同名文件，没有再次上传。可能是中断前已保存的这一份，请在设备书库中核对。':e.why;return true;}
   if(e.status){item.state='failed';item.why=e.why;return false;}
   item.state=sending?'unconfirmed':'failed';
-  item.why=sending?'连接中断，结果未确认。可以点“重试”；若提示已有同名文件，请在设备书库中核对。':e.aborted?'已停止，未上传。':'连接中断，未上传。请检查与设备的连接。';
+  item.why=sending?'连接中断，结果未确认。可以点「重试」；若提示已有同名文件，请在设备书库中核对。':e.aborted?'已停止，未上传。':'连接中断，未上传。请检查与设备的连接。';
   return false;
  }finally{xhr=null;}
 };

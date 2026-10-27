@@ -10,35 +10,60 @@ const char* ReaderApp::Impl::library_scan_notice() const {
     }
 }
 
-std::pair<std::string, std::string> ReaderApp::Impl::library_problem() const {
+ReaderApp::Impl::LibraryProblem ReaderApp::Impl::library_problem() const {
+    // A card cannot be mounted again without a restart, so every card state offers the power menu.
     if (!card_available) {
         switch (card_issue) {
-        case CardIssue::NotInserted: return {"没有检测到存储卡", "插入 TF 卡后，请重启设备。"};
+        case CardIssue::NotInserted:
+            return {"没有检测到 TF 卡", "书籍、设置和阅读进度都保存在 TF 卡上。", {"插入 TF 卡", "重启设备"}, PowerMenu, "关机 / 重启"};
         case CardIssue::NoFilesystem:
-            return {"无法识别存储卡", "卡上没有可识别的文件系统。请在电脑上检查这张卡，再插回设备并重启。"};
+            return {"无法识别 TF 卡", "卡上没有可识别的文件系统。", {"在电脑上检查这张卡", "插回设备后重启"}, PowerMenu, "关机 / 重启"};
         case CardIssue::Unreadable:
-            return {"存储卡无法读取", "请重新插好 TF 卡，然后重启设备。仍然无法读取时，请在电脑上检查这张卡。"};
+            return {"TF 卡无法读取", "挂载 TF 卡时出错。", {"取出 TF 卡，重新插好", "重启设备", "仍然无法读取时，在电脑上检查这张卡"},
+                    PowerMenu, "关机 / 重启"};
         case CardIssue::Removed: break;
         }
-        return {"存储卡已移除", "插回存储卡后，请重启设备。"};
+        return {"TF 卡已移除", "重启后设备才能重新读取 TF 卡。", {"插回 TF 卡", "重启设备"}, PowerMenu, "关机 / 重启"};
     }
     const auto path = (folder.empty() ? library_home_root : folder) + "/";
+    const auto name = ReaderSettings{}.library_roots.front() + "/";
     switch (library_scan) {
     case LibraryScan::Missing:
-        if (!folder.empty()) return {"文件夹已不存在", path + " 可能已被移动或删除。请返回上一级。"};
-        return {"找不到书库目录", "设置文件指定的书库目录 " + path + " 不存在。请在电脑上创建这个文件夹，"
-                "或修改 PicoPage/settings.toml 中的 library.roots。"};
+        if (!folder.empty()) return {"文件夹已不存在", path + " 可能已被移动或删除。", {}, Back, "返回上一级"};
+        return {"找不到书库目录", "设置文件指定的 " + path + " 不存在。",
+                {"在电脑上创建这个文件夹，或修改 PicoPage/settings.toml 中的 library.roots"}, UsbStart, "USB 连接电脑"};
     case LibraryScan::NotDirectory:
-        return {"无法打开书库目录", path.substr(0, path.size() - 1) + " 是一个文件，不是文件夹。请在电脑上重命名或移走这个文件。"};
-    case LibraryScan::CreateFailed: {
-        const auto name = ReaderSettings{}.library_roots.front() + "/";
-        if (library_create_full) return {"存储卡已满", "无法创建书库目录 " + name + "。请连接电脑，删除不需要的文件后再试。"};
-        if (library_create_denied) return {"无法创建书库目录", "存储卡拒绝写入，可能处于只读状态。请在电脑上检查这张卡，或手动创建 " + name + "。"};
-        return {"无法创建书库目录", "创建 " + name + " 时出错。请重试；仍然失败时，请在电脑上检查这张卡。"};
-    }
+        return {"无法打开书库目录", path.substr(0, path.size() - 1) + " 是一个文件，不是文件夹。",
+                {"在电脑上重命名或移走这个文件"}, UsbStart, "USB 连接电脑"};
+    case LibraryScan::CreateFailed:
+        if (library_create_full)
+            return {"TF 卡已满", "无法创建书库目录 " + name + "。", {"在电脑上删除不需要的文件"}, UsbStart, "USB 连接电脑"};
+        if (library_create_denied)
+            return {"无法创建书库目录", "TF 卡拒绝写入，可能处于只读状态。", {"在电脑上检查这张卡，或手动创建 " + name}, 0, ""};
+        return {"无法创建书库目录", "创建 " + name + " 时出错。", {"点下方「重试」", "仍然失败时，在电脑上检查这张卡"}, LibraryRetry, "重试"};
     default:
-        return {"无法读取书库目录", "读取 " + path + " 时出错。请重试；仍然失败时，请在电脑上检查这张卡。"};
+        return {"无法读取书库目录", "读取 " + path + " 时出错。", {"点下方「重试」", "仍然失败时，在电脑上检查这张卡"}, LibraryRetry, "重试"};
     }
+}
+
+void ReaderApp::Impl::draw_library_problem(int top) {
+    const auto problem = library_problem();
+    // Same rhythm as the empty library: title, grey summary, a rule and rows; only a sequence is numbered.
+    const int title_top = top == 104 ? 160 : top + 40;
+    text(problem.title, 36, title_top, 40, 612, 1, true);
+    int y = title_top + 62 + wrapped(problem.summary, 36, title_top + 62, 612, 26, true, 3) + 30;
+    if (!problem.steps.empty()) canvas.line(24, y, 660, y, 1, 2);
+    const bool numbered = problem.steps.size() > 1;
+    const int step_left = numbered ? 88 : 36, step_width = 648 - step_left;
+    for (std::size_t i = 0; i < problem.steps.size(); ++i) {
+        const int height = std::max(88, wrapped(problem.steps[i], 0, 0, step_width, 26, false) + 48);
+        if (numbered) text(std::to_string(i + 1), 36, y + 24, 26, 40, 1, true);
+        wrapped(problem.steps[i], step_left, y + 24, step_width, 26);
+        y += height;
+        canvas.line(36, y - 1, 647, y - 1, 12, 2);
+    }
+    // The control keeps the position of the guide button on the empty library.
+    if (problem.action) button(problem.action, problem.action_label, 24, std::max(796, y + 56), 636, 96, false, 30);
 }
 
 void ReaderApp::Impl::scan_library() {
@@ -249,12 +274,13 @@ void ReaderApp::Impl::draw_library(bool decode) {
                parent_is_library ? nullptr : &font);
         hits.back() = {0, 0, 396, 104, Back};
     }
-    for (int x : {396, 540}) canvas.line(x, 0, x, 102, 1, 2);
-    // Importing needs a mounted card.
+    // Importing needs a mounted card; without one the cell is left out entirely.
     if (card_available) {
+        canvas.line(396, 0, 396, 102, 1, 2);
         center("导入", 396, 32, 144, 26);
         hits.push_back({396, 0, 144, 104, Import});
     }
+    canvas.line(540, 0, 540, 102, 1, 2);
     center("设置", 540, 32, 144, 26);
     hits.push_back({540, 0, 144, 104, Settings});
     // The card appears where reading normally starts and only when there is a book to resume.
@@ -291,18 +317,11 @@ void ReaderApp::Impl::draw_library(bool decode) {
         }
         const int y = top + 120;
         if (!card_available || library_scan_failed()) {
-            const auto problem = library_problem();
-            text(problem.first, 36, y, 40, 612, 1, true);
-            wrapped(problem.second, 36, y + 76, 612, 28);
-            const bool retry = library_scan == LibraryScan::Unavailable ||
-                (library_scan == LibraryScan::CreateFailed && !library_create_full && !library_create_denied);
-            // A fixed row below three lines of explanation; a card cannot be mounted again without a restart.
-            if (!card_available) button(PowerMenu, "关机 / 重启", 24, y + 220, 636, 96);
-            else if (retry) button(LibraryRetry, "重试", 24, y + 220, 636, 96);
+            draw_library_problem(top);
         } else {
             text(folder.empty() ? "书库里还没有书" : "这个文件夹是空的", 36, y, 40, 612, 1, true);
-            const int height = wrapped(folder.empty() ? "把 EPUB 或 TXT 放入" + library_location() + "，或使用“导入”。"
-                                                      : "用“导入”把 EPUB 或 TXT 复制到存储卡，或返回上一级。", 36, y + 76, 612, 28);
+            const int height = wrapped(folder.empty() ? "把 EPUB 或 TXT 放入" + library_location() + "，或使用「导入」。"
+                                                      : "用「导入」把 EPUB 或 TXT 复制到 TF 卡，或返回上一级。", 36, y + 76, 612, 28);
             button(Import, "导入", 24, y + 104 + height, 636, 96);
         }
         footer_bar(library_scan == LibraryScan::Complete ? notice() : library_scan_notice());

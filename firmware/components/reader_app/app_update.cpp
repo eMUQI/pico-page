@@ -126,7 +126,7 @@ void ReaderApp::Impl::draw_update_home(update::Offer offer, int preview_bottom) 
     }
     check_button(880, "重新检查");
     update_install_button(992, offer);
-    const auto reason = offer == update::Offer::TooLarge ? "新固件 " + file_size(manifest->size) + "，超过本机 4 MiB 的固件分区，不能安装。这与存储卡空间无关。"
+    const auto reason = offer == update::Offer::TooLarge ? "新固件 " + file_size(manifest->size) + "，超过本机 4 MiB 的固件分区，不能安装。这与 TF 卡空间无关。"
         : offer == update::Offer::OlderSchema ? std::string("这个版本写入的数据格式比本机旧，不能安装。") : update_block();
     wrapped(update_notice.empty() ? reason : update_notice, 36, 1104, 612, 24);
 }
@@ -229,7 +229,7 @@ void ReaderApp::Impl::draw_update() {
             break;
         case UpdateFailure::Server: title = "下载服务器返回错误"; body = "没有取得固件文件，稍后再试。"; break;
         case UpdateFailure::Mismatch: title = "校验没有通过"; body = "下载的文件与服务器公布的不一致，已丢弃。"; break;
-        case UpdateFailure::TooLarge: title = "固件超出容量"; body = "新固件 " + file_size(manifest->size) + "，超过本机 4 MiB 的固件分区，无法安装。这与存储卡空间无关。"; break;
+        case UpdateFailure::TooLarge: title = "固件超出容量"; body = "新固件 " + file_size(manifest->size) + "，超过本机 4 MiB 的固件分区，无法安装。这与 TF 卡空间无关。"; break;
         case UpdateFailure::WrongImage: title = "型号不符"; body = "这个固件不是给 Read Pico 的，或版本与服务器公布的不符。"; break;
         default: break;
         }
@@ -248,7 +248,7 @@ void ReaderApp::Impl::draw_update() {
         update_head("已下载并校验", update_to);
         update_steps(2);
         wrapped("重启期间不要断电。重启前保存阅读位置，新固件启动后回到书库。", 36, 556, 612, 26);
-        wrapped(update_notice.empty() ? "选“稍后”回到设置。设备关机或重启后需要重新下载。" : update_notice, 36, 700, 612, 24, true, 3);
+        wrapped(update_notice.empty() ? "选「稍后」回到设置。设备关机或重启后需要重新下载。" : update_notice, 36, 700, 612, 24, true, 3);
         button(UpdateRestart, "重启并安装", 24, 976, 636, 96, true);
         button(UpdateLater, "稍后", 24, 1088, 636, 88);
         return;
@@ -260,7 +260,7 @@ void ReaderApp::Impl::draw_update() {
         int y = update_sheet(640, progress && config ? "阅读进度和设置格式会变化" : progress ? "阅读进度格式会变化" : "设置文件格式会变化");
         y += wrapped("新版本按新格式保存。之后如果回到 " + running_version + "，新格式的" +
                      (progress && config ? "阅读进度和设置" : progress ? "阅读进度" : "设置") + "不会显示。", 36, y, 612, 26) + 16;
-        wrapped("详见本版更新日志的“兼容性”一节。", 36, y, 612, 24, true, 3);
+        wrapped("详见本版更新日志的「兼容性」一节。", 36, y, 612, 24, true, 3);
         button(UpdateConfirm, "我知道了，安装", 24, 976, 636, 96, true);
         button(UpdateCancel, "取消", 24, 1088, 636, 88);
     }

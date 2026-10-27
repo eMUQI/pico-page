@@ -363,7 +363,7 @@ static void network_setup_test(const fs::path& root, const fs::path& fixtures, b
     join = app.take_wifi_request();
     assert(join && join->targets.networks[0].password == "qwe12345");
     // A refused password saves nothing and leads back to the same draft.
-    app.complete_wifi(join->id, {}, "无法连接“Office-2.4”，密码可能不正确。", LinkFailure::Password);
+    app.complete_wifi(join->id, {}, "无法连接「Office-2.4」，密码可能不正确。", LinkFailure::Password);
     driver.present(); assert(app.view() == View::WifiSettings && !fs::exists(network_file));
     driver.tap(300, 920); driver.present(); assert(app.view() == View::TextEntry);
     driver.tap(579, 1160); driver.present();
@@ -400,13 +400,13 @@ static void network_setup_test(const fs::path& root, const fs::path& fixtures, b
     driver.tap(579, 1160); driver.present(); assert(app.view() == View::WifiSettings);
     join = app.take_wifi_request();
     assert(join && join->targets.networks[0].ssid == "cafe" && join->targets.networks[0].password == std::string(64, 'a'));
-    app.complete_wifi(join->id, {}, "找不到名为“cafe”的网络。", LinkFailure::NotNearby); driver.present();
+    app.complete_wifi(join->id, {}, "找不到名为「cafe」的网络。", LinkFailure::NotNearby); driver.present();
     assert(provision::load_networks(root.string(), saved, error) && saved.size() == 1);
     // A refused empty password of a typed network leads back to the password, not to a blind retry.
     driver.tap(300, 1040); driver.present(); driver.tap(300, 770); driver.present(); type("cafe");
     driver.tap(579, 1160); driver.present(); driver.tap(579, 1160); driver.present();
     join = app.take_wifi_request(); assert(join && join->targets.networks[0].password.empty());
-    app.complete_wifi(join->id, {}, "无法连接“cafe”，密码可能不正确。", LinkFailure::Password); driver.present();
+    app.complete_wifi(join->id, {}, "无法连接「cafe」，密码可能不正确。", LinkFailure::Password); driver.present();
     driver.tap(300, 920); driver.present(); assert(app.view() == View::TextEntry && !app.take_wifi_request());
     driver.tap(60, 50); driver.present(); driver.tap(60, 50); driver.present();
     // A 64-character password that is not a hexadecimal key cannot be submitted.
@@ -528,7 +528,7 @@ static void network_setup_test(const fs::path& root, const fs::path& fixtures, b
     assert(kept && kept->kind == WifiOperation::Kind::Connect && kept->targets.automatic);
     app.complete_wifi(kept->id, {}, "");
     app.show_wifi({101, WifiPhase::Connected, "home", "", true}); driver.present();
-    app.show_wifi({102, WifiPhase::Offline, "", "手动连接已暂停，点“立即连接”可恢复。", false}); driver.present();
+    app.show_wifi({102, WifiPhase::Offline, "", "手动连接已暂停，点「立即连接」可恢复。", false}); driver.present();
     assert(network::live(kept->cancelled));
     driver.tap(300, 740); driver.present();
     const auto resumed = app.take_wifi_request();
@@ -1160,7 +1160,7 @@ static void library_root_state_test(const fs::path& base, bool async) {
         shot(names[static_cast<int>(issue)], *app);
         pages.push_back(app->canvas().pixels());
         driver.tap(450, 50); assert(!app->pending_frame());
-        driver.tap(300, 490); driver.present(); assert(app->view() == View::PowerMenu);
+        driver.tap(300, 840); driver.present(); assert(app->view() == View::PowerMenu);
     }
     for (std::size_t i = 0; i < pages.size(); ++i)
         for (std::size_t j = i + 1; j < pages.size(); ++j) assert(pages[i] != pages[j]);
@@ -1196,7 +1196,7 @@ static void library_scan_failure_test(const fs::path& base) {
             d.refresh();
             assert(app.canvas().pixels() == failed && library_read_entries == scanned);
             library_read_failure_after = -1; library_stat_failure = 0;
-            d.tap(300, 490); d.present();
+            d.tap(300, 840); d.present();
             assert(app.view() == View::Library && app.status().empty());
             assert(app.canvas().pixels() != failed);
         } else if (mode < 3) {
@@ -2325,7 +2325,7 @@ static void update_test(const fs::path& root) {
         assert(!fs::exists(root / "PicoPage/cache" / update::state_cache));
         // A failed check leaves nothing cached: no link, an HTTP error, another board, a malformed version.
         // A failed check names its step; the retry is the primary button except after a Wi-Fi failure.
-        check(app, driver, 1130, "", 0, UpdateFailure::Link, "找不到网络“home”。");
+        check(app, driver, 1130, "", 0, UpdateFailure::Link, "找不到网络「home」。");
         check(app, driver, 1130, "not found", 404);
         check(app, driver, 1130, "{\"manifest\":1,\"board\":\"other\"}", 200, UpdateFailure::None, "", 500);
         check(app, driver, 1130, update_manifest("0.2"), 200, UpdateFailure::None, "", 500);
@@ -4552,7 +4552,7 @@ int main(int argc, char** argv) {
         // A pinned network that is out of range is not replaced; automatic selection is offered for one check.
         auto pinned = driver.check_remote();
         assert(!pinned.targets.automatic && pinned.targets.networks.size() == 1 && pinned.targets.networks[0].ssid == "phone");
-        app.complete_network(pinned.id, 0, "", "找不到名为“phone”的网络。", LinkFailure::NotNearby); driver.present();
+        app.complete_network(pinned.id, 0, "", "找不到名为「phone」的网络。", LinkFailure::NotNearby); driver.present();
         assert(app.view() == View::Sync && !network::live(pinned.session));
         driver.tap(342, 1090); driver.present();
         auto once = app.take_network_request();
@@ -6422,7 +6422,7 @@ int main(int argc, char** argv) {
         assert(app.take_portal_action() == PortalAction::UploadStation);
         assert(app.prepare_portal(true)); driver.present();
         assert(app.view() == View::Portal && !app.prepare_sleep());
-        const std::string refused = "无法连接“home”，密码可能不正确。可以改用设备热点传书。";
+        const std::string refused = "无法连接「home」，密码可能不正确。可以改用设备热点传书。";
         driver.portal({PortalPhase::Closed, "", "", "", refused, "", 0, ""}); driver.present();
         assert(app.view() == View::Import && app.status() == refused && *app.saved_record() == saved);
         // A started session shows one code for the joined network and the saved-book summary.

@@ -122,7 +122,7 @@ void ReaderApp::Impl::draw_bookmarks(int list_top) {
     const auto &items = bookmarks.bookmarks;
     const auto problem = bookmark_problem();
     if (!problem.empty() || items.empty()) {
-        wrapped(problem.empty() ? "还没有书签。在正文工具页点右上角的“加书签”，可标记当前页。" : problem,
+        wrapped(problem.empty() ? "还没有书签。在正文工具页点右上角的「加书签」，可标记当前页。" : problem,
                 36, list_top + 40, 612, 24, true, 3);
         footer_bar("");
         return;

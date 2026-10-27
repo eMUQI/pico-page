@@ -39,7 +39,7 @@ std::int64_t settled_us = 0;
 // An upload session ends itself after this long without an upload; the access point keeps the
 // radio powered for as long as it is up.
 constexpr std::int64_t portal_idle_us = 600'000'000;
-constexpr char manual_paused[] = "手动连接已暂停，点“立即连接”可恢复。";
+constexpr char manual_paused[] = "手动连接已暂停，点「立即连接」可恢复。";
 namespace diag = pico_page::diagnostics;
 namespace platform = pico_page::platform;
 namespace provision = pico_page::provision;

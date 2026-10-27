@@ -62,7 +62,7 @@ bool read_entry(toml_datum_t table, bool with_time, SavedWifi& entry) {
     return valid_wifi(entry);
 }
 
-std::string quote_name(const std::string& name) { return "“" + name + "”"; }
+std::string quote_name(const std::string& name) { return "「" + name + "」"; }
 
 bool parse_network_bytes(const std::string& bytes, std::vector<SavedWifi>& networks, std::string& error) {
     networks.clear();

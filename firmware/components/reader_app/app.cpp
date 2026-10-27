@@ -291,7 +291,7 @@ bool ReaderApp::prepare_usb_transfer(std::string* problem) {
     }
     if (impl_->cancel_custom_preparation()) return refuse("正在结束后台任务，请稍后重试。");
     invalidate_identity_cache();
-    if (!impl_->card_available) return refuse("没有可用的存储卡。");
+    if (!impl_->card_available) return refuse("没有可用的 TF 卡。");
     if (impl_->network_worker_id || impl_->portal_live || impl_->usb_prepared || impl_->display.busy() || impl_->active_network)
         return refuse("设备正忙，请稍后重试。");
     if (!impl_->persist()) return refuse("阅读位置没有保存，没有进入 USB 传输。请稍后重试。");
@@ -399,7 +399,7 @@ void ReaderApp::show_wifi(const WifiStatus& status) {
     if (status.sequence <= impl_->wifi_status.sequence || impl_->display.busy()) return;
     impl_->wifi_status = status;
     if (status.phase == WifiPhase::Offline && !network::live(impl_->manual_hold) &&
-        status.detail == "手动连接已暂停，点“立即连接”可恢复。") impl_->wifi_status.detail.clear();
+        status.detail == "手动连接已暂停，点「立即连接」可恢复。") impl_->wifi_status.detail.clear();
     // A join saves its network, with the connection time, only when it completes; a cancelled or
     // failed join must leave network.toml as it was.
     if (status.phase == WifiPhase::Offline) impl_->join_link = false;
@@ -756,7 +756,7 @@ void ReaderApp::card_unavailable(CardIssue issue) {
     impl_->clear_prefetch();
     impl_->release_counting();
     impl_->card_issue = issue;
-    if (impl_->usb_prepared) { show_usb_transfer(false, "存储卡已移除。请退出 USB 传输，插回存储卡后重启。"); return; }
+    if (impl_->usb_prepared) { show_usb_transfer(false, "TF 卡已移除。请退出 USB 传输，插回 TF 卡后重启。"); return; }
     impl_->cancel_sync();
     impl_->covers.clear();
     const bool unsaved = impl_->card_available && impl_->session.needs_save();
@@ -773,8 +773,8 @@ void ReaderApp::card_unavailable(CardIssue issue) {
         impl_->entries.clear();
         impl_->draw_library(); impl_->overlay();
     } else {
-        impl_->error(unsaved ? "存储卡已移除。最近的阅读位置没有保存。插回存储卡后，请重启设备。"
-                             : "存储卡已移除。插回存储卡后，请重启设备。");
+        impl_->error(unsaved ? "TF 卡已移除。最近的阅读位置没有保存。插回 TF 卡后，请重启设备。"
+                             : "TF 卡已移除。插回 TF 卡后，请重启设备。");
     }
 }
 bool ReaderApp::save_due() const {

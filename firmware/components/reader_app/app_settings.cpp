@@ -427,7 +427,7 @@ void ReaderApp::Impl::draw_storage() {
     std::uint64_t card_total = 0, card_free = 0;
     const bool measured = store.card_space(card_total, card_free);
     const auto size = [](const std::optional<std::uint64_t> &bytes) { return bytes ? file_size(*bytes) : std::string("未知"); };
-    text("存储卡", 36, 128, 22, 612, 3);
+    text("TF 卡", 36, 128, 22, 612, 3);
     value_row(0, "书籍原文件", "", size(books), 164, 70);
     value_row(0, "缓存（可重建）", "", size(cache), 234, 70);
     value_row(0, "可用空间", "", measured ? file_size(card_free) : "未知", 304, 70, true);

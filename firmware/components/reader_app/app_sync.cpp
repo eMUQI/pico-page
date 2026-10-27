@@ -9,7 +9,7 @@ void ReaderApp::Impl::draw_sync_settings() {
     if (account_page == AccountPage::Remove) {
         header("移除同步账户", 0);
         text("移除同步账户？", 36, 160, 34, 612, 1, true);
-        wrapped("设备会删除 PicoPage/sync.toml。阅读位置仍保存在存储卡，服务器上的记录不受影响。", 36, 244, 612, 28);
+        wrapped("设备会删除 PicoPage/sync.toml。阅读位置仍保存在 TF 卡，服务器上的记录不受影响。", 36, 244, 612, 28);
         button(Back, "取消", 24, 1080, 306, 96, true);
         button(AccountRemoveConfirm, "移除", 354, 1080, 306, 96);
         return;

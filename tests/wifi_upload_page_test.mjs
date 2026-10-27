@@ -33,7 +33,7 @@ const choose=async(...files)=>{elements.files.files=files;await elements.files.o
 const list=()=>elements.list.innerHTML;
 
 // The route line escapes the network name and the footer matches the route.
-assert.equal(elements.route.innerHTML,'经已保存的 Wi-Fi“home&#60;&#34;x&#34;&#62;”');
+assert.equal(elements.route.innerHTML,'经已保存的 Wi-Fi「home&#60;&#34;x&#34;&#62;」');
 assert.match(elements.keep.textContent,/^请保持本页打开。/);
 
 // One request pair per book with the CRC, size and encoded name.
@@ -63,7 +63,7 @@ open();
 handler=r=>r.url==='/upload'&&r.headers['X-Pico-Name']===encodeURIComponent('b.epub')?'error':200;
 await choose(book('a.epub'),book('b.epub'),book('c.epub'));
 assert.deepEqual(requests.map(r=>r.url),['/check','/upload','/check','/upload']);
-assert.ok(list().includes('结果未确认。可以点“重试”')&&list().includes('data-retry="1"'));
+assert.ok(list().includes('结果未确认。可以点「重试」')&&list().includes('data-retry="1"'));
 assert.ok(list().includes('整批已停止，未上传。')&&list().includes('data-retry="2"'));
 assert.equal(elements['result-title'].textContent,'已保存 1 个，2 个没有完成');
 // Retrying runs that one book again; a same-name refusal asks to check the copy on the device.

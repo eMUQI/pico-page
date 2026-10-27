@@ -75,12 +75,12 @@ constexpr Refusal bad_type{"415 Unsupported Media Type", "仅支持 EPUB、TXT�
 constexpr Refusal bad_checksum{"400 Bad Request", "文件校验值无效。"};
 constexpr Refusal exists{"409 Conflict", "已有同名文件，未上传。已有文件不会被覆盖。"};
 constexpr Refusal images_full{"409 Conflict", "LockScreens 已有 256 张图片或目录项过多，未上传。请先整理该文件夹。"};
-constexpr Refusal images_unreadable{"500 Internal Server Error", "无法读取 LockScreens 文件夹，请检查存储卡后重试。"};
-constexpr Refusal not_prepared{"500 Internal Server Error", "无法准备上传或清理上次的临时文件，请检查存储卡后重试。"};
-constexpr Refusal cleanup_failed{"500 Internal Server Error", "临时文件清理失败，请检查存储卡后重试。"};
+constexpr Refusal images_unreadable{"500 Internal Server Error", "无法读取 LockScreens 文件夹，请检查 TF 卡后重试。"};
+constexpr Refusal not_prepared{"500 Internal Server Error", "无法准备上传或清理上次的临时文件，请检查 TF 卡后重试。"};
+constexpr Refusal cleanup_failed{"500 Internal Server Error", "临时文件清理失败，请检查 TF 卡后重试。"};
 constexpr Refusal closed{"503 Service Unavailable", "传输已结束。"};
 constexpr Refusal interrupted{"500 Internal Server Error", "接收中断或超时，未完成的文件未导入。"};
-constexpr Refusal write_failed{"507 Insufficient Storage", "写入失败，请检查存储卡空间。"};
+constexpr Refusal write_failed{"507 Insufficient Storage", "写入失败，请检查 TF 卡空间。"};
 constexpr Refusal commit_failed{"500 Internal Server Error", "保存或校验失败，请在设备上核对后重试。已有同名文件不会被覆盖。"};
 
 /** Where an upload goes, chosen by its lower-case extension; the page lists the same kinds. */
@@ -115,7 +115,7 @@ esp_err_t upload(httpd_req_t* request) {
         std::string cleanup_error;
         if (transaction && transaction->cancel(cleanup_error) != StoreStatus::Ok) {
             ESP_LOGW("pico_upload", "Cleanup failed: %s", cleanup_error.c_str());
-            refusal = {"500 Internal Server Error", "传输未完成，临时文件清理失败。请检查存储卡后重试。"};
+            refusal = {"500 Internal Server Error", "传输未完成，临时文件清理失败。请检查 TF 卡后重试。"};
         }
         ESP_LOGW("pico_upload", "Rejected: %s %s", refusal.status, refusal.message);
         httpd_resp_set_status(request, refusal.status);
