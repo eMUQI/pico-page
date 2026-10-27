@@ -118,15 +118,17 @@ void ContentJob::read_dictionary() {
 dictionary::Result ContentJob::open_dictionary(FileStore& store, const std::string& relative_path,
                                                dictionary::Dictionary& reader, const dictionary::Stop& stop) {
     // Sources cannot change within a mount session: USB and remount reset it. Remembered
-    // results therefore skip path checks; explicit retry and preparation re-read the source.
+    // results therefore skip path checks. Preparation always hashes the source; explicit retry
+    // hashes only a source whose definitive failure it clears.
     auto* session = request.dictionary_session.get();
+    bool full_check = request.kind == Kind::DictionaryPrepare;
     if (session) {
         auto& failures = session->preparation_failures;
         const auto found = std::find_if(failures.begin(), failures.end(),
             [&](const auto& entry) { return entry.first == relative_path; });
         if (found != failures.end()) {
             if (!request.dictionary_retry && request.kind != Kind::DictionaryPrepare) return found->second;
-            failures.erase(found);
+            failures.erase(found); full_check = true;
         }
     }
     DictionarySession::Source temporary;
@@ -148,7 +150,7 @@ dictionary::Result ContentJob::open_dictionary(FileStore& store, const std::stri
         if (resolved != StoreStatus::Ok) return path_error(resolved);
         source->path = std::move(path);
     }
-    auto status = reader.open_prepared(source->path, store, source->verification, stop);
+    auto status = reader.open_prepared(source->path, store, source->verification, stop, full_check);
     if (!status) {
         source->path.clear();
         if (session && session->preparation_failures.size() < 32 &&
@@ -185,26 +187,56 @@ void ContentJob::search_dictionaries(FileStore& store, const dictionary::Stop& s
         if (stop()) break;
         dictionary::Dictionary reader;
         auto status = open_dictionary(store, sources[source], reader, stop);
-        std::vector<dictionary::Entry> entries;
+        std::vector<dictionary::Entry> entries, matched;
         std::vector<dictionary::Field> fields;
-        bool more = false;
+        bool more = false, matched_more = false;
         std::size_t hit = limit;
-        for (std::size_t index = 0; status && index < limit; ++index) {
-            auto lookup = reader.lookup(candidates[index].word, entries, more, request.dictionary_ordinal, stop);
-            if (lookup.status == dictionary::Status::NotFound) continue;
-            if (lookup) lookup = reader.read(entries.front().ordinal, fields, stop);
-            if (lookup) { hit = index; status = std::move(lookup); break; }
-            if (lookup.status == dictionary::Status::Cancelled) { status = std::move(lookup); break; }
-            // An unreadable entry leaves lower-ranked candidates in this source available.
-            if (failure) failure = std::move(lookup);
+        // Exact candidates sharing a start are prefixes of each other. Querying them from
+        // short to long lets a prefix that no headword extends rule out every longer one.
+        std::vector<std::size_t> order(limit);
+        for (std::size_t index = 0; index < limit; ++index) order[index] = index;
+        std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+            const auto& x = candidates[a]; const auto& y = candidates[b];
+            if (x.inflection != y.inflection) return !x.inflection;
+            if (x.selection.begin != y.selection.begin) return x.selection.begin < y.selection.begin;
+            return x.selection.end < y.selection.end;
+        });
+        std::vector<const dictionary::Candidate*> closed;  // Candidates no headword extends.
+        std::vector<bool> settled(limit);  // Candidates known absent or unusable in this source.
+        const auto fail = [&](dictionary::Result error) {
+            if (failure) failure = std::move(error);  // Keep the first failure.
             result.dictionary_partial = true;
+        };
+        // A failed lookup or entry read leaves lower-ranked candidates in this source available.
+        while (status) {
+            hit = limit;
+            for (const auto index : order) {
+                const auto& candidate = candidates[index];
+                if (index > hit || settled[index]) continue;  // Cannot outrank the current match.
+                if (!candidate.inflection && std::any_of(closed.begin(), closed.end(), [&](const auto* prefix) {
+                        return prefix->selection.begin == candidate.selection.begin &&
+                               candidate.word.size() > prefix->word.size() &&
+                               candidate.word.compare(0, prefix->word.size(), prefix->word) == 0;
+                    })) continue;
+                bool extensible = true;
+                auto lookup = reader.lookup(candidate.word, entries, more, request.dictionary_ordinal, stop, &extensible);
+                if (lookup.status == dictionary::Status::NotFound) {
+                    settled[index] = true;
+                    if (!candidate.inflection && !extensible) closed.push_back(&candidate);
+                    continue;
+                }
+                if (lookup.status == dictionary::Status::Cancelled) { status = std::move(lookup); break; }
+                if (!lookup) { settled[index] = true; fail(std::move(lookup)); continue; }
+                hit = index; matched = std::move(entries); matched_more = more;
+            }
+            if (!status || hit == limit) break;
+            auto read = reader.read(matched.front().ordinal, fields, stop);
+            if (read) { entries = std::move(matched); more = matched_more; status = std::move(read); break; }
+            if (read.status == dictionary::Status::Cancelled) { status = std::move(read); break; }
+            settled[hit] = true; fail(std::move(read));
         }
         if (status.status == dictionary::Status::Cancelled || stop()) break;
-        if (!status) {
-            if (failure) failure = std::move(status);  // Keep the first failure.
-            result.dictionary_partial = true;
-            continue;
-        }
+        if (!status) { fail(std::move(status)); continue; }
         if (hit == limit) continue;
         found = true;
         result.dictionary_source = source;

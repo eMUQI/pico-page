@@ -2849,8 +2849,20 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     contact(Phase::Move, 260, hit_y + 130, false, true);
     app.poll_background(true);
     assert(!app.pending_frame() && app.canvas().pixels() == before_release);
+    // After the preview, a slow lookup shows its loading panel only after dictionary_panel_delay.
+    ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryLookup, std::chrono::milliseconds(800));
     contact(Phase::End, 250, hit_y + 130);
-    assert(app.content_busy()); driver.present(); driver.complete_content();
+    assert(app.content_busy() && !app.pending_frame());
+    app.poll_background(); assert(!app.pending_frame() && app.canvas().pixels() == before_release);
+    std::this_thread::sleep_for(std::chrono::milliseconds(550));
+    app.poll_background(); assert(app.pending_frame() && app.content_busy());
+    driver.present();
+    ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryLookup, std::chrono::milliseconds(0));
+    unsigned slow_frames = 0;
+    driver.frame_observer = [&](const Frame&) { ++slow_frames; };
+    driver.complete_content();
+    driver.frame_observer = {};
+    assert(slow_frames == 1 && app.view() == View::Dictionary);
     assert(app.saved_record() == saved);
     driver.tap(600, 600); driver.present();
     assert(app.canvas().pixels() == body);
@@ -2884,8 +2896,29 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     const auto preview = app.canvas().pixels();
     contact(Phase::End, hit_x, hit_y);
     assert(!app.content_busy() && app.canvas().pixels() == preview);
-    driver.present(); app.poll_background();
-    assert(app.content_busy()); driver.present(); driver.complete_content();
+    driver.present(); app.poll_background(); driver.complete_content();
+    driver.tap(480, 600); driver.present();
+    // A fast lookup followed by slow page layout still shows the loading panel after the delay.
+    ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryPage, std::chrono::milliseconds(800));
+    contact(Phase::Begin, hit_x, hit_y, true); driver.present();
+    contact(Phase::End, hit_x, hit_y); app.poll_background();
+    assert(!app.pending_frame());
+    std::this_thread::sleep_for(std::chrono::milliseconds(550));
+    app.poll_background(); app.poll_background();
+    assert(app.pending_frame() && app.content_busy());
+    driver.present();
+    ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryPage, std::chrono::milliseconds(0));
+    driver.complete_content();
+    driver.tap(480, 600); driver.present();
+    contact(Phase::Begin, hit_x, hit_y, true); driver.present();
+    contact(Phase::End, hit_x, hit_y);
+    // A fast lookup replaces the preview with its result without a loading panel.
+    assert(app.content_busy() && !app.pending_frame());
+    unsigned fast_frames = 0;
+    driver.frame_observer = [&](const Frame&) { ++fast_frames; };
+    driver.complete_content();
+    driver.frame_observer = {};
+    assert(fast_frames == 1);
     const auto automatic = app.canvas().pixels();
     driver.tap(480, 600); driver.present();
     assert(!app.content_busy()); driver.refresh();
@@ -2897,13 +2930,13 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     // Grabbing and releasing the handle must not jump to the adjacent line.
     contact(Phase::Begin, handle_x, handle_y);
     contact(Phase::End, handle_x, handle_y);
-    driver.present(); app.poll_background(); driver.present(); driver.complete_content();
+    driver.present(); app.poll_background(); driver.complete_content();
     assert(app.canvas().pixels() == automatic);
     driver.tap(480, 600); driver.present();
     contact(Phase::Begin, handle_x, handle_y);
     driver.present();
     contact(Phase::Move, 400, hit_y); driver.present();
-    contact(Phase::End, 400, hit_y); driver.present(); driver.complete_content();
+    contact(Phase::End, 400, hit_y); driver.complete_content();
     assert(app.canvas().pixels() != automatic && app.saved_record() == saved);
     driver.tap(600, 600); driver.present();
     driver.hold(hit_x, hit_y); assert(app.view() == View::Dictionary && app.content_busy());

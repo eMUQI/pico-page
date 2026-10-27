@@ -177,14 +177,14 @@ void ReaderApp::Impl::submit_dictionary_selection() {
         dictionary_notice = status.status == dictionary::Status::ResourceLimit ? "选词过长，请拖动端点缩短选区。" : dictionary_error(status);
         dictionary_selecting = true; draw_dictionary(); overlay(); return;
     }
-    dictionary_selecting = false;
+    const bool previewed = std::exchange(dictionary_selecting, false);
     // Exact forms precede inflections; longer Chinese candidates precede shorter ones.
     std::stable_sort(dictionary_candidates.begin(), dictionary_candidates.end(), [](const auto& a, const auto& b) {
         if (a.inflection != b.inflection) return !a.inflection;
         return a.selection.end - a.selection.begin > b.selection.end - b.selection.begin;
     });
     dictionary_source = 0; dictionary_search_all = true; dictionary_partial_error = false;
-    query_dictionary();
+    query_dictionary(false, previewed);
 }
 
 void ReaderApp::Impl::begin_dictionary(int x, int y, bool selecting) {
@@ -207,7 +207,7 @@ void ReaderApp::Impl::begin_dictionary(int x, int y, bool selecting) {
     else submit_dictionary_selection();
 }
 
-void ReaderApp::Impl::query_dictionary(bool retry) {
+void ReaderApp::Impl::query_dictionary(bool retry, bool defer_panel) {
     dictionary_definition.reset(); dictionary_page = {}; dictionary_pages.clear(); dictionary_entry = 0; dictionary_entry_base = 0;
     dictionary_entries.clear(); dictionary_headword.clear(); dictionary_name.clear();
     dictionary_missing_glyphs = dictionary_omitted_fields = false;
@@ -222,7 +222,16 @@ void ReaderApp::Impl::query_dictionary(bool retry) {
     else request.relative_path = settings.dictionary_enabled[dictionary_source];
     request.dictionary_candidates = dictionary_candidates; request.dictionary_retry = retry;
     if (request.dictionary_candidates.empty()) { dictionary_notice = "未找到词条。"; draw_dictionary(); overlay(); return; }
-    queue_dictionary(std::move(request)); draw_dictionary(); overlay();
+    queue_dictionary(std::move(request));
+    if (defer_panel) dictionary_panel_due = std::chrono::steady_clock::now() + dictionary_panel_delay;
+    else { draw_dictionary(); overlay(); }
+}
+
+void ReaderApp::Impl::poll_dictionary_panel() {
+    if (dictionary_panel_due == std::chrono::steady_clock::time_point{}) return;
+    if (view != View::Dictionary || !content_loading || dictionary_selecting) { dictionary_panel_due = {}; return; }
+    if (display.busy() || std::chrono::steady_clock::now() < dictionary_panel_due) return;
+    dictionary_panel_due = {}; draw_dictionary(); overlay();
 }
 
 void ReaderApp::Impl::page_dictionary(int movement, bool redraw) {
@@ -442,6 +451,8 @@ void ReaderApp::Impl::finish_dictionary(ContentJob& job) {
         });
         draw_dictionary_settings();
     } else draw_dictionary();
+    // A successful lookup returns earlier and keeps the deadline while its first page is laid out.
+    dictionary_panel_due = {};
     overlay();
 }
 

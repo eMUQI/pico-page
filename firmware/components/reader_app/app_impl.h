@@ -43,6 +43,8 @@ inline constexpr int viewer_left = 24, viewer_top = 104, viewer_width = 636, vie
 inline constexpr int viewer_toolbar_height = 96, viewer_action_left = 456;
 inline constexpr int viewer_contrast_levels = 3;
 inline constexpr auto inline_image_delay = std::chrono::milliseconds(250);
+// After a selection preview, the loading panel appears only for lookups still running at this delay.
+inline constexpr auto dictionary_panel_delay = std::chrono::milliseconds(500);
 inline constexpr const char* kSleepFallbackNotice = "本次使用简洁屏保";
 inline constexpr const char *content_revision = "epub-native-v1";
 /** UI labels may borrow the body face without changing the next reading operation's size. */
@@ -773,6 +775,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::chrono::steady_clock::time_point mapping_start_retry{};
     std::optional<ContentJob::Request> pending_content;
     std::shared_ptr<DictionarySession> dictionary_session;
+    std::chrono::steady_clock::time_point dictionary_panel_due{};
     std::vector<DictionaryItem> dictionary_items;
     std::vector<std::string> dictionary_ready;
     std::size_t dictionary_list_page = 0, dictionary_source = 0, dictionary_entry = 0, dictionary_entry_base = 0;
@@ -811,8 +814,11 @@ struct ReaderApp::Impl final : DisplayBackend {
     void submit_dictionary_selection();
     void flush_dictionary_selection();
     void reset_dictionary_contact();
-    /** Queues one lookup of the current candidates; retry re-prepares remembered failed sources. */
-    void query_dictionary(bool retry = false);
+    /** Queues one lookup of the current candidates; retry re-prepares remembered failed sources.
+     * defer_panel keeps the presented selection preview until the result or dictionary_panel_delay.
+     */
+    void query_dictionary(bool retry = false, bool defer_panel = false);
+    void poll_dictionary_panel();
     void page_dictionary(int movement = 0, bool redraw = true);
     void draw_dictionary();
     void finish_dictionary(ContentJob& job);

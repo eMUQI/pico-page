@@ -160,6 +160,14 @@ int main(int argc, char** argv) {
     assert(dictionary.lookup("龥", entries, more).status == Status::NotFound);
     assert(dictionary.lookup("0", entries, more).status == Status::NotFound);
     found("中文"); found("APPLE"); found("别名");
+    // extensible reports whether any longer headword (or synonym) begins with the word.
+    bool extensible = false;
+    assert(dictionary.lookup("dupl", entries, more, 0, {}, &extensible).status == Status::NotFound && extensible);
+    assert(dictionary.lookup("duplicates", entries, more, 0, {}, &extensible).status == Status::NotFound && !extensible);
+    assert(dictionary.lookup("中", entries, more, 0, {}, &extensible).status == Status::NotFound && extensible);
+    assert(dictionary.lookup("别", entries, more, 0, {}, &extensible).status == Status::NotFound && extensible);
+    assert(dictionary.lookup("龥", entries, more, 0, {}, &extensible).status == Status::NotFound && !extensible);
+    assert(dictionary.lookup("ap", entries, more, 0, {}, &extensible).status == Status::NotFound && extensible);
     unsigned count = 0;
     std::uint32_t next = 0;
     do {
@@ -206,6 +214,24 @@ int main(int argc, char** argv) {
     assert(prepared("compressed.ifo") && dictionary.reused_index());
     found("alias"); read(entries[0].ordinal); assert(fields[0].text == "upper");
     verified.clear(); assert(prepared("compressed.ifo") && dictionary.reused_index());
+    {
+        // Unchanged sizes and times reuse the recorded digest, as sdcv trusts its offset cache;
+        // a same-size edit with a restored time needs a full check, and a new time triggers one.
+        const auto copy = fs::path(card) / "identity"; fs::create_directories(copy);
+        for (const auto* suffix : {".ifo", ".idx", ".dict.dz", ".syn.dz"})
+            fs::copy_file(root + "/compressed" + suffix, copy / (std::string("main") + suffix));
+        const auto main = (copy / "main.ifo").string(), index = (copy / "main.idx").string();
+        verified.clear(); assert(dictionary.open_prepared(main, store, verified) && !dictionary.reused_index());
+        const auto written = fs::last_write_time(index);
+        { std::fstream f(index, std::ios::in | std::ios::out | std::ios::binary); assert(f); f.put('B'); }
+        fs::last_write_time(index, written);
+        verified.clear(); assert(dictionary.open_prepared(main, store, verified) && dictionary.reused_index());
+        // A full check ignores the stale result already held for this mount.
+        assert(dictionary.open_prepared(main, store, verified, {}, true).status == Status::InvalidFormat);
+        fs::last_write_time(index, written + std::chrono::seconds(10));
+        verified.clear(); assert(dictionary.open_prepared(main, store, verified).status == Status::InvalidFormat);
+        verified.clear();
+    }
     dictionary.close(); assert(store.clear_cache() == pico_page::StoreStatus::Ok);
     assert(prepared("compressed.ifo") && !dictionary.reused_index());
     verified.clear();
@@ -245,12 +271,17 @@ int main(int argc, char** argv) {
         [&] { return ++callbacks > 8; }).status == Status::Cancelled);
     assert(prepared("packed.ifo.gz"));
     dictionary.close(); verified.clear();
-    // Source replacement keeps its size but must invalidate the previous mount's cache.
+    // A replacement that keeps its size but has a new modification time invalidates the previous mount's cache.
     const auto replace_path = fs::path(root) / "plain.idx";
-    { std::fstream f(replace_path, std::ios::in | std::ios::out | std::ios::binary); f.put('b'); }
+    const auto replaced = [&](char first, int seconds) {
+        const auto written = fs::last_write_time(replace_path);
+        { std::fstream f(replace_path, std::ios::in | std::ios::out | std::ios::binary); f.put(first); }
+        fs::last_write_time(replace_path, written + std::chrono::seconds(seconds));
+    };
+    replaced('b', 10);
     assert(prepared("plain.ifo")); found("bpple");
     dictionary.close(); verified.clear();
-    { std::fstream f(replace_path, std::ios::in | std::ios::out | std::ios::binary); f.put('a'); }
+    replaced('a', -10);
     assert(prepared("plain.ifo") && !dictionary.reused_index()); found("apple");
     dictionary.close(); verified.clear();
     assert(store.clear_cache() == pico_page::StoreStatus::Ok);

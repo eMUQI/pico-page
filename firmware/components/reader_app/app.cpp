@@ -845,6 +845,7 @@ void ReaderApp::poll_background(bool cancel) {
         impl_->error(std::exchange(impl_->bookmark_error, std::string()));
     }
     if (!cancel || !impl_->content_loading) impl_->poll_content(!cancel);
+    if (!cancel) impl_->poll_dictionary_panel();
     // Waits for the queued taps of one burst, so they reach the panel in a single update.
     if (!cancel) impl_->flush_entry();
     if (!cancel && impl_->custom_notice_pending &&

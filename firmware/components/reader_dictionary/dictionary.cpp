@@ -6,6 +6,7 @@
 #include <array>
 #include <charconv>
 #include <cstring>
+#include <initializer_list>
 #include <new>
 #include <sys/stat.h>
 
@@ -151,6 +152,37 @@ std::uint32_t take32(const std::string& bytes, std::size_t& at) {
     for (unsigned shift : {0U, 8U, 16U, 24U}) value |= std::uint32_t(static_cast<unsigned char>(bytes[at++])) << shift;
     return value;
 }
+// One "size mtime" line per present source file; empty when any file cannot be inspected.
+std::string source_identity(std::initializer_list<std::string> paths) {
+    std::string identity;
+    for (const auto& path : paths) {
+        if (path.empty()) { identity += "-\n"; continue; }
+        struct stat st{};
+        if (stat(path.c_str(), &st) || !S_ISREG(st.st_mode)) return {};
+        identity += std::to_string(static_cast<long long>(st.st_size)) + ' ' +
+                    std::to_string(static_cast<long long>(st.st_mtime)) + '\n';
+    }
+    return identity;
+}
+// PPDID01, the 64-hex source fingerprint, the identity lines, then a SHA-256 of all preceding bytes.
+std::string recorded_fingerprint(const FileStore& store, const std::string& name, const std::string& identity) {
+    std::string bytes;
+    if (store.load_cache(name, 4096, bytes) != StoreStatus::Ok || bytes.size() != 8 + 64 + identity.size() + 64 ||
+        bytes.compare(0, 8, "PPDID01\n") || bytes.compare(72, identity.size(), identity)) return {};
+    Sha256Digest hash;
+    if (!hash.update(std::string_view(bytes).substr(0, bytes.size() - 64)) || hash.finish() != bytes.substr(bytes.size() - 64))
+        return {};
+    return bytes.substr(8, 64);
+}
+void record_fingerprint(const FileStore& store, const std::string& name, const std::string& identity,
+                        const std::string& fingerprint) {
+    auto bytes = "PPDID01\n" + fingerprint + identity;
+    Sha256Digest hash;
+    if (!hash.update(bytes)) return;
+    const auto digest = hash.finish();
+    if (!digest.empty()) store.save_cache(name, bytes + digest);
+}
+
 std::string serialize_index(const std::string& fingerprint, const std::string& expanded,
                             const Index& index, const Index& synonyms, std::uint32_t data_size) {
     std::string bytes = "PPDIX01\n" + fingerprint + (expanded.empty() ? std::string(64, '0') : expanded);
@@ -272,13 +304,14 @@ void Dictionary::close() { impl_.reset(); }
 const Info& Dictionary::info() const { static const Info empty; return impl_ ? impl_->info : empty; }
 bool Dictionary::reused_index() const { return impl_ && impl_->reused; }
 Result Dictionary::open(const std::string& ifo_path, const Stop& stop) {
-    return open_impl(ifo_path, nullptr, nullptr, stop);
+    return open_impl(ifo_path, nullptr, nullptr, stop, true);
 }
 Result Dictionary::open_prepared(const std::string& ifo_path, FileStore& store,
-                                 Verification& verification, const Stop& stop) {
-    return open_impl(ifo_path, &store, &verification, stop);
+                                 Verification& verification, const Stop& stop, bool full_check) {
+    return open_impl(ifo_path, &store, &verification, stop, full_check);
 }
-Result Dictionary::open_impl(const std::string& ifo_path, FileStore* store, Verification* verification, const Stop& stop) {
+Result Dictionary::open_impl(const std::string& ifo_path, FileStore* store, Verification* verification, const Stop& stop,
+                             bool full_check) {
     close();
     std::unique_ptr<Impl> pending(new (std::nothrow) Impl);
     if (!pending) return failure(Status::ResourceLimit, "No memory for dictionary reader");
@@ -299,12 +332,17 @@ Result Dictionary::open_impl(const std::string& ifo_path, FileStore* store, Veri
     if (packed_index && !store) return failure(Status::Unsupported, "Compressed dictionary index requires preparation");
     if (state.info.index_bytes > 64 * 1024 * 1024)
         return failure(Status::ResourceLimit, "Dictionary index exceeds 64 MiB");
-    std::string fingerprint, cache, expanded_digest;
+    std::string fingerprint, cache, expanded_digest, identity;
     bool verified = false;
     if (store) {
-        verified = verification->source_ == ifo_path && !verification->fingerprint_.empty();
+        cache = "dictionaries/" + md5_hex(ifo_path) + "/";
+        verified = !full_check && verification->source_ == ifo_path && !verification->fingerprint_.empty();
         if (verified) fingerprint = verification->fingerprint_;
         else {
+            identity = source_identity({ifo_path, index_path, synonym_path});
+            if (!full_check && !identity.empty()) fingerprint = recorded_fingerprint(*store, cache + "identity.bin", identity);
+        }
+        if (fingerprint.empty()) {
             Sha256Digest combined;
             for (const auto& path : {ifo_path, index_path, synonym_path}) {
                 if (path.empty()) continue;
@@ -316,8 +354,9 @@ Result Dictionary::open_impl(const std::string& ifo_path, FileStore* store, Veri
             }
             fingerprint = combined.finish();
             if (fingerprint.empty()) return failure(Status::IoError, "Dictionary source digest failed");
+            // A failed record only costs the next mount another full check.
+            if (!identity.empty()) record_fingerprint(*store, cache + "identity.bin", identity, fingerprint);
         }
-        cache = "dictionaries/" + md5_hex(ifo_path) + "/";
     }
     std::string cached;
     if (store) store->load_cache(cache + "index.bin", 80 * 1024, cached);
@@ -393,15 +432,28 @@ Result Dictionary::open_impl(const std::string& ifo_path, FileStore* store, Veri
     return {};
 }
 Result Dictionary::lookup(const std::string& word, std::vector<Entry>& entries, bool& more,
-                          std::uint32_t first_ordinal, const Stop& stop) {
+                          std::uint32_t first_ordinal, const Stop& stop, bool* extensible) {
     entries.clear(); more = false;
+    if (extensible) *extensible = false;
     if (!impl_ || !impl_->ready) return failure(Status::InvalidFormat, "Dictionary is not prepared");
     if (word.empty() || word.size() > kMaxWord || !valid_utf8(word)) return failure(Status::InvalidFormat, "Invalid dictionary query");
     if (!memory_room(64 * 1024)) return failure(Status::ResourceLimit, "Insufficient memory for dictionary lookup");
     auto& state = *impl_;
     state.data.discard_decoded();
+    // Headwords that fold-extend word sort directly after it, so the first greater record decides.
+    const auto extends = [&](const std::string& head) {
+        if (head.size() < word.size()) return false;
+        for (std::size_t i = 0; i < word.size(); ++i)
+            if (fold(static_cast<unsigned char>(head[i])) != fold(static_cast<unsigned char>(word[i]))) return false;
+        return true;
+    };
     for (auto* source : {&state.index, &state.synonyms}) {
-        if (!source->count || source->outside(word)) continue;
+        if (!source->count) continue;
+        if (source->outside(word)) {
+            // Below the first headword the following records are unknown; keep longer words possible.
+            if (extensible && source->first_known && compare(word, source->first_word) < 0) *extensible = true;
+            continue;
+        }
         std::uint32_t offset = 0, ordinal = 0;
         auto result = source->start(word, offset, ordinal, stop); if (!result) { entries.clear(); return result; }
         Cursor cursor(source->file, offset, stop);
@@ -411,7 +463,7 @@ Result Dictionary::lookup(const std::string& word, std::vector<Entry>& entries, 
             if (!ordinal && !source->first_known) { source->first_word = record.word; source->first_known = true; }
             if (ordinal + 1 == source->count && !source->last_known) { source->last_word = record.word; source->last_known = true; }
             const auto order = compare(record.word, word);
-            if (order > 0) break;
+            if (order > 0) { if (extensible && extends(record.word)) *extensible = true; break; }
             if (order < 0) continue;
             const auto target = source->synonym ? record.offset : ordinal;
             if (target < first_ordinal || std::any_of(entries.begin(), entries.end(), [target](const Entry& e) { return e.ordinal == target; })) continue;
