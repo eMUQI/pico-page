@@ -185,7 +185,7 @@ def main():
     key.add_argument("key", choices=("K1", "K2", "K3"))
     swipe = commands.add_parser("swipe")
     swipe.add_argument("direction", choices=("left", "right"))
-    for name in ("tap", "hold"):
+    for name in ("tap", "hold", "press", "release"):
         tap = commands.add_parser(name)
         tap.add_argument("x", type=int)
         tap.add_argument("y", type=int)
@@ -218,7 +218,7 @@ def main():
             elif command == "waveform": command += f" {args.variant}"
             elif command == "key": command += f" {args.key}"
             elif command == "swipe": command += f" {args.direction}"
-            elif command in ("tap", "hold"): command += f" {args.x} {args.y}"
+            elif command in ("tap", "hold", "press", "release"): command += f" {args.x} {args.y}"
             elif command in ("open", "file", "file_head"): command += f" {args.path}"
             state, entries = console.request(command)
             for entry in entries:

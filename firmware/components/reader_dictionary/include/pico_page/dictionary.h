@@ -66,11 +66,15 @@ public:
     Dictionary& operator=(const Dictionary&) = delete;
     Result open(const std::string& ifo_path, const Stop& stop = {});
     /** Restores a verified sparse index or prepares it through FileStore.
-     * First use in each Verification scope hashes the current source files.
-     * Compressed indexes are streamed to cache with CRC and SHA-256 readback.
+     * First use in each Verification scope identifies the source files. Like sdcv's offset
+     * cache, unchanged sizes and modification times reuse the source digest recorded by the
+     * last full check; otherwise, or with full_check, the current files are hashed.
+     * The size/time identity is not a content check: a replacement that keeps both is not
+     * detected until the next full check. Compressed indexes are streamed to cache with
+     * CRC and SHA-256 readback.
      */
     Result open_prepared(const std::string& ifo_path, FileStore& store,
-                         Verification& verification, const Stop& stop = {});
+                         Verification& verification, const Stop& stop = {}, bool full_check = false);
     bool reused_index() const;
     void close();
     const Info& info() const;
@@ -85,7 +89,8 @@ public:
      */
     Result read(std::uint32_t ordinal, std::vector<Field>& fields, const Stop& stop = {});
 private:
-    Result open_impl(const std::string& ifo_path, FileStore* store, Verification* verification, const Stop& stop);
+    Result open_impl(const std::string& ifo_path, FileStore* store, Verification* verification, const Stop& stop,
+                     bool full_check);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

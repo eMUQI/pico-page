@@ -148,7 +148,8 @@ dictionary::Result ContentJob::open_dictionary(FileStore& store, const std::stri
         if (resolved != StoreStatus::Ok) return path_error(resolved);
         source->path = std::move(path);
     }
-    auto status = reader.open_prepared(source->path, store, source->verification, stop);
+    auto status = reader.open_prepared(source->path, store, source->verification, stop,
+                                       request.dictionary_retry || request.kind == Kind::DictionaryPrepare);
     if (!status) {
         source->path.clear();
         if (session && session->preparation_failures.size() < 32 &&

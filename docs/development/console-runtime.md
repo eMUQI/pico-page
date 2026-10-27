@@ -11,7 +11,7 @@
 1. 在应用任务调用 `console::initialize(error)`。它安装带 8 KiB 接收、2 KiB 发送缓冲的官方 USB 驱动，将现有控制台绑定到该驱动。协议使用 `usb_serial_jtag_read_bytes(..., 0)` 非阻塞读取；回复采用独立有界缓冲，一次入队整行，避免日志 VFS 逐字节尽力发送造成回复不完整。
 2. 所有显示调用完成后、`app.complete_frame()` 之前，调用 `console::frame_completed(frame, actual_result)`。结果必须来自真实平台调用。
 3. 每轮主循环调用 `console::poll(app, card_root, input_sequence, actions_allowed, input_allowed)`。物理输入与诊断输入共用一个递增序号；物理释放和取消沿用对应按下的序号。
-4. 有网络工作、休眠请求或物理触摸尚未结束时，传入 `actions_allowed=false`，拒绝直接开书和开始导入。仅网络工作忙且无物理接触/休眠请求时，另传 `input_allowed=true`，允许 `key/tap/hold/swipe` 走实体输入相同的应用路由，用于验证 K2 和取消；在途显示帧及资源导入仍拒绝输入。`status`、目录列表与屏幕分块仍可读取。挂载不可用时传入空 `card_root`。
+4. 有网络工作、休眠请求或物理触摸尚未结束时，传入 `actions_allowed=false`，拒绝直接开书和开始导入。仅网络工作忙且无物理接触/休眠请求时，另传 `input_allowed=true`，允许 `key/tap/hold/swipe/press/release` 走实体输入相同的应用路由，用于验证 K2 和取消；在途显示帧及资源导入仍拒绝输入。`status`、目录列表与屏幕分块仍可读取。挂载不可用时传入空 `card_root`。
 5. `console::transfer_active()` 为真时，暂缓新的物理输入、网络分派与休眠。已被吞下的物理接触持续吞到释放；断卡事件仍需处理。已有导入的 data/commit/abort 不依赖 `actions_allowed`，否则事务会被自己的保护条件阻塞。
 
 组件不调用 `complete_frame()`，不跳过 App 的呈现确认、保存或输入路由。关闭配置后，三个入口保留空实现，不读取输入、不安装 USB 驱动、不输出诊断结果。
@@ -29,6 +29,7 @@
 | `PP 4 key K2` | 经正常 App API 发送按下和释放；正文仍为立即全刷 |
 | `PP 5 tap 342 600` | 发送屏幕内一次触摸；坐标范围为 x 0–683、y 0–1215 |
 | `PP 5 hold 128 560` | 发送一次长按；参数与 `tap` 相同。只验证应用对长按的处理，不经过触摸采样和时长判定 |
+| `PP 8 press 128 560`／`PP 9 release 128 560` | 分别发送连续接触的长按开始与松手，与触摸采样器的连续接触相同，用于选词预览后松手查词；`release` 须对应先前的 `press`，否则返回 `no_contact`。同样不经过时长判定 |
 | `PP 6 open Books/example.epub` | 经正常 App API 开书；路径必须存在于卡内 |
 | `PP 7 screen 12 0 256` | 导出第 12 个已确认帧从字节 0 开始的 256 字节 packed 数据 |
 | `PP 8 file Fonts/reader.ttf` | 只返回白名单资源的长度与 CRC32 |

@@ -488,7 +488,8 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
               static_cast<unsigned>(count), data.c_str());
         return;
     }
-    const bool input_command = word == "key" || word == "tap" || word == "hold" || word == "swipe";
+    const bool input_command = word == "key" || word == "tap" || word == "hold" || word == "swipe" ||
+                               word == "press" || word == "release";
     if ((!actions_allowed && !(input_allowed && input_command)) || app.pending_frame() || transfer) {
         error(id, "busy");
         return;
@@ -548,6 +549,25 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
         event.event.sequence = ++sequence;
         app.input(event);
         event.event.phase = Phase::End;
+        app.input(event);
+    } else if (word == "press" || word == "release") {
+        // A continuous contact as from the touch sampler: press begins a long press, release ends it.
+        static std::uint64_t contact = 0;
+        std::string_view first, second, extra;
+        AppInput event{{0, word == "press" ? Phase::Begin : Phase::End, Input::TouchCenter}, true, 0, 0, false, word == "press"};
+        event.continuous = true;
+        if (!token(input, first) || !token(input, second) || token(input, extra) || !number(first, event.x) ||
+            !number(second, event.y) || event.x < 0 || event.x >= platform::width ||
+            event.y < 0 || event.y >= platform::height) {
+            error(id, "invalid_touch");
+            return;
+        }
+        if (word == "press") {
+            if (sequence == std::numeric_limits<std::uint64_t>::max()) { error(id, "sequence_exhausted"); return; }
+            contact = ++sequence;
+        } else if (!contact) { error(id, "no_contact"); return; }
+        event.event.sequence = contact;
+        if (word == "release") contact = 0;
         app.input(event);
     } else {
         error(id, "unknown_command");
