@@ -190,10 +190,14 @@ void ContentJob::search_dictionaries(FileStore& store, const dictionary::Stop& s
         bool more = false;
         std::size_t hit = limit;
         for (std::size_t index = 0; status && index < limit; ++index) {
-            status = reader.lookup(candidates[index].word, entries, more, request.dictionary_ordinal, stop);
-            if (status.status == dictionary::Status::NotFound) { status = {}; continue; }
-            if (status) { hit = index; status = reader.read(entries.front().ordinal, fields, stop); }
-            break;
+            auto lookup = reader.lookup(candidates[index].word, entries, more, request.dictionary_ordinal, stop);
+            if (lookup.status == dictionary::Status::NotFound) continue;
+            if (lookup) lookup = reader.read(entries.front().ordinal, fields, stop);
+            if (lookup) { hit = index; status = std::move(lookup); break; }
+            if (lookup.status == dictionary::Status::Cancelled) { status = std::move(lookup); break; }
+            // An unreadable entry leaves lower-ranked candidates in this source available.
+            if (failure) failure = std::move(lookup);
+            result.dictionary_partial = true;
         }
         if (status.status == dictionary::Status::Cancelled || stop()) break;
         if (!status) {

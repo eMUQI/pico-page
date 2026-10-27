@@ -516,6 +516,17 @@ int main(int argc, char** argv) {
         assert(found.dictionary_fields[0].text == "long match" && !found.dictionary_partial);
         query.dictionary_sources = {"second.ifo", "first.ifo"};
         found = search(); assert(found.dictionary_source == 0 && found.dictionary_match->word == "中文");
+        // An unreadable longer entry still lets a shorter candidate in the same source match.
+        copy_dictionary("han-broken", "broken");
+        query.dictionary_sources = {"broken.ifo"};
+        found = search();
+        assert(found.dictionary_status && found.dictionary_match->word == "中" && found.dictionary_partial);
+        assert(found.dictionary_fields[0].text == "short match");
+        query.dictionary_candidates = {{{0, 2}, "中文", false}}; query.dictionary_sources = {"broken.ifo", "first.ifo"};
+        found = search(); assert(found.dictionary_status.status == dict::Status::NotFound && found.dictionary_partial);
+        query.relative_path = "broken.ifo"; query.dictionary_sources.clear();
+        found = search(); assert(found.dictionary_status.status == dict::Status::InvalidFormat && !found.error.empty());
+        query.relative_path.clear(); query.dictionary_sources = {"first.ifo", "second.ifo", "third.ifo"};
         query.dictionary_candidates = {{{0, 7}, "missing", false}};
         found = search();
         assert(found.dictionary_status.status == dict::Status::NotFound && !found.dictionary_partial && found.error.empty());
