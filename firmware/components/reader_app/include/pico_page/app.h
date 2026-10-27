@@ -222,8 +222,8 @@ class ReaderApp {
     bool portal_visible() const;
     /** Consumes one explicit UI request; the main loop arbitrates device ownership. */
     UsbTransferAction take_usb_transfer_action();
-    /** Saves confirmed progress and releases card files; false forbids USB handoff. */
-    bool prepare_usb_transfer();
+    /** Saves confirmed progress and releases card files; false forbids USB handoff and sets problem to the reason. */
+    bool prepare_usb_transfer(std::string* problem = nullptr);
     /** Draws a transfer/error page from internal fonts, without accessing the card. */
     void show_usb_transfer(bool active, const std::string& error);
     /** Consumes one explicit UI request; the main loop owns the radio and the setup page server. */
@@ -288,7 +288,8 @@ class ReaderApp {
     /** Resumes reading or the library; slept=false preserves a current error page, otherwise
      * also restores the cancelled manual Wi-Fi intent. */
     void wake(bool slept = true);
-    void card_removed();
+    /** Releases card consumers and shows why the card is unavailable; recovery needs a restart. */
+    void card_unavailable(CardIssue issue);
     /**
      * True when a presented position or recent-book entry needs an eligible save attempt.
      * The caller applies the reading dwell policy before calling save_progress().

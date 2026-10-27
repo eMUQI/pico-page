@@ -131,7 +131,6 @@ enum Control {
     PowerSave,
     ClearCache,
     DetailOpen,
-    DetailCache,
     DetailReset,
     DetailDelete,
     ManageConfirm,
@@ -142,7 +141,7 @@ enum Control {
     PortalStop,
     WifiSettings,
     WifiToggle,
-    Help, About, OnboardingReplay, OnboardingStart, OnboardingFinish,
+    Help, About, OnboardingReplay, OnboardingStart, OnboardingNext, OnboardingFinish,
     HelpPrevious, HelpTools, HelpNext, HelpPosition, HelpDevice,
     HelpKey1, HelpKey2, HelpKey3, ResumeDetails,
     SyncCancel,
@@ -342,15 +341,21 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void prepare_next(const std::function<bool()>& stop);
     ReaderSettings settings, draft;
-    enum class OnboardingStep { Welcome, PageTurn, Tools };
+    enum class OnboardingStep { Welcome, Practice, Tools };
+    // The practice asks for each reading gesture in turn; Done leaves free practice.
+    enum class OnboardingTask { Next, Previous, OpenTools, CloseTools, Done };
     OnboardingStep onboarding_step = OnboardingStep::Welcome;
-    bool onboarding_from_help = false, onboarding_middle_hint = false;
+    OnboardingTask onboarding_task = OnboardingTask::Next;
+    int onboarding_page = 0, onboarding_tool = 0;
+    bool onboarding_from_help = false, onboarding_tools_open = false;
     bool sleep_onboarding = false, error_onboarding_help = false;
     void draw_onboarding();
+    void draw_practice(const std::string& finish);
     void start_onboarding(bool from_help);
+    void start_practice();
     void finish_onboarding();
     void onboarding_input(const AppInput& input);
-    void draw_turn_regions(int x, int y, int width, int height, int selected, bool labels, std::uint8_t divider = 1);
+    void draw_turn_regions(int x, int y, int width, int height, int selected, std::uint8_t divider = 1);
     std::size_t help_page = 0;
     int help_zone = HelpTools, help_key = HelpKey2, help_position = 0, help_device = 0;
     SettingsSnapshot edit_snapshot;
@@ -363,7 +368,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     PowerAction power_selected = PowerAction::None;
     PowerRequest power_request;
     bool power_save_failed = false;
-    bool power_progress_saved = false;
+    bool power_progress_saved = false, power_reading = false;
     void draw_power_menu() {
         view = View::PowerMenu;
         hits.clear(); canvas.clear(); header("电源", 0);
@@ -390,6 +395,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         power_save_failed = false; power_request = {};
         if (view == View::Library) draw_library();
         overlay();
+    }
+    /** The power-off page mentions the reading position only when a book was open. */
+    std::string power_saved_note() const {
+        if (!power_reading) return "";
+        return power_progress_saved ? "阅读位置已保存。" : "阅读位置没有完整保存。";
     }
     void draw_power_off(const std::string& detail, bool manual = false) {
         view = View::PowerOff;
@@ -431,6 +441,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     WifiPage join_origin = WifiPage::Add;
     LinkFailure join_failure = LinkFailure::None;
     std::string join_error;
+    // The join succeeded but writing network.toml failed.
+    bool join_unsaved = false;
     /** One on-screen keyboard field. Key taps change this model; flush_entry() draws it. */
     struct TextEntry {
         enum class Field { None, WifiPassword, WifiName, Endpoint, Username, Password };
@@ -492,6 +504,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     // Keep the dispatch slot until its matching completion, even after UI cancellation.
     std::uint64_t network_worker_id = 0;
     int network_after_cancel = 0;
+    bool network_closing_upload = false;
     View network_return_view = View::Sync;
     bool sync_checked = false, uploading = false;
     std::string sync_status;
@@ -671,12 +684,18 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::string library_home_root;
     // The open folder is one of the configured library roots; its parent is the library.
     bool folder_root = false;
-    enum class LibraryScan { Complete, Limited, Partial, Unavailable };
+    // Partial and Limited still show entries; the other incomplete states have no listing.
+    enum class LibraryScan { Complete, Limited, Partial, Unavailable, Missing, NotDirectory, CreateFailed };
     LibraryScan library_scan = LibraryScan::Complete;
+    bool library_create_full = false, library_create_denied = false;
     bool library_scan_failed() const {
-        return library_scan == LibraryScan::Partial || library_scan == LibraryScan::Unavailable;
+        return library_scan != LibraryScan::Complete && library_scan != LibraryScan::Limited &&
+               library_scan != LibraryScan::Partial;
     }
     const char* library_scan_notice() const;
+    /** Title and next step for an unavailable card or a library that cannot be listed. */
+    std::pair<std::string, std::string> library_problem() const;
+    CardIssue card_issue = CardIssue::Removed;
     reading_footer::Position footer_position = reading_footer::Position::Pages;
     reading_footer::Device footer_device = reading_footer::Device::Battery;
     bool footer_charging = false;
@@ -2098,6 +2117,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         link_return.reset();
         sync_return = false;
     }
+    static constexpr int kToolbarIds[] = {Contents, Typography, Sync, Refresh, FullRefresh};
+    static constexpr const char* kToolbarLabels[] = {"目录", "排版", "同步", "刷新模式", "全刷"};
+    /** Draws the reading toolbar along the bottom edge and adds its five hits. */
+    void draw_toolbar();
     void draw_tools();
     std::size_t current_toc() const {
         const auto &toc = document.toc();
@@ -2437,6 +2460,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     /** Verifies join_draft on the radio; the network is saved only after the join succeeds. */
     void join_wifi() {
         entry.field = TextEntry::Field::None;
+        join_unsaved = false;
         join_failure = LinkFailure::Other;
         wifi_page = WifiPage::JoinFailed;
         if (!provision::valid_wifi(join_draft)) join_error = "网络名称或密码的格式不正确。";
@@ -2458,6 +2482,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         wifi_page = page;
     }
     void join_complete(const std::string& error, LinkFailure failure) {
+        join_unsaved = false;
         if (!error.empty()) {
             join_error = error; join_failure = failure == LinkFailure::None ? LinkFailure::Other : failure;
             wifi_page = WifiPage::JoinFailed;
@@ -2465,7 +2490,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         std::string detail;
         if (!provision::save_network_edit(root, join_draft, false, std::time(nullptr), detail)) {
-            join_error = "已连接，但网络没有写入存储卡。请检查 TF 卡。"; join_failure = LinkFailure::Other;
+            join_error.clear(); join_failure = LinkFailure::Other; join_unsaved = true;
             wifi_page = WifiPage::JoinFailed;
             return;
         }
@@ -2704,7 +2729,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         const bool wifi = failed == CheckStage::Wifi, internet = failed == CheckStage::Internet;
         check_cell(36, y, "Wi-Fi", wifi ? CellState::Failed : CellState::Done, wifi ? "未连接" : "已连接", wifi ? note : ssid);
         if (wifi) check_cell(244, y, "互联网", CellState::Waiting, "未进行");
-        else check_cell(244, y, "互联网", internet ? CellState::Failed : CellState::Done, internet ? "无法访问" : "正常", internet ? note : "");
+        else check_cell(244, y, "互联网", internet ? CellState::Failed : CellState::Done, internet ? note : "正常");
         if (failed != CheckStage::Server) check_cell(452, y, "更新服务器", CellState::Waiting, "未进行");
         else check_cell(452, y, "更新服务器", CellState::Failed, "异常", note);
     }
@@ -2807,7 +2832,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         const std::array<Hit, 5> zones{{{x, y, left, foot, HelpPrevious},
             {x + left, y, right - left, foot, HelpTools}, {x + right, y, width - right, foot, HelpNext},
             {x, y + foot, device, height - foot, HelpPosition}, {x + device, y + foot, width - device, height - foot, HelpDevice}}};
-        draw_turn_regions(x, y, width, foot, help_zone, false, 9);
+        draw_turn_regions(x, y, width, foot, help_zone, 9);
         for (const auto& zone : zones) {
             const bool hidden = help_page == 3 && ((zone.id == HelpPosition && help_position == 4) ||
                 (zone.id == HelpDevice && help_device == 2));
@@ -3012,6 +3037,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         return sync::valid_config(next);
     }
     void draw_sync_settings();
+    /** What an unverified check leaves behind: a saved account is never removed by it. */
+    const char* account_kept() const {
+        return !account.saved ? "账户没有保存。" : account.changed ? "修改没有保存，原来的账户保留。" : "原来的账户保留。";
+    }
     void verify_account();
     /** Stops an account check; a late completion is discarded by its request ID. */
     void cancel_account() {
@@ -3030,13 +3059,13 @@ struct ReaderApp::Impl final : DisplayBackend {
         active_network = 0;
         account_page = AccountPage::Form;
         std::string detail;
-        if (!failure.empty()) account_notice = link != LinkFailure::None ? failure + "账户没有保存。" : "服务器没有响应，或网络中断。账户没有保存。";
+        if (!failure.empty()) account_notice = (link != LinkFailure::None ? failure : "没有连上同步服务器。") + std::string(account_kept());
         else if (status == 401 || status == 403) {
             account.check = AccountDraft::Check::Rejected;
             account_notice = account.saved && !account.changed ? "服务器拒绝了已保存的账户，账户或密码不正确。"
-                                                               : "账户或密码不正确。账户没有保存。";
+                                                               : "账户或密码不正确。" + std::string(account_kept());
         }
-        else if (status != 200) account_notice = "同步服务返回 HTTP " + std::to_string(status) + "，无法确认账户。账户没有保存。";
+        else if (status != 200) account_notice = "同步服务返回 HTTP " + std::to_string(status) + "，无法确认账户。" + account_kept();
         else if (store.save_private("sync.toml", provision::sync_toml(checked), detail) != StoreStatus::Ok)
             account_notice = "账户已通过验证，但没有写入存储卡。请检查 TF 卡。";
         else {
@@ -3156,9 +3185,11 @@ struct ReaderApp::Impl final : DisplayBackend {
             button(UsbCancel, "取消", 24, 1080, 306, 96);
             button(UsbExitConfirm, "退出并重启", 354, 1080, 306, 96, true);
         } else {
-            header(usb_active ? "USB 文件传输中" : "USB 文件传输", 0);
-            text(usb_active ? "电脑正在使用 TF 卡" : "USB 文件传输未开启", 36, 160, 40, 612, 1, true);
-            const int height = wrapped("传输期间设备暂停阅读和同步。完成后先在电脑上安全弹出，再退出并重启。", 36, 244, 612, 28);
+            header("USB 文件传输", 0);
+            // An open USB service only offers the card; it cannot tell whether a computer uses it.
+            text(usb_active ? "USB 文件传输已开启" : "USB 文件传输未开启", 36, 160, 40, 612, 1, true);
+            const int height = wrapped(usb_active ? "用数据线连接电脑后，TF 卡会显示为可移动磁盘。传输期间设备暂停阅读和同步。完成后先在电脑上安全弹出，再退出并重启。"
+                                                  : "传输期间设备暂停阅读和同步。完成后先在电脑上安全弹出，再退出并重启。", 36, 244, 612, 28);
             if (!message.empty()) wrapped(message, 36, 272 + height, 612, 26);
             button(UsbExit, "退出并重启", 24, 1080, 636, 96);
         }
@@ -3242,13 +3273,15 @@ struct ReaderApp::Impl final : DisplayBackend {
         view = View::NetworkClosing;
         hits.clear(); canvas.clear(); header(account_page_waiting ? "KOReader 同步" : "同步", 0);
         note(account_page_waiting ? "正在结束验证…" : "正在结束同步…", 246);
-        wrapped(account_page_waiting ? "网络任务正在安全收尾。账户没有保存。"
-                                     : "网络任务正在安全收尾。已发出的上传仍可能生效，下次同步需重新检查远端。", 36, 336, 612, 26);
-        button(ContinueOffline, "继续离线阅读", 24, 1080, 636, 96);
+        wrapped(account_page_waiting ? "网络任务正在结束。" + std::string(account_kept())
+                : network_closing_upload ? "网络任务正在结束。已发出的上传仍可能生效，下次同步需重新检查远端。"
+                : "网络任务正在结束。本机位置没有改动。", 36, 336, 612, 26);
+        button(ContinueOffline, return_label(origin_for(view)), 24, 1080, 636, 96);
     }
     void wait_network(int next_control) {
         network_after_cancel = next_control;
         network_return_view = view;
+        network_closing_upload = uploading;
         sync_cancelled(uploading);
         draw_network_closing(); overlay();
     }
@@ -3388,15 +3421,30 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::string retry_path;
     /**
      * Shows a failure. The text up to the first full stop, comma or colon is the specific title;
-     * the rest explains it. retry names a book whose opening failed and can be repeated.
+     * the rest explains it. retry names a book whose opening failed; repeatable offers to open it again.
      */
-    void error(const std::string &text_in, const std::string &retry = "");
+    void error(const std::string &text_in, const std::string &retry = "", bool repeatable = true);
+    /** Shows why a book did not open; only causes that may pass, such as a read failure, offer a retry. */
+    void open_failed(const std::string& detail, const std::string& path) {
+        const auto cause = reason(detail, "无法解析文件内容");
+        const bool transient = cause == "设备内存不足" || cause == "文件在读取过程中发生了变化" ||
+                               cause == "文件无法读取，请检查 TF 卡" || cause == "EPUB 格式标识读取失败";
+        error(cause + "。原书没有被修改。", path, transient);
+    }
+    /** Names the first configuration problem by cause: unreadable, newer schema or invalid content. */
+    static std::string settings_file_problem(const std::vector<ConfigDiagnostic>& diagnostics) {
+        for (const auto& diagnostic : diagnostics)
+            if (diagnostic.status == StoreStatus::IoError) return "设置文件无法读取";
+        for (const auto& diagnostic : diagnostics)
+            if (diagnostic.status == StoreStatus::UnsupportedVersion) return "设置文件来自较新的固件";
+        return "设置文件内容有误";
+    }
     void back();
     bool begin_settings_edit(bool global = false) {
         if (!bookmark_io_ready()) return false;
         auto snapshot = store.settings_snapshot(global ? "" : book_path);
         if (!snapshot.config.diagnostics.empty()) {
-            error("设置文件无效，原文件未修改。请检查后重新打开设置。");
+            error(settings_file_problem(snapshot.config.diagnostics) + "。原文件未修改，请在电脑上检查后重新打开设置。");
             return false;
         }
         edit_snapshot = std::move(snapshot);

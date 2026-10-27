@@ -486,7 +486,7 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
         if (!job->result.error.empty()) {
             if (request.kind == ContentJob::Kind::Inspect) {
                 detail_error = job->result.error; draw_details(); overlay();
-            } else error(reason(job->result.error, "无法解析文件内容") + "。原书没有被修改。", request.relative_path);
+            } else open_failed(job->result.error, request.relative_path);
             return;
         }
         const auto& loaded = *job->result.document;

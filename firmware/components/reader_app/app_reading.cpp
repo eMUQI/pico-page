@@ -27,7 +27,7 @@ bool ReaderApp::Impl::open(std::string path) {
     if (!open_document(path, detail)) {
         book_path.clear();
         session.open("", "", writer);
-        error(reason(detail, "无法解析文件内容") + "。原书没有被修改。", path);
+        open_failed(detail, path);
         return false;
     }
     return finish_open(path);
@@ -62,7 +62,7 @@ bool ReaderApp::Impl::finish_open(const std::string& path, ContentJob::Result* l
     offset = 0;
     message.clear();
     if (!configuration.diagnostics.empty())
-        message = "设置文件无效，已回退；原文件未修改";
+        message = settings_file_problem(configuration.diagnostics) + "，本次使用默认值；原文件未修改";
     else if (!bookmarks_usable())
         message = bookmarks.status == StoreStatus::IdentityMismatch ? "书签与当前原书不符，未使用；原文件已保留"
                                                                     : "书签文件无法读取，已保留原文件；阅读进度不受影响";

@@ -21,6 +21,7 @@ struct Driver {
         app.input({{sequence, Phase::End, key}, touch, x, y, queued});
     }
     void tap(int x, int y) { input(Input::TouchCenter, true, x, y); }
+    void swipe(bool next) { input(next ? Input::Next : Input::Previous, false, 300, 500); }
     void capture(const std::string& path) {
         std::ofstream out(path, std::ios::binary);
         out << "P5\n684 1216\n255\n";
@@ -53,16 +54,30 @@ int main(int argc, char** argv) {
             d.capture((shots / "welcome.pgm").string()); d.refresh(); d.sleep();
             assert(!fs::exists(root / "PicoPage/settings.toml"));
             d.tap(300, 700); assert(!app.pending_frame());
-            d.tap(300, 1000); d.present(); d.capture((shots / "page-turn.pgm").string());
+            d.tap(300, 1000); d.present(); d.capture((shots / "practice.pgm").string());
             const auto practice = app.canvas().pixels(); d.refresh(); d.sleep();
+            // Nothing precedes the first practice page.
             d.tap(100, 500); d.input(Input::K1); d.input(Input::Previous); assert(!app.pending_frame());
-            d.tap(300, 500); d.present(); assert(app.canvas().pixels() != practice);
-            d.input(Input::K1); d.present(); assert(app.canvas().pixels() == practice);
+            // The middle opens a toolbar like the reading one; its tools only explain themselves.
+            d.tap(300, 500); d.present(); d.capture((shots / "practice-toolbar.pgm").string());
+            const auto toolbar = app.canvas().pixels(); assert(toolbar != practice);
+            d.input(Input::K1); d.input(Input::K3); d.input(Input::Next); assert(!app.pending_frame());
+            d.tap(60, 1150); d.present(); d.capture((shots / "practice-tool.pgm").string());
+            assert(app.canvas().pixels() != toolbar);
+            d.tap(60, 1150); d.tap(300, 50); assert(!app.pending_frame());
+            d.tap(600, 700); d.present(); assert(app.canvas().pixels() == practice);
             d.input(Input::K3, false, 0, 0, true); assert(!app.pending_frame());
-            // A queued or duplicate tail cannot consume the next screen's action.
-            d.tap(600, 500); const auto advanced = app.canvas().pixels();
-            app.input({{d.sequence, Phase::End, Input::K3}}); assert(app.canvas().pixels() == advanced);
-            d.present(); d.capture((shots / "tools.pgm").string()); d.refresh(); d.sleep();
+            // A queued or duplicate tail cannot consume the next task.
+            d.tap(600, 500); const auto turned = app.canvas().pixels(); assert(turned != practice);
+            app.input({{d.sequence, Phase::End, Input::TouchCenter}, true, 600, 500});
+            assert(app.canvas().pixels() == turned); d.present();
+            d.capture((shots / "practice-previous.pgm").string()); d.sleep();
+            d.input(Input::K1); d.present(); d.capture((shots / "practice-open.pgm").string());
+            d.tap(300, 500); d.present(); d.tap(300, 900); d.present();
+            d.capture((shots / "practice-done.pgm").string()); d.refresh();
+            const auto done = app.canvas().pixels();
+            d.swipe(true); d.present(); d.swipe(false); d.present(); assert(app.canvas().pixels() == done);
+            d.tap(300, 1130); d.present(); d.capture((shots / "tools.pgm").string()); d.refresh(); d.sleep();
             d.tap(600, 50); d.tap(300, 420); assert(!app.pending_frame());
             d.tap(300, 1120); d.present(); assert(app.view() == View::Library);
             assert(store.load_settings().settings.onboarding_done && !store.needs_onboarding());
@@ -74,7 +89,9 @@ int main(int argc, char** argv) {
         d.capture((shots / "help.pgm").string());
         d.tap(300, 1060); d.present(); assert(upgraded.view() == View::Onboarding);
         d.tap(300, 1120); d.present(); assert(upgraded.view() == View::Help);
-        d.tap(300, 1060); d.present(); d.input(Input::K3); d.present(); d.input(Input::Next); d.present();
+        // Keys alone reach the end: turning past the last practice page leaves the practice.
+        d.tap(300, 1060); d.present(); d.input(Input::K3); d.present();
+        for (int i = 0; i < 3; ++i) { d.input(Input::Next); d.present(); }
         d.input(Input::K3); d.present(); assert(upgraded.view() == View::Help);
         assert(store.settings_snapshot().global_source == before);
         d.tap(300, 1060); d.present(); upgraded.show_error("测试错误"); d.present();
@@ -99,8 +116,8 @@ int main(int argc, char** argv) {
         for (int boot = 0; boot < 2; ++boot) {
             ReaderApp app(root.string()); Driver d{app}; assert(app.initialize()); d.present();
             assert(app.view() == View::Onboarding);
-            if (absent) { app.card_removed(); d.present(); assert(app.view() == View::Onboarding); }
-            d.input(Input::K3); d.present(); d.input(Input::K3); d.present(); d.input(Input::K3); d.present();
+            if (absent) { app.card_unavailable(CardIssue::Removed); d.present(); assert(app.view() == View::Onboarding); }
+            for (int i = 0; i < 5; ++i) { d.input(Input::K3); d.present(); }
             assert(app.view() == View::Library && !FileStore(root.string()).load_settings().settings.onboarding_done);
         }
     }

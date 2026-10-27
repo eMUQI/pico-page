@@ -5,6 +5,8 @@ namespace {
 constexpr int kDictionaryPanelHeight = 560;
 constexpr int kDictionaryLowerTop = 568;
 constexpr std::size_t kDictionarySourcesPerPage = 5;
+// Marks an enabled dictionary that the latest scan no longer found.
+constexpr const char* kMissingDictionary = "Missing dictionary";
 std::string dictionary_error(const dictionary::Result& status) {
     switch (status.status) {
     case dictionary::Status::Ok: return {};
@@ -58,7 +60,8 @@ void ReaderApp::Impl::draw_dictionary_settings() {
         const int y = 164 + static_cast<int>(row) * 184;
         title_lines(item.info.name.empty() ? basename(item.id) : item.info.name, 36, y, 450, 26, true, 2);
         const bool ready = std::find(dictionary_ready.begin(), dictionary_ready.end(), item.id) != dictionary_ready.end();
-        const auto label = !item.status ? dictionary_error(item.status) : ready ? "已准备" : "待准备";
+        const auto label = item.status.message == kMissingDictionary ? "找不到这套词典的文件" :
+                           !item.status ? dictionary_error(item.status) : ready ? "已准备" : "待准备";
         text(label, 36, y + 62, 22, 612, 3);
         if (!content_loading) button(DictionaryToggleBase + static_cast<int>(index), enabled ? "停用" : "启用", 516, y, 144, 60, enabled, 23);
         if (!content_loading && enabled) {
@@ -69,7 +72,10 @@ void ReaderApp::Impl::draw_dictionary_settings() {
         if (!content_loading && item.status) button(DictionaryPrepareBase + static_cast<int>(index), "准备词典", 444, y + 100, 216, 60, false, 23);
         canvas.line(36, y + 176, 648, y + 176, 10);
     }
-    if (dictionary_items.empty() && !content_loading) wrapped("没有找到词典。请复制含 .ifo、.idx 和 .dict 或 .dict.dz 的词典文件夹，再重新扫描。", 36, 220, 612, 26);
+    // A failed scan reports its cause below instead of claiming that no dictionary exists.
+    if (dictionary_items.empty() && !content_loading)
+        wrapped(dictionary_notice.empty() ? "没有找到词典。请复制含 .ifo、.idx 和 .dict 或 .dict.dz 的词典文件夹，再重新扫描。"
+                                          : "无法读取词典目录，请重新扫描。", 36, 220, 612, 26);
     if (!content_loading && dictionary_list_page) button(Prev, "上一页", 24, 928, 198, 68, false, 24);
     center(std::to_string(dictionary_list_page + 1) + " / " + std::to_string(screens), 222, 950, 240, 24);
     if (!content_loading && dictionary_list_page + 1 < screens) button(Next, "下一页", 462, 928, 198, 68, false, 24);
@@ -397,7 +403,7 @@ void ReaderApp::Impl::finish_dictionary(ContentJob& job) {
         dictionary_items = std::move(result.dictionaries); dictionary_list_complete = result.dictionary_complete;
         for (const auto& id : settings.dictionary_enabled)
             if (std::none_of(dictionary_items.begin(), dictionary_items.end(), [&](const auto& item) { return item.id == id; }))
-                dictionary_items.push_back({id, {}, {dictionary::Status::IoError, "Missing dictionary"}});
+                dictionary_items.push_back({id, {}, {dictionary::Status::IoError, kMissingDictionary}});
     } else if (job.request.kind == ContentJob::Kind::DictionaryPrepare) {
         if (result.dictionary_status && std::find(dictionary_ready.begin(), dictionary_ready.end(), job.request.relative_path) == dictionary_ready.end())
             dictionary_ready.push_back(job.request.relative_path);
@@ -440,7 +446,8 @@ void ReaderApp::Impl::finish_dictionary(ContentJob& job) {
         } else if (job.request.kind == ContentJob::Kind::DictionaryLookup && !job.request.dictionary_entry_lookup &&
                    result.dictionary_status.status != dictionary::Status::Cancelled) {
             dictionary_partial_error = result.dictionary_partial || result.dictionary_status.status != dictionary::Status::NotFound;
-            if (dictionary_partial_error) dictionary_notice = "没有可用结果；部分词典读取失败，请检查文件或 TF 卡。";
+            // A single failure keeps its own cause; several sources may have failed differently.
+            if (result.dictionary_partial) dictionary_notice = "没有找到词条；部分词典无法使用，结果可能不完整。";
         }
     }
     if (view == View::DictionarySettings) {

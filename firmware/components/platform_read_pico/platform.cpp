@@ -57,6 +57,7 @@ bool ready = false;
 bool display_ready = false;
 bool baseline_valid = false;
 bool mounted = false;
+pico_page::CardIssue card_issue = pico_page::CardIssue::NotInserted;
 bool usb_owns_card = false;
 bool suppress_power = true;
 bool pending_power_long = false;
@@ -234,6 +235,8 @@ void observe_card() {
     read_pico_sd_info_t info{};
     const auto result = read_pico_sd_get_info(&info);
     mounted = result == ESP_OK && info.mounted;
+    card_issue = mounted ? pico_page::CardIssue::Removed : !info.present ? pico_page::CardIssue::NotInserted :
+        info.needs_format ? pico_page::CardIssue::NoFilesystem : pico_page::CardIssue::Unreadable;
     mount_error = mounted ? "" : !info.present ? "TF card not inserted" :
         std::string("TF card unavailable: ") + esp_err_to_name(result);
 }
@@ -626,6 +629,7 @@ bool set_page_effect_waveform(PageWaveform waveform, std::string& error) {
 }
 PresentTiming present_timing() { return timing; }
 const char* card_root() { return mounted ? "/sdcard" : nullptr; }
+pico_page::CardIssue card_start_issue() { return card_issue; }
 const std::string& card_error() { return mount_error; }
 Battery battery() { return battery_state; }
 

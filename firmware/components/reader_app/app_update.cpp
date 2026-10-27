@@ -126,7 +126,7 @@ void ReaderApp::Impl::draw_update_home(update::Offer offer, int preview_bottom) 
     }
     check_button(880, "重新检查");
     update_install_button(992, offer);
-    const auto reason = offer == update::Offer::TooLarge ? "新固件 " + file_size(manifest->size) + "，超过 4 MiB 的分区，不能安装。"
+    const auto reason = offer == update::Offer::TooLarge ? "新固件 " + file_size(manifest->size) + "，超过本机 4 MiB 的固件分区，不能安装。这与存储卡空间无关。"
         : offer == update::Offer::OlderSchema ? std::string("这个版本写入的数据格式比本机旧，不能安装。") : update_block();
     wrapped(update_notice.empty() ? reason : update_notice, 36, 1104, 612, 24);
 }
@@ -220,21 +220,27 @@ void ReaderApp::Impl::draw_update() {
         const char* title = "无法写入固件";
         std::string body = "设备无法写入更新分区。";
         switch (update_failure) {
-        case UpdateFailure::Link: title = "没有连上网络"; body = update_notice; break;
-        case UpdateFailure::Internet: title = "没有连上互联网"; body = "已连接 Wi-Fi，但" + update_notice + "。"; break;
-        case UpdateFailure::Network: title = "网络中断"; body = "下载到 " + megabytes(update_bytes) + " MiB 时网络断开。"; break;
-        case UpdateFailure::Server: title = "更新服务器无响应"; body = "没有取得固件文件，稍后再试。"; break;
+        case UpdateFailure::Link: title = "没有连上 Wi-Fi"; body = update_notice; break;
+        case UpdateFailure::Internet: title = "无法开始下载"; body = "已连接 Wi-Fi，但" + update_notice + "。请确认这个网络可以上网。"; break;
+        case UpdateFailure::Network:
+            // The same failure covers a refused connection before any byte and a later interruption.
+            if (update_bytes) { title = "下载中断"; body = "下载到 " + megabytes(update_bytes) + " MiB 时连接中断或超时。"; }
+            else { title = "无法开始下载"; body = "没有连上固件下载服务器。"; }
+            break;
+        case UpdateFailure::Server: title = "下载服务器返回错误"; body = "没有取得固件文件，稍后再试。"; break;
         case UpdateFailure::Mismatch: title = "校验没有通过"; body = "下载的文件和清单记录的不一致，已丢弃。"; break;
-        case UpdateFailure::TooLarge: title = "空间不够"; body = "新固件 " + file_size(manifest->size) + "，超过 4 MiB 的分区。"; break;
+        case UpdateFailure::TooLarge: title = "固件超出容量"; body = "新固件 " + file_size(manifest->size) + "，超过本机 4 MiB 的固件分区，无法安装。这与存储卡空间无关。"; break;
         case UpdateFailure::WrongImage: title = "型号不符"; body = "这个固件不是给 Read Pico 的，或版本与清单不符。"; break;
         default: break;
         }
+        // The same file would fail again; only transfer and write failures are worth repeating.
+        const bool repeatable = update_failure != UpdateFailure::TooLarge && update_failure != UpdateFailure::WrongImage;
         canvas.fill_rect(36, 140, 48, 48, 1);
         center("!", 36, 146, 48, 32, 15, true);
         text(title, 100, 144, 34, 548, 1, true);
         wrapped(body + "仍在使用 " + running_version + "。", 36, 228, 612, 26);
-        button(UpdateRetry, "重新下载", 24, 976, 636, 96, true);
-        button(UpdateLater, "稍后", 24, 1088, 636, 88);
+        if (repeatable) button(UpdateRetry, "重新下载", 24, 976, 636, 96, true);
+        button(UpdateLater, repeatable ? "稍后" : "返回", 24, 1088, 636, 88);
         return;
     }
     case UpdatePage::Ready:
@@ -325,15 +331,16 @@ void ReaderApp::Impl::update_complete(std::uint64_t id, UpdateFailure failure, i
                 link == LinkFailure::NotNearby ? "附近没有" : link == LinkFailure::Password ? "密码错误" : "",
                 link == LinkFailure::NotNearby && !absent.empty() ? absent + "可以换个位置再试，或者添加新的网络。" : detail};
         } else if (failure == UpdateFailure::Internet) {
-            update_check = {CheckStage::Internet, ssid, detail, "设备已连接" + (ssid.empty() ? std::string("Wi-Fi") : quoted_name(ssid)) +
-                "，但无法访问互联网。请检查路由器或手机热点是否已联网。"};
+            update_check = {CheckStage::Internet, ssid, "失败", "已连接" + (ssid.empty() ? std::string("Wi-Fi") : quoted_name(ssid)) +
+                "，但" + detail + "。请确认这个网络可以上网，稍后再试。"};
         } else if (failure != UpdateFailure::None || status != 200 || !update::parse_manifest(body, manifest, problem)) {
             update_check = {CheckStage::Server, ssid,
                 failure != UpdateFailure::None ? "连接失败" : status != 200 ? "HTTP " + std::to_string(status) : "清单无效",
                 failure != UpdateFailure::None ? "已连接互联网，但无法连接更新服务器。稍后再试。"
                 // The update host answers 404 until the first manifest is published.
                 : status == 404 ? "更新服务器上还没有发布固件。"
-                : status != 200 ? "网络没有问题，是更新服务器暂时不可用。稍后再试。" : "更新服务器返回的清单无法识别。稍后再试。"};
+                : status != 200 ? "更新服务器返回 HTTP " + std::to_string(status) + "，暂时无法检查。稍后再试。"
+                : "更新服务器返回的清单无法识别。稍后再试。"};
         }
         // Pages that offer an installation show the cause below their controls.
         if (update_check.stage != CheckStage::None) update_notice = update_check.body;

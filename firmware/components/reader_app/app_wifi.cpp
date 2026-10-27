@@ -137,8 +137,9 @@ void ReaderApp::Impl::draw_wifi() {
         break;
     case WifiPage::JoinFailed: {
         header("连接 Wi-Fi", 0);
-        title_lines("无法连接" + quoted_name(join_draft.ssid), 36, 160, 612, 34, true, 2);
-        const int height = wrapped(join_error + "网络没有保存。", 36, 280, 612, 26);
+        title_lines((join_unsaved ? "没能保存" : "无法连接") + quoted_name(join_draft.ssid), 36, 160, 612, 34, true, 2);
+        const int height = wrapped(join_unsaved ? "已经连上这个网络，但无法写入存储卡。下次开机不会自动连接。"
+                                                : join_error + "网络没有保存。", 36, 280, 612, 26);
         const bool password = join_failure == LinkFailure::Password && !join_open;
         if (password) wrapped("密码区分大小写。可点“显示”逐位核对。", 36, 300 + height, 612, 24, true, 3);
         button(password ? WifiJoinEdit : WifiJoinRetry, password ? "重新输入密码" : "重试", 24, 880, 636, 96, true);

@@ -19,7 +19,7 @@ void ReaderApp::Impl::draw_sync_settings() {
         text("正在验证账户", 36, 160, 34, 612, 1, true);
         text("网络：" + network_label(), 36, 236, 24, 612, 3);
         button(AccountCancel, "取消", 24, 1000, 636, 96);
-        note("取消后不保存账户。", 1124);
+        note(account.saved ? "取消后保留原来的账户。" : "取消后不保存账户。", 1124);
         return;
     }
     header("KOReader 同步", Back, "设置");
@@ -141,8 +141,8 @@ void ReaderApp::Impl::draw_sync() {
     }
     switch (sync_state) {
     case SyncState::NoRecord:
-        sync_columns("无记录", "服务器上没有这本书");
-        status("上传后，其他设备打开同一本书时可以接续。");
+        sync_columns("无记录", "没有阅读位置");
+        status("服务器上还没有这本书的阅读位置。上传本机位置后，其他设备打开同一本书时可以接续。");
         button(SyncUpload, "上传本机位置…", 36, sync_lower, 612, 88, true);
         break;
     case SyncState::Same:
@@ -175,7 +175,7 @@ void ReaderApp::Impl::draw_sync() {
         break;
     case SyncState::Failed:
         sync_columns("未检查", "—");
-        status("服务器没有响应，或网络中断。");
+        status("没有取得远端位置。");
         sync_network_row();
         button(SyncCheck, "重试", 36, sync_upper, 612, 88, true);
         break;
@@ -316,6 +316,7 @@ void ReaderApp::Impl::network_complete(std::uint64_t id, int status, const std::
         if (sync_state == SyncState::LinkFailed)
             sync_status = sync_link_pinned && link == LinkFailure::NotNearby
                 ? "指定的" + quoted_name(sync_link_name) + "不在附近，没有连接其他网络。" : failure;
+        else if (sync_state == SyncState::Failed) sync_status = "没有连上同步服务器。";
     } else if (uploading) {
         remote_anchor.reset();
         if (sync::upload_confirmed(status, detail) && upload_record && session.saved_record() &&
@@ -351,6 +352,9 @@ void ReaderApp::Impl::network_complete(std::uint64_t id, int status, const std::
         } else {
             sync_checked = false;
             sync_state = remote.status == sync::RemoteStatus::Unauthorized ? SyncState::Unauthorized : SyncState::Failed;
+            if (sync_state == SyncState::Failed)
+                sync_status = status != 200 ? "同步服务返回 HTTP " + std::to_string(status) + "，没有取得远端位置。"
+                                            : "同步服务返回的内容无法识别，没有取得远端位置。";
         }
     }
     if (!sync_checked || sync_state == SyncState::Same) network::release(sync_hold);

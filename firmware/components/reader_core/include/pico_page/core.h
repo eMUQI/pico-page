@@ -12,6 +12,9 @@ enum class Action { None, PreviousPage, NextPage, ForceRefresh, OpenTools, Close
                     CancelPreview, KeepLocal, Cancel, EndTransfer, Wake };
 Action map_input(Context context, Input input);
 
+/** Why the card is unavailable: removed while running, or absent/unmountable at start. */
+enum class CardIssue { Removed, NotInserted, NoFilesystem, Unreadable };
+
 enum class Phase { Begin, End, Cancel, Move };
 struct InputEvent {
     std::uint64_t sequence;

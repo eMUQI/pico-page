@@ -2,7 +2,7 @@
 
 namespace pico_page {
 
-void ReaderApp::Impl::error(const std::string &text_in, const std::string &retry) {
+void ReaderApp::Impl::error(const std::string &text_in, const std::string &retry, bool repeatable) {
     reset_dictionary_contact();
     sleep_wait_footer.reset();
     sleep_wait_restore_pending = false;
@@ -27,7 +27,7 @@ void ReaderApp::Impl::error(const std::string &text_in, const std::string &retry
     link_return = confirmed_link_return;
     sync_return = confirmed_sync_return;
     message = detail;
-    retry_path = retry;
+    retry_path = repeatable ? retry : "";
     std::size_t split = std::string::npos, mark = 0;
     for (const char *separator : {"。", "，", "："}) {
         const auto found = detail.find(separator);
@@ -41,7 +41,7 @@ void ReaderApp::Impl::error(const std::string &text_in, const std::string &retry
                           restore_confirmed_position() && panel_background(752, false);
     view = View::Error;
     hits.clear();
-    const bool unsaved = session.needs_save();
+    const bool unsaved = card_available && session.needs_save();
     const bool resumes = error_origin == Origin::Reading && has_book() && (session.visible_record() || session.saved_record());
     if (retained) {
         canvas.fill_rect(0, 752, 684, 464, 15);
@@ -57,17 +57,14 @@ void ReaderApp::Impl::error(const std::string &text_in, const std::string &retry
         title_lines(title, 36, 160, 612, 40, true);
         int y = 160 + std::min(wrapped(title, 0, 0, 612, 40, false), 96) + 28;
         if (!body.empty()) y += wrapped(body, 36, y, 612, 28) + 28;
-        if (!retry.empty()) {
-            y += wrapped(retry, 36, y, 612, 24, true, 3);
-            wrapped("可重试一次；仍失败时请检查 TF 卡。", 36, y, 612, 24, true, 3);
-        }
+        if (!retry.empty()) wrapped(retry, 36, y, 612, 24, true, 3);
     }
     // Two actions share the row with the recommended one on the right; one action fills it.
     const auto leave = return_label(error_origin);
-    const bool second = unsaved || !retry.empty();
+    const bool second = unsaved || !retry_path.empty();
     button(Back, leave, 24, 1080, second ? 306 : 636, 96, !second);
     if (unsaved) button(SaveRetry, "重试保存", 354, 1080, 306, 96, true);
-    else if (!retry.empty()) button(Retry, "重试", 354, 1080, 306, 96, true);
+    else if (!retry_path.empty()) button(Retry, "重试", 354, 1080, 306, 96, true);
     drawing_error = false;
     if (!display.busy()) overlay();
 }
@@ -667,12 +664,6 @@ void ReaderApp::Impl::control(int id) {
         library_grid = id == LibraryGrid;
         library_page = 0;
         draw_library();
-        break;
-    case DetailCache:
-        covers.erase(std::remove_if(covers.begin(), covers.end(), [&](const auto& cover) { return cover.path == detail_path; }), covers.end());
-        if (detail_path == book_path) clear_page_history();
-        message = "本书内存缓存已清理，阅读记录保留";
-        draw_details();
         break;
     case DetailReset:
     case DetailDelete:
