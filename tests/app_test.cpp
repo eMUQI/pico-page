@@ -2907,7 +2907,13 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     assert(app.canvas().pixels() != automatic && app.saved_record() == saved);
     driver.tap(600, 600); driver.present();
     driver.hold(hit_x, hit_y); assert(app.view() == View::Dictionary && app.content_busy());
-    driver.present(); driver.complete_content();
+    driver.present();
+    // The missing first source falls through to the next one behind the loading panel; only the result is presented.
+    unsigned lookup_frames = 0;
+    driver.frame_observer = [&](const Frame&) { ++lookup_frames; };
+    driver.complete_content();
+    driver.frame_observer = {};
+    assert(lookup_frames == 1);
     assert(app.view() == View::Dictionary && app.saved_record() == saved);
     assert(app.canvas().pixels() != body); shot("dictionary-panel", app);
     const auto first = app.canvas().pixels();

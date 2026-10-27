@@ -813,8 +813,9 @@ struct ReaderApp::Impl final : DisplayBackend {
     void submit_dictionary_selection();
     void flush_dictionary_selection();
     void reset_dictionary_contact();
-    void query_dictionary();
-    void page_dictionary(int movement = 0);
+    /** Queue dictionary work; redraw=false keeps the loading panel that is already presented. */
+    void query_dictionary(bool redraw = true);
+    void page_dictionary(int movement = 0, bool redraw = true);
     void draw_dictionary();
     void finish_dictionary(ContentJob& job);
     void dictionary_control(int id);

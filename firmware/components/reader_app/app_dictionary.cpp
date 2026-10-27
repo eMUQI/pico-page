@@ -207,7 +207,7 @@ void ReaderApp::Impl::begin_dictionary(int x, int y, bool selecting) {
     else submit_dictionary_selection();
 }
 
-void ReaderApp::Impl::query_dictionary() {
+void ReaderApp::Impl::query_dictionary(bool redraw) {
     dictionary_definition.reset(); dictionary_page = {}; dictionary_pages.clear(); dictionary_entry = 0; dictionary_entry_base = 0;
     dictionary_entries.clear(); dictionary_headword.clear(); dictionary_name.clear();
     dictionary_missing_glyphs = dictionary_omitted_fields = false;
@@ -225,10 +225,11 @@ void ReaderApp::Impl::query_dictionary() {
             candidate.selection.end - candidate.selection.begin == dictionary_candidate_length))
             request.dictionary_candidates.push_back(candidate);
     if (request.dictionary_candidates.empty()) { dictionary_notice = "未找到词条。"; draw_dictionary(); overlay(); return; }
-    queue_dictionary(std::move(request)); draw_dictionary(); overlay();
+    queue_dictionary(std::move(request));
+    if (redraw) { draw_dictionary(); overlay(); }
 }
 
-void ReaderApp::Impl::page_dictionary(int movement) {
+void ReaderApp::Impl::page_dictionary(int movement, bool redraw) {
     if (!dictionary_definition || dictionary_pages.empty()) return;
     ContentJob::Request request; request.kind = ContentJob::Kind::DictionaryPage;
     request.dictionary_definition = dictionary_definition;
@@ -244,7 +245,8 @@ void ReaderApp::Impl::page_dictionary(int movement) {
     }
     request.font = builtin_body ? std::string() : root + "/" + effective_font;
     dictionary_page_move = movement; dictionary_notice.clear();
-    queue_dictionary(std::move(request)); draw_dictionary(); overlay();
+    queue_dictionary(std::move(request));
+    if (redraw) { draw_dictionary(); overlay(); }
 }
 
 void ReaderApp::Impl::draw_dictionary() {
@@ -433,19 +435,20 @@ void ReaderApp::Impl::finish_dictionary(ContentJob& job) {
             dictionary_omitted_fields = result.dictionary_status.omitted_fields;
             dictionary_headword = dictionary_entries[dictionary_entry].headword;
             dictionary_definition = std::make_shared<const std::vector<dictionary::Field>>(std::move(result.dictionary_fields));
-            dictionary_pages.assign(1, {}); dictionary_page_number = 0; dictionary_layout_anchor = 0; page_dictionary(); return;
+            dictionary_pages.assign(1, {}); dictionary_page_number = 0; dictionary_layout_anchor = 0; page_dictionary(0, false); return;
         } else if (job.request.kind == ContentJob::Kind::DictionaryLookup && !job.request.dictionary_entry_lookup &&
                    result.dictionary_status.status != dictionary::Status::Cancelled) {
             dictionary_partial_error = dictionary_partial_error || result.dictionary_status.status != dictionary::Status::NotFound;
-            if (dictionary_search_all && ++dictionary_source < settings.dictionary_enabled.size()) { query_dictionary(); return; }
+            // The loading panel stays on screen while the search continues; only the final result is presented.
+            if (dictionary_search_all && ++dictionary_source < settings.dictionary_enabled.size()) { query_dictionary(false); return; }
             if (dictionary_candidate_length > 1) {
                 --dictionary_candidate_length;
                 if (dictionary_search_all) dictionary_source = 0;
-                query_dictionary(); return;
+                query_dictionary(false); return;
             }
             if (!dictionary_inflections && std::any_of(dictionary_candidates.begin(), dictionary_candidates.end(), [](const auto& candidate) { return candidate.inflection; })) {
                 if (dictionary_search_all) dictionary_source = 0;
-                dictionary_inflections = true; query_dictionary(); return;
+                dictionary_inflections = true; query_dictionary(false); return;
             }
             if (dictionary_search_all) dictionary_source = 0;
             if (dictionary_partial_error) dictionary_notice = "没有可用结果；部分词典读取失败，请检查文件或 TF 卡。";
