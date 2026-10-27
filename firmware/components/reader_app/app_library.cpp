@@ -5,10 +5,64 @@ namespace pico_page {
 const char* ReaderApp::Impl::library_scan_notice() const {
     switch (library_scan) {
     case LibraryScan::Limited: return "当前目录仅显示前 512 项，请分目录存放";
-    case LibraryScan::Partial: return "目录读取不完整，请检查 TF 卡后重试";
-    case LibraryScan::Unavailable: return "无法读取目录，请检查 TF 卡后重试";
+    case LibraryScan::Partial: return "部分文件读取失败，列表可能不完整";
     default: return "";
     }
+}
+
+ReaderApp::Impl::LibraryProblem ReaderApp::Impl::library_problem() const {
+    // A card cannot be mounted again without a restart, so every card state offers the power menu.
+    if (!card_available) {
+        switch (card_issue) {
+        case CardIssue::NotInserted:
+            return {"没有检测到 TF 卡", "书籍、设置和阅读进度都保存在 TF 卡上。", {"插入 TF 卡", "重启设备"}, PowerMenu, "关机 / 重启"};
+        case CardIssue::NoFilesystem:
+            return {"无法识别 TF 卡", "卡上没有可识别的文件系统。", {"在电脑上检查这张卡", "插回设备后重启"}, PowerMenu, "关机 / 重启"};
+        case CardIssue::Unreadable:
+            return {"TF 卡无法读取", "挂载 TF 卡时出错。", {"取出 TF 卡，重新插好", "重启设备", "仍然无法读取时，在电脑上检查这张卡"},
+                    PowerMenu, "关机 / 重启"};
+        case CardIssue::Removed: break;
+        }
+        return {"TF 卡已移除", "重启后设备才能重新读取 TF 卡。", {"插回 TF 卡", "重启设备"}, PowerMenu, "关机 / 重启"};
+    }
+    const auto path = (folder.empty() ? library_home_root : folder) + "/";
+    const auto name = ReaderSettings{}.library_roots.front() + "/";
+    switch (library_scan) {
+    case LibraryScan::Missing:
+        if (!folder.empty()) return {"文件夹已不存在", path + " 可能已被移动或删除。", {}, Back, "返回上一级"};
+        return {"找不到书库目录", "设置文件指定的 " + path + " 不存在。",
+                {"在电脑上创建这个文件夹，或修改 PicoPage/settings.toml 中的 library.roots"}, UsbStart, "USB 连接电脑"};
+    case LibraryScan::NotDirectory:
+        return {"无法打开书库目录", path.substr(0, path.size() - 1) + " 是一个文件，不是文件夹。",
+                {"在电脑上重命名或移走这个文件"}, UsbStart, "USB 连接电脑"};
+    case LibraryScan::CreateFailed:
+        if (library_create_full)
+            return {"TF 卡已满", "无法创建书库目录 " + name + "。", {"在电脑上删除不需要的文件"}, UsbStart, "USB 连接电脑"};
+        if (library_create_denied)
+            return {"无法创建书库目录", "TF 卡拒绝写入，可能处于只读状态。", {"在电脑上检查这张卡，或手动创建 " + name}, 0, ""};
+        return {"无法创建书库目录", "创建 " + name + " 时出错。", {"点下方「重试」", "仍然失败时，在电脑上检查这张卡"}, LibraryRetry, "重试"};
+    default:
+        return {"无法读取书库目录", "读取 " + path + " 时出错。", {"点下方「重试」", "仍然失败时，在电脑上检查这张卡"}, LibraryRetry, "重试"};
+    }
+}
+
+void ReaderApp::Impl::draw_library_problem(int top) {
+    const auto problem = library_problem();
+    // Same rhythm as the empty library: title, grey summary, a rule and rows; only a sequence is numbered.
+    const int title_top = top == 104 ? 160 : top + 40;
+    text(problem.title, 36, title_top, 40, 612, 1, true);
+    int y = title_top + 62 + wrapped(problem.summary, 36, title_top + 62, 612, 26, true, 3) + 30;
+    if (!problem.steps.empty()) canvas.line(24, y, 660, y, 1, 2);
+    const bool numbered = problem.steps.size() > 1;
+    const int step_left = numbered ? 88 : 36, step_width = 648 - step_left;
+    for (std::size_t i = 0; i < problem.steps.size(); ++i) {
+        const int height = std::max(88, wrapped(problem.steps[i], 0, 0, step_width, 26, false) + 48);
+        if (numbered) text(std::to_string(i + 1), 36, y + 24, 26, 40, 1, true);
+        wrapped(problem.steps[i], step_left, y + 24, step_width, 26);
+        y += height;
+        canvas.line(36, y - 1, 647, y - 1, 12, 2);
+    }
+    if (problem.action) button(problem.action, problem.action_label, 24, y + kSectionGap, 636, 96, false, 30);
 }
 
 void ReaderApp::Impl::scan_library() {
@@ -28,6 +82,25 @@ void ReaderApp::Impl::scan_library() {
     library_home_root = roots.size() == 1 ? roots.front() : "";
     folder_root = std::find(roots.begin(), roots.end(), folder) != roots.end();
     const auto listing = folder.empty() ? library_home_root : folder;
+    if (folder.empty()) {
+        // A new card has no default directory yet. Custom roots are never created, because a
+        // missing one more likely means a typing error or a different card.
+        const auto default_root = std::find(roots.begin(), roots.end(), ReaderSettings{}.library_roots.front());
+        if (default_root != roots.end()) {
+            int error_number = 0;
+            const auto created = store.create_library_directory(*default_root, error_number);
+            // With several roots the others stay listed; the missing one is skipped as before.
+            if (created == StoreStatus::IoError && error_number && listing == *default_root) {
+                library_scan = LibraryScan::CreateFailed;
+                // FatFs reports both a full card and write protection as EACCES.
+                std::uint64_t total = 0, available = 1;
+                library_create_full = error_number == ENOSPC ||
+                    (store.card_space(total, available) && available == 0);
+                library_create_denied = error_number == EACCES || error_number == EROFS;
+                return;
+            }
+        }
+    }
     if (listing.empty()) {
         for (const auto &path : roots) {
             struct stat st{};
@@ -41,8 +114,11 @@ void ReaderApp::Impl::scan_library() {
     } else {
         DIR *dir = safe_existing(root, listing) ? opendir((root + "/" + listing).c_str()) : nullptr;
         if (!dir) {
-            library_scan = LibraryScan::Unavailable;
-            message = library_scan_notice();
+            struct stat st{};
+            errno = 0;
+            const bool exists = stat((root + "/" + listing).c_str(), &st) == 0;
+            library_scan = exists && !S_ISDIR(st.st_mode) ? LibraryScan::NotDirectory
+                         : !exists && errno == ENOENT ? LibraryScan::Missing : LibraryScan::Unavailable;
             return;
         }
         for (;;) {
@@ -198,14 +274,18 @@ void ReaderApp::Impl::draw_library(bool decode) {
                parent_is_library ? nullptr : &font);
         hits.back() = {0, 0, 396, 104, Back};
     }
-    for (int x : {396, 540}) canvas.line(x, 0, x, 102, 1, 2);
-    center(library_scan_failed() ? "重试" : "导入", 396, 32, 144, 26);
+    // Importing needs a mounted card; without one the cell is left out entirely.
+    if (card_available) {
+        canvas.line(396, 0, 396, 102, 1, 2);
+        center("导入", 396, 32, 144, 26);
+        hits.push_back({396, 0, 144, 104, Import});
+    }
+    canvas.line(540, 0, 540, 102, 1, 2);
     center("设置", 540, 32, 144, 26);
-    hits.push_back({396, 0, 144, 104, library_scan_failed() ? LibraryRetry : Import});
     hits.push_back({540, 0, 144, 104, Settings});
     // The card appears where reading normally starts and only when there is a book to resume.
     int top = 104;
-    if (library_resume()) {
+    if (card_available && library_resume()) {
         std::string position;
         if (has_book() && page.end > page.start) position = chapter_label() + " · " + book_percent();
         else if (!has_book()) {
@@ -236,13 +316,12 @@ void ReaderApp::Impl::draw_library(bool decode) {
             return;
         }
         const int y = top + 120;
-        text(!card_available ? "存储卡不可用" : library_scan_failed() ? "无法读取书库目录" :
-             folder.empty() ? "书库里还没有书" : "这个文件夹是空的", 36, y, 40, 612, 1, true);
-        if (!card_available || library_scan_failed())
-            wrapped(!card_available ? "这不代表书籍已被删除。" : "请检查书库目录和 TF 卡。", 36, y + 76, 612, 28);
-        else {
-            const int height = wrapped(folder.empty() ? "把 EPUB 或 TXT 放入" + library_location() + "，或使用“导入”。"
-                                                      : "用“导入”把 EPUB 或 TXT 复制到存储卡，或返回上一级。", 36, y + 76, 612, 28);
+        if (!card_available || library_scan_failed()) {
+            draw_library_problem(top);
+        } else {
+            text(folder.empty() ? "书库里还没有书" : "这个文件夹是空的", 36, y, 40, 612, 1, true);
+            const int height = wrapped(folder.empty() ? "把 EPUB 或 TXT 放入" + library_location() + "，或使用「导入」。"
+                                                      : "用「导入」把 EPUB 或 TXT 复制到 TF 卡，或返回上一级。", 36, y + 76, 612, 28);
             button(Import, "导入", 24, y + 104 + height, 636, 96);
         }
         footer_bar(library_scan == LibraryScan::Complete ? notice() : library_scan_notice());
@@ -389,7 +468,6 @@ void ReaderApp::Impl::draw_details() {
     if (detail_error.empty()) button(DetailOpen, detail_progress.record ? "继续阅读" : "打开书籍", 36, 630, 612, 96, true);
     else wrapped("无法打开：" + reason(detail_error, "无法解析文件内容") + "。", 36, 620, 612, 24);
     canvas.line(0, 764, 683, 764, 1, 3);
-    button(DetailCache, "清理本书缓存", 36, 788, 612, 76);
     if (detail_error.empty()) button(DetailReset, "清除本地阅读进度", 36, 880, 612, 76);
     button(DetailDelete, "删除原书文件", 36, 972, 612, 76);
     footer_bar(notice());

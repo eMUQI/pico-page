@@ -39,7 +39,7 @@ std::int64_t settled_us = 0;
 // An upload session ends itself after this long without an upload; the access point keeps the
 // radio powered for as long as it is up.
 constexpr std::int64_t portal_idle_us = 600'000'000;
-constexpr char manual_paused[] = "手动连接已暂停，点“立即连接”可恢复。";
+constexpr char manual_paused[] = "手动连接已暂停，点「立即连接」可恢复。";
 namespace diag = pico_page::diagnostics;
 namespace platform = pico_page::platform;
 namespace provision = pico_page::provision;
@@ -153,6 +153,7 @@ std::string wifi_failure(const std::string &ssid, const platform::ConnectFailure
                       : failure.stage == Stage::Address ? provision::WifiFailure::NoAddress
                       : failure.stage == Stage::Clock   ? provision::WifiFailure::NoClock
                                                         : provision::WifiFailure::Setup;
+    ESP_LOGW(tag, "Wi-Fi failure stage %d, driver reason %d", static_cast<int>(failure.stage), failure.reason);
     return provision::wifi_problem(ssid, kind, failure.reason);
 }
 std::vector<provision::NearbyWifi> nearby_wifi(const std::vector<platform::NearbyNetwork> &scanned) {
@@ -416,14 +417,14 @@ void run_update(NetworkJob& job) {
                 job.error = wifi_failure(station_target.ssid, failure);
                 return UpdateFailure::Link;
             }
-            job.error = "时间未校准";
+            job.error = "没有取得网络时间";
             return UpdateFailure::Internet;
         }
         if (operation.kind == pico_page::UpdateOperation::Kind::Check) {
             // A failed lookup separates a network without internet access from a failing server.
             if (!network_stage(job, 4, [&] { return platform::resolve_host(operation.url, job.error, &cancelled); })) {
                 ESP_LOGW(tag, "Update check: %s", job.error.c_str());
-                job.error = "找不到服务器";
+                job.error = "无法解析更新服务器的地址";
                 return UpdateFailure::Internet;
             }
             publish_wifi(pico_page::WifiPhase::Request, station_target.ssid);
@@ -644,7 +645,7 @@ extern "C" void app_main() {
     // may have written data; it is given up now instead.
     if (unconfirmed && !(first_frame && pico_page::platform::confirm_firmware())) pico_page::platform::reject_firmware();
     if (!card) {
-        app->card_removed();
+        app->card_unavailable(pico_page::platform::card_start_issue());
         present(*app);
     }
     requests = xQueueCreate(1, sizeof(NetworkJob *));
@@ -784,7 +785,8 @@ extern "C" void app_main() {
                 present(*app);
             } else {
                 app->show_usb_transfer(false, "正在准备 USB 文件传输。");
-                if (present(*app) && app->prepare_usb_transfer()) {
+                std::string problem = "设备正忙，请稍后重试。";
+                if (present(*app) && app->prepare_usb_transfer(&problem)) {
                     usb_mode = true;
                     pico_page::platform::set_performance(true);
                     app->show_usb_transfer(false, "正在准备 USB 文件传输。");
@@ -797,7 +799,7 @@ extern "C" void app_main() {
                         present(*app);
                     }
                 } else {
-                    app->show_usb_transfer(false, "准备失败，请确认进度已保存。");
+                    app->show_usb_transfer(false, problem);
                     present(*app);
                 }
             }
@@ -814,7 +816,7 @@ extern "C" void app_main() {
             if (portal_stop || !worker_ready || usb_mode || network_busy || sleep_requested ||
                 pico_page::console::transfer_active() || !app->prepare_portal(station)) {
                 pico_page::PortalStatus refused{pico_page::PortalPhase::Closed, "", "", "",
-                    "设备正忙或无法开启网络会话，请稍后重试。", "", 0, "", app->portal_generation()};
+                    "设备正忙或暂时无法联网，请稍后重试。", "", 0, "", app->portal_generation()};
                 if (network_busy || pico_page::console::transfer_active())
                     deferred_portal_failure = std::move(refused);
                 else app->show_portal(refused);
@@ -877,8 +879,8 @@ extern "C" void app_main() {
                 if (worker_ready) {
                     auto* job = new NetworkJob{}; job->wifi = *wifi;
                     if (xQueueSend(requests, &job, 0) == pdTRUE) network_busy = true;
-                    else { delete job; app->complete_wifi(wifi->id, {}, "网络任务暂时不可用。"); }
-                } else app->complete_wifi(wifi->id, {}, "网络任务创建失败。");
+                    else { delete job; app->complete_wifi(wifi->id, {}, "设备暂时无法联网，请稍后重试。"); }
+                } else app->complete_wifi(wifi->id, {}, "设备暂时无法联网，请稍后重试。");
                 present(*app);
             }
         }
@@ -896,7 +898,7 @@ extern "C" void app_main() {
                 if (job && xQueueSend(requests, &job, 0) == pdTRUE) network_busy = true;
                 else {
                     delete job;
-                    app->complete_update(id, pico_page::UpdateFailure::Link, 0, "", "网络任务暂时不可用。");
+                    app->complete_update(id, pico_page::UpdateFailure::Link, 0, "", "设备暂时无法联网，请稍后重试。");
                     present(*app);
                 }
             }
@@ -910,11 +912,11 @@ extern "C" void app_main() {
                         network_busy = true;
                     else {
                         delete job;
-                        app->complete_network(request->id, 0, "", "网络任务暂时不可用");
+                        app->complete_network(request->id, 0, "", "设备暂时无法联网，请稍后重试。");
                         present(*app);
                     }
                 } else {
-                    app->complete_network(request->id, 0, "", "网络任务创建失败");
+                    app->complete_network(request->id, 0, "", "设备暂时无法联网，请稍后重试。");
                     present(*app);
                 }
             }
@@ -995,7 +997,7 @@ extern "C" void app_main() {
             reset_contact();
         } else if (event.kind == EventKind::SdRemoved) {
             reset_contact();
-            app->card_removed();
+            app->card_unavailable(pico_page::CardIssue::Removed);
             present(*app);
         } else if (event.kind == EventKind::PowerLong) {
             reset_contact();

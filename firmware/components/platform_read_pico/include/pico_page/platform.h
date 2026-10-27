@@ -50,6 +50,8 @@ bool panel_ready();
 
 /** Returns /sdcard for the currently valid mount, otherwise nullptr. */
 const char* card_root();
+/** Why card_root() is null after the start-up mount: absent, without a file system, or unreadable. */
+CardIssue card_start_issue();
 const std::string& card_error();
 
 /** Closes and remounts the card without formatting. Close all files first. */

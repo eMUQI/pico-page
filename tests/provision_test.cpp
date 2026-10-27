@@ -283,8 +283,8 @@ int main() {
     using provision::WifiFailure;
     assert(provision::wifi_problem("home", WifiFailure::Rejected, 201).find("找不到") != std::string::npos);
     assert(provision::wifi_problem("home", WifiFailure::Rejected, 211).find("2.4 GHz") != std::string::npos);
-    assert(provision::wifi_problem("home", WifiFailure::Rejected, 15).find("密码可能不正确（驱动原因 15）") != std::string::npos);
-    assert(provision::wifi_problem("home", WifiFailure::Rejected, 8) == "无法连接“home”（驱动原因 8）。");
+    assert(provision::wifi_problem("home", WifiFailure::Rejected, 15).find("密码可能不正确。") != std::string::npos);
+    assert(provision::wifi_problem("home", WifiFailure::Rejected, 8) == "无法连接「home」。");
     assert(provision::wifi_problem("home", WifiFailure::NoClock, 0).find("网络时间") != std::string::npos);
     assert(provision::wifi_problem("home", WifiFailure::NoAddress, 0).find("超时") != std::string::npos);
     assert(provision::wifi_qr({"PicoPage-18B8", "abcd2345"}) == "WIFI:T:WPA;S:PicoPage-18B8;P:abcd2345;;");

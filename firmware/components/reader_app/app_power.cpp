@@ -33,7 +33,7 @@ void ReaderApp::Impl::prepare_custom_sleep(bool sleeping) {
     counting_job = std::make_unique<ContentJob>(std::move(request));
     if (!counting_job->start()) {
         counting_job.reset();
-        if (sleeping) custom_notice = "休眠图片任务无法启动";
+        if (sleeping) custom_notice = "休眠图片暂时无法准备";
     }
 }
 

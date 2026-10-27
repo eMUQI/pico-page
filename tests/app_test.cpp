@@ -363,7 +363,7 @@ static void network_setup_test(const fs::path& root, const fs::path& fixtures, b
     join = app.take_wifi_request();
     assert(join && join->targets.networks[0].password == "qwe12345");
     // A refused password saves nothing and leads back to the same draft.
-    app.complete_wifi(join->id, {}, "无法连接“Office-2.4”，密码可能不正确（驱动原因 15）。", LinkFailure::Password);
+    app.complete_wifi(join->id, {}, "无法连接「Office-2.4」，密码可能不正确。", LinkFailure::Password);
     driver.present(); assert(app.view() == View::WifiSettings && !fs::exists(network_file));
     driver.tap(300, 920); driver.present(); assert(app.view() == View::TextEntry);
     driver.tap(579, 1160); driver.present();
@@ -400,13 +400,13 @@ static void network_setup_test(const fs::path& root, const fs::path& fixtures, b
     driver.tap(579, 1160); driver.present(); assert(app.view() == View::WifiSettings);
     join = app.take_wifi_request();
     assert(join && join->targets.networks[0].ssid == "cafe" && join->targets.networks[0].password == std::string(64, 'a'));
-    app.complete_wifi(join->id, {}, "找不到名为“cafe”的网络。", LinkFailure::NotNearby); driver.present();
+    app.complete_wifi(join->id, {}, "找不到名为「cafe」的网络。", LinkFailure::NotNearby); driver.present();
     assert(provision::load_networks(root.string(), saved, error) && saved.size() == 1);
     // A refused empty password of a typed network leads back to the password, not to a blind retry.
     driver.tap(300, 1040); driver.present(); driver.tap(300, 770); driver.present(); type("cafe");
     driver.tap(579, 1160); driver.present(); driver.tap(579, 1160); driver.present();
     join = app.take_wifi_request(); assert(join && join->targets.networks[0].password.empty());
-    app.complete_wifi(join->id, {}, "无法连接“cafe”，密码可能不正确（驱动原因 15）。", LinkFailure::Password); driver.present();
+    app.complete_wifi(join->id, {}, "无法连接「cafe」，密码可能不正确。", LinkFailure::Password); driver.present();
     driver.tap(300, 920); driver.present(); assert(app.view() == View::TextEntry && !app.take_wifi_request());
     driver.tap(60, 50); driver.present(); driver.tap(60, 50); driver.present();
     // A 64-character password that is not a hexadecimal key cannot be submitted.
@@ -528,7 +528,7 @@ static void network_setup_test(const fs::path& root, const fs::path& fixtures, b
     assert(kept && kept->kind == WifiOperation::Kind::Connect && kept->targets.automatic);
     app.complete_wifi(kept->id, {}, "");
     app.show_wifi({101, WifiPhase::Connected, "home", "", true}); driver.present();
-    app.show_wifi({102, WifiPhase::Offline, "", "手动连接已暂停，点“立即连接”可恢复。", false}); driver.present();
+    app.show_wifi({102, WifiPhase::Offline, "", "手动连接已暂停，点「立即连接」可恢复。", false}); driver.present();
     assert(network::live(kept->cancelled));
     driver.tap(300, 740); driver.present();
     const auto resumed = app.take_wifi_request();
@@ -1036,7 +1036,7 @@ static void release_review_test(const fs::path& root, const fs::path& fixtures, 
     // An empty root library lists the ways to add books; the third row only describes one.
     driver.tap(300, 620); assert(!app.pending_frame() && app.view() == View::Library);
     driver.tap(300, 350); assert(app.take_usb_transfer_action() == UsbTransferAction::Start);
-    driver.tap(300, 840); driver.present(); assert(app.view() == View::Help);
+    driver.tap(300, 790); driver.present(); assert(app.view() == View::Help);
     driver.tap(60, 50); driver.present(); assert(app.view() == View::Library);
     driver.tap(600, 50); driver.present(); assert(app.view() == View::Settings);
     driver.tap(300, 1030); driver.present(); assert(app.view() == View::About);
@@ -1105,6 +1105,99 @@ static void release_review_test(const fs::path& root, const fs::path& fixtures, 
     assert(trimmed == first_use("RootB", std::string(40, 'b') + "/Shelf/Books"));
     assert(trimmed != first_use("RootC", std::string(40, 'a') + "/Shelf/Texts"));
 }
+static void shot(const char* name, const ReaderApp& shown) {
+    const char* folder = std::getenv("PICO_PAGE_UI_SHOTS");
+    if (!folder) return;
+    fs::create_directories(folder);
+    std::ofstream file(fs::path(folder) / (std::string(name) + ".pgm"), std::ios::binary);
+    file << "P5\n684 1216\n255\n";
+    for (int y = 0; y < 1216; ++y) for (int x = 0; x < 684; ++x) file.put(static_cast<char>(shown.canvas().pixel(x, y) * 17));
+    assert(file.good());
+}
+
+// A new card, a missing or blocked library root and an absent card each have their own page.
+static void library_root_state_test(const fs::path& base, bool async) {
+    const auto open = [&](const fs::path& card, const char* name) {
+        if (!fs::exists(card / "PicoPage/settings.toml")) write(card / "PicoPage/settings.toml", "schema_version=1\n[onboarding]\ndone=true\n");
+        auto app = std::make_unique<ReaderApp>(card.string(), "library-root-state", true, async);
+        Driver driver{*app}; assert(app->initialize()); driver.present();
+        assert(app->view() == View::Library); shot(name, *app);
+        return app;
+    };
+    const auto fresh = base / "Fresh"; fs::create_directories(fresh);
+    const auto fresh_pixels = open(fresh, "library-new-card")->canvas().pixels();
+    assert(fs::is_directory(fresh / "Books"));
+    // The created directory is indistinguishable from one the user made.
+    const auto existing = base / "Existing"; fs::create_directories(existing / "Books");
+    assert(open(existing, "library-empty")->canvas().pixels() == fresh_pixels);
+
+    const auto custom = base / "Custom";
+    write(custom / "PicoPage/settings.toml", "schema_version=1\n[library]\nroots=['Shelf']\n[onboarding]\ndone=true\n");
+    const auto custom_pixels = open(custom, "library-custom-missing")->canvas().pixels();
+    assert(!fs::exists(custom / "Shelf") && !fs::exists(custom / "Books") && custom_pixels != fresh_pixels);
+
+    const auto file = base / "File"; write(file / "Books", "not a directory");
+    const auto file_pixels = open(file, "library-not-directory")->canvas().pixels();
+    assert(read(file / "Books") == "not a directory" && file_pixels != fresh_pixels && file_pixels != custom_pixels);
+
+    // A recent-sorted library that omits the resumed book still explains a removed card.
+    const auto recent = base / "Recent"; write(recent / "Books/a.txt", "book");
+    write(recent / "PicoPage/settings.toml", "schema_version=1\n[library]\nsort='recent'\n[onboarding]\ndone=true\n");
+    { std::string detail; assert(FileStore(recent.string()).save_last_book("Books/a.txt", detail) == StoreStatus::Ok); }
+    {
+        auto app = open(recent, "library-recent");
+        Driver driver{*app};
+        app->card_unavailable(CardIssue::Removed); driver.present();
+        for (int y = 400; y < 1000 && app->view() != View::PowerMenu; y += 24) {
+            driver.tap(300, y);
+            if (app->pending_frame()) driver.present();
+        }
+        assert(app->view() == View::PowerMenu);
+    }
+
+    if (geteuid() != 0) {
+        // A Books directory that cannot be created does not hide the other configured roots.
+        const auto shared = base / "SharedLocked"; write(shared / "Shelf/b.txt", "book");
+        write(shared / "PicoPage/settings.toml", "schema_version=1\n[library]\nroots=['Books','Shelf']\n[onboarding]\ndone=true\n");
+        fs::permissions(shared, fs::perms::owner_read | fs::perms::owner_exec);
+        {
+            auto app = open(shared, "library-roots-read-only");
+            Driver driver{*app};
+            driver.tap(300, 250); assert(app->pending_frame());
+        }
+        fs::permissions(shared, fs::perms::owner_all);
+        assert(!fs::exists(shared / "Books"));
+
+        const auto locked = base / "Locked"; fs::create_directories(locked);
+        write(locked / "PicoPage/settings.toml", "schema_version=1\n[onboarding]\ndone=true\n");
+        fs::permissions(locked, fs::perms::owner_read | fs::perms::owner_exec);
+        auto app = open(locked, "library-read-only");
+        fs::permissions(locked, fs::perms::owner_all);
+        assert(!fs::exists(locked / "Books") && app->canvas().pixels() != fresh_pixels);
+    }
+
+    // A failed start-up mount offers the power menu, because remounting needs a restart.
+    std::vector<std::vector<std::uint8_t>> pages;
+    for (const auto issue : {CardIssue::NotInserted, CardIssue::NoFilesystem, CardIssue::Unreadable, CardIssue::Removed}) {
+        auto app = open(existing, "library-before-card");
+        Driver driver{*app};
+        app->card_unavailable(issue); driver.present();
+        assert(app->view() == View::Library);
+        static const char* names[] = {"card-removed", "card-not-inserted", "card-no-filesystem", "card-unreadable"};
+        shot(names[static_cast<int>(issue)], *app);
+        pages.push_back(app->canvas().pixels());
+        driver.tap(450, 50); assert(!app->pending_frame());
+        // The button follows the steps, whose number differs between states.
+        for (int y = 400; y < 1000 && app->view() != View::PowerMenu; y += 24) {
+            driver.tap(300, y);
+            if (app->pending_frame()) driver.present();
+        }
+        assert(app->view() == View::PowerMenu);
+    }
+    for (std::size_t i = 0; i < pages.size(); ++i)
+        for (std::size_t j = i + 1; j < pages.size(); ++j) assert(pages[i] != pages[j]);
+}
+
 #ifdef PICO_PAGE_WRAP_LIBRARY_IO_TEST
 static void library_scan_failure_test(const fs::path& base) {
     for (int mode = 0; mode < 7; ++mode) {
@@ -1127,16 +1220,20 @@ static void library_scan_failure_test(const fs::path& base) {
         library_dirty_errno = mode == 4 || mode == 5;
         ReaderApp app(root.string(), "library-scan-failure", true, true); Driver d{app};
         assert(app.initialize()); d.present();
-        if (mode < 3) {
-            assert(app.status() == (mode == 0 ? "无法读取目录，请检查 TF 卡后重试" : "目录读取不完整，请检查 TF 卡后重试"));
+        if (mode == 0) {
+            // Nothing could be listed: the page offers a retry that scans again.
+            assert(app.status().empty());
             const auto failed = app.canvas().pixels();
             const auto scanned = library_read_entries;
             d.refresh();
             assert(app.canvas().pixels() == failed && library_read_entries == scanned);
             library_read_failure_after = -1; library_stat_failure = 0;
-            d.tap(460, 50); d.present();
+            d.tap(300, 570); d.present();
             assert(app.view() == View::Library && app.status().empty());
             assert(app.canvas().pixels() != failed);
+        } else if (mode < 3) {
+            // A partial listing keeps the entries readable and says the list may be incomplete.
+            assert(app.status() == "部分文件读取失败，列表可能不完整");
         } else if (mode == 6) {
             assert(app.status() == "当前目录仅显示前 512 项，请分目录存放");
             assert(library_read_entries == 512);
@@ -2260,11 +2357,11 @@ static void update_test(const fs::path& root) {
         assert(!fs::exists(root / "PicoPage/cache" / update::state_cache));
         // A failed check leaves nothing cached: no link, an HTTP error, another board, a malformed version.
         // A failed check names its step; the retry is the primary button except after a Wi-Fi failure.
-        check(app, driver, 1130, "", 0, UpdateFailure::Link, "找不到网络“home”。");
+        check(app, driver, 1130, "", 0, UpdateFailure::Link, "找不到网络「home」。");
         check(app, driver, 1130, "not found", 404);
         check(app, driver, 1130, "{\"manifest\":1,\"board\":\"other\"}", 200, UpdateFailure::None, "", 500);
         check(app, driver, 1130, update_manifest("0.2"), 200, UpdateFailure::None, "", 500);
-        check(app, driver, 1130, "", 0, UpdateFailure::Internet, "找不到服务器", 500);
+        check(app, driver, 1130, "", 0, UpdateFailure::Internet, "无法解析更新服务器的地址", 500);
         assert(!fs::exists(root / "PicoPage/cache" / update::state_cache));
         // A request the worker has not taken ends at once; one it holds ends with its completion.
         driver.tap(500, 1130); driver.present(); assert(app.update_busy());
@@ -2662,7 +2759,12 @@ static void return_origin_test(const fs::path& root, const fs::path& fixtures, b
         } else if (scenario == "screen") {
             driver.key(Input::K2); app.complete_frame(false);
             assert(app.status() == "屏幕更新失败。返回将回到书库。");
-        } else if (scenario.rfind("card-", 0) == 0) app.card_removed();
+        } else if (scenario == "card-library") {
+            // The library explains a removed card itself instead of stacking an error page on it.
+            app.card_unavailable(CardIssue::Removed); driver.present();
+            assert(app.view() == View::Library);
+            return;
+        } else if (scenario.rfind("card-", 0) == 0) app.card_unavailable(CardIssue::Removed);
         else if (scenario != "management") app.show_error("测试错误。请返回。");
         driver.present(); assert(app.view() == View::Error); driver.refresh();
         driver.close();
@@ -3359,6 +3461,7 @@ int main(int argc, char** argv) {
 #ifdef PICO_PAGE_WRAP_LIBRARY_IO_TEST
     library_scan_failure_test(card / "LibraryScanFailure");
 #endif
+    for (bool async : {false, true}) library_root_state_test(card / (async ? "RootStateAsync" : "RootStateSync"), async);
     for (bool async : {false, true})
         for (bool grid : {false, true})
             library_resume_pagination_test(card / (std::string("ResumePages") + (grid ? "Grid" : "List") +
@@ -4481,7 +4584,7 @@ int main(int argc, char** argv) {
         // A pinned network that is out of range is not replaced; automatic selection is offered for one check.
         auto pinned = driver.check_remote();
         assert(!pinned.targets.automatic && pinned.targets.networks.size() == 1 && pinned.targets.networks[0].ssid == "phone");
-        app.complete_network(pinned.id, 0, "", "找不到名为“phone”的网络。", LinkFailure::NotNearby); driver.present();
+        app.complete_network(pinned.id, 0, "", "找不到名为「phone」的网络。", LinkFailure::NotNearby); driver.present();
         assert(app.view() == View::Sync && !network::live(pinned.session));
         driver.tap(342, 1090); driver.present();
         auto once = app.take_network_request();
@@ -6351,7 +6454,7 @@ int main(int argc, char** argv) {
         assert(app.take_portal_action() == PortalAction::UploadStation);
         assert(app.prepare_portal(true)); driver.present();
         assert(app.view() == View::Portal && !app.prepare_sleep());
-        const std::string refused = "无法连接“home”，密码可能不正确（驱动原因 15）。可以改用设备热点传书。";
+        const std::string refused = "无法连接「home」，密码可能不正确。可以改用设备热点传书。";
         driver.portal({PortalPhase::Closed, "", "", "", refused, "", 0, ""}); driver.present();
         assert(app.view() == View::Import && app.status() == refused && *app.saved_record() == saved);
         // A started session shows one code for the joined network and the saved-book summary.
@@ -6541,7 +6644,7 @@ int main(int argc, char** argv) {
             assert(app.close_power_files()); app.show_power_off_help();
             app.complete_frame(false);
             assert(app.view() == View::PowerOff && !app.pending_frame());
-            assert(app.status().find("未完整保存") != std::string::npos && app.saved_record() == previous);
+            assert(app.status().find("没有完整保存") != std::string::npos && app.saved_record() == previous);
             assert(!app.take_network_request());
         } else {
             driver.tap(100, 1100); driver.present();

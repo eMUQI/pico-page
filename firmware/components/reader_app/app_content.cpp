@@ -384,7 +384,7 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
         if (mapping && std::chrono::steady_clock::now() < mapping_start_retry) return;
         if (!foreground_job->start()) {
             if (ContentJob::dictionary_kind(foreground_job->request.kind)) {
-                foreground_job.reset(); content_loading = false; dictionary_notice = "词典任务无法启动，请稍后重试。";
+                foreground_job.reset(); content_loading = false; dictionary_notice = "暂时无法查词，请稍后重试。";
                 if (view == View::Dictionary) draw_dictionary(); else draw_dictionary_settings(); overlay(); return;
             }
             if (mapping) {
@@ -398,12 +398,12 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
                 foreground_job.reset(); content_loading = false;
                 cancel_sync();
                 sync_status = memory ? "内部内存不足，无法启动位置准备。请重新检查，本机位置未改动。"
-                                     : "位置准备任务创建失败。请重新检查，本机位置未改动。";
+                                     : "暂时无法准备位置，请重新检查。本机位置没有改动。";
                 draw_sync(); overlay(); return;
             }
             if (foreground_job->request.kind == ContentJob::Kind::LockScreenPreview) {
                 foreground_job.reset(); content_loading = false;
-                draw_power("预览任务无法启动，请稍后重试。"); overlay(); return;
+                draw_power("暂时无法预览，请稍后重试。"); overlay(); return;
             }
             if (foreground_job->request.progressive) {
                 foreground_job->result.error = "Image worker unavailable";
@@ -414,7 +414,7 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
                 draw_typography(false); overlay(); return;
             }
             foreground_job.reset(); content_loading = false;
-            error("内容任务无法启动，请返回后重试。");
+            error("暂时无法打开，请返回后重试。");
         }
         return;
     }
@@ -486,7 +486,7 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
         if (!job->result.error.empty()) {
             if (request.kind == ContentJob::Kind::Inspect) {
                 detail_error = job->result.error; draw_details(); overlay();
-            } else error(reason(job->result.error, "无法解析文件内容") + "。原书没有被修改。", request.relative_path);
+            } else open_failed(job->result.error, request.relative_path);
             return;
         }
         const auto& loaded = *job->result.document;

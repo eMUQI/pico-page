@@ -1081,6 +1081,18 @@ StoreStatus FileStore::manage_book(const BookSnapshot& snapshot, bool delete_ori
     return store_internal::commit_file(root_, path, snapshot.progress, bytes, progress_limit, error, true);
 }
 
+StoreStatus FileStore::create_library_directory(const std::string& name, int& error_number) const {
+    error_number = 0;
+    if (name.find('/') != std::string::npos) return StoreStatus::UnsafePath;
+    const auto safe = store_internal::safe_path(root_, name);
+    if (safe != StoreStatus::Missing) return safe;
+    if (mkdir((root_ + "/" + name).c_str(), 0700) != 0) {
+        error_number = errno;
+        return StoreStatus::IoError;
+    }
+    return sync_directory(root_) ? StoreStatus::Ok : StoreStatus::IoError;
+}
+
 StoreStatus FileStore::clear_cache() const {
     const std::string path = "PicoPage/cache";
     const auto safe = store_internal::safe_path(root_, path);

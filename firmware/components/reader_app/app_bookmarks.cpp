@@ -83,6 +83,20 @@ bool ReaderApp::Impl::finish_bookmark(bool redraw) {
 }
 
 
+void ReaderApp::Impl::draw_toolbar() {
+    canvas.fill_rect(0, toolbar_top, 684, 136, 15);
+    canvas.line(0, toolbar_top, 683, toolbar_top, 1, 3);
+    for (int i = 0; i < 5; ++i) {
+        // Four cells of 137 pixels leave 136 for the last one.
+        const int x = i * 137, width = std::min(137, 684 - x);
+        if (i) canvas.line(x, toolbar_top, x, 1215, 1, 2);
+        tool_icon(kToolbarIds[i], x + 68, 1126);
+        const int size = kToolbarIds[i] == Refresh ? 26 : 28;
+        center(kToolbarLabels[i], x, 1160 + (28 - size) / 2, width, size);
+        hits.push_back({x, toolbar_top, width, 136, kToolbarIds[i]});
+    }
+}
+
 void ReaderApp::Impl::draw_tools() {
     tools_save_pending = session.needs_save();
     view = View::Tools;
@@ -93,19 +107,7 @@ void ReaderApp::Impl::draw_tools() {
         if ((line.top < 104 && line.bottom > 104) || (line.top < toolbar_top && line.bottom > toolbar_top))
             canvas.fill_rect(0, line.top, 684, line.bottom - line.top + 1, 15);
     reading_header();
-    canvas.fill_rect(0, toolbar_top, 684, 136, 15);
-    canvas.line(0, toolbar_top, 683, toolbar_top, 1, 3);
-    const char *labels[] = {"目录", "排版", "同步", "刷新模式", "全刷"};
-    const int ids[] = {Contents, Typography, Sync, Refresh, FullRefresh};
-    for (int i = 0; i < 5; ++i) {
-        // Four cells of 137 pixels leave 136 for the last one.
-        const int x = i * 137, width = std::min(137, 684 - x);
-        if (i) canvas.line(x, toolbar_top, x, 1215, 1, 2);
-        tool_icon(ids[i], x + 68, 1126);
-        const int size = ids[i] == Refresh ? 26 : 28;
-        center(labels[i], x, 1160 + (28 - size) / 2, width, size);
-        hits.push_back({x, toolbar_top, width, 136, ids[i]});
-    }
+    draw_toolbar();
     if (!notice().empty()) {
         canvas.fill_rect(24, 1012, 636, 56, 15);
         note(message, 1024);
@@ -120,7 +122,7 @@ void ReaderApp::Impl::draw_bookmarks(int list_top) {
     const auto &items = bookmarks.bookmarks;
     const auto problem = bookmark_problem();
     if (!problem.empty() || items.empty()) {
-        wrapped(problem.empty() ? "还没有书签。在正文工具页点右上角的“加书签”，可标记当前页。" : problem,
+        wrapped(problem.empty() ? "还没有书签。在正文工具页点右上角的「加书签」，可标记当前页。" : problem,
                 36, list_top + 40, 612, 24, true, 3);
         footer_bar("");
         return;

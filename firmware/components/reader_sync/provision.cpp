@@ -62,7 +62,7 @@ bool read_entry(toml_datum_t table, bool with_time, SavedWifi& entry) {
     return valid_wifi(entry);
 }
 
-std::string quote_name(const std::string& name) { return "“" + name + "”"; }
+std::string quote_name(const std::string& name) { return "「" + name + "」"; }
 
 bool parse_network_bytes(const std::string& bytes, std::vector<SavedWifi>& networks, std::string& error) {
     networks.clear();
@@ -528,15 +528,15 @@ std::string wifi_problem(const std::string& ssid, WifiFailure failure, int reaso
     switch (failure) {
     case WifiFailure::Setup: return "设备的 Wi-Fi 没有启动。";
     case WifiFailure::NoAddress: return "连接" + name + "超时，没有取得网络地址。";
-    case WifiFailure::NoClock: return "已连接" + name + "，但没有取得网络时间。这个网络可能无法访问互联网。";
+    case WifiFailure::NoClock: return "已连接" + name + "，但没有取得网络时间。请确认这个网络可以上网。";
     case WifiFailure::Rejected: break;
     }
-    const auto code = "（驱动原因 " + std::to_string(reason) + "）。";
+    // The driver reason stays in the device log.
     if (network_absent(reason))
-        return "找不到名为" + name + "的网络" + code + "设备只支持 2.4 GHz Wi-Fi。";
+        return "找不到名为" + name + "的网络。设备只支持 2.4 GHz Wi-Fi。";
     if (password_rejected(reason))
-        return "无法连接" + name + "，密码可能不正确" + code;
-    return "无法连接" + name + code;
+        return "无法连接" + name + "，密码可能不正确。";
+    return "无法连接" + name + "。";
 }
 
 std::string wifi_qr(const WifiCredentials& access) {

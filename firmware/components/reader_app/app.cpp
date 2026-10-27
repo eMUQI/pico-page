@@ -36,7 +36,7 @@ void ReaderApp::Impl::apply_typography() {
     if (!bookmark_io_ready()) return;
     std::string detail;
     if (font_fallback || weight_unavailable) {
-        error("所选字体或字重不可用，排版未保存");
+        error(font_fallback ? "所选字体不可用，排版未保存" : "所选字重不可用，排版未保存");
         return;
     }
     const auto result = reset_overrides && book_scope
@@ -280,18 +280,24 @@ UsbTransferAction ReaderApp::take_usb_transfer_action() {
     impl_->usb_request_view.reset();
     return std::exchange(impl_->usb_action, UsbTransferAction::None);
 }
-bool ReaderApp::prepare_usb_transfer() {
+bool ReaderApp::prepare_usb_transfer(std::string* problem) {
+    const auto refuse = [&](const char* reason) {
+        if (problem) *problem = reason;
+        return false;
+    };
     if (impl_->foreground_job && ContentJob::dictionary_kind(impl_->foreground_job->request.kind) &&
         impl_->foreground_job->started() && !impl_->foreground_job->done()) {
-        impl_->foreground_job->cancel(); return false;
+        impl_->foreground_job->cancel(); return refuse("正在结束后台任务，请稍后重试。");
     }
-    if (impl_->cancel_custom_preparation()) return false;
+    if (impl_->cancel_custom_preparation()) return refuse("正在结束后台任务，请稍后重试。");
     invalidate_identity_cache();
-    if (impl_->network_worker_id || impl_->portal_live || impl_->usb_prepared || impl_->display.busy() || impl_->active_network ||
-        !impl_->card_available || !impl_->persist()) return false;
+    if (!impl_->card_available) return refuse("没有可用的 TF 卡。");
+    if (impl_->network_worker_id || impl_->portal_live || impl_->usb_prepared || impl_->display.busy() || impl_->active_network)
+        return refuse("设备正忙，请稍后重试。");
+    if (!impl_->persist()) return refuse("阅读位置没有保存，没有进入 USB 传输。请稍后重试。");
     impl_->cancel_sync();
     impl_->save_pages();
-    if (!impl_->ui.open_fallback()) return false;
+    if (!impl_->ui.open_fallback()) return refuse("准备失败，请稍后重试。");
     impl_->library_font.close();
     impl_->library_uses_body = false; impl_->library_font_path.clear();
     impl_->document.close();
@@ -393,7 +399,7 @@ void ReaderApp::show_wifi(const WifiStatus& status) {
     if (status.sequence <= impl_->wifi_status.sequence || impl_->display.busy()) return;
     impl_->wifi_status = status;
     if (status.phase == WifiPhase::Offline && !network::live(impl_->manual_hold) &&
-        status.detail == "手动连接已暂停，点“立即连接”可恢复。") impl_->wifi_status.detail.clear();
+        status.detail == "手动连接已暂停，点「立即连接」可恢复。") impl_->wifi_status.detail.clear();
     // A join saves its network, with the connection time, only when it completes; a cancelled or
     // failed join must leave network.toml as it was.
     if (status.phase == WifiPhase::Offline) impl_->join_link = false;
@@ -549,11 +555,16 @@ bool ReaderApp::prepare_power(PowerRequest request) {
         request.action != impl_->power_selected || impl_->display.busy() || impl_->active_network ||
         impl_->usb_prepared || (request.without_save && !impl_->power_save_failed)) return false;
     bool saved = !request.without_save && impl_->persist();
+    // Names the record that failed; persist() leaves the position pending when that commit failed.
+    std::string unsaved = saved || request.without_save ? "" : impl_->session.needs_save() ? "阅读位置" : "书签";
     std::string detail;
-    if (saved && impl_->has_book() && impl_->session.visible_record() && impl_->card_available) {
+    const bool reading = impl_->has_book() && impl_->session.visible_record() && impl_->card_available;
+    if (saved && reading) {
         saved = impl_->store.save_last_book(impl_->book_path, detail) == StoreStatus::Ok;
         if (saved) { impl_->last_recorded = impl_->book_path; impl_->recent_save_failed = false; }
+        else unsaved = "最近阅读记录";
     }
+    impl_->power_reading = reading;
     if (install) {
         if (const auto battery = impl_->update_battery_block(); !battery.empty()) {
             impl_->power_request = {}; impl_->power_selected = PowerAction::None;
@@ -563,7 +574,7 @@ bool ReaderApp::prepare_power(PowerRequest request) {
         }
         if (!saved) {
             impl_->power_request = {}; impl_->power_selected = PowerAction::None;
-            impl_->update_notice = "阅读位置没有写入 TF 卡，没有重启。";
+            impl_->update_notice = unsaved + "没有保存到 TF 卡，没有重启。";
             impl_->draw_update(); impl_->overlay();
             return false;
         }
@@ -571,7 +582,7 @@ bool ReaderApp::prepare_power(PowerRequest request) {
     impl_->power_save_failed = !saved;
     impl_->power_progress_saved = saved;
     if (!saved && !request.without_save) {
-        impl_->message = "阅读位置、书签或最近阅读记录未能保存到 TF 卡，仍要" +
+        impl_->message = unsaved + "没有保存到 TF 卡，仍要" +
             std::string(request.action == PowerAction::Restart ? "重启吗？" : "关机吗？");
         impl_->draw_power_menu(); impl_->overlay(); return false;
     }
@@ -583,7 +594,7 @@ bool ReaderApp::prepare_power(PowerRequest request) {
     impl_->power_return_canvas.reset(); impl_->power_return_hits.clear();
     impl_->power_request = {};
     if (install) impl_->draw_installing();
-    else impl_->draw_power_off(saved ? "本地阅读位置已保存。" : "本地阅读位置未完整保存。");
+    else impl_->draw_power_off(impl_->power_saved_note());
     impl_->overlay(true);
     return true;
 }
@@ -598,8 +609,7 @@ bool ReaderApp::close_power_files() {
 }
 void ReaderApp::show_power_off_help() {
     if (impl_->display.busy() || impl_->view != View::PowerOff) return;
-    impl_->draw_power_off(std::string(impl_->power_progress_saved ? "本地阅读位置已保存。" : "本地阅读位置未完整保存。") +
-        "请长按电源键强制关机；若连接 USB，请拔下电源线。", true);
+    impl_->draw_power_off(impl_->power_saved_note() + "请长按电源键强制关机；若连接 USB，请拔下电源线。", true);
     impl_->overlay(true);
 }
 bool ReaderApp::begin_sleep() {
@@ -738,16 +748,21 @@ void ReaderApp::wake(bool slept) {
         impl_->return_to_origin(impl_->sleep_origin, true);
     }
 }
-void ReaderApp::card_removed() {
+void ReaderApp::card_unavailable(CardIssue issue) {
     stop_wifi();
     impl_->power_return_canvas.reset(); impl_->power_request = {};
     invalidate_identity_cache();
     impl_->clear_body_cache();
     impl_->clear_prefetch();
     impl_->release_counting();
-    if (impl_->usb_prepared) { show_usb_transfer(false, "TF 卡已移除，请退出并重启。"); return; }
+    impl_->card_issue = issue;
+    if (impl_->usb_prepared) { show_usb_transfer(false, "TF 卡已移除。请退出 USB 传输，插回 TF 卡后重启。"); return; }
     impl_->cancel_sync();
     impl_->covers.clear();
+    // The library drawn later must not list entries of the removed card.
+    impl_->entries.clear();
+    impl_->library_resume_omitted = false;
+    const bool unsaved = impl_->card_available && impl_->session.needs_save();
     impl_->card_available = false;
     impl_->library_font.close();
     impl_->library_uses_body = false; impl_->library_font_path.clear();
@@ -756,7 +771,13 @@ void ReaderApp::card_removed() {
     impl_->effective_font.clear();
     if (impl_->view == View::Onboarding) {
         impl_->draw_onboarding(); impl_->overlay();
-    } else impl_->error("TF 卡已移除。请重新插卡并重启设备。");
+    } else if (issue != CardIssue::Removed || impl_->view == View::Library) {
+        // The library page itself explains the card state and offers a restart.
+        impl_->draw_library(); impl_->overlay();
+    } else {
+        impl_->error(unsaved ? "TF 卡已移除。最近的阅读位置没有保存。插回 TF 卡后，请重启设备。"
+                             : "TF 卡已移除。插回 TF 卡后，请重启设备。");
+    }
 }
 bool ReaderApp::save_due() const {
     return !impl_->portal_live && impl_->view != View::PowerMenu && impl_->view != View::PowerOff &&

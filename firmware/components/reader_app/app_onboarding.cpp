@@ -3,13 +3,33 @@
 
 namespace pico_page {
 
+namespace {
+// Practice pages are drawn with the built-in face, so every character must be in its subset.
+constexpr const char* kPracticePages[] = {
+    "清晨，窗外下起了小雨。她把椅子挪到窗边，翻开那本读了一半的书。雨声很轻，纸上的字也显得安静。",
+    "读到一半，她停下来，想起前面某一章的情节。往回翻几页，答案就在那里，和记忆里的稍有不同。",
+    "雨停的时候，书也读到了最后一页。她合上书，想了想明天要读什么。",
+};
+constexpr int kPracticePageCount = sizeof(kPracticePages) / sizeof(kPracticePages[0]);
+constexpr const char* kToolPurposes[] = {
+    "跳到任意章节。", "调整字号、行距、边距和字体。", "与 KOReader 同步阅读位置。", "设置多久全刷一次屏幕。", "立即全刷，清除残影。",
+};
+} // namespace
+
 void ReaderApp::Impl::start_onboarding(bool from_help) {
     onboarding_from_help = from_help;
     onboarding_step = OnboardingStep::Welcome;
-    onboarding_middle_hint = false;
     // The guide must not depend on the card's fonts or an open book's typeface.
     ui.open_fallback();
     draw_onboarding();
+}
+
+void ReaderApp::Impl::start_practice() {
+    onboarding_step = OnboardingStep::Practice;
+    onboarding_task = OnboardingTask::Next;
+    onboarding_page = 0;
+    onboarding_tool = 0;
+    onboarding_tools_open = false;
 }
 
 void ReaderApp::Impl::finish_onboarding() {
@@ -31,19 +51,12 @@ void ReaderApp::Impl::finish_onboarding() {
     overlay();
 }
 
-void ReaderApp::Impl::draw_turn_regions(int x, int y, int width, int height, int selected, bool labels, std::uint8_t divider) {
+void ReaderApp::Impl::draw_turn_regions(int x, int y, int width, int height, int selected, std::uint8_t divider) {
     const int edges[] = {0, width * 205 / 684, width * 479 / 684, width};
-    const char* symbols[] = {"‹", "≡", "›"};
-    const char* names[] = {"上一页", "工具", "下一页"};
     for (int i = 0; i < 3; ++i) {
         const int left = x + edges[i], w = edges[i + 1] - edges[i];
-        const bool active = selected == HelpPrevious + i;
-        canvas.fill_rect(left, y, w, height, active ? 1 : 15);
+        canvas.fill_rect(left, y, w, height, selected == HelpPrevious + i ? 1 : 15);
         if (i) canvas.line(left, y, left, y + height - 1, divider, 2);
-        if (labels) {
-            center(symbols[i], left, y + height / 2 - 56, w, 40, active ? 15 : 1);
-            center(names[i], left, y + height / 2 + 12, w, 26, active ? 15 : i == 1 ? 3 : 1);
-        }
     }
 }
 
@@ -51,7 +64,7 @@ void ReaderApp::Impl::draw_onboarding() {
     view = View::Onboarding;
     hits.clear(); canvas.clear();
     const bool welcome = onboarding_step == OnboardingStep::Welcome;
-    const bool practice = onboarding_step == OnboardingStep::PageTurn;
+    const bool practice = onboarding_step == OnboardingStep::Practice;
     const std::string finish = onboarding_from_help ? "返回使用说明" : "进入书库";
     const auto primary = [&](int id, const std::string& label, int y) {
         button(id, label, 36, y, 612, 96, true, 30, true);
@@ -82,27 +95,12 @@ void ReaderApp::Impl::draw_onboarding() {
     text(practice ? "1 / 2" : "2 / 2", 36, 32, 26);
     canvas.line(0, 103, 683, 103, 1, 3);
     if (practice) {
-        const auto label = onboarding_from_help ? finish : "跳过";
-        const int width = text_width(label, 26);
-        link(label, 648 - width, 32, width);
-        hits.push_back({342, 0, 342, 104, OnboardingFinish});
-        text("翻页", 36, 144, 34, 612, 1, true);
-        title_lines("点屏幕左侧或右侧翻页，也可以用按键。", 36, 200, 612, 26, false, 2, 3);
-        draw_turn_regions(36, 320, 612, 420, HelpNext, true);
-        outline(36, 320, 612, 420, 3);
-        for (int i = 0; i < 3; ++i) {
-            const int x = 36 + i * 209;
-            outline(x, 780, 194, 112);
-            center("K" + std::to_string(i + 1), x, 794, 194, 26, 1, true);
-            center(i == 0 ? "上一页" : i == 1 ? "全刷" : "下一页", x, 834, 194, 22);
-        }
-        canvas.line(0, 1064, 683, 1064, 1, 3);
-        center(onboarding_middle_hint ? "中间是工具，下一步介绍" : "试试：点屏幕右侧 ›", 0, 1120, 684, 30, 1, true);
+        draw_practice(finish);
         return;
     }
     text("最后一步", 648 - text_width("最后一步", 26), 32, 26, 200, 5);
-    text("轻点中间，打开工具", 36, 144, 34, 612, 1, true);
-    title_lines("阅读时点屏幕中间，底部会出现工具面板。点面板以外的地方收起。", 36, 200, 612, 26, false, 3, 3);
+    text("工具栏里有什么", 36, 144, 34, 612, 1, true);
+    title_lines("阅读时点屏幕中间打开工具栏，点工具栏以外的地方收起。", 36, 200, 612, 26, false, 3, 3);
     const int ids[] = {Contents, Typography, Sync, Refresh, FullRefresh};
     const char* names[] = {"目录", "排版", "同步", "刷新模式", "全刷"};
     outline(36, 360, 612, 136, 3);
@@ -124,34 +122,93 @@ void ReaderApp::Impl::draw_onboarding() {
     primary(OnboardingFinish, finish, 1072);
 }
 
-void ReaderApp::Impl::onboarding_input(const AppInput& input) {
-    if (input.queued) return;
-    const bool old_hint = onboarding_middle_hint;
-    onboarding_middle_hint = false;
-    if (!input.touch && input.event.input == Input::K2) {
-        if (old_hint) draw_onboarding();
-        force_refresh(); return;
+void ReaderApp::Impl::draw_practice(const std::string& finish) {
+    const auto label = onboarding_from_help ? finish : "跳过";
+    const int label_width = text_width(label, 26);
+    text(label, 648 - label_width, 32, 26);
+    canvas.line(648 - label_width, 67, 648, 67, 1);
+    hits.push_back({342, 0, 342, 104, OnboardingFinish});
+    std::string title, hint;
+    if (onboarding_tools_open && onboarding_tool) {
+        const auto index = std::find(std::begin(kToolbarIds), std::end(kToolbarIds), onboarding_tool) - std::begin(kToolbarIds);
+        title = kToolbarLabels[index];
+        hint = std::string(kToolPurposes[index]) + "练习中不会打开。";
+    } else if (onboarding_tools_open) {
+        title = "收起工具栏"; hint = "点工具栏以外的任意位置。";
+    } else switch (onboarding_task) {
+    case OnboardingTask::Next: title = "翻到下一页"; hint = "点屏幕右侧、向左滑，或按 K3。"; break;
+    case OnboardingTask::Previous: title = "翻回上一页"; hint = "点屏幕左侧、向右滑，或按 K1。"; break;
+    case OnboardingTask::OpenTools: title = "打开工具栏"; hint = "点屏幕中间。目录、排版和同步都在工具栏里。"; break;
+    default: title = "练习完成"; hint = "可以继续练习，或点「下一步」。"; break;
     }
-    if (input.touch) {
-        for (const auto& hit : hits) if (hit.contains(input.x, input.y)) {
-            if (hit.id == OnboardingFinish) { finish_onboarding(); return; }
-            if (hit.id == OnboardingStart) {
-                onboarding_step = OnboardingStep::PageTurn;
-                draw_onboarding(); overlay(); return;
-            }
+    text(title, 36, 128, 34, 612, 1, true);
+    title_lines(hint, 36, 184, 612, 26, false, 2, 3);
+    canvas.line(0, 264, 683, 264, 1, 2);
+    wrapped("\u3000\u3000" + std::string(kPracticePages[onboarding_page]), 36, 304, 612, 30);
+    // Region guides teach the reading layout until both turns and the toolbar have been tried.
+    if (onboarding_task <= OnboardingTask::OpenTools && !onboarding_tools_open) {
+        const int edges[] = {0, 205, 479, 684};
+        const char* names[] = {"‹ 上一页", "工具栏", "下一页 ›"};
+        const int active = onboarding_task == OnboardingTask::Next ? 2 : onboarding_task == OnboardingTask::Previous ? 0 : 1;
+        for (int i = 0; i < 3; ++i) {
+            if (i) canvas.line(edges[i], 760, edges[i], 1063, 12, 2);
+            center(names[i], edges[i], 980, edges[i + 1] - edges[i], 24, i == active ? 1 : 5, i == active);
         }
     }
-    const auto action = map_input(Context::Reading, input.event.input);
-    const bool next = input.touch ? input.x >= 479 && input.y >= 104 && input.y < 1064 : action == Action::NextPage;
-    if (onboarding_step == OnboardingStep::PageTurn) {
-        if (next) onboarding_step = OnboardingStep::Tools;
-        else if (input.touch && input.y >= 104 && input.y < 1064 && input.x >= 205 && input.x < 479)
-            onboarding_middle_hint = true;
-        if (next || old_hint != onboarding_middle_hint) { draw_onboarding(); overlay(); }
-    } else if (!input.touch && action == Action::NextPage) {
-        if (onboarding_step == OnboardingStep::Tools) { finish_onboarding(); return; }
-        onboarding_step = OnboardingStep::PageTurn;
-        draw_onboarding(); overlay();
+    canvas.line(0, 1064, 683, 1064, 1, 3);
+    const bool last = onboarding_page + 1 == kPracticePageCount;
+    // The open toolbar covers the footer, so its controls are not drawn or registered.
+    if (onboarding_tools_open) draw_toolbar();
+    else if (onboarding_task == OnboardingTask::Done) button(OnboardingNext, "下一步", 36, 1088, 612, 96, true, 30, true);
+    else {
+        center(last ? "最后一页，再往后翻进入下一步" : "第 " + std::to_string(onboarding_page + 1) + " / " +
+               std::to_string(kPracticePageCount) + " 页", 0, 1092, 684, 24, 3);
+        center("K1 上一页　K2 全刷　K3 下一页", 0, 1144, 684, 22, 3);
     }
+}
+
+void ReaderApp::Impl::onboarding_input(const AppInput& input) {
+    if (input.queued) return;
+    if (!input.touch && input.event.input == Input::K2) { force_refresh(); return; }
+    int hit_id = 0;
+    if (input.touch)
+        for (const auto& hit : hits) if (hit.contains(input.x, input.y)) { hit_id = hit.id; break; }
+    if (hit_id == OnboardingFinish) { finish_onboarding(); return; }
+    const auto action = input.touch ? Action::None : map_input(Context::Reading, input.event.input);
+    if (onboarding_step == OnboardingStep::Welcome) {
+        if (hit_id != OnboardingStart && action != Action::NextPage) return;
+        start_practice();
+    } else if (onboarding_step == OnboardingStep::Tools) {
+        if (action == Action::NextPage) finish_onboarding();
+        return;
+    } else if (hit_id == OnboardingNext) {
+        onboarding_step = OnboardingStep::Tools;
+    } else if (onboarding_tools_open) {
+        // Like the reading toolbar, keys other than K2 do nothing while it is open.
+        if (!input.touch || (!hit_id && input.y < 104) || (hit_id && hit_id == onboarding_tool)) return;
+        onboarding_tool = hit_id;
+        if (!hit_id) {
+            onboarding_tools_open = false;
+            if (onboarding_task == OnboardingTask::CloseTools) onboarding_task = OnboardingTask::Done;
+        }
+    } else {
+        // The same three regions as a reading page, below the top bar.
+        auto turn = action;
+        if (input.touch && input.y >= 104)
+            turn = input.x < 205 ? Action::PreviousPage : input.x >= 479 ? Action::NextPage : Action::OpenTools;
+        if (turn == Action::OpenTools) {
+            onboarding_tools_open = true;
+            if (onboarding_task == OnboardingTask::OpenTools) onboarding_task = OnboardingTask::CloseTools;
+        } else if (turn == Action::NextPage) {
+            // Turning past the last page leaves the practice, so keys alone can finish the guide.
+            if (onboarding_page + 1 == kPracticePageCount) onboarding_step = OnboardingStep::Tools;
+            else ++onboarding_page;
+            if (onboarding_task == OnboardingTask::Next) onboarding_task = OnboardingTask::Previous;
+        } else if (turn == Action::PreviousPage && onboarding_page > 0) {
+            --onboarding_page;
+            if (onboarding_task == OnboardingTask::Previous) onboarding_task = OnboardingTask::OpenTools;
+        } else return;
+    }
+    draw_onboarding(); overlay();
 }
 } // namespace pico_page

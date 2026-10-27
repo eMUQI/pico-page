@@ -53,7 +53,7 @@ void ReaderApp::Impl::draw_portal() {
         note(portal_closing ? "正在结束…" : portal_station ? "正在连接已保存的 Wi-Fi…" : "正在开启设备热点…", 200);
     } else if (!portal.network.empty()) {
         text("用手机扫码打开传书页", 36, 140, 30, 612, 1, true);
-        wrapped("手机或电脑需连着“" + portal.network + "”。", 36, 188, 612, 24, true, 3);
+        wrapped("手机或电脑需连着「" + portal.network + "」。", 36, 188, 612, 24, true, 3);
         graphics::draw_qr(canvas, portal.url, 152, 256, 380);
         center("或在浏览器输入", 0, 660, 684, 24, 3);
         center(address, 0, 700, 684, 34);

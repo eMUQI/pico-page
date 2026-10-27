@@ -80,7 +80,7 @@ void ReaderApp::Impl::draw_update_home(update::Offer offer, int preview_bottom) 
         if (manifest) {
             const auto at = update_checked_at();
             // The cache keeps the manifest and the time, not how it compared with the firmware then.
-            text("上次成功检查" + (at.empty() ? "时间未知" : " " + at) + " · 清单版本 " + manifest->version,
+            text("上次成功检查" + (at.empty() ? "时间未知" : " " + at) + " · 服务器版本 " + manifest->version,
                  36, 1010, 22, 612, 3);
         }
         if (!networks || !enabled) { check_button(1080, "检查更新"); return; }
@@ -103,7 +103,7 @@ void ReaderApp::Impl::draw_update_home(update::Offer offer, int preview_bottom) 
             y += 80;
         }
         if (offer == update::Offer::Skipped)
-            y += wrapped(manifest->version + " 上次没有启动成功，已跳过。清单出现更高的版本后可以更新。", 36, y, 612, 26) + 24;
+            y += wrapped(manifest->version + " 上次没有启动成功，已跳过。服务器发布更高的版本后可以更新。", 36, y, 612, 26) + 24;
         if (manifest && manifest->version == running_version) value_row(UpdateNotes, "本版更新日志", "", "", y, 96);
         wrapped(update_notice, 36, 940, 612, 24);
         check_button(1080, manifest ? "重新检查" : "检查更新");
@@ -113,9 +113,9 @@ void ReaderApp::Impl::draw_update_home(update::Offer offer, int preview_bottom) 
     if (offer == update::Offer::Development) {
         update_head("当前版本 · 开发构建", running_version);
         canvas.line(36, 300, 647, 300, 1, 2);
-        text("清单版本", 36, 324, 24, 612, 3);
+        text("服务器版本", 36, 324, 24, 612, 3);
         text(manifest->version, 36, 362, 36, 612, 1, true);
-        wrapped("开发构建无法判断新旧。安装后会换成清单里的发布构建，本机改动不保留。", 36, 432, 612, 26);
+        wrapped("开发构建无法判断新旧。安装后会换成服务器上的发布版本，本机改动不保留。", 36, 432, 612, 26);
         value_row(UpdateNotes, "更新日志", "", "", 716, 96);
     } else {
         update_head("新版本", manifest->version, "当前 " + running_version +
@@ -126,7 +126,7 @@ void ReaderApp::Impl::draw_update_home(update::Offer offer, int preview_bottom) 
     }
     check_button(880, "重新检查");
     update_install_button(992, offer);
-    const auto reason = offer == update::Offer::TooLarge ? "新固件 " + file_size(manifest->size) + "，超过 4 MiB 的分区，不能安装。"
+    const auto reason = offer == update::Offer::TooLarge ? "新固件 " + file_size(manifest->size) + "，超过本机 4 MiB 的固件分区，不能安装。这与 TF 卡空间无关。"
         : offer == update::Offer::OlderSchema ? std::string("这个版本写入的数据格式比本机旧，不能安装。") : update_block();
     wrapped(update_notice.empty() ? reason : update_notice, 36, 1104, 612, 24);
 }
@@ -139,7 +139,7 @@ void ReaderApp::Impl::draw_update() {
     if (update_page == UpdatePage::Result && update_rolled_back) {
         int y = update_sheet(700, "更新没有完成");
         y += wrapped(update_to + " 没有启动成功，已回到 " + running_version + "。阅读进度没有变化。", 36, y, 612, 26) + 16;
-        wrapped("设备会跳过这个版本，直到清单出现更高的版本。", 36, y, 612, 24, true, 3);
+        wrapped("设备会跳过这个版本，直到服务器发布更高的版本。", 36, y, 612, 24, true, 3);
         button(UpdateDismiss, "知道了", 24, 1088, 636, 96, true);
         return;
     }
@@ -190,7 +190,7 @@ void ReaderApp::Impl::draw_update() {
         const bool requesting = phase == WifiPhase::Request;
         const auto ssid = linked ? wifi_status.ssid : "";
         const auto named = ssid.empty() ? std::string("Wi-Fi") : quoted_name(ssid);
-        text(!linked ? "正在连接 Wi-Fi。" : requesting ? "已连接互联网，正在读取更新清单。" : "已连接" + named + "，正在访问互联网。",
+        text(!linked ? "正在连接 Wi-Fi。" : requesting ? "已连接互联网，正在读取更新信息。" : "已连接" + named + "，正在访问互联网。",
              36, 398, 26, 612);
         check_cell(36, 456, "Wi-Fi", linked ? CellState::Done : CellState::Active, linked ? "已连接" : "连接中…", ssid);
         check_cell(244, 456, "互联网", requesting ? CellState::Done : linked ? CellState::Active : CellState::Waiting,
@@ -220,21 +220,27 @@ void ReaderApp::Impl::draw_update() {
         const char* title = "无法写入固件";
         std::string body = "设备无法写入更新分区。";
         switch (update_failure) {
-        case UpdateFailure::Link: title = "没有连上网络"; body = update_notice; break;
-        case UpdateFailure::Internet: title = "没有连上互联网"; body = "已连接 Wi-Fi，但" + update_notice + "。"; break;
-        case UpdateFailure::Network: title = "网络中断"; body = "下载到 " + megabytes(update_bytes) + " MiB 时网络断开。"; break;
-        case UpdateFailure::Server: title = "更新服务器无响应"; body = "没有取得固件文件，稍后再试。"; break;
-        case UpdateFailure::Mismatch: title = "校验没有通过"; body = "下载的文件和清单记录的不一致，已丢弃。"; break;
-        case UpdateFailure::TooLarge: title = "空间不够"; body = "新固件 " + file_size(manifest->size) + "，超过 4 MiB 的分区。"; break;
-        case UpdateFailure::WrongImage: title = "型号不符"; body = "这个固件不是给 Read Pico 的，或版本与清单不符。"; break;
+        case UpdateFailure::Link: title = "没有连上 Wi-Fi"; body = update_notice; break;
+        case UpdateFailure::Internet: title = "无法开始下载"; body = "已连接 Wi-Fi，但" + update_notice + "。请确认这个网络可以上网。"; break;
+        case UpdateFailure::Network:
+            // The same failure covers a refused connection before any byte and a later interruption.
+            if (update_bytes) { title = "下载中断"; body = "下载到 " + megabytes(update_bytes) + " MiB 时连接中断或超时。"; }
+            else { title = "无法开始下载"; body = "没有连上固件下载服务器。"; }
+            break;
+        case UpdateFailure::Server: title = "下载服务器返回错误"; body = "没有取得固件文件，稍后再试。"; break;
+        case UpdateFailure::Mismatch: title = "校验没有通过"; body = "下载的文件与服务器公布的不一致，已丢弃。"; break;
+        case UpdateFailure::TooLarge: title = "固件超出容量"; body = "新固件 " + file_size(manifest->size) + "，超过本机 4 MiB 的固件分区，无法安装。这与 TF 卡空间无关。"; break;
+        case UpdateFailure::WrongImage: title = "型号不符"; body = "这个固件不是给 Read Pico 的，或版本与服务器公布的不符。"; break;
         default: break;
         }
+        // The same file would fail again; only transfer and write failures are worth repeating.
+        const bool repeatable = update_failure != UpdateFailure::TooLarge && update_failure != UpdateFailure::WrongImage;
         canvas.fill_rect(36, 140, 48, 48, 1);
         center("!", 36, 146, 48, 32, 15, true);
         text(title, 100, 144, 34, 548, 1, true);
         wrapped(body + "仍在使用 " + running_version + "。", 36, 228, 612, 26);
-        button(UpdateRetry, "重新下载", 24, 976, 636, 96, true);
-        button(UpdateLater, "稍后", 24, 1088, 636, 88);
+        if (repeatable) button(UpdateRetry, "重新下载", 24, 976, 636, 96, true);
+        button(UpdateLater, repeatable ? "稍后" : "返回", 24, 1088, 636, 88);
         return;
     }
     case UpdatePage::Ready:
@@ -242,7 +248,7 @@ void ReaderApp::Impl::draw_update() {
         update_head("已下载并校验", update_to);
         update_steps(2);
         wrapped("重启期间不要断电。重启前保存阅读位置，新固件启动后回到书库。", 36, 556, 612, 26);
-        wrapped(update_notice.empty() ? "选“稍后”回到设置。设备关机或重启后需要重新下载。" : update_notice, 36, 700, 612, 24, true, 3);
+        wrapped(update_notice.empty() ? "选「稍后」回到设置。设备关机或重启后需要重新下载。" : update_notice, 36, 700, 612, 24, true, 3);
         button(UpdateRestart, "重启并安装", 24, 976, 636, 96, true);
         button(UpdateLater, "稍后", 24, 1088, 636, 88);
         return;
@@ -254,7 +260,7 @@ void ReaderApp::Impl::draw_update() {
         int y = update_sheet(640, progress && config ? "阅读进度和设置格式会变化" : progress ? "阅读进度格式会变化" : "设置文件格式会变化");
         y += wrapped("新版本按新格式保存。之后如果回到 " + running_version + "，新格式的" +
                      (progress && config ? "阅读进度和设置" : progress ? "阅读进度" : "设置") + "不会显示。", 36, y, 612, 26) + 16;
-        wrapped("详见本版更新日志的“兼容性”一节。", 36, y, 612, 24, true, 3);
+        wrapped("详见本版更新日志的「兼容性」一节。", 36, y, 612, 24, true, 3);
         button(UpdateConfirm, "我知道了，安装", 24, 976, 636, 96, true);
         button(UpdateCancel, "取消", 24, 1088, 636, 88);
     }
@@ -325,15 +331,16 @@ void ReaderApp::Impl::update_complete(std::uint64_t id, UpdateFailure failure, i
                 link == LinkFailure::NotNearby ? "附近没有" : link == LinkFailure::Password ? "密码错误" : "",
                 link == LinkFailure::NotNearby && !absent.empty() ? absent + "可以换个位置再试，或者添加新的网络。" : detail};
         } else if (failure == UpdateFailure::Internet) {
-            update_check = {CheckStage::Internet, ssid, detail, "设备已连接" + (ssid.empty() ? std::string("Wi-Fi") : quoted_name(ssid)) +
-                "，但无法访问互联网。请检查路由器或手机热点是否已联网。"};
+            update_check = {CheckStage::Internet, ssid, "失败", "已连接" + (ssid.empty() ? std::string("Wi-Fi") : quoted_name(ssid)) +
+                "，但" + detail + "。请确认这个网络可以上网，稍后再试。"};
         } else if (failure != UpdateFailure::None || status != 200 || !update::parse_manifest(body, manifest, problem)) {
             update_check = {CheckStage::Server, ssid,
-                failure != UpdateFailure::None ? "连接失败" : status != 200 ? "HTTP " + std::to_string(status) : "清单无效",
+                failure != UpdateFailure::None ? "连接失败" : status != 200 ? "HTTP " + std::to_string(status) : "内容无效",
                 failure != UpdateFailure::None ? "已连接互联网，但无法连接更新服务器。稍后再试。"
                 // The update host answers 404 until the first manifest is published.
                 : status == 404 ? "更新服务器上还没有发布固件。"
-                : status != 200 ? "网络没有问题，是更新服务器暂时不可用。稍后再试。" : "更新服务器返回的清单无法识别。稍后再试。"};
+                : status != 200 ? "更新服务器返回 HTTP " + std::to_string(status) + "，暂时无法检查。稍后再试。"
+                : "更新服务器返回的内容无法识别。稍后再试。"};
         }
         // Pages that offer an installation show the cause below their controls.
         if (update_check.stage != CheckStage::None) update_notice = update_check.body;
@@ -349,7 +356,7 @@ void ReaderApp::Impl::update_complete(std::uint64_t id, UpdateFailure failure, i
             update_state.checked_at = now >= provision::clock_floor ? now : 0;
             note_lines.clear(); note_page = 0;
             if (!save_update_state()) update_notice = "检查结果没有写入 TF 卡，下次需要重新检查。";
-            if (confirming && !same) update_notice = "更新清单有变化，请确认后再安装。";
+            if (confirming && !same) update_notice = "更新信息有变化，请确认后再安装。";
             const auto offer = update_offer();
             if (confirming && same && update_installable(offer) && update_block().empty()) {
                 if (!update::requires_schema_confirmation(*update_state.manifest)) { update_begin(UpdateOperation::Kind::Download); return; }
