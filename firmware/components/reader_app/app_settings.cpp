@@ -79,18 +79,7 @@ void ReaderApp::Impl::draw_font_picker() {
             else if (path.find("-Medium.") != std::string::npos) name += " · 中粗";
             else if (path.find("-Bold.") != std::string::npos) name += " · 粗";
         }
-        const int name_width = current ? 444 : 552;
-        const bool multiline = text_width(name, 28) > name_width;
-        title_lines(name, 36, y + (multiline ? 10 : 28), name_width, 28, false, 2);
-        if (current) text("当前使用", 500, y + 32, 24, 100, 3);
-        for (int dy = -18; dy <= 18; ++dy)
-            for (int dx = -18; dx <= 18; ++dx) {
-                const int radius = dx * dx + dy * dy;
-                if ((radius <= 324 && radius >= 256) || (path == draft.font && radius <= 144))
-                    canvas.pixel(624 + dx, y + 45 + dy, 1);
-            }
-        canvas.line(36, y + 89, 648, y + 89, 12, 2);
-        hits.push_back({24, y, 636, 90, FontEntryBase + static_cast<int>(index)});
+        file_choice(FontEntryBase + static_cast<int>(index), name, "", y, path == draft.font, current ? "当前使用" : nullptr);
     }
     if (font_picker_page) button(Prev, "上一页", 36, 1008, 216, 88);
     else disabled_button("上一页", 36, 1008, 216, 88);
@@ -359,8 +348,16 @@ void ReaderApp::Impl::draw_help_demo() {
         hits.push_back({330, y, 330, 88, id});
     }
     text("点示意图或说明，查看对应区域", 36, 786, 24, 612, 3);
-    for (int i = 0; i < 3; ++i)
-        button(HelpKey1 + i, "K" + std::to_string(i + 1), 24 + i * 216, 842, 204, 88, help_key == HelpKey1 + i);
+    for (int i = 0; i < 3; ++i) {
+        const int x = 24 + i * 212;
+        const bool selected = help_key == HelpKey1 + i;
+        if (selected) canvas.fill_rect(x, 842, 212, 88, 1);
+        center("K" + std::to_string(i + 1), x, 869, 212, 28, selected ? 15 : 1, selected);
+        hits.push_back({x, 842, 212, 88, HelpKey1 + i});
+    }
+    outline(24, 842, 636, 88);
+    canvas.fill_rect(236, 842, 2, 88, 1);
+    canvas.fill_rect(448, 842, 2, 88, 1);
     const char* description = help_key == HelpKey2 ? "所有可交互页面：立即全刷。" :
         help_key == HelpKey1 ? "正文：上一页。书库、目录、书签、说明：上一屏。" : "正文：下一页。书库、目录、书签、说明：下一屏。";
     wrapped(description, 36, 942, 612, 24);

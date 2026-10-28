@@ -570,6 +570,14 @@ static void help_test(const fs::path& root, const fs::path& fixtures, bool async
             const auto original = app.canvas().pixels();
             driver.tap(index == 2 ? 60 : 600, index == 2 ? 350 : 400); driver.present();
             assert(app.canvas().pixels() != original && app.view() == View::Help);
+            if (index == 2) {
+                for (const int x : {235, 236, 448}) {
+                    driver.tap(x, 929); driver.present();
+                    const int selected = x < 236 ? 0 : x < 448 ? 1 : 2;
+                    for (int cell = 0; cell < 3; ++cell)
+                        assert(app.canvas().pixel(32 + cell * 212, 850) == (cell == selected ? 1 : 15));
+                }
+            }
             if (index == 3) {
                 for (const auto& cycle : {std::pair<int, int>{100, 5}, {600, 3}}) {
                     driver.tap(cycle.first, 1160); driver.present();
@@ -1613,6 +1621,48 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
     std::string detail;
     assert(EpubDocument::read_cover((fixtures / "image-cover.epub").string(), encoded, detail));
     const std::string png(reinterpret_cast<const char*>(encoded.data()), encoded.size());
+    {
+        const auto card = root / "SelectionLayout";
+        const std::string long_name = "06-用于验证单行省略且不覆盖保存状态的长文件名.png";
+        for (const auto& name : {std::string("01.png"), std::string("02.png"), std::string("03.png"),
+                                 std::string("04.png"), std::string("05.png"), long_name})
+            write(card / "LockScreens" / name, png);
+        ReaderApp app(card.string(), "selection-layout", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        driver.tap(600, 50); driver.present(); driver.tap(340, 640); driver.present();
+        FileStore settings_store(card.string());
+        const auto saved_settings = read(card / "PicoPage/settings.toml");
+        const std::pair<int, int> cell_hits[] = {{341, 283}, {342, 192}, {36, 284}, {647, 375}};
+        for (int selected = 0; selected < 4; ++selected) {
+            driver.tap(cell_hits[selected].first, cell_hits[selected].second); driver.present();
+            for (int cell = 0; cell < 4; ++cell)
+                assert(app.canvas().pixel(44 + (cell % 2) * 306, 200 + (cell / 2) * 92) == (cell == selected ? 1 : 15));
+            assert(read(card / "PicoPage/settings.toml") == saved_settings);
+        }
+        const auto overlay_off = app.canvas().pixels();
+        driver.tap(24, 552); driver.present();
+        assert(app.canvas().pixels() != overlay_off && !settings_store.load_settings().settings.sleep_overlay);
+        driver.refresh();
+        driver.tap(659, 655); driver.present(); assert(app.canvas().pixels() == overlay_off);
+        driver.tap(24, 552); driver.present(); driver.tap(150, 1120); driver.present();
+        assert(read(card / "PicoPage/settings.toml") == saved_settings);
+        driver.tap(340, 640); driver.present();
+        assert(app.canvas().pixel(44, 200) == 1);
+        driver.tap(647, 375); driver.present(); driver.tap(659, 655); driver.present();
+        driver.tap(500, 1120); driver.present();
+        assert(settings_store.load_settings().settings.sleep_screen == "custom" && settings_store.load_settings().settings.sleep_overlay);
+        driver.tap(340, 640); driver.present(); driver.tap(150, 450); driver.present(); driver.complete_content();
+        assert(app.view() == View::LockScreens);
+        for (int selected = 0; selected < 6; ++selected) {
+            driver.tap(24, 300 + selected * 90); driver.present();
+            for (int row = 0; row < 6; ++row)
+                assert(app.canvas().pixel(624, 345 + row * 90) == (row == selected ? 1 : 15));
+            assert(settings_store.load_settings().settings.sleep_image.empty());
+        }
+        driver.refresh(); driver.tap(300, 848); assert(!app.pending_frame());
+        driver.tap(450, 1020); driver.present(); driver.tap(500, 1120); driver.present();
+        assert(settings_store.load_settings().settings.sleep_image == long_name);
+    }
     write(root / "LockScreens/01.png", png);
     write(root / "LockScreens/02.PNG", png);
     write(root / "LockScreens/._ignored.png", png);

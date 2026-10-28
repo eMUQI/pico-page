@@ -2285,6 +2285,32 @@ struct ReaderApp::Impl final : DisplayBackend {
         hits.push_back({24, y, 636, 116, id});
     }
     /**
+     * One row of a file list: the name on the left in up to two lines, an optional state word
+     * and the selection ring on the right, and a rule below. A description makes the row 116 px
+     * high instead of 90 and keeps the name to one line.
+     */
+    void file_choice(int id, const std::string &name, const std::string &description, int y, bool selected,
+                     const char *state = nullptr) {
+        const int height = description.empty() ? 90 : 116;
+        const int name_width = state ? 444 : 552;
+        if (description.empty()) {
+            const bool multiline = text_width(name, 28) > name_width;
+            title_lines(name, 36, y + (multiline ? 10 : 28), name_width, 28, false, 2);
+        } else {
+            text(name, 36, y + 18, 28, name_width);
+            text(description, 36, y + 62, 24, name_width, 3);
+        }
+        if (state) text(state, 500, y + height / 2 - 13, 24, 100, 3);
+        for (int dy = -18; dy <= 18; ++dy)
+            for (int dx = -18; dx <= 18; ++dx) {
+                const int radius = dx * dx + dy * dy;
+                if ((radius <= 324 && radius >= 256) || (selected && radius <= 144))
+                    canvas.pixel(624 + dx, y + height / 2 + dy, 1);
+            }
+        canvas.line(36, y + height - 1, 648, y + height - 1, 12, 2);
+        hits.push_back({24, y, 636, height, id});
+    }
+    /**
      * Draws the reading page behind a panel that starts at top and clears the panel area. With
      * live false the header only names the book, for a page that accepts panel controls alone.
      */
@@ -2922,15 +2948,19 @@ struct ReaderApp::Impl final : DisplayBackend {
     void draw_lock_screens() {
         view = View::LockScreens;
         hits.clear(); canvas.clear(); header("自定义休眠图片", Back, "休眠");
-        choice(SleepRotation, "按文件名轮播", "每次休眠使用下一张图片", 140, draft.sleep_image.empty(),
-               draft.sleep_image != edit_snapshot.config.settings.sleep_image || draft.sleep_screen != edit_snapshot.config.settings.sleep_screen);
-        text("LockScreens/ · PNG / JPEG", 36, 280, 24, 612, 3);
+        // Rotation and the images form one selection; only the selected row names its save state.
+        const bool pending = draft.sleep_image != edit_snapshot.config.settings.sleep_image ||
+                             draft.sleep_screen != edit_snapshot.config.settings.sleep_screen;
+        const char* state = pending ? "待保存" : "当前";
+        file_choice(SleepRotation, "按文件名轮播", "每次休眠使用下一张图片", 120, draft.sleep_image.empty(),
+                    draft.sleep_image.empty() ? state : nullptr);
+        text("LockScreens/ · PNG / JPEG", 36, 262, 24, 612, 3);
         const auto pages = std::max<std::size_t>(1, (lock_screens.size() + 5) / 6);
         lock_screen_page = std::min(lock_screen_page, pages - 1);
         for (std::size_t i = lock_screen_page * 6; i < lock_screens.size() && i < (lock_screen_page + 1) * 6; ++i) {
-            const int y = 334 + static_cast<int>(i % 6) * 102;
-            button(LockScreenBase + static_cast<int>(i), lock_screens[i], 36, y, 612, 88,
-                   draft.sleep_image == lock_screens[i], 24);
+            const bool selected = draft.sleep_image == lock_screens[i];
+            file_choice(LockScreenBase + static_cast<int>(i), lock_screens[i], "", 300 + static_cast<int>(i % 6) * 90,
+                        selected, selected ? state : nullptr);
         }
         if (lock_screens.empty()) note(lock_screen_error.empty() ? "请将图片放入 TF 卡 LockScreens/ 目录。" : lock_screen_error, 380);
         button(SleepRefresh, "重新读取", 36, 980, 280, 88);

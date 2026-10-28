@@ -63,7 +63,7 @@ void ReaderApp::Impl::draw_dictionary_settings() {
         const auto label = item.status.message == kMissingDictionary ? "找不到这套词典的文件" :
                            !item.status ? dictionary_error(item.status) : enabled ? "已启用" : "未启用";
         text(label, 36, y + 62, 22, 612, 3);
-        if (!content_loading) button(DictionaryToggleBase + static_cast<int>(index), enabled ? "停用" : "启用", 516, y, 144, 60, enabled, 23);
+        if (!content_loading) button(DictionaryToggleBase + static_cast<int>(index), enabled ? "停用" : "启用", 516, y, 144, 60, false, 23);
         if (!content_loading && enabled) {
             const auto order = static_cast<std::size_t>(found - settings.dictionary_enabled.begin());
             if (order) button(DictionaryUpBase + static_cast<int>(index), "上移", 24, y + 100, 198, 60, false, 23);

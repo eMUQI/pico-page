@@ -42,24 +42,34 @@ void ReaderApp::Impl::draw_power(const std::string& preview_notice) {
     view = View::PowerSettings;
     hits.clear(); canvas.clear(); header("电源与休眠", Back, "设置");
     text("休眠画面", 36, 144, 24, 612, 3);
-    button(SleepCover, "书籍封面", 36, 192, 296, 92, draft.sleep_screen == "cover");
-    button(SleepReading, "保留正文", 352, 192, 296, 92, draft.sleep_screen == "reading");
-    button(SleepSimple, "简洁屏保", 36, 308, 296, 92, draft.sleep_screen == "simple");
-    button(SleepCustom, "自定义图片", 352, 308, 296, 92, draft.sleep_screen == "custom");
+    const int style_actions[] = {SleepCover, SleepReading, SleepSimple, SleepCustom};
+    const char* style_values[] = {"cover", "reading", "simple", "custom"};
+    const char* style_labels[] = {"书籍封面", "保留正文", "简洁屏保", "自定义图片"};
+    for (int i = 0; i < 4; ++i) {
+        const int x = 36 + (i % 2) * 306, y = 192 + (i / 2) * 92;
+        const bool selected = draft.sleep_screen == style_values[i];
+        if (selected) canvas.fill_rect(x, y, 306, 92, 1);
+        center(style_labels[i], x, y + 29, 306, 28, selected ? 15 : 1, selected);
+        hits.push_back({x, y, 306, 92, style_actions[i]});
+    }
+    outline(36, 192, 612, 184);
+    canvas.fill_rect(342, 192, 2, 184, 1);
+    canvas.fill_rect(36, 284, 612, 2, 1);
     if (draft.sleep_screen == "custom") {
-        button(SleepChoose, "选择图片 / 轮播", 36, 432, 296, 88, false, 26);
-        button(SleepPreview, "预览", 352, 432, 296, 88, false, 26);
-        text(draft.sleep_image.empty() ? "按文件名轮播" : draft.sleep_image, 36, 536, 24, 612, 3);
-        button(SleepOverlay, draft.sleep_overlay ? "叠加当前画面：开" : "叠加当前画面：关", 36, 580, 612, 64, draft.sleep_overlay, 26);
+        button(SleepChoose, "选择图片 / 轮播", 36, 408, 296, 88, false, 26);
+        button(SleepPreview, "预览", 352, 408, 296, 88, false, 26);
+        text(draft.sleep_image.empty() ? "按文件名轮播" : draft.sleep_image, 36, 512, 24, 612, 3);
+        value_row(SleepOverlay, "叠加当前画面", "点按切换", draft.sleep_overlay ? "开" : "关", 552, 104, true, false);
     } else if (draft.sleep_screen == "cover") note("无可用封面时显示书名与作者。", 464);
     else if (draft.sleep_screen == "reading") note("保留当前正文，并显示休眠提示。", 464);
     else note("显示书名、阅读位置与唤醒提示。", 464);
-    const int auto_top = draft.sleep_screen == "custom" ? 668 : 636;
+    const int auto_top = draft.sleep_screen == "custom" ? 680 : 636;
     text("自动休眠", 36, auto_top, 28, 612, 1, true);
     button(SleepLess, "−", 36, auto_top + 70, 120, 96);
     center(draft.auto_sleep_minutes ? std::to_string(draft.auto_sleep_minutes) + " 分钟" : "关闭", 168, auto_top + 92, 348, 34);
     button(SleepMore, "+", 528, auto_top + 70, 120, 96);
-    note(preview_notice.empty() ? "按电源键唤醒；保存失败时不进入休眠。" : preview_notice, 856);
+    note(preview_notice.empty() ? "按电源键唤醒；保存失败时不进入休眠。" : preview_notice,
+         draft.sleep_screen == "custom" ? 868 : 856);
     button(PowerMenu, "关机 / 重启", 24, 952, 636, 96);
     button(Back, "取消", 24, 1080, 306, 96);
     button(PowerSave, "保存设置", 354, 1080, 306, 96, true);

@@ -2,7 +2,7 @@
 
 相连的一组选择格，格与格共用边线，当前项为 `ink` 黑底，用来在少量互斥选项中切换。
 
-依据 `firmware/components/reader_app/app_library.cpp` 的列表／卡片切换与 `app_impl.h` 的 `tabs()` 整理；电源页休眠样式按 D47 采用本组件，固件尚未实现。
+依据 `firmware/components/reader_app/app_library.cpp` 的列表／卡片切换与 `app_impl.h` 的 `tabs()` 整理；电源页休眠样式与帮助按键示例已按 D47 采用相连选择格。
 
 ## 结构
 
