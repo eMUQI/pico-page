@@ -175,6 +175,7 @@ enum Control {
     DictionaryOpen = 55000, DictionaryScan, DictionaryClose, DictionaryExpand, DictionaryRetry,
     DictionarySources, DictionaryNextEntry, DictionaryStart = 55008, DictionaryEnd, DictionaryManage,
     DictionaryPreviousSource, DictionaryNextSource,
+    DictionaryStartPrevious, DictionaryStartNext, DictionaryEndPrevious, DictionaryEndNext,
     DictionaryToggleBase = 56000, DictionaryUpBase = 56100, DictionaryDownBase = 56200, DictionarySourceBase = 56400
 };
 static_assert(ContentsBookmarks < EntryBase);
@@ -853,8 +854,11 @@ struct ReaderApp::Impl final : DisplayBackend {
     void page_dictionary(int movement = 0, bool redraw = true);
     void draw_dictionary();
     void finish_dictionary(ContentJob& job);
-    void dictionary_control(int id);
+    /** by_scalar comes from a long press and moves a range edge by one scalar instead of a word. */
+    void dictionary_control(int id, bool by_scalar = false);
     void close_dictionary();
+    /** The selection after one range control step, or nullopt when that edge cannot move or the query would be too long. */
+    std::optional<dictionary::Selection> dictionary_range_step(int id, bool by_scalar) const;
     int dictionary_top(bool full) const;
     graphics::LayoutSpec dictionary_layout(bool full) const;
     std::shared_ptr<const ContentCacheEntry> chapter_cache, recent_chapter_cache;

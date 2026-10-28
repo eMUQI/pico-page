@@ -2977,12 +2977,12 @@ static void dictionary_query_failure_test(const fs::path& root, const fs::path& 
     assert(app.view() == View::Dictionary && dictionary_preparations == 1);
     const auto short_hit = app.canvas().pixels();
     // The mount session remembers the definitive failure; only explicit retry prepares it again.
-    driver.tap(140, 700); driver.present(); driver.complete_content();
+    driver.tap(342, 1092); driver.present(); driver.complete_content();
     driver.tap(100, 230); driver.present(); driver.complete_content();
     assert(dictionary_preparations == 1 && app.canvas().pixels() != short_hit);
-    driver.tap(300, 1090); driver.present(); driver.complete_content();
+    driver.tap(342, 1172); driver.present(); driver.complete_content();
     assert(dictionary_preparations == 2);
-    driver.tap(600, 600); driver.present();
+    driver.tap(636, 692); driver.present();
     driver.hold(hit_x, hit_y); driver.present(); driver.complete_content();
     assert(dictionary_preparations == 2 && app.canvas().pixels() == short_hit);
     assert(app.saved_record() == saved);
@@ -3052,7 +3052,7 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     driver.frame_observer = {};
     assert(slow_frames == 1 && app.view() == View::Dictionary);
     assert(app.saved_record() == saved);
-    driver.tap(600, 600); driver.present();
+    driver.tap(636, 692); driver.present();
     assert(app.canvas().pixels() == body);
     // Cancellation during a refresh consumes the late release and restores the same body.
     contact(Phase::Begin, hit_x, hit_y, true);
@@ -3085,7 +3085,7 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     contact(Phase::End, hit_x, hit_y);
     assert(!app.content_busy() && app.canvas().pixels() == preview);
     driver.present(); app.poll_background(); driver.complete_content();
-    driver.tap(636, 600); driver.present();
+    driver.tap(636, 692); driver.present();
     // A fast lookup followed by slow page layout still shows the loading panel after the delay.
     ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryPage, std::chrono::milliseconds(800));
     contact(Phase::Begin, hit_x, hit_y, true); driver.present();
@@ -3097,7 +3097,7 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     driver.present();
     ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryPage, std::chrono::milliseconds(0));
     driver.complete_content();
-    driver.tap(636, 600); driver.present();
+    driver.tap(636, 692); driver.present();
     contact(Phase::Begin, hit_x, hit_y, true); driver.present();
     contact(Phase::End, hit_x, hit_y);
     // A fast lookup replaces the preview with its result without a loading panel.
@@ -3109,7 +3109,7 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     assert(fast_frames == 1);
     const auto automatic = app.canvas().pixels();
     // The removed edit control has no hit area; selection remains available through its handles.
-    driver.tap(480, 600);
+    driver.tap(480, 692);
     assert(!app.content_busy() && !app.pending_frame() && app.canvas().pixels() == automatic);
     int handle_x = -1, handle_y = -1;
     for (int y = 0; y < 1128 && handle_x < 0; ++y)
@@ -3127,7 +3127,7 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     contact(Phase::Move, 400, hit_y); driver.present();
     contact(Phase::End, 400, hit_y); driver.complete_content();
     assert(app.canvas().pixels() != automatic && app.saved_record() == saved);
-    driver.tap(600, 600); driver.present();
+    driver.tap(636, 692); driver.present();
     driver.hold(hit_x, hit_y); assert(app.view() == View::Dictionary && app.content_busy());
     driver.present();
     // The missing first source falls through to the next one behind the loading panel; only the result is presented.
@@ -3152,81 +3152,84 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     driver.key(Input::K1); driver.present(); driver.complete_content();
     assert(app.canvas().pixels() == first);
     // Source selection and management cancellation retain the displayed result and book position.
-    driver.tap(140, 700); driver.present(); driver.complete_content(); shot("dictionary-sources", app);
+    driver.tap(342, 1092); driver.present(); driver.complete_content(); shot("dictionary-sources", app);
     driver.refresh(); driver.tap(600, 50); driver.present();
     assert(app.canvas().pixels() == first && app.saved_record() == saved);
-    driver.tap(140, 700); driver.present(); driver.complete_content();
+    driver.tap(342, 1092); driver.present(); driver.complete_content();
     driver.tap(100, 350); driver.present();
     assert(app.canvas().pixels() == first && !app.content_busy());
-    driver.tap(140, 700); driver.present(); driver.complete_content();
+    driver.tap(342, 1092); driver.present(); driver.complete_content();
     driver.tap(400, 1140); driver.present(); driver.complete_content();
     assert(app.view() == View::DictionarySettings);
     driver.tap(100, 1140); driver.present(); driver.complete_content();
     driver.tap(500, 1140); driver.present();
     assert(app.view() == View::Dictionary && app.canvas().pixels() == first);
     ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryList, std::chrono::milliseconds(200));
-    driver.tap(140, 700); driver.present(); app.poll_background();
+    driver.tap(342, 1092); driver.present(); app.poll_background();
     driver.tap(600, 50); driver.present();
     assert(app.canvas().pixels() == first);
     std::this_thread::sleep_for(std::chrono::milliseconds(220)); app.poll_background();
     assert(app.canvas().pixels() == first && !app.pending_frame());
     ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryList, std::chrono::milliseconds(0));
     // Changing source does not fall through to another source when the selected one fails.
-    driver.tap(140, 700); driver.present(); driver.complete_content();
+    driver.tap(342, 1092); driver.present(); driver.complete_content();
     driver.tap(100, 230); driver.present(); driver.complete_content();
     assert(app.canvas().pixels() != first && app.saved_record() == saved);
     shot("dictionary-source-error", app);
     const auto unavailable_source = app.canvas().pixels();
-    driver.tap(300, 1090); driver.present(); driver.complete_content();
+    driver.tap(342, 1172); driver.present(); driver.complete_content();
     assert(app.canvas().pixels() == unavailable_source);
-    driver.tap(140, 700); driver.present(); driver.complete_content();
+    driver.tap(342, 1092); driver.present(); driver.complete_content();
     driver.tap(100, 350); driver.present(); driver.complete_content();
     assert(app.view() == View::Dictionary && app.saved_record() == saved);
     const auto chosen_source = app.canvas().pixels();
     const auto chosen_canvas = app.canvas();
     assert(chosen_source == first);
-    driver.tap(574, 700);
-    driver.tap(550, 1090);
+    driver.tap(300, 750);
+    driver.tap(300, 750);
     assert(!app.content_busy() && !app.pending_frame() && app.canvas().pixels() == chosen_source);
-    driver.tap(516, 700);
+    driver.tap(598, 1092);
     assert(!app.content_busy() && !app.pending_frame() && app.canvas().pixels() == chosen_source);
-    driver.tap(316, 700); driver.present(); driver.complete_content();
+    driver.tap(85, 1092); driver.present(); driver.complete_content();
     assert(app.view() == View::Dictionary && app.saved_record() == saved && app.canvas().pixels() != chosen_source);
     // Exhausting earlier sources changes only the previous-source icon, retaining the definition.
-    for (int y = 768; y < 1128; ++y)
+    for (int y = 730; y < 984; ++y)
         for (int x = 0; x < 684; ++x)
             assert(app.canvas().pixel(x, y) == chosen_canvas.pixel(x, y));
     const auto exhausted = app.canvas().pixels();
-    driver.tap(316, 700);
+    driver.tap(85, 1092);
     assert(!app.content_busy() && !app.pending_frame());
-    driver.tap(516, 700);
+    driver.tap(598, 1092);
     assert(!app.content_busy() && !app.pending_frame() && app.canvas().pixels() == exhausted);
     shot("dictionary-source-navigation", app);
-    driver.tap(600, 600); driver.present(); driver.hold(hit_x, hit_y); driver.present(); driver.complete_content();
+    driver.tap(636, 692); driver.present(); driver.hold(hit_x, hit_y); driver.present(); driver.complete_content();
     assert(app.canvas().pixels() == first);
     driver.key(Input::K3); driver.present(); driver.complete_content();
     const auto second_page = app.canvas().pixels();
     const auto second_canvas = app.canvas();
     // A failed reflow keeps the previous layout and can be retried after the font returns.
     fs::rename(root / "Fonts/LXGWWenKai-Regular.ttf", root / "Fonts/held.ttf");
-    driver.tap(636, 1090); driver.present(); driver.complete_content();
+    driver.tap(342, 1172); driver.present(); driver.complete_content();
     assert(app.view() == View::Dictionary && app.saved_record() == saved);
     fs::rename(root / "Fonts/held.ttf", root / "Fonts/LXGWWenKai-Regular.ttf");
-    driver.tap(636, 1090); driver.present(); driver.complete_content(); shot("dictionary-expanded", app);
+    // The failure replaces 展开 with 重试 in the same cell; the retry restores the page, then expansion proceeds.
+    driver.tap(342, 1172); driver.present(); driver.complete_content();
+    assert(app.canvas().pixels() == second_page);
+    driver.tap(342, 1172); driver.present(); driver.complete_content(); shot("dictionary-expanded", app);
     assert(app.view() == View::Dictionary && app.saved_record() == saved);
     for (int y = 0; y < 42; ++y)
         for (int x = 36; x < 648; ++x)
-            assert(app.canvas().pixel(x, 200 + y) == second_canvas.pixel(x, 768 + y));
-    driver.tap(636, 1170); driver.present(); driver.complete_content();
+            assert(app.canvas().pixel(x, 108 + y) == second_canvas.pixel(x, 764 + y));
+    driver.tap(342, 1172); driver.present(); driver.complete_content();
     assert(app.canvas().pixels() == second_page);
     driver.key(Input::K1); driver.present(); driver.complete_content();
     assert(app.canvas().pixels() == first);
-    driver.tap(600, 600); driver.present();
+    driver.tap(636, 692); driver.present();
     assert(app.view() == View::Reading && app.saved_record() == saved && app.canvas().pixels() == body);
     // Closing a delayed lookup discards its result without waiting in input dispatch.
     ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryLookup, std::chrono::milliseconds(200));
     driver.hold(hit_x, hit_y); driver.present(); app.poll_background();
-    driver.tap(600, 600); driver.present();
+    driver.tap(636, 692); driver.present();
     assert(app.view() == View::Reading && app.saved_record() == saved);
     std::this_thread::sleep_for(std::chrono::milliseconds(220)); app.poll_background();
     assert(app.view() == View::Reading && !app.pending_frame());
@@ -3247,13 +3250,13 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     }
     assert(app.view() == View::PowerMenu && app.saved_record() == saved);
     driver.tap(300, 1120); driver.present(); assert(app.view() == View::Dictionary);
-    driver.tap(600, 600); driver.present();
+    driver.tap(636, 692); driver.present();
     driver.hold(hit_x, hit_y); driver.present(); app.poll_background();
     assert(app.begin_sleep()); driver.present();
     assert(!app.prepare_sleep() && app.sleep_pending());
     app.cancel_sleep(); if (app.pending_frame()) driver.present(); driver.complete_content();
     assert(app.view() == View::Dictionary && app.saved_record() == saved);
-    driver.tap(600, 600); driver.present();
+    driver.tap(636, 692); driver.present();
     driver.hold(hit_x, hit_y); driver.present(); app.poll_background();
     assert(sleep_frame(app)); driver.present();
     assert(app.view() == View::Sleeping && app.saved_record() == saved);
@@ -3325,8 +3328,8 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
                 assert(!expected_font.missing(U'發'));
                 graphics::Canvas expected;
                 expected.clear();
-                assert(expected_font.draw(expected, U'發', 24, 584 + expected_font.metrics().ascender, 1, true));
-                for (int row = 584; row < 620; ++row)
+                assert(expected_font.draw(expected, U'發', 24, 672 + expected_font.metrics().ascender, 1, true));
+                for (int row = 672; row < 708; ++row)
                     for (int col = 24; col < 64; ++col)
                         assert(reader.canvas().pixel(col, row) == expected.pixel(col, row));
             }
@@ -3346,7 +3349,7 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
                 }
                 assert(reader.canvas().pixels() == first_page);
             }
-            d.refresh(); d.tap(600, 600); d.present();
+            d.refresh(); d.tap(636, 692); d.present();
             assert(reader.view() == View::Reading && reader.canvas().pixels() == original && reader.saved_record() == position);
         }
     }
@@ -3377,16 +3380,16 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
             input.continuous = true; reader.input(input); d.present();
             input.event.phase = Phase::End; input.x = end.first; input.y = end.second; input.long_press = false;
             reader.input(input); d.present(); d.complete_content();
-            const int top = downward ? 0 : 568;
+            const int top = downward ? 0 : 656;
             assert(reader.view() == View::Dictionary && reader.saved_record() == position);
             assert(reader.canvas().pixel(0, top) == 1);
-            assert(reader.canvas().pixel(0, downward ? 568 : 0) == 15);
-            d.tap(320, top + 400); assert(!reader.pending_frame() && !reader.content_busy());
-            d.tap(100, top + 480); assert(!reader.pending_frame() && !reader.content_busy());
-            d.tap(260, top + 480); assert(!reader.pending_frame() && !reader.content_busy());
+            assert(reader.canvas().pixel(0, downward ? 656 : 0) == 15);
+            d.tap(85, top + 364); assert(!reader.pending_frame() && !reader.content_busy());
+            d.tap(114, top + 516); assert(!reader.pending_frame() && !reader.content_busy());
+            d.tap(342, top + 516); assert(!reader.pending_frame() && !reader.content_busy());
             shot(downward ? "dictionary-panel-top" : "dictionary-panel-bottom", reader);
             const auto empty_result = reader.canvas().pixels();
-            d.tap(300, top + 520); d.present(); d.complete_content();
+            d.tap(342, top + 436); d.present(); d.complete_content();
             assert(reader.view() == View::DictionarySettings);
             d.tap(500, 1140); d.present();
             assert(reader.view() == View::Dictionary && reader.canvas().pixels() == empty_result);
@@ -3414,18 +3417,18 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
         assert(reader.initialize()); d.present(); opened(reader, "Books/sample.txt"); d.present();
         const auto original = reader.canvas().pixels(); const auto saved_position = reader.saved_record();
         d.hold(130, 94); d.present(); d.complete_content();
-        d.tap(140, 700); d.present(); d.complete_content();
+        d.tap(342, 1092); d.present(); d.complete_content();
         const auto first_list = reader.canvas().pixels();
         d.key(Input::K3); d.present(); assert(reader.canvas().pixels() != first_list);
         d.key(Input::K1); d.present(); assert(reader.canvas().pixels() == first_list);
         d.key(Input::K3); d.present(); d.tap(100, 230); d.present(); d.complete_content();
-        d.tap(140, 700); d.present(); d.complete_content(); shot("dictionary-sources-page-2", reader);
+        d.tap(342, 1092); d.present(); d.complete_content(); shot("dictionary-sources-page-2", reader);
         d.tap(400, 1140); d.present(); d.complete_content();
         assert(reader.view() == View::DictionarySettings);
         d.tap(580, 190); d.present();  // Disable one enabled source while preserving the chosen source.
         d.tap(500, 1140); d.present(); d.complete_content();
         assert(reader.view() == View::Dictionary && reader.saved_record() == saved_position);
-        d.tap(600, 600); d.present(); assert(reader.canvas().pixels() == original);
+        d.tap(636, 692); d.present(); assert(reader.canvas().pixels() == original);
     }
     // Result navigation skips unusable sources in both directions and discards a cancelled lookup.
     {
@@ -3451,35 +3454,35 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
         assert(hit_x >= 0); d.hold(hit_x, hit_y); d.present(); d.complete_content();
         const auto first_result = reader.canvas().pixels();
         ContentJob::fail_starts_for_test(ContentJob::Kind::DictionaryLookup, 1, ContentJob::StartFailure::TaskCreate);
-        d.tap(516, 700); d.present(); d.complete_content();
+        d.tap(598, 1092); d.present(); d.complete_content();
         assert(reader.saved_record() == position);
         const auto failed_navigation = reader.canvas().pixels(); assert(failed_navigation != first_result);
-        d.tap(240, 1090); d.present(); d.complete_content();
+        d.tap(342, 1172); d.present(); d.complete_content();
         assert(reader.view() == View::Dictionary && reader.saved_record() == position);
         const auto last_result = reader.canvas().pixels(); assert(last_result != first_result);
-        d.tap(516, 700); assert(!reader.content_busy() && !reader.pending_frame());
+        d.tap(598, 1092); assert(!reader.content_busy() && !reader.pending_frame());
         shot("dictionary-navigation-skipped", reader);
-        d.tap(316, 700); d.present(); d.complete_content();
+        d.tap(85, 1092); d.present(); d.complete_content();
         assert(reader.canvas().pixels() == first_result && reader.saved_record() == position);
-        d.tap(316, 700); assert(!reader.content_busy() && !reader.pending_frame());
+        d.tap(85, 1092); assert(!reader.content_busy() && !reader.pending_frame());
         // A new definition cannot use the previous definition's next-page cursor after layout fails.
         ContentJob::fail_starts_for_test(ContentJob::Kind::DictionaryPage, 1, ContentJob::StartFailure::TaskCreate);
-        d.tap(516, 700); d.present(); d.complete_content();
+        d.tap(598, 1092); d.present(); d.complete_content();
         const auto failed_first_page = reader.canvas().pixels();
-        d.tap(444, 1090); d.key(Input::K3);
+        d.tap(570, 1172); d.key(Input::K3);
         assert(!reader.content_busy() && !reader.pending_frame() && reader.canvas().pixels() == failed_first_page);
-        d.tap(240, 1090); d.present(); d.complete_content();
+        d.tap(342, 1172); d.present(); d.complete_content();
         assert(reader.canvas().pixels() == last_result && reader.saved_record() == position);
-        d.tap(316, 700); d.present(); d.complete_content();
+        d.tap(85, 1092); d.present(); d.complete_content();
         assert(reader.canvas().pixels() == first_result);
-        d.tap(140, 700); d.present(); d.complete_content();
+        d.tap(342, 1092); d.present(); d.complete_content();
         d.tap(400, 1140); d.present(); d.complete_content();
         assert(reader.view() == View::DictionarySettings); shot("dictionary-known-source-error", reader);
         d.tap(500, 1140); d.present();
         assert(reader.canvas().pixels() == first_result);
         ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryLookup, std::chrono::milliseconds(200));
-        d.tap(516, 700); d.present(); reader.poll_background();
-        d.tap(636, 600); d.present();
+        d.tap(598, 1092); d.present(); reader.poll_background();
+        d.tap(636, 692); d.present();
         std::this_thread::sleep_for(std::chrono::milliseconds(220)); reader.poll_background();
         ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryLookup, std::chrono::milliseconds(0));
         assert(reader.view() == View::Reading && !reader.pending_frame() && !reader.content_busy());
@@ -3492,13 +3495,13 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
             for (int x = 36; x < 640; ++x) if (reader.can_long_press_at(x, y)) { hit_x = x; hit_y = y; break; }
         assert(hit_x >= 0); d.hold(hit_x, hit_y); d.present(); d.complete_content();
         const auto empty_result = reader.canvas(); const auto empty_position = reader.saved_record();
-        d.tap(516, 700); d.present(); d.complete_content();
-        for (int y = 768; y < 1044; ++y)
+        d.tap(598, 1092); d.present(); d.complete_content();
+        for (int y = 730; y < 984; ++y)
             for (int x = 0; x < 684; ++x) assert(reader.canvas().pixel(x, y) == empty_result.pixel(x, y));
-        d.tap(140, 700); d.present(); d.complete_content();
+        d.tap(342, 1092); d.present(); d.complete_content();
         d.tap(100, 470); d.present(); d.complete_content();
-        d.tap(316, 700); d.present(); d.complete_content();
-        for (int y = 768; y < 1044; ++y)
+        d.tap(85, 1092); d.present(); d.complete_content();
+        for (int y = 730; y < 984; ++y)
             for (int x = 0; x < 684; ++x) assert(reader.canvas().pixel(x, y) == empty_result.pixel(x, y));
         assert(reader.saved_record() == empty_position);
     }
@@ -3517,7 +3520,7 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
         d.hold(130, 94); d.present(); d.complete_content();
         const auto first_entry = reader.canvas().pixels();
         for (int index = 0; index < 33; ++index) {
-            d.tap(550, 790); d.present(); d.complete_content();
+            d.tap(570, 786); d.present(); d.complete_content();
             assert(reader.saved_record() == position);
             if (index == 31) { assert(reader.canvas().pixels() != first_entry); shot("dictionary-entry-33", reader); }
         }
@@ -3571,12 +3574,116 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
             const auto& actual = reader.canvas().pixels();
             for (int y = 0; y < 1216; ++y) {
                 for (int x = 0; x < 342; ++x) {
-                    // Previous-source availability and the ordinal depend on the enabled list.
-                    if ((y >= 676 && y < 716 && x >= 148 && x < 168) ||
-                        (y >= 682 && y < 716 && x >= 184 && x < 232)) continue;
+                    // The source row's previous-source availability and ordinal depend on the enabled list.
+                    if (y > 1056 && y < 1128) continue;
                     assert(actual[y * 342 + x] == chinese_result[y * 342 + x]);
                 }
             }
+        }
+    }
+    // Range cells step the selection edges and requery without moving the reading position.
+    {
+        const auto card = root / "Range";
+        fs::create_directories(card / "Fonts"); fs::copy_file(font, card / "Fonts/LXGWWenKai-Regular.ttf");
+        fs::create_directories(card / "Dictionaries/han-long");
+        for (const auto* suffix : {".ifo", ".idx", ".dict.dz"})
+            fs::copy_file(dict / (std::string("han-long") + suffix), card / "Dictionaries/han-long" / (std::string("main") + suffix));
+        write(card / "Books/chinese.txt", "中文词典\n");
+        write(card / "PicoPage/settings.toml", "schema_version=1\n[dictionary]\nenabled=['han-long/main.ifo']\n");
+        ReaderApp reader(card.string(), "dictionary", true, true); Driver d{reader};
+        assert(reader.initialize()); d.present(); opened(reader, "Books/chinese.txt"); d.present();
+        const auto position = reader.saved_record();
+        int x = -1, y = -1;
+        for (int row = 64; row < 150 && x < 0; ++row)
+            for (int col = 36; col < 640; ++col) if (reader.can_long_press_at(col, row)) { x = col; y = row; break; }
+        assert(x >= 0); d.hold(x, y); d.present(); d.complete_content();
+        const auto whole = reader.canvas().pixels();
+        constexpr int range_y = 1020, start_previous = 85, end_previous = 427, end_next = 598;
+        // The selection starts the page, so its start cannot move earlier.
+        d.tap(start_previous, range_y);
+        assert(!reader.pending_frame() && !reader.content_busy() && reader.canvas().pixels() == whole);
+        d.tap(end_previous, range_y);
+        assert(reader.content_busy() && reader.pending_frame());
+        d.present(); d.complete_content();
+        const auto shorter = reader.canvas().pixels();
+        assert(shorter != whole && reader.view() == View::Dictionary && reader.saved_record() == position);
+        shot("dictionary-range-shorter", reader);
+        d.tap(end_next, range_y); d.present(); d.complete_content();
+        assert(reader.canvas().pixels() == whole);
+        // A step during a lookup replaces it; only the newest selection's result is shown.
+        ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryLookup, std::chrono::milliseconds(200));
+        d.tap(end_previous, range_y); d.present();
+        assert(reader.content_busy());
+        d.tap(end_next, range_y); d.present();
+        assert(reader.content_busy());
+        ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryLookup, std::chrono::milliseconds(0));
+        d.complete_content();
+        assert(reader.canvas().pixels() == whole && reader.saved_record() == position);
+        // A long press steps by one scalar, which is the same step for Han text.
+        d.hold(end_previous, range_y); d.present(); d.complete_content();
+        assert(reader.canvas().pixels() == shorter);
+        d.tap(end_next, range_y); d.present(); d.complete_content();
+        // A step from the full-screen view returns to the panel so the changed selection is visible.
+        d.tap(342, 1172); d.present(); d.complete_content();
+        assert(reader.canvas().pixel(0, 656) != 1);
+        d.tap(end_previous, range_y); d.present(); d.complete_content();
+        assert(reader.canvas().pixels() == shorter && reader.saved_record() == position);
+    }
+    {
+        const auto card = root / "RangeEnglish";
+        fs::create_directories(card / "Fonts"); fs::copy_file(font, card / "Fonts/LXGWWenKai-Regular.ttf");
+        fs::create_directories(card / "Dictionaries/English");
+        for (const auto* suffix : {".ifo", ".idx", ".dict.dz"})
+            fs::copy_file(dict / (std::string("compressed") + suffix), card / "Dictionaries/English" / (std::string("main") + suffix));
+        write(card / "PicoPage/settings.toml", "schema_version=1\n[dictionary]\nenabled=['English/main.ifo']\n");
+        write(card / "Books/trailing.txt", "apple. \n");
+        write(card / "Books/leading.txt", " .apple\n");
+        write(card / "Books/long.txt", "apple " + std::string(70, 'a') + "\n");
+        ReaderApp reader(card.string(), "dictionary", true, true); Driver d{reader};
+        assert(reader.initialize()); d.present();
+        constexpr int range_y = 1020, start_previous = 85, start_next = 256, end_previous = 427, end_next = 598;
+        for (const auto* book : {"trailing", "leading", "long"}) {
+            opened(reader, "Books/" + std::string(book) + ".txt"); d.present();
+            const auto position = reader.saved_record();
+            int x = -1, y = -1;
+            for (int row = 64; row < 150 && x < 0; ++row)
+                for (int col = 36; col < 640; ++col) if (reader.can_long_press_at(col, row)) { x = col; y = row; break; }
+            assert(x >= 0);
+            if (std::string(book) == "leading") x += 32;
+            if (std::string(book) == "long") {
+                // Select a prefix whose next word boundary exceeds the query limit.
+                const auto sequence = ++d.sequence;
+                AppInput input{{sequence, Phase::Begin, Input::TouchCenter}, true, x, y, false, true};
+                input.continuous = true; reader.input(input); d.present();
+                input.event.phase = Phase::End; input.x = 450; reader.input(input);
+                d.complete_content();
+                const auto prefix = reader.canvas().pixels();
+                d.tap(end_next, range_y);
+                assert(!reader.pending_frame() && !reader.content_busy() && reader.canvas().pixels() == prefix);
+                d.hold(end_next, range_y);
+                assert(reader.pending_frame() && reader.content_busy());
+                d.present(); d.complete_content();
+                assert(reader.canvas().pixels() != prefix);
+                d.hold(end_previous, range_y); d.present(); d.complete_content();
+                assert(reader.canvas().pixels() == prefix);
+            } else {
+                d.hold(x, y); d.present(); d.complete_content();
+                assert(reader.view() == View::Dictionary);
+                const auto whole = reader.canvas().pixels();
+                const bool trailing = std::string(book) == "trailing";
+                // Word expansion cannot consume separators at either page boundary.
+                d.tap(trailing ? end_next : start_previous, range_y);
+                assert(!reader.pending_frame() && !reader.content_busy() && reader.canvas().pixels() == whole);
+                d.hold(trailing ? end_next : start_previous, range_y);
+                assert(!reader.pending_frame() && !reader.content_busy() && reader.canvas().pixels() == whole);
+                // Shrinking one word still falls back to a character step.
+                d.tap(trailing ? end_previous : start_next, range_y);
+                assert(reader.pending_frame() && reader.content_busy());
+                d.present(); d.complete_content();
+                assert(reader.canvas().pixels() != whole);
+            }
+            assert(reader.view() == View::Dictionary && reader.saved_record() == position);
+            d.tap(636, 692); d.present();
         }
     }
 }

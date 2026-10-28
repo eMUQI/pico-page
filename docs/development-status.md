@@ -2,6 +2,8 @@
 
 ## 当前摘要（2026-10-28）
 
+2026-10-28 D48 查词按钮表候选：查词面板底部改为范围、来源、翻页三行相连格，可按词／字调整选区端点并立即重查；下方面板移到 y 656 并覆盖阅读页脚。PR #166 的本地 review 修正限制字符回退仅用于收缩，保留按词超限时的长按入口，并统一跳过端点分隔符；第二轮以 Unicode 分类修正其他文字与日文标点的判断。Debug 与完整 ASan／UBSan 各 31/31、标准固件构建通过，host 画面已检查；未刷写，真机触控与近黑白显示待验证，详见下方本批记录。
+
 2026-10-28 D47 黑底语义候选：电源页休眠样式与帮助按键示例改为相连选择格，休眠叠加改为整行切换，锁屏图片改为与字体选择相同的文件列表，词典启停改为实线框动作按钮。Debug 31/31、app 的 ASan／UBSan 1/1 和标准固件构建通过，前后各 15 张 host 截图已检查；真机视觉与触控待验证，详见下方本批记录。
 
 2026-10-28 官网安装状态候选：下载、擦除、校验与发送重启指令等无百分比阶段使用循环等待动画，写入按实际传输回调显示进度；最后一段传输完成不再停留在 100%。完成提示只确认写入与校验，设备启动结果需用户观察。网页回归、构建和浏览器模拟流程通过，未部署或连接设备；详见下方本批记录。
@@ -890,3 +892,59 @@ Debug host 重新配置、构建和完整 CTest 31/31 通过。标准固件构�
 前后截图与来源记录位于 `artifacts/d47-fill-semantics-20261028/`，截图脚本和日志保留在本地 `.local/d47-fill-semantics-20261028/`，使用合成卡、合成词典和六个合成锁屏文件，没有个人书籍或设备数据。实现中发现设计系统的带框范围和 D46 原文与 D47 冲突，已在 PR #164 修正；锁屏图片原定的左侧圆点单选行经用户查看后改为字体选择的文件列表样式，规则同步更新。
 
 未验证：真机近黑白与快速档效果（HELP01、CFG09、PW07 相关项）、真实触控、草稿取消／保存与 K2 全刷的实体输入，以及目标端资源峰值。词典管理既有的 60 px 紧凑热区与专项字号不在本批范围。
+
+## 2026-10-28 · D48 查词按钮表与选区调整
+
+用户看过 15 种状态稿后授权实现，参考 KOReader 查词弹窗的相连按钮表（`dictquicklookup.lua` 的 `prev_dict／highlight／next_dict` 布局）和标记编辑对话框的边界调整（`readerhighlight.lua` 的点按按词、长按按字符）；只参考交互，没有复制代码。基线为干净的 `main c5a7b53`。
+
+`reader_dictionary` 新增纯逻辑 `adjust_selection()`：按拉丁词、其他字母或数字、或单个 Unicode 标量移动选区一端，按词时跨过空格和标点；收缩不会清空选区，越过可见页或超过 64 标量／255 字节时分别返回 NotFound 与 ResourceLimit，原选区不变。应用层只在选区和当前页文本上做有界扫描，在绘制时为四个范围格判断可用性，每格最多两次调用，不新增任务、分配大缓冲或文件访问。范围格动作复用现有手动选区提交：先取消在途查询再以新选区查询，来源导航重置，全屏释义回到面板；长按经由现有 `AppInput::long_press` 传入，不改动固件主循环。
+
+面板改为：72 px 词头行（词头、「第 N 页」、关闭）；说明行；释义区；底部 72／72／88 px 三行相连格。下方面板顶部由 568 改为 656（`1216 - 560`），覆盖阅读页脚；最后一行与 y 1128 页脚区重合，休眠准备提示沿用原有页脚像素保存与恢复。释义区在无多词条时由 6 行减为 5 行，有多词条时为 4 行；全屏为 20 行。已有释义出错时，翻页行中间格由「展开」改为「重试」，重载当前页后恢复「展开」。多词条控件文字由「词条 N／下一词条」改为「同名词条 N／下一条」，避免误解为跳到正文下一个词。
+
+测试：`dictionary_test` 增加 22 条范围步进断言，覆盖英文词、部分词、标点、中文、页边界、单字符、标量与字节上限和非法输入。`app_test` 把原有词典 UI 测试的坐标迁移到新布局，未删除断言；展开失败后的流程改为先点「重试」再「展开」；新增范围格测试，覆盖页首置灰、收缩与扩展后重查、查询中调整取代旧查询、长按、全屏调整回到面板，并确认阅读进度不变。
+
+环境同上一批：macOS 27.0 arm64、AppleClang 21.0.0、CMake 4.4.3；固件为 EIM 中的 ESP-IDF 6.1.0 与 BSP `5f3406de`，目标 ESP32-S3；`sdkconfig`、defaults 和依赖锁未改动。
+
+| 命令 | 结果 |
+|---|---|
+| `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`，`cmake --build build/host --parallel 4` | 通过。 |
+| `ctest --test-dir build/host -N`／`--output-on-failure` | 注册 31 项，31/31 通过。 |
+| sanitized 配置（见环境说明），`ctest --test-dir build/sanitized -R '^(app\|dictionary)$'` | 2/2 通过；本机不执行 LSan。 |
+| `sh tools/build_firmware.sh` | 通过，`pico_page.bin` 3,943,008 字节，比上一批记录的 3,939,552 字节多 3,456 字节；分区剩余 6%。与同提交干净工作树构建的映射对比，`libreader_app.a` 增 4,159 字节、`libreader_dictionary.a` 增 1,022 字节。未刷写。 |
+| `PICO_PAGE_DICTIONARY_SHOTS=… build/host/app_test … dictionary` | 生成 20 张词典 host 画面，已逐张查看无裁字、重叠或热区错位。 |
+| `python3 tools/check_handoff.py`、`git diff --check` | 通过。 |
+
+状态稿位于 `artifacts/dictionary-range-draft-20261028/`（HTML 静态示意，非固件渲染），host 渲染位于 `artifacts/dictionary-range-20261028/`，均使用合成书籍与合成词典。
+
+未验证：真机触控（范围格点按与长按时长、72 px 行的误触）、近黑白与快速档下不可用格能否与可用格区分、休眠提示覆盖词典最后一行的实际显示，以及 DICT05／DICT07 其余真机专项和目标端栈／堆峰值。「起点／终点」文字用户认为略难懂，本批保留；后续可在真机试用后再定。
+
+
+## 2026-10-28 · PR #166 选区调整 review 修正
+
+用户要求接手 PR #166。基线为干净的 `feat/dictionary-range-buttons 747d338d73b3d94a298adb603123bc61554065bb`，与远端 PR head 一致；原 head 的 Host checks 和 Website build 已通过，review 有两条未解决的 P2。本批在本地修正：按词操作仅在收缩单词且无法继续时回退到字符步进，扩展遇到页边分隔符不回退；范围格同时检查点按和长按是否存在合法结果，仅按词扩展超限时保留长按入口，点按保持选区。联动修正字符步进：与按词步进共用分隔符跳过逻辑，端点不再停在空格或标点上。D48、UI 说明、DICT05 与接口契约同步澄清。
+
+沿用既有 dictionary／app 测试，不新增测试目标。新增英文页首／页尾分隔符处点按和长按均无动作、单词收缩回退、手动选中超长英文词前缀后点按不动而长按可调整、反向长按恢复选区及阅读进度保持的断言；核心断言覆盖字符步进跨分隔符的两个方向与页边界。原有将空格留作字符步进端点的断言按产品约定改为下一有效字符。新增应用用例先复现页尾点按错误，修正收缩回退后再复现长按入口缺失；日志分别为 `.local/pr166-review/regression-before.log` 与 `regression-after-shrink-fix.log`。
+
+本批保持应用任务独占选区，查询仍复用既有取消、代次校验及 worker 交还路径。可用性判断至多额外计算一次字符步进，使用常量大小局部变量与当前可见页文本，不新增任务、驻留缓存或文件访问；分隔符扫描有当前页边界约束，无新增阻塞调用或等待 worker 退出。失败保持原选区与原查询；没有改变正文锚点、保存修订、存储协议或面板事务。未实测目标设备扫描耗时与整体交互延迟，不据 host 结果宣称性能改善。
+
+验证：`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、host 构建、CTest 注册检查及完整回归通过，实际注册 31 项、通过 31/31。按环境说明配置并构建 `build/sanitized`，`UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized -R '^(app|dictionary)$' --output-on-failure` 通过 2/2；本次未运行完整 sanitizer 套件或 LSan。标准 `sh tools/build_firmware.sh` 通过；首次配置受沙箱内 psutil 的 sysctl 查询限制，同一入口在允许的构建环境重跑。使用现有 EIM／ESP-IDF v6.1（`fff9895c82d744c7237be8847347bdd1b07c6643`），保留已有的链接脚本修改及 requirements 文件；BSP 固定提交为 `5f3406deec33304de8801046db583dec7c49e55b`。生效 sdkconfig、defaults 和依赖锁摘要与构建前一致。应用镜像为 `0x3c2a60` 字节，4 MiB 应用槽剩余 `0x3d5a0` 字节（6%），SHA-256 为 `2d6890b2feee67daf2ec54ec699bd029c1067ea1d9b58e98b238652ebeb860bd`；来源标识为 `0.4.0+g747d338.dirty`。host 保留既有 Homebrew 动态库系统版本链接警告。构建、回归、环境摘要与镜像来源保存在忽略目录 `.local/pr166-review/`。
+
+交接检查与 `git diff --check` 通过。本批未提交、推送、合并、刷写或发布，未改动远端 review 线程；原 head 的绿色 CI 不代表本地修正已在远端验证。下一步按授权提交推送后复核 CI／review；DICT05／DICT07 的实体点按与长按、近黑白及快速档可用性区分、慢 TF、面板遮挡和休眠提示恢复仍待真机验收。
+
+
+## 2026-10-28 · PR #166 修正提交与合并交接
+
+用户授权推送修正，并在 CI 与 review 均通过后压缩合并；如有新问题则继续修正。提交前确认工作区只包含上一批已验证的九个文件，本地分支与远端 PR head 均为 `747d338`，目标 `main` 仍为 `c5a7b53`。本批不再修改固件或测试逻辑，沿用上一批 Debug 31/31、相关 ASan／UBSan 2/2 和标准固件构建结果；交接检查与差异检查重新执行。推送后须在最终 head 上确认 Host checks、Website build 和完成的 review，处理全部有效发现；实际合并状态以 GitHub 记录为准。未授权刷写，DICT 专项真机验收继续保留。
+
+
+## 2026-10-28 · PR #166 Unicode 分类修正与本地 CI
+
+修正已提交并推送为 `4d5c761`，两条已修复的旧 review 线程已解决。该 head 的 Host checks 与 Website build 均未执行任何步骤，GitHub 检查注释明确指出账户付款或额度限制；用户随后授权「CI 本地能跑就跑，不然就忽略」，因此这两项远端基础设施失败不再作为合并阻塞，完成的 review 与有效问题修复仍是合并条件。未修改工作流、账户计费、测试断言强度或合并保护配置。
+
+本轮 review 发现：原查词单位白名单跳过西里尔字母等未列出的文字，日文区块又将中点包含为文字，导致按词和按字符调整提交错误范围。新增回归先复现该问题，再以 Unicode 16.0.0 的字母、组合标记和数字类别替换区块白名单。保留既有拉丁词与内部连接符规则，其他类别按单个有效标量移动；没有扩展初始自动选词或实现字素簇切分。测试覆盖西里尔文两个方向、日文中点两个方向、希腊文、天城文、阿拉伯数字、组合标记，以及跳过符号和未分配码点；两种手势均执行。UI 说明与 DICT05 同步补充。
+
+分类数据来自 Unicode 官方固定版本 `UnicodeData.txt`，SHA-256 为 `ff58e5823bd095166564a006e47d111130813dcf8bf234ef79fa51a870edb48f`；范围表、校验摘要的生成脚本、来源说明与 Unicode-3.0 完整许可位于 `firmware/components/reader_dictionary/third_party/unicode/`。只提取并合并 L／M／N 区间，未引入运行时库或第三方代码。表含 819 个区间、6,552 字节只读数据，二分查找最多约十次比较，不新增堆分配、任务或文件操作，扫描仍限于当前可见页。生成脚本的 `--check` 通过，另以本机 Unicode 16.0.0 的 Python 数据库逐项核对全部 1,114,112 个码点，结果一致。没有目标设备耗时或内存实测，不宣称真机性能改善。
+
+按当前完整 PR 差异运行 `python3 tools/ci_changes.py --base origin/main`，结果为 `host=true`、`web=false`，因此网站构建无适用输入变化。本地执行工作流中的四组 Python 测试：`test_ci_changes.py`、`test_deploy_firmware.py`、`test_cos_guard.py`、`test_publish_cos.py`，共 13 项通过。上一轮代码与本轮分类修正均补跑完整 sanitizer；最终本轮 `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、host 构建与完整 CTest 31/31 通过。`build/ci-sanitized` 使用工作流的 `-O1 -g`、Clang、ASan／UBSan、BSP 波形与 `PICO_PAGE_HOST_TRACE_EVENTS=ON` 配置，完整 CTest 注册及运行 31/31 通过；本机为 macOS，不作为 Linux CI 或 LSan 结果。首次该目录构建因 ccache 默认路径权限失败，指定工作流同样的仓库 `.local/ccache` 与临时目录后重跑通过，未修改依赖或测试内容。
+
+标准 `sh tools/build_firmware.sh` 使用上一批相同的 EIM／ESP-IDF 6.1、固定 BSP 与本地 SDK 差异通过，应用为 `0x3c43b0` 字节，比上一轮 `0x3c2a60` 增加 6,480 字节；4 MiB 应用槽剩余 `0x3bc50` 字节（6%）。生效配置与依赖锁未修改。交接检查与 `git diff --check` 通过；构建、测试、复现与固定版本 Unicode 源数据保存在 `.local/pr166-review/` 下的 `unicode-*` 日志及 `unicode/` 目录。下一步推送本轮并复核最终 head 的 review；实际合并状态以 GitHub 为准。未刷写或发布，实体触控、面板、慢 TF 与目标资源专项仍待验证。

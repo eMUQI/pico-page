@@ -4,7 +4,14 @@
 namespace pico_page {
 namespace {
 constexpr int kDictionaryPanelHeight = 560;
-constexpr int kDictionaryLowerTop = 568;
+// The lower panel covers the reading footer. The 96-pixel band between the panels exceeds the
+// largest configured body line (56 px x 1.65), so one side always leaves a single selected line visible.
+constexpr int kDictionaryLowerTop = 1216 - kDictionaryPanelHeight;
+// Panel rows: 72-pixel header, status line, definition, then a range, source and page row.
+// In the lower and full-screen panels the 88-pixel page row coincides with the reading footer,
+// so the sleep notice, which saves and redraws y >= footer_top, replaces exactly that row.
+constexpr int kDictionaryHeaderHeight = 72, kDictionaryDefinitionTop = 108;
+constexpr int kDictionaryRowHeight = 72, kDictionaryTableHeight = 2 * kDictionaryRowHeight + 88;
 constexpr std::size_t kDictionarySourcesPerPage = 5;
 // Marks an enabled dictionary that the latest scan no longer found.
 constexpr const char* kMissingDictionary = "Missing dictionary";
@@ -102,8 +109,8 @@ graphics::LayoutSpec ReaderApp::Impl::dictionary_layout(bool full) const {
     const int top = dictionary_top(full);
     const int height = full ? 1216 : kDictionaryPanelHeight;
     const int entry_height = dictionary_entry_base || dictionary_entries.size() > 1 || dictionary_more_entries ? 48 : 0;
-    spec.left = 36; spec.top = top + 200 + entry_height; spec.width = 612;
-    spec.height = height - 284 - entry_height;
+    spec.left = 36; spec.top = top + kDictionaryDefinitionTop + entry_height; spec.width = 612;
+    spec.height = height - kDictionaryDefinitionTop - entry_height - kDictionaryTableHeight;
     spec.font_px = 28; spec.line_height = 42; spec.indent_chars = 0;
     return spec;
 }
@@ -310,24 +317,16 @@ void ReaderApp::Impl::draw_dictionary() {
                                         cy - dictionary_icons::kSize / 2 + y,
                                         15 - alpha * (enabled ? 14 : 7) / 15);
             }
-        if (enabled) hits.push_back({cx - width / 2, cy - height / 2, width, height, id});
+        if (enabled && id) hits.push_back({cx - width / 2, cy - height / 2, width, height, id});
     };
-    text(body, heading, 24, top + 16, 30, 540, 1, true);
+    const bool page_ready = dictionary_definition && !content_loading;
+    const bool paged = page_ready && dictionary_notice.empty();
+    const auto page_label = "第 " + std::to_string(dictionary_page_number + 1) + " 页";
+    const int page_width = paged ? text_width(page_label, 24) : 0;
+    if (paged) text(page_label, 572 - page_width, top + 22, 24, page_width, 3);
+    text(body, heading, 24, top + 16, 30, (paged ? 556 - page_width : 572) - 24, 1, true);
     icon(DictionaryClose, dictionary_icons::kClose, 636, top + 36, 96, 72);
-    if (!settings.dictionary_enabled.empty()) {
-        const auto index = std::min(dictionary_source, settings.dictionary_enabled.size() - 1);
-        const auto& id = settings.dictionary_enabled[index];
-        const auto found = std::find_if(dictionary_items.begin(), dictionary_items.end(), [&](const auto& item) { return item.id == id; });
-        const auto name = !dictionary_name.empty() ? dictionary_name : found != dictionary_items.end() && !found->info.name.empty() ? found->info.name : basename(id);
-        text(body, name, 24, top + 112, 24, 236, 1, false);
-        icon(DictionaryPreviousSource, dictionary_icons::kPreviousSource, 316, top + 128, 88, 72,
-             !content_loading && index != 0 && !dictionary_previous_exhausted);
-        center(std::to_string(index + 1) + "/" + std::to_string(settings.dictionary_enabled.size()), 368, top + 114, 96, 23);
-        icon(DictionaryNextSource, dictionary_icons::kNextSource, 516, top + 128, 88, 72,
-             !content_loading && index + 1 < settings.dictionary_enabled.size() && !dictionary_next_exhausted);
-        if (!content_loading) hits.push_back({24, top + 92, 236, 72, DictionarySources});
-    }
-    canvas.line(0, top + 164, 683, top + 164, 10);
+    canvas.line(0, top + kDictionaryHeaderHeight, 683, top + kDictionaryHeaderHeight, 1, 2);
     const auto heading_scalars = decode_utf8(heading);
     const bool missing_glyphs = dictionary_missing_glyphs || std::any_of(heading_scalars.begin(), heading_scalars.end(),
         [&](char32_t scalar) { return body.missing(scalar); });
@@ -335,12 +334,12 @@ void ReaderApp::Impl::draw_dictionary() {
         dictionary_omitted_fields ? (missing_glyphs ? "部分内容无法显示，且有缺字。" : "部分内容无法显示。") :
         missing_glyphs ? "部分字符缺字，请更换支持音标和生僻字的字体。" :
         dictionary_next.degraded && dictionary_definition ? "部分格式已简化显示。" : "";
-    if (warning.empty() && heading != selected) text(body, selected + " → " + heading, 36, top + 172, 20, 612, 3, false);
-    else text(warning, 36, top + 172, 20, 612, 3);
+    if (warning.empty() && heading != selected) text(body, selected + " → " + heading, 36, top + 80, 20, 612, 3, false);
+    else text(warning, 36, top + 80, 20, 612, 3);
     if (dictionary_entry_base || dictionary_entries.size() > 1 || dictionary_more_entries) {
         const auto number = dictionary_entry_base + dictionary_entry + 1;
-        text("词条 " + std::to_string(number), 36, top + 208, 23, 380);
-        if (!content_loading) button(DictionaryNextEntry, "下一词条", 480, top + 200, 180, 44, false, 22);
+        text("同名词条 " + std::to_string(number), 36, top + kDictionaryDefinitionTop + 8, 23, 380);
+        if (!content_loading) button(DictionaryNextEntry, "下一条", 480, top + kDictionaryDefinitionTop, 180, 44, false, 22);
     }
     const auto area = dictionary_layout(dictionary_full);
     if (content_loading) wrapped("正在查词，可关闭取消…", 36, area.top + 8, 612, 24);
@@ -350,17 +349,61 @@ void ReaderApp::Impl::draw_dictionary() {
             wrapped("释义绘制失败，可关闭后重试。", 36, area.top + 8, 612, 24);
         }
     } else wrapped(dictionary_notice.empty() ? "暂无可显示释义。" : dictionary_notice, 36, area.top + 8, 612, 24);
-    if (!content_loading) {
-        if (dictionary_definition) {
-            canvas.line(12, bottom - 84, 672, bottom - 84, 10);
-            icon(Prev, dictionary_icons::kPreviousPage, 96, bottom - 44, 144, 72, dictionary_page_number != 0);
-            if (!dictionary_notice.empty()) button(DictionaryRetry, "重试", 180, bottom - 76, 144, 64, false, 23);
-            else center("第 " + std::to_string(dictionary_page_number + 1) + " 页", 180, bottom - 58, 144, 23);
-            icon(Next, dictionary_icons::kNextPage, 444, bottom - 44, 144, 72, !dictionary_page_end);
-            icon(DictionaryExpand, dictionary_full ? dictionary_icons::kCollapse : dictionary_icons::kExpand,
-                 636, bottom - 44, 96, 72);
-        } else if (settings.dictionary_enabled.empty()) button(DictionaryManage, "设置词典", 24, bottom - 76, 636, 64, false, 24);
-        else button(DictionaryRetry, "重新查询", 24, bottom - 76, 636, 64, false, 24);
+
+    // Connected cells share their rules; an unavailable cell keeps its place with a disabled label and no hit area.
+    const int range_top = bottom - kDictionaryTableHeight, source_top = range_top + kDictionaryRowHeight;
+    const int page_top = source_top + kDictionaryRowHeight;
+    canvas.line(0, range_top, 683, range_top, 1, 2);
+    canvas.fill_rect(0, source_top, 684, 1, 1); canvas.fill_rect(0, page_top, 684, 1, 1);
+    const auto cell = [&](int id, const std::string& label, int x, int y, int w, int h, bool enabled) {
+        center(label, x, y + (h - 28) / 2 - 3, w, 28, enabled ? 1 : 5);
+        if (enabled) hits.push_back({x, y, w, h, id});
+    };
+    const bool lookup_ready = !settings.dictionary_enabled.empty();
+    const std::pair<int, const char*> ranges[] = {{DictionaryStartPrevious, "‹ 起点"}, {DictionaryStartNext, "起点 ›"},
+                                                  {DictionaryEndPrevious, "‹ 终点"}, {DictionaryEndNext, "终点 ›"}};
+    for (int i = 0; i < 4; ++i) {
+        if (i) canvas.fill_rect(i * 171, range_top + 2, 1, kDictionaryRowHeight - 2, 1);
+        cell(ranges[i].first, ranges[i].second, i * 171, range_top + 2, 171, kDictionaryRowHeight - 2,
+             lookup_ready && (dictionary_range_step(ranges[i].first, false).has_value() ||
+                              dictionary_range_step(ranges[i].first, true).has_value()));
+    }
+    if (!lookup_ready) cell(DictionaryManage, "设置词典", 0, source_top + 1, 684, kDictionaryRowHeight - 1, true);
+    else {
+        const auto index = std::min(dictionary_source, settings.dictionary_enabled.size() - 1);
+        const auto& id = settings.dictionary_enabled[index];
+        const auto found = std::find_if(dictionary_items.begin(), dictionary_items.end(), [&](const auto& item) { return item.id == id; });
+        const auto name = !dictionary_name.empty() ? dictionary_name : found != dictionary_items.end() && !found->info.name.empty() ? found->info.name : basename(id);
+        const auto order = std::to_string(index + 1) + "/" + std::to_string(settings.dictionary_enabled.size());
+        canvas.fill_rect(171, source_top + 1, 1, kDictionaryRowHeight - 1, 1);
+        canvas.fill_rect(513, source_top + 1, 1, kDictionaryRowHeight - 1, 1);
+        const int middle = source_top + kDictionaryRowHeight / 2;
+        icon(DictionaryPreviousSource, dictionary_icons::kPreviousSource, 85, middle, 171, kDictionaryRowHeight - 1,
+             !content_loading && index != 0 && !dictionary_previous_exhausted);
+        icon(DictionaryNextSource, dictionary_icons::kNextSource, 598, middle, 171, kDictionaryRowHeight - 1,
+             !content_loading && index + 1 < settings.dictionary_enabled.size() && !dictionary_next_exhausted);
+        const std::uint8_t gray = content_loading ? 5 : 1;
+        const int order_width = text_width(order, 24);
+        const int name_width = std::min(text_width(body, name, 26), 342 - 40 - 16 - order_width);
+        const int left = 171 + (342 - name_width - 16 - order_width) / 2;
+        text(body, name, left, middle - 18, 26, name_width, gray, false);
+        text(order, left + name_width + 16, middle - 16, 24, order_width, gray);
+        if (!content_loading) hits.push_back({172, source_top + 1, 341, kDictionaryRowHeight - 1, DictionarySources});
+    }
+    const int page_height = bottom - page_top - 1;
+    canvas.fill_rect(228, page_top + 1, 1, page_height, 1); canvas.fill_rect(456, page_top + 1, 1, page_height, 1);
+    cell(Prev, "‹ 上一页", 0, page_top + 1, 228, page_height, page_ready && dictionary_page_number != 0);
+    cell(Next, "下一页 ›", 456, page_top + 1, 228, page_height, page_ready && !dictionary_page_end);
+    if (!content_loading && (dictionary_definition ? !dictionary_notice.empty() : lookup_ready))
+        cell(DictionaryRetry, dictionary_definition ? "重试" : "重新查询", 228, page_top + 1, 228, page_height, true);
+    else {
+        const auto label = dictionary_full ? "收起" : "展开";
+        const bool expandable = !content_loading && dictionary_definition;
+        const int label_width = text_width(label, 28), left = 228 + (228 - 40 - 8 - label_width) / 2;
+        const int middle = page_top + 1 + page_height / 2;
+        icon(0, dictionary_full ? dictionary_icons::kCollapse : dictionary_icons::kExpand, left + 20, middle, 0, 0, expandable);
+        text(label, left + 48, middle - 17, 28, label_width, expandable ? 1 : 5);
+        if (expandable) hits.push_back({229, page_top + 1, 227, page_height, DictionaryExpand});
     }
     canvas.line(0, bottom - 1, 683, bottom - 1, 1, 2);
 }
@@ -538,7 +581,23 @@ void ReaderApp::Impl::close_dictionary() {
     else recover_body();
 }
 
-void ReaderApp::Impl::dictionary_control(int id) {
+std::optional<dictionary::Selection> ReaderApp::Impl::dictionary_range_step(int id, bool by_scalar) const {
+    const auto edge = id == DictionaryStartPrevious || id == DictionaryStartNext ? dictionary::SelectionEdge::Begin
+                                                                                : dictionary::SelectionEdge::End;
+    const int direction = id == DictionaryStartPrevious || id == DictionaryEndPrevious ? -1 : 1;
+    auto selection = dictionary_selection;
+    const auto step = [&](bool scalar) {
+        return dictionary::adjust_selection(chapter.text, {page.start, page.end}, edge, direction, scalar, selection);
+    };
+    auto status = step(by_scalar);
+    // Shrinking a single word falls back to one scalar; expansion requires another lookup unit.
+    const bool shrinking = id == DictionaryStartNext || id == DictionaryEndPrevious;
+    if (!by_scalar && shrinking && status.status == dictionary::Status::NotFound) status = step(true);
+    if (!status) return std::nullopt;
+    return selection;
+}
+
+void ReaderApp::Impl::dictionary_control(int id, bool by_scalar) {
     if (id == Back || id == DictionaryClose) { back(); return; }
     if (view == View::DictionarySettings) {
         if (id == DictionaryScan) {
@@ -603,6 +662,14 @@ void ReaderApp::Impl::dictionary_control(int id) {
     if (dictionary_selecting) {
         if (id == DictionaryRetry && !dictionary_contact) submit_dictionary_selection();
         return;
+    }
+    // A range step replaces any lookup in flight; the full-screen view returns to the panel to show the selection.
+    if (id >= DictionaryStartPrevious && id <= DictionaryEndNext) {
+        if (settings.dictionary_enabled.empty()) return;
+        const auto selection = dictionary_range_step(id, by_scalar);
+        if (!selection) return;
+        dictionary_selection = *selection; dictionary_manual = true; dictionary_full = false;
+        submit_dictionary_selection(); return;
     }
     if (content_loading) return;
     if (id == DictionaryPreviousSource && dictionary_source && !dictionary_previous_exhausted) {

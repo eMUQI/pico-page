@@ -117,6 +117,66 @@ void selection_checks() {
     assert(!selection_candidates(U"valid", {0, 5}, {1, 3}, 4, false, candidates) && candidates.empty());
     const std::u32string invalid(1, static_cast<char32_t>(0xd800));
     assert(!selection_candidates(invalid, {0, 1}, {0, 1}, 0, true, candidates) && candidates.empty());
+
+    // Range steps: Latin words with the separators between them, Han one character at a time.
+    const auto step = [](std::u32string_view text, Selection visible, Selection from, SelectionEdge edge, int direction,
+                         bool by_scalar = false) {
+        const auto status = adjust_selection(text, visible, edge, direction, by_scalar, from);
+        return std::make_pair(status.status, from);
+    };
+    const auto is = [](const std::pair<Status, Selection>& value, Status status, std::size_t begin, std::size_t end) {
+        return value.first == status && value.second.begin == begin && value.second.end == end;
+    };
+    const std::u32string sentence = U"The lighthouse keeper, wrote.";
+    const Selection all{0, sentence.size()};
+    assert(is(step(sentence, all, {4, 14}, SelectionEdge::Begin, -1), Status::Ok, 0, 14));
+    assert(is(step(sentence, all, {4, 14}, SelectionEdge::End, 1), Status::Ok, 4, 21));
+    assert(is(step(sentence, all, {4, 21}, SelectionEdge::End, 1), Status::Ok, 4, 28));
+    assert(is(step(sentence, all, {4, 28}, SelectionEdge::End, -1), Status::Ok, 4, 21));
+    assert(is(step(sentence, all, {0, 21}, SelectionEdge::Begin, 1), Status::Ok, 4, 21));
+    assert(is(step(sentence, all, {4, 14}, SelectionEdge::Begin, 1), Status::NotFound, 4, 14));
+    assert(is(step(sentence, all, {4, 14}, SelectionEdge::End, -1), Status::NotFound, 4, 14));
+    assert(is(step(sentence, all, {4, 14}, SelectionEdge::Begin, 1, true), Status::Ok, 5, 14));
+    assert(is(step(sentence, all, {4, 14}, SelectionEdge::End, -1, true), Status::Ok, 4, 13));
+    assert(is(step(sentence, all, {4, 14}, SelectionEdge::End, 1, true), Status::Ok, 4, 16));
+    assert(is(step(sentence, all, {4, 16}, SelectionEdge::End, -1, true), Status::Ok, 4, 14));
+    assert(is(step(sentence, all, {4, 14}, SelectionEdge::Begin, -1, true), Status::Ok, 2, 14));
+    assert(is(step(sentence, all, {2, 14}, SelectionEdge::Begin, 1, true), Status::Ok, 4, 14));
+    assert(is(step(sentence, all, {22, 28}, SelectionEdge::End, 1, true), Status::NotFound, 22, 28));
+    assert(is(step(U" .apple", {0, 7}, {2, 7}, SelectionEdge::Begin, -1, true), Status::NotFound, 2, 7));
+    for (const bool by_scalar : {false, true}) {
+        const std::u32string mixed = U"apple мир end";
+        assert(is(step(mixed, {0, mixed.size()}, {0, 5}, SelectionEdge::End, 1, by_scalar), Status::Ok, 0, 7));
+        assert(is(step(mixed, {0, mixed.size()}, {10, 13}, SelectionEdge::Begin, -1, by_scalar), Status::Ok, 8, 13));
+        assert(is(step(U"本・語", {0, 3}, {0, 1}, SelectionEdge::End, 1, by_scalar), Status::Ok, 0, 3));
+        assert(is(step(U"本・語", {0, 3}, {2, 3}, SelectionEdge::Begin, -1, by_scalar), Status::Ok, 0, 3));
+        for (const auto text : {U"a Ω", U"a क", U"a ١", U"a \u0301"})
+            assert(is(step(text, {0, 3}, {0, 1}, SelectionEdge::End, 1, by_scalar), Status::Ok, 0, 3));
+        for (const auto text : {U"a ☃ b", U"a \u0378 b"})
+            assert(is(step(text, {0, 5}, {0, 1}, SelectionEdge::End, 1, by_scalar), Status::Ok, 0, 5));
+    }
+    assert(is(step(sentence, all, {4, 5}, SelectionEdge::End, -1, true), Status::NotFound, 4, 5));
+    assert(is(step(sentence, all, {0, 3}, SelectionEdge::Begin, -1), Status::NotFound, 0, 3));
+    assert(is(step(sentence, all, {22, 28}, SelectionEdge::End, 1), Status::NotFound, 22, 28));
+    // A partial word grows to the word boundary in a word step.
+    assert(is(step(sentence, all, {6, 10}, SelectionEdge::Begin, -1), Status::Ok, 4, 10));
+    assert(is(step(sentence, all, {6, 10}, SelectionEdge::End, 1), Status::Ok, 6, 14));
+    const std::u32string han = U"他把书合上，听见";
+    const Selection han_page{0, han.size()};
+    assert(is(step(han, han_page, {3, 4}, SelectionEdge::End, 1), Status::Ok, 3, 5));
+    assert(is(step(han, han_page, {3, 5}, SelectionEdge::End, 1), Status::Ok, 3, 7));
+    assert(is(step(han, han_page, {6, 7}, SelectionEdge::Begin, -1), Status::Ok, 4, 7));
+    assert(is(step(han, han_page, {0, 1}, SelectionEdge::Begin, -1), Status::NotFound, 0, 1));
+    assert(is(step(han, {2, 6}, {2, 5}, SelectionEdge::Begin, -1), Status::NotFound, 2, 5));
+    assert(is(step(han, han_page, {2, 5}, SelectionEdge::Begin, 1), Status::Ok, 3, 5));
+    const std::u32string run(66, U'a');
+    const std::u32string spaced = std::u32string(32, U'a') + U" " + std::u32string(32, U'b');
+    assert(is(step(spaced, {0, spaced.size()}, {0, 32}, SelectionEdge::End, 1), Status::ResourceLimit, 0, 32));
+    assert(is(step(run, {0, run.size()}, {0, 64}, SelectionEdge::End, 1, true), Status::ResourceLimit, 0, 64));
+    const std::u32string wide_run(90, U'\U00020000');
+    assert(is(step(wide_run, {0, 90}, {0, 63}, SelectionEdge::End, 1), Status::ResourceLimit, 0, 63));
+    assert(is(step(sentence, all, {4, 14}, SelectionEdge::End, 0), Status::InvalidFormat, 4, 14));
+    assert(is(step(sentence, {5, 14}, {4, 14}, SelectionEdge::End, 1), Status::InvalidFormat, 4, 14));
 }
 }  // namespace
 int main(int argc, char** argv) {

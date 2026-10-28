@@ -30,4 +30,15 @@ Result selection_candidates(std::u32string_view text, Selection visible,
                             Selection selection, std::size_t hit, bool manual,
                             std::vector<Candidate>& candidates);
 
+enum class SelectionEdge { Begin, End };
+/** Moves one edge of selection by one unit within visible; direction is -1 or 1.
+ * A unit is a Latin word, another Unicode letter, mark or number, or with by_scalar one Unicode
+ * scalar. Spaces and punctuation between units are crossed with the
+ * step and never left at the moved edge. Shrinking never empties the selection.
+ * Returns NotFound when the edge cannot move, ResourceLimit when the result would
+ * exceed the 64-scalar or 255-byte query limit; selection is unchanged on failure.
+ */
+Result adjust_selection(std::u32string_view text, Selection visible, SelectionEdge edge,
+                        int direction, bool by_scalar, Selection& selection);
+
 }  // namespace pico_page::dictionary

@@ -1000,7 +1000,7 @@ void ReaderApp::Impl::input(const AppInput &input) {
             if (input.event.input == Input::K2) force_refresh();
             else if (input.event.input == Input::K1 || input.event.input == Input::Previous) dictionary_control(Prev);
             else if (input.event.input == Input::K3 || input.event.input == Input::Next) dictionary_control(Next);
-        } else for (const auto& hit : hits) if (hit.contains(input.x, input.y)) { dictionary_control(hit.id); break; }
+        } else for (const auto& hit : hits) if (hit.contains(input.x, input.y)) { dictionary_control(hit.id, input.long_press); break; }
         return;
     }
     if (async_content) {

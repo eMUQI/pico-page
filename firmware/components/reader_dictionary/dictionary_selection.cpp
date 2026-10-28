@@ -1,5 +1,6 @@
 #include "pico_page/dictionary_selection.h"
 #include <algorithm>
+#include <iterator>
 
 namespace pico_page::dictionary {
 namespace {
@@ -20,6 +21,23 @@ bool word_at(std::u32string_view text, Selection visible, std::size_t at) {
     if (latin(text[at]) || mark(text[at])) return true;
     return joiner(text[at]) && at > visible.begin && at + 1 < visible.end &&
            (latin(text[at - 1]) || mark(text[at - 1])) && latin(text[at + 1]);
+}
+struct LookupRange { char32_t first, last; };
+constexpr LookupRange kLookupRanges[] = {
+#include "third_party/unicode/lookup_ranges.inc"
+};
+// Unicode categories avoid treating unlisted scripts as separators or block punctuation as letters.
+bool unit_at(std::u32string_view text, Selection visible, std::size_t at) {
+    const auto c = text[at];
+    if (word_at(text, visible, at)) return true;
+    const auto found = std::lower_bound(std::begin(kLookupRanges), std::end(kLookupRanges), c,
+        [](const LookupRange& range, char32_t scalar) { return range.last < scalar; });
+    return found != std::end(kLookupRanges) && found->first <= c;
+}
+std::size_t utf8_bytes(std::u32string_view text) {
+    std::size_t bytes = 0;
+    for (const auto c : text) bytes += c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4;
+    return bytes;
 }
 bool contains(Selection outer, Selection inner) {
     return outer.begin <= inner.begin && inner.begin < inner.end && inner.end <= outer.end;
@@ -121,8 +139,8 @@ Result selection_candidates(std::u32string_view text, Selection visible, Selecti
     forms(candidates, selection, original);
     std::u32string normalized;
     for (auto c : text.substr(selection.begin, selection.end - selection.begin)) {
-        if (c == U'\u00ad') continue;
-        if (c == U'\u2019') c = U'\'';
+        if (c == U'­') continue;
+        if (c == U'’') c = U'\'';
         normalized += c;
     }
     std::string word;
@@ -130,6 +148,47 @@ Result selection_candidates(std::u32string_view text, Selection visible, Selecti
     forms(candidates, selection, word);
     for (auto& c : word) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
     inflections(candidates, selection, word);
+    return {};
+}
+
+Result adjust_selection(std::u32string_view text, Selection visible, SelectionEdge edge,
+                        int direction, bool by_scalar, Selection& selection) {
+    if (visible.end > text.size() || !contains(visible, selection) || (direction != -1 && direction != 1)) return invalid();
+    const auto unit = [&](std::size_t at) { return unit_at(text, visible, at); };
+    const auto word = [&](std::size_t at) { return word_at(text, visible, at); };
+    auto next = selection;
+    if (edge == SelectionEdge::Begin && direction < 0) {
+        auto at = next.begin;
+        while (at > visible.begin && !unit(at - 1)) --at;
+        if (at == visible.begin) return {Status::NotFound, {}};
+        if (!by_scalar && word(at - 1)) while (at > visible.begin && word(at - 1)) --at;
+        else --at;
+        next.begin = at;
+    } else if (edge == SelectionEdge::Begin) {
+        auto at = next.begin;
+        if (!by_scalar && word(at)) while (at < next.end && word(at)) ++at;
+        else ++at;
+        while (at < next.end && !unit(at)) ++at;
+        if (at >= next.end) return {Status::NotFound, {}};
+        next.begin = at;
+    } else if (direction > 0) {
+        auto at = next.end;
+        while (at < visible.end && !unit(at)) ++at;
+        if (at == visible.end) return {Status::NotFound, {}};
+        if (!by_scalar && word(at)) while (at < visible.end && word(at)) ++at;
+        else ++at;
+        next.end = at;
+    } else {
+        auto at = next.end;
+        if (!by_scalar && word(at - 1)) while (at > next.begin && word(at - 1)) --at;
+        else --at;
+        while (at > next.begin && !unit(at - 1)) --at;
+        if (at <= next.begin) return {Status::NotFound, {}};
+        next.end = at;
+    }
+    if (next.end - next.begin > kMaxScalars || utf8_bytes(text.substr(next.begin, next.end - next.begin)) > kMaxBytes)
+        return too_long();
+    selection = next;
     return {};
 }
 
