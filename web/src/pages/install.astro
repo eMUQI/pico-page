@@ -90,13 +90,13 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
                         </div>
                       </div>
                       <div data-panel="writing" hidden>
-                        <div class="progress-line"><span data-el="stage"></span><span class="mono" data-el="percent"></span></div>
+                        <div class="progress-line"><span data-el="stage" role="status"></span><span class="mono" data-el="percent"></span></div>
                         <div class="track" role="progressbar" aria-label="安装进度" aria-valuemin="0" aria-valuemax="100"><div data-el="bar"></div></div>
                         <p class="keep">请勿拔线或关闭页面。</p>
                       </div>
                       <div data-panel="done" hidden>
-                        <p class="finished">安装完成。</p>
-                        <p class="after">设备会自动重启并显示书库。屏幕没有变化时，按住电源键约 10 秒强制关机，松开后再按住 1 秒以上开机。</p>
+                        <p class="finished">固件已写入并通过校验。</p>
+                        <p class="after">请等待设备启动并显示书库。本页无法确认设备是否已正常启动。屏幕没有变化时，按住电源键约 10 秒强制关机，松开后再按住 1 秒以上开机。</p>
                         <div class="choices"><a class="primary" href="#step3">下一步：放入书和字体 ↓</a></div>
                       </div>
                     </div>
@@ -157,7 +157,7 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
                 <p>保持供电，重新连接并安装一次。无法连接时，按上方说明进入烧录模式，再重新选择串口。</p>
               </details>
               <details>
-                <summary>安装完成，屏幕没变化</summary>
+                <summary>写入完成，屏幕没变化</summary>
                 <p>墨水屏断电后会保留旧画面。按住电源键约 10 秒强制关机，松开后再按住 1 秒以上开机；仍无变化时，重新连接并安装一次。</p>
               </details>
               <details>
@@ -175,11 +175,12 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
         const { url, version, sha256 } = card.dataset;
         const el = (name) => card.querySelector(`[data-el="${name}"]`);
         const steps = document.querySelectorAll(".tracker li");
-        const labels = { idle: "未连接", connected: "已连接", writing: "正在安装", done: "已完成", failed: "安装未完成" };
+        const labels = { idle: "未连接", connected: "已连接", writing: "正在安装", done: "写入与校验完成", failed: "安装未完成" };
         let transport, loader, md5;
 
         function show(phase, error = "", diagnostic = "") {
           card.dataset.phase = phase;
+          if (phase !== "writing") progress("", 0);
           el("status").textContent = labels[phase];
           el("error").textContent = error;
           el("error").hidden = !error;
@@ -238,11 +239,16 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
           }
         });
 
-        function progress(percent, stage) {
+        function progress(stage, percent = null) {
+          const track = el("bar").parentElement;
           el("stage").textContent = stage;
-          el("percent").textContent = `${percent}%`;
-          el("bar").style.width = `${percent}%`;
-          el("bar").parentElement.setAttribute("aria-valuenow", percent);
+          el("percent").hidden = percent === null;
+          el("percent").textContent = percent === null ? "" : `${percent}%`;
+          track.dataset.indeterminate = String(percent === null);
+          track.setAttribute("aria-label", stage || "安装进度");
+          el("bar").style.width = percent === null ? "" : `${percent}%`;
+          if (percent === null) track.removeAttribute("aria-valuenow");
+          else track.setAttribute("aria-valuenow", percent);
         }
 
         // Restarts an ESP32-S3 with its RTC watchdog, as esptool's watchdog_reset does. Read Pico
@@ -332,7 +338,7 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
         async function install() {
           window.dispatchEvent(new CustomEvent("pico-page:analytics", { detail: "install_start" }));
           show("writing");
-          progress(0, "正在下载固件");
+          progress("正在下载固件");
           let erasing = false;
           let stage = "请求固件", code = "DOWNLOAD_UNREACHABLE";
           let title = "暂时无法下载固件";
@@ -377,6 +383,7 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
             code = "VERIFY_FAILED";
             title = "未能完成固件校验";
             failure = "请刷新页面后重试。";
+            progress("正在校验下载的固件");
             const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", image));
             details["预期 SHA-256"] = sha256;
             details["实际 SHA-256"] = Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -386,21 +393,28 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
               failure = "请重新连接并重试。";
               throw new Error("The downloaded image does not match the published digest");
             }
-            stage = "擦除、写入或设备校验";
+            stage = "擦除整片闪存";
             code = "FLASH_FAILED";
             erasing = true;
-            progress(0, "正在擦除整片闪存");
+            progress("正在擦除整片闪存");
+            await loader.eraseFlash();
+            stage = "准备写入";
+            progress("正在准备写入");
             await loader.writeFlash({
               fileArray: [{ data: image, address: 0 }],
               flashMode: "keep",
               flashFreq: "keep",
               flashSize: "keep",
-              eraseAll: true,
+              eraseAll: false,
               compress: true,
               calculateMD5Hash: md5,
-              reportProgress: (_, written, total) =>
-                progress(Math.floor((written / total) * 100), written < total ? "正在写入" : "正在校验"),
+              reportProgress: (_, written, total) => {
+                // The final transfer callback precedes flash finalization and MD5 verification.
+                stage = written < total ? "写入固件" : "完成写入并校验";
+                progress(`正在${stage}`, written < total ? Math.floor((written / total) * 100) : null);
+              },
             });
+            progress("正在发送重启指令");
             show("done", (await release()) ? "" : "固件已写入并通过校验，但设备可能没有自动重启。请按住电源键约 10 秒强制关机，松开后再按住 1 秒以上开机。");
             window.dispatchEvent(new CustomEvent("pico-page:analytics", { detail: "install_success" }));
           } catch (error) {
@@ -409,6 +423,7 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
             details["耗时（毫秒）"] = Math.round(performance.now() - started);
             details["已进入擦写流程"] = erasing ? "是" : "否";
             const diagnostic = diagnosticInfo(code, stage, error, details);
+            progress("正在释放连接");
             await release();
             showFailure({
               title: erasing ? "安装未完成" : title,
@@ -734,12 +749,30 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
   .track {
     height: 8px;
     background: #ebe9e2;
+    overflow: hidden;
   }
   .track div {
     width: 0;
     height: 100%;
     background: var(--ink);
     transition: width 0.12s linear;
+  }
+  .track[data-indeterminate="true"] div {
+    width: 35%;
+    animation: install-wait 1.4s ease-in-out infinite;
+  }
+  @keyframes install-wait {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(286%); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .track div {
+      transition: none;
+    }
+    .track[data-indeterminate="true"] div {
+      animation: none;
+      transform: translateX(93%);
+    }
   }
 
   /* Card layout and font download */
