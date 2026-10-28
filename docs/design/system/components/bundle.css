@@ -10,6 +10,8 @@
   box-sizing: border-box;
 }
 .pp-stage *, .pp-stage *::before, .pp-stage *::after { box-sizing: border-box; }
+/* UI text line height is the font size plus 8 px, resolved per element. */
+.pp-stage * { line-height: calc(1em + 8px); }
 .pp-body { font-family: var(--font-body, "Pico Page WenKai", "LXGW WenKai", serif); }
 
 /* Buttons: primary is the ink fill, secondary a 2 px frame. One primary per area. */
@@ -39,7 +41,7 @@
 .pp-header__chapter { font: 700 30px/38px var(--font-body, "Pico Page WenKai", "LXGW WenKai", serif); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pp-header__meta { font: 22px/30px var(--font-body, "Pico Page WenKai", "LXGW WenKai", serif); color: var(--secondary, #333333); }
 .pp-badge {
-  align-self: center; height: 54px; padding: 0 16px; display: flex; align-items: center;
+  align-self: center; width: 148px; height: 54px; display: flex; align-items: center; justify-content: center;
   background: var(--ink, #111111); color: var(--paper, #ffffff); font-size: 20px; white-space: nowrap;
 }
 
@@ -126,3 +128,14 @@
 .pp-check__label { font-size: 24px; }
 .pp-check__value { margin-top: 16px; font-size: 28px; font-weight: 700; }
 .pp-check__note { margin-top: 16px; font-size: 24px; }
+
+/* Segmented group: joined cells sharing 2 px ink rules; the current cell is filled. */
+.pp-segmented { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); border: 2px solid var(--ink, #111111); }
+.pp-segmented__cell { display: flex; align-items: center; justify-content: center; height: 88px; font-size: 28px; }
+.pp-segmented__cell + .pp-segmented__cell { border-left: 2px solid var(--ink, #111111); }
+.pp-segmented__cell--current { background: var(--ink, #111111); color: var(--paper, #ffffff); font-weight: 700; }
+.pp-segmented--compact .pp-segmented__cell { height: 56px; font-size: 22px; }
+.pp-segmented--grid { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 612px; }
+.pp-segmented--grid .pp-segmented__cell { height: 90px; border-left: 0; }
+.pp-segmented--grid .pp-segmented__cell:nth-child(even) { border-left: 2px solid var(--ink, #111111); }
+.pp-segmented--grid .pp-segmented__cell:nth-child(-n+2) { border-bottom: 2px solid var(--ink, #111111); }
