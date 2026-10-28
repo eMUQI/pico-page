@@ -13,7 +13,7 @@
 | `docs/planning/` | 产品决定、路线图、里程碑、词典方案与调研 | 维护决定、范围、依赖和候选；实际完成度链接开发状态 |
 | `docs/development-status.md` | 当前实现、未验收项和批次记录，供维护者与 agent 共用 | 当前摘要只在状态变化时更新；每批记录对应命令、结果和未测项 |
 | `docs/releases/` | 面向用户的版本说明 | 按版本维护，官网和设备更新清单读取同一来源 |
-| `docs/design/` | 当前设计说明及原始 PNG／HTML，供设计、开发与 agent 查阅 | 原件不修改；当前交互以开发目录的 UI 说明为准 |
+| `docs/design/` | [设计系统](design/system/README.md)、当前设计说明及原始 PNG／HTML，供设计、开发与 agent 查阅 | 原件不修改；视觉规范以设计系统为准，当前交互以开发目录的 UI 说明为准 |
 | `docs/archive/` | 旧设计、计划和验证记录 | 只供追溯，不跟随代码更新；迁移时只修正必要链接并注明来源 |
 | `firmware/`、`host/`、`tests/`、`web/` 的 README | 对应子项目的构建、测试或部署入口 | 操作命令就近维护，跨模块规则用链接 |
 | `examples/`、`artifacts/`、组件 `third_party/` | 配置示例、截图证据、依赖来源与许可 | 示例随格式核对；证据按批次保留；许可随依赖变更 |
@@ -29,6 +29,7 @@
 | 产品行为、范围或取舍 | [产品决定](planning/decisions.md) | 实现说明采用现行规则；AGENTS 保留导航和关键底线 |
 | 组件职责与所有权 | [架构](development/architecture.md) | 具体调用细节在对应运行文档，规划不复制 |
 | 文件格式、路径与兼容性 | [存储约定](development/storage.md) | 示例同步核对；提交算法在存储实现，用户指南只说明操作和风险 |
+| 颜色、字体、线框、尺寸与组件外观 | [设计系统](design/system/README.md) | UI 说明只链接视觉规则，不复制；在线设计系统页面是只读副本，改动先提交仓库再同步 |
 | 页面与输入行为 | [UI 说明](development/ui-implementation.md) | 用户可见变化再核对三处用户说明；不把技术细节搬进帮助 |
 | 解析、排版、图片、同步、平台机制 | 对应 `docs/development/*-runtime.md` | 锁屏准备与 OTA 协议在平台文档；路线图只引用实现 |
 | 构建、测试入口与依赖 | 子项目 README、[环境](development/environment.md)、[依赖审查](development/dependency-review.md) | 测试总数查 `ctest -N`；实际命令输出只记当次结果 |

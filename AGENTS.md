@@ -17,12 +17,12 @@
 | 组件职责、调用与所有权边界 | `docs/development/architecture.md` |
 | 固件或共享核心修改 | `docs/development/embedded-development.md` 对应章节及 `docs/development/acceptance.md` 对应测试项 |
 | 存储、USB | `docs/development/storage.md`、`docs/development/store-implementation.md`、`docs/development/usb-storage-runtime.md` 对应部分 |
-| UI、文案或交互 | `docs/development/ui-implementation.md` 对应部分 |
+| UI、文案或交互 | `docs/development/ui-implementation.md` 对应部分；视觉规范查 `docs/design/system/` |
 | 构建、依赖或板级 | `docs/development/environment.md` |
 | 电源与 OTA 实现 | `docs/development/platform-runtime.md` 对应章节；页面行为查 UI 说明 |
 | 按键扩展或阶段规划 | `docs/planning/roadmap.md` 对应功能；阶段规划另查 `docs/planning/milestones.md` |
 
-项目需求冲突时：用户在当前任务中的明确更新 > `docs/planning/decisions.md` > 当前 architecture/storage/ui-implementation > `docs/design/original/` > `docs/archive/`。这是项目资料间的优先级，不覆盖工具权限和更高层规则。历史资料仅用于追溯，已废弃的决定不作为现行要求。以源码实际组件和调用链定位实现；架构中的职责名称不要求对应独立组件或任务。
+项目需求冲突时：用户在当前任务中的明确更新 > `docs/planning/decisions.md` > 当前 architecture/storage/ui-implementation/设计系统 > `docs/design/original/` > `docs/archive/`。这是项目资料间的优先级，不覆盖工具权限和更高层规则。历史资料仅用于追溯，已废弃的决定不作为现行要求。以源码实际组件和调用链定位实现；架构中的职责名称不要求对应独立组件或任务。
 
 ## 技术资料与候选参考
 

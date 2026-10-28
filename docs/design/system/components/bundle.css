@@ -1,0 +1,128 @@
+/* Pico Page device components, in device pixels on the 684 × 1216 canvas.
+   .pp-stage scales a 684 px strip down to the preview card; set --pp-zoom to change it. */
+.pp-stage {
+  width: 684px;
+  zoom: var(--pp-zoom, 0.5);
+  background: var(--paper, #ffffff);
+  color: var(--ink, #111111);
+  font-family: var(--font-ui, "Pico Page Fallback", "Noto Sans SC", sans-serif);
+  position: relative;
+  box-sizing: border-box;
+}
+.pp-stage *, .pp-stage *::before, .pp-stage *::after { box-sizing: border-box; }
+.pp-body { font-family: var(--font-body, "Pico Page WenKai", "LXGW WenKai", serif); }
+
+/* Buttons: primary is the ink fill, secondary a 2 px frame. One primary per area. */
+.pp-btn {
+  display: flex; align-items: center; justify-content: center;
+  height: 88px; padding: 0 12px;
+  border: 2px solid var(--ink, #111111); border-radius: 0;
+  background: var(--paper, #ffffff); color: var(--ink, #111111);
+  font: 28px/36px var(--font-ui, "Pico Page Fallback", "Noto Sans SC", sans-serif);
+}
+.pp-btn--primary { background: var(--ink, #111111); color: var(--paper, #ffffff); }
+.pp-btn--large { height: 96px; }
+.pp-btn--pressed { border-width: 6px; }
+/* Unavailable: no frame, disabled label, no hit area. Shape and gray differ, so near-black-and-white still tells it apart. */
+.pp-btn--disabled { border-color: transparent; color: var(--disabled, #555555); }
+
+/* Top bar */
+.pp-header {
+  height: 104px; display: flex; align-items: center; gap: 28px;
+  padding: 0 24px 0 28px; border-bottom: 3px solid var(--ink, #111111);
+}
+.pp-header__back { font-size: 28px; white-space: nowrap; }
+.pp-header__title { font-size: 32px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pp-header--reading { align-items: stretch; padding-left: 28px; gap: 0; }
+.pp-header--reading .pp-header__back { width: 104px; display: flex; align-items: center; }
+.pp-header__book { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.pp-header__chapter { font: 700 30px/38px var(--font-body, "Pico Page WenKai", "LXGW WenKai", serif); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pp-header__meta { font: 22px/30px var(--font-body, "Pico Page WenKai", "LXGW WenKai", serif); color: var(--secondary, #333333); }
+.pp-badge {
+  align-self: center; height: 54px; padding: 0 16px; display: flex; align-items: center;
+  background: var(--ink, #111111); color: var(--paper, #ffffff); font-size: 20px; white-space: nowrap;
+}
+
+/* Value row: title, optional description, right value; 2 px rule from x 36 to 647. */
+.pp-row {
+  min-height: 104px; margin: 0 36px; display: flex; align-items: center; gap: 16px;
+  border-bottom: 2px solid var(--rule, #cccccc);
+}
+.pp-row__text { flex: 1; min-width: 0; }
+.pp-row__title { font-size: 28px; line-height: 36px; }
+.pp-row__desc { font-size: 24px; line-height: 32px; color: var(--secondary, #333333); }
+.pp-row__value { font-size: 24px; white-space: nowrap; }
+.pp-row__value--bold { font-weight: 700; }
+
+/* Radio row, 116 px inside the 24 px inset. The dot marks the selection; the state word says whether it is saved. No frame. */
+.pp-choice { position: relative; height: 116px; margin: 0 24px; padding: 16px 120px 0 78px; }
+.pp-choice__ring {
+  position: absolute; left: 20px; top: 30px; width: 36px; height: 36px;
+  border: 3px solid var(--ink, #111111); border-radius: 50%;
+}
+.pp-choice--current .pp-choice__ring::after, .pp-choice--pending .pp-choice__ring::after {
+  content: ""; position: absolute; inset: 5px; border-radius: 50%; background: var(--ink, #111111);
+}
+.pp-choice__title { font-size: 28px; line-height: 36px; font-weight: 700; }
+.pp-choice__desc { margin-top: 10px; font-size: 24px; color: var(--secondary, #333333); }
+.pp-tag {
+  position: absolute; right: 12px; top: 18px; font-size: 24px; line-height: 32px; color: var(--ink, #111111);
+}
+
+/* Tool panel tabs with the close strip above. */
+.pp-strip {
+  height: 56px; border-top: 3px solid var(--ink, #111111);
+  display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding-right: 36px;
+  font-size: 24px; color: var(--secondary, #333333);
+}
+.pp-tabs { display: grid; grid-template-columns: repeat(4, 171px); height: 100px; border-block: 2px solid var(--ink, #111111); }
+.pp-tab { display: flex; align-items: center; justify-content: center; font-size: 28px; }
+.pp-tab + .pp-tab { border-left: 2px solid var(--ink, #111111); }
+.pp-tab--active { background: var(--ink, #111111); color: var(--paper, #ffffff); font-weight: 700; }
+
+/* Reading toolbar: five cells, 137 px each (last 136). */
+.pp-toolbar { display: grid; grid-template-columns: repeat(4, 137px) 136px; height: 136px; border-top: 3px solid var(--ink, #111111); }
+.pp-tool { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font-size: 28px; }
+.pp-tool + .pp-tool { border-left: 2px solid var(--ink, #111111); }
+.pp-tool svg { width: 40px; height: 40px; }
+
+/* Typography parameter grid and stepper. */
+.pp-grid { display: grid; grid-template-columns: repeat(4, 150px); gap: 12px; padding: 0 24px; }
+.pp-cell {
+  height: 80px; border: 1px solid var(--ink, #111111);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+}
+.pp-cell__name { font-size: 24px; }
+.pp-cell__value { font-size: 24px; font-weight: 700; }
+.pp-cell--selected { border: 3px solid var(--ink, #111111); }
+.pp-cell--action { font-size: 24px; }
+.pp-stepper { display: grid; grid-template-columns: 150px 1fr 150px; gap: 12px; padding: 0 24px; align-items: center; }
+.pp-stepper .pp-btn { font-size: 40px; }
+.pp-stepper__value { text-align: center; font-size: 32px; font-weight: 700; }
+
+/* Footer bar: notice or pager, dividers at x 205 and 479. */
+.pp-footer { height: 96px; border-top: 2px solid var(--ink, #111111); display: grid; grid-template-columns: 205px 274px 205px; font-size: 24px; }
+.pp-footer > * { display: flex; align-items: center; }
+.pp-footer__prev { padding-left: 36px; border-right: 2px solid var(--ink, #111111); }
+.pp-footer__count { justify-content: center; color: var(--secondary, #333333); }
+.pp-footer__next { justify-content: flex-end; padding-right: 36px; border-left: 2px solid var(--ink, #111111); }
+.pp-footer--notice { display: flex; align-items: center; padding: 0 36px; }
+
+/* Reading footer, 88 px from y 1128; no rule. */
+.pp-reading-footer { height: 88px; display: flex; align-items: center; justify-content: space-between; padding: 0 36px; font-size: 24px; }
+.pp-battery { display: flex; align-items: center; gap: 10px; }
+.pp-battery__case { position: relative; width: 32px; height: 18px; border: 2px solid var(--ink, #111111); margin-right: 3px; }
+.pp-battery__case::after { content: ""; position: absolute; right: -5px; top: 4px; width: 3px; height: 6px; background: var(--ink, #111111); }
+.pp-battery__fill { position: absolute; left: 2px; top: 2px; bottom: 2px; background: var(--ink, #111111); }
+
+/* Status check cell, 196 × 176. Failed: 3 px frame plus an ink 「!」 block; not run: solid disabled frame. */
+.pp-check { position: relative; width: 196px; height: 176px; padding: 20px; border: 2px solid var(--ink, #111111); display: flex; flex-direction: column; }
+.pp-check--failed { border-width: 3px; }
+.pp-check--waiting { border-color: var(--disabled, #555555); color: var(--disabled, #555555); }
+.pp-check__alert {
+  position: absolute; right: 14px; top: 14px; width: 30px; height: 30px;
+  background: var(--ink, #111111); color: var(--paper, #ffffff); font-size: 24px; line-height: 30px; font-weight: 700; text-align: center;
+}
+.pp-check__label { font-size: 24px; }
+.pp-check__value { margin-top: 16px; font-size: 28px; font-weight: 700; }
+.pp-check__note { margin-top: 16px; font-size: 24px; }

@@ -1,0 +1,35 @@
+<!-- @dsCard height=288 -->
+<style>
+  html, body { margin: 0; background: var(--paper, #ffffff); }
+  .cover { position: relative; width: 960px; height: 288px; overflow: hidden; background: var(--paper, #ffffff); }
+  .cover svg { position: absolute; left: 0; top: 0; }
+  .ink { fill: var(--ink, #111111); }
+  .secondary { fill: var(--secondary, #333333); }
+  .disabled { fill: var(--disabled, #555555); }
+  .rule { fill: var(--rule, #cccccc); }
+  .paper { fill: var(--paper, #ffffff); }
+  .name { position: absolute; left: 48px; bottom: 48px; max-width: 440px; }
+  .name h1 { margin: 0; font: 400 80px/0.95 var(--font-body, "Pico Page WenKai", serif); color: var(--ink, #111111); }
+  .name p { margin: 16px 0 0; font: 14px/1.4 var(--font-ui, "Pico Page Fallback", sans-serif); color: var(--secondary, #333333); }
+</style>
+<div class="cover">
+  <!--
+    blocks: ink slab 192 × 288 (4 × space-48, full height); secondary 240 × 104 (top-bar); disabled 144 × 96 (button-large); rule 96 × 184.
+    arrangement: one tall ink page with satellites stacked flush to the right edge, square corners (radius-none), like the 104 px top bar over a screen.
+    pattern: literal motif, the reading page itself: five paper text lines at a space-36 pitch, the last one short, and the bookmark ribbon cut out of the slab's top edge; the README's rule "square frames, state by line weight, one ink fill" chose it.
+    scales: pitch space-36, inset space-36, line 4 px (border-emphasis + 1), ribbon 48 × 76 with a 24 px notch (2 × bookmark ribbon); radius-none throughout.
+  -->
+  <svg width="960" height="288" viewBox="0 0 960 288">
+    <rect class="ink" x="528" y="0" width="192" height="288"/>
+    <path class="paper" d="M636 0h48v76l-24-24-24 24Z"/>
+    <rect class="paper" x="564" y="108" width="120" height="4"/>
+    <rect class="paper" x="564" y="144" width="120" height="4"/>
+    <rect class="paper" x="564" y="180" width="120" height="4"/>
+    <rect class="paper" x="564" y="216" width="120" height="4"/>
+    <rect class="paper" x="564" y="252" width="64" height="4"/>
+    <rect class="secondary" x="720" y="0" width="240" height="104"/>
+    <rect class="disabled" x="720" y="104" width="144" height="96"/>
+    <rect class="rule" x="864" y="104" width="96" height="184"/>
+  </svg>
+  <div class="name"><h1>Pico Page</h1><p>读自己的书，接着读下去。</p></div>
+</div>

@@ -45,6 +45,7 @@ Issue #53 的完整长节点映射候选已于 2026-10-22 撤回：额外 128 Ki
 - **阅读与显示**：章节缓存和整页图片缓存的同条件设备对照；DP08／DP10、IN07／IN08／IN09、CFG09 的非正文保持、翻页页脚、水波纹方向、充电、键盘、轻扫及字体选择；持续阅读和低内存降级。历史单机短时通过不替代完整专项。
 - **电源与存储**：PW02／PW05／PW07 的长期休眠、电源键取消、透明锁屏冷／热轮播与保存失败；R1 实际断电、USB 供电状态；CK01／CK02 的保时与故障；TF 掉电及 USB 异常交接。各项已有部分记录，仍须逐项核对。
 - **网络、同步与更新**：真实 KOReader 双向接续与异常恢复；Issue #49 的 HTTPS／显示交叠；跨分段上传百分比倒退；Issue #74 的缓存安装入口真机检查；OTA03–OTA06 的重启安装、首次启动确认及回滚；WIFI09 的手机浏览器、大字体、锁屏图片与超限场景。
+- **界面视觉**：按 D46 在固件中实现[设计系统](design/system/README.md)「固件尚未实现的规则」所列六项，并更新截图、核对近黑白与快速档下的不可用状态。
 - **产品与后续候选**：书签、内置说明和书库交互的完整真机验收；Issue #30 的调度／休眠输入整理，以及 Issue #37 尚未实现的诊断场景。竖排、繁体中文、蓝牙、自定义按键等继续按[路线图](planning/roadmap.md)安排，不预先指定发布版本。
 - **发布与维护**：项目总许可证及二进制分发义务仍需收尾。按最后记录，COS 自动封禁定时器已暂停，费用与流量告警保留；首次上传的 `UserNetworkTooSlow` 不算已根治。恢复与部署方法见[固件托管](development/firmware-hosting.md)，本次未复核线上状态。
 
@@ -777,3 +778,11 @@ macOS AppleClang 21、CMake 4.4.3：重新配置和构建 Debug，CTest 实际�
 本机仍为 macOS AppleClang 21、CMake 4.4.3，使用既有 EIM ESP-IDF v6.1 `fff9895c82d744c7237be8847347bdd1b07c6643` 和 BSP `5f3406deec33304de8801046db583dec7c49e55b`，保留 SDK 原有链接脚本差异及额外 requirements 文件，未修改依赖锁、补丁或 sdkconfig。词典修复在原 PR 基线上重新配置和构建，完整 Debug CTest 31/31（57.49 秒）及 ASan／UBSan `app` 1/1（103.99 秒）通过；日志见 `.local/dictionary-review-{configure,build,registered,debug,sanitized-configure,sanitized-build,sanitized}.log`；本机不执行 LSan。标准 `sh tools/build_firmware.sh` 及来源记录见 `.local/dictionary-review-firmware.log` 和 `firmware/build/provenance.json`；干净检出的交接结果记录在 `.local/dictionary-review-clean-handoff.log`。本批未刷写或发布，最终 CI／review 与合并状态由 PR #160 的对应提交记录确认。
 
 合并前同步主线 `ef9bc53b`（PR #159 的 IO 扩展器逐寄存器读取修复）。冲突仅为开发记录末尾的并行追加，双方历史均保留，主线代码与测试原样整合。整合后的 Debug 注册／完整回归、ASan／UBSan `sleep_io` 和标准固件记录分别位于 `.local/dictionary-review-integrated-{configure,build,registered,debug,sanitized-build,sanitized}.log` 与上述固件日志；最终提交仍须通过对应 CI 和重新 review 后才合并。
+
+## 2026-10-28 · 设计系统入库与 D46 视觉规则
+
+从固件绘制代码、原始 tokens 和官网样式整理出设计系统，以中文写入 `docs/design/system/`：视觉规范 README、`tokens.json`、11 个组件的使用规则与静态预览（`preview.html`，引用同目录 `bundle.css`）以及封面。用户在前后对比稿中确认四项调整，记为 D46：不可用控件不画框只留淡色文字、单选行以圆点和「当前」「待保存」文字表达状态、界面字号收为 32／28／24／20 四档、检测格去虚线并为失败格加「!」，以及「刷新模式」统一为 28 px。UI 说明中六处不可用画法改为链接设计系统并按 D46 表述；D39 注明由 D46 修订；文档导航、设计说明和 AGENTS 的任务表与资料优先级加入设计系统。
+
+字体文件不入库，交接检查也不允许新增字体；README 写明界面字体位置和正文子集的生成来源。claude.ai 上的设计系统页面作为只读副本，改动先提交本目录再同步。
+
+本机 Python 3.14.7 运行 `python3 tools/check_handoff.py`（673 项通过）和 `git diff --cached --check` 通过。本批只改文档，未运行 host、sanitizer 或固件构建，未刷写设备。D46 尚未在固件实现；实现时按设计系统差异清单修改绘制代码，并做近黑白和快速档真机核对。
