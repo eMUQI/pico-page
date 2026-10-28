@@ -655,11 +655,11 @@ static void content_font_test(const fs::path& root, const fs::path& fixtures, co
         graphics::Canvas expected;
         int x = 36;
         for (const auto c : graphics::decode_utf8(folder)) {
-            assert(expected_font.draw(expected, c, x, 226 + expected_font.metrics().ascender));
+            assert(expected_font.draw(expected, c, x, 238 + expected_font.metrics().ascender));
             x += expected_font.advance(c);
         }
-        const auto label = crop(expected, 36, 220, 300, 65);
-        assert(crop(app.canvas(), 36, 220, 300, 65) == label);
+        const auto label = crop(expected, 36, 232, 300, 65);
+        assert(crop(app.canvas(), 36, 232, 300, 65) == label);
         const auto current_header = crop(app.canvas(), 0, 0, 684, 104);
         if (header.empty()) header = current_header;
         else assert(current_header == header);
@@ -685,7 +685,7 @@ static void content_font_test(const fs::path& root, const fs::path& fixtures, co
         assert(app.saved_record() == saved);
         d.tap(342, 500); d.present(); d.tap(50, 50); d.present();
         assert(app.view() == View::Library);
-        assert(crop(app.canvas(), 36, 470, 300, 65) == label);
+        assert(crop(app.canvas(), 36, 482, 300, 65) == label);
         assert((app.cache_usage().library_glyph_bytes > 0) == (mode == "valid"));
         assert(read(card / "PicoPage/settings.toml") == config);
         if (mode == "valid") {
@@ -693,7 +693,7 @@ static void content_font_test(const fs::path& root, const fs::path& fixtures, co
             assert(!app.cache_usage().library_glyph_bytes);
             d.tap(342, 500); d.present(); d.tap(50, 50); d.present();
             assert(sleep_frame(app)); d.present(); app.wake(); d.present();
-            assert(app.view() == View::Library && crop(app.canvas(), 36, 470, 300, 65) == label);
+            assert(app.view() == View::Library && crop(app.canvas(), 36, 482, 300, 65) == label);
         }
         assert(app.prepare_usb_transfer());
         const auto released = app.cache_usage();
@@ -1315,7 +1315,7 @@ static void library_resume_pagination_test(const fs::path& root, const fs::path&
         }
         const int slot = target == 2 ? 0 : page_size - 1;
         const int x = grid ? 36 + (slot % 3) * 214 + 80 : 100;
-        const int y = grid ? 454 + (slot / 3) * 320 + 100 : 432 + slot * 126 + 60;
+        const int y = grid ? 466 + (slot / 3) * 320 + 100 : 444 + slot * 126 + 60;
         driver.tap(x, y); driver.present(); driver.complete_content();
         assert(app.view() == View::Reading);
         assert(store.load_last_book(detail) == std::optional<std::string>(book_path(target * page_size + slot)));
@@ -2423,7 +2423,9 @@ static void update_test(const fs::path& root) {
 
         // Installation needs 20% or a charger; an unknown level without one is refused.
         step(app, driver, 300, 1040); assert(!app.update_busy());
+        assert(app.canvas().pixel(24, 1040) == 1);
         app.set_battery(19); step(app, driver, 300, 1040); assert(!app.update_busy());
+        assert(app.canvas().pixel(24, 1040) == 1);
         app.set_battery(std::nullopt, true); driver.tap(300, 1040); driver.present();
         assert(app.update_busy() && !app.open_book("Books/none.epub"));
         auto download = app.take_update_request();
@@ -3772,15 +3774,15 @@ int main(int argc, char** argv) {
         assert(app.initialize()); driver.present();
         // The card view shows the same cached thumbnail at full size.
         driver.tap(610, 384); driver.present();
-        assert(app.canvas().pixel(300, 560) == 0 && app.canvas().pixel(270, 610) == 5);
+        assert(app.canvas().pixel(300, 572) == 0 && app.canvas().pixel(270, 622) == 5);
         driver.refresh();
         const auto original_cover = read(card / "Books/cover.epub");
         write(card / "Books/cover.epub", "broken");
         driver.tap(520, 384); driver.present(); driver.tap(610, 384); driver.present();
-        assert(app.canvas().pixel(300, 560) == 15);
+        assert(app.canvas().pixel(300, 572) == 15);
         write(card / "Books/cover.epub", original_cover);
         driver.tap(520, 384); driver.present(); driver.tap(610, 384); driver.present();
-        assert(app.canvas().pixel(300, 560) == 0 && app.canvas().pixel(270, 610) == 5);
+        assert(app.canvas().pixel(300, 572) == 0 && app.canvas().pixel(270, 622) == 5);
         driver.tap(520, 384); driver.present();
         assert(app.view() == View::Library);
         opened(app, "Books/cover.epub");
@@ -3816,9 +3818,9 @@ int main(int argc, char** argv) {
             return app.canvas().pixel(x, y);
         };
         // A white thumbnail counts as no cover: the card shows the title placeholder with its rule.
-        assert(grid_pixel(300, 560) == 15 && grid_pixel(270, 682) == 1);
+        assert(grid_pixel(300, 572) == 15 && grid_pixel(270, 694) == 1);
         write(cached, "stale");
-        assert(grid_pixel(300, 560) == 0 && grid_pixel(270, 610) == 5);
+        assert(grid_pixel(300, 572) == 0 && grid_pixel(270, 622) == 5);
         assert(read(cached).size() > thumbnail_bytes);
         // A previous decoder's negative cache must not hide a newly supported cover.
         auto obsolete = read(cached);
@@ -3827,7 +3829,7 @@ int main(int argc, char** argv) {
         obsolete.resize(obsolete.size() - thumbnail_bytes);
         write(cached, obsolete);
         const auto decodes = graphics::image_decode_count();
-        assert(grid_pixel(300, 560) == 0 && grid_pixel(270, 610) == 5);
+        assert(grid_pixel(300, 572) == 0 && grid_pixel(270, 622) == 5);
         assert(graphics::image_decode_count() == decodes + 1);
         assert(read(cached).find("PPCOVER3\n") == 0 && read(cached).size() > thumbnail_bytes);
     }

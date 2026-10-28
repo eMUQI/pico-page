@@ -26,7 +26,7 @@ header{padding:18px 20px;border-bottom:3px solid #111}h1{font-size:22px;margin:0
 <div class="pick"><label class="drop" id="drop"><input id="files" type="file" accept=".epub,.txt,.ttf,.otf,.png,.jpg,.jpeg" multiple hidden><span id="drop-label">选择书籍、字体或锁屏图片</span></label>
 <div class="hint kinds"><b>书籍</b><span>EPUB、TXT · 最大 64 MiB</span><b>字体</b><span>TTF、OTF · 最大 32 MiB</span><b>锁屏图片</b><span>PNG、JPEG · 最大 2 MiB</span></div>
 <p class="hint">存入 Books、Fonts、LockScreens，同名不覆盖。</p></div>
-<div class="result" id="result" role="status" hidden><b id="result-title"></b><span>在设备上点“结束传书”，书库和字体列表随即更新。</span></div>
+<div class="result" id="result" role="status" hidden><b id="result-title"></b><span>在设备上点「结束传书」，书库和字体列表随即更新。</span></div>
 <div class="counts" id="counts" hidden><span id="count"></span><span id="tally"></span></div>
 <div class="list" id="list"></div>
 <div class="foot"><button class="btn" id="stop" hidden>停止上传</button><button class="btn primary" id="again" hidden>继续选择文件</button><p class="hint" id="keep"></p></div>

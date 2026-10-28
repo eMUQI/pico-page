@@ -1,0 +1,51 @@
+{
+  "captured_at": "2026-10-28T12:27:51.847135+08:00",
+  "base_commit": "1ce9c1de85450654f8c1d158727a17bf7fee13b0",
+  "source_diff_sha256": "ad56df38d50319813c07c57c9158b855bfbb81b6db28f8d777022f4d5755f436",
+  "canvas": [
+    684,
+    1216
+  ],
+  "before_count": 10,
+  "after_count": 16,
+  "source": "Synthetic original text; built-in UI font and LXGWWenKai-Regular; mock network results; isolated file-write failure fixtures. No device operations.",
+  "binaries": {
+    ".local/design-system-implementation-20261028/pico_page-before": "6f037e97d1bc1a1496cbe94c7bbf184d79a98c42131856a6d48651907e3ba11b",
+    "build/host/pico_page": "b5ae625990d9cc6ad6c02a255cccbebed046ae6d085e35dee77c1d9a17bdf27c",
+    "firmware/build/pico_page.bin": "2b320326c268cc85dbf3d0230b5e27158cff1d8403bdb85c959dba6c921f2251"
+  },
+  "fonts": {
+    "firmware/components/reader_graphics/fonts/PicoPageFallback.otf": "5d1d013b2a5e347bbf0650205b19645904b91460f0be3febf8efc349c9992c84",
+    ".local/design-system-implementation-20261028/card-before/Fonts/LXGWWenKai-Regular.ttf": "8d6ba638ac9553413354cfaab97637c1cd778444e259441ea1e5f8fb2c697fba"
+  },
+  "screenshots": {
+    "before/wifi.png": "379093e6bb0914321d84bd122f2ee89e854516b0f0058872aa4557a259ec7927",
+    "before/font-picker.png": "8a6228d72ca8ef633a31abcb3ae1c2fbcae1d6d8f1dd396927c3417446720213",
+    "before/settings.png": "2f78677ddf204b2558fa643775978214e9645f4c620c6a85a63fc39c63458ebc",
+    "before/keyboard.png": "789ce071c9573c8f3261e76631b7db64dbc42fb5d24f52015a44a158b9efb854",
+    "before/typography.png": "89b2ee2c4466a81469a45a6fb8414f9812f5bd0c808b653b35461028b5b7b1a3",
+    "before/library.png": "9f83b1096089dd6cb49d85391cbc153ee471fc9f18773e9fb370cf2feeca22cd",
+    "before/tools.png": "899e349ce8c50b296bb2de1bdbb3c53053b4d2d52a7f7385605976ead2e39a0d",
+    "before/reading-settings.png": "13da35f4383f9f6deb7ebc10058c5181af57a7043c8b21c081eac117357396f7",
+    "before/library-settings.png": "4e2a11864e0703aa045b232cace6b87114f9e3d271d6b32d0191b7f68f74411f",
+    "before/refresh.png": "a62589cab995b7f7c997a6603b07be2608260c62ef36b275ceac33b114cec7f9",
+    "after/wifi.png": "032224d4bcbe7db96de86fdc671dbef26d42ce7dfff9080455f485873834e0cf",
+    "after/font-picker.png": "dfe6465c83b7b6c38c3ce3af08b1d476569c74d85262648e1f84604a041042f3",
+    "after/settings.png": "95c986c06e36d514a2c365a6a971e053c80592ebe35d6b9b911f322efd3c8eae",
+    "after/keyboard.png": "500f7baa6b781070980ac6b178ab26830ccfd64ad08ff7a40bd3c32560c5f175",
+    "after/typography.png": "211f01b2455f75ea51a91c2acc0e2650221739f637c5c9f719b02fcb6c243825",
+    "after/check-internet-failed.png": "f57bc36e9d341ea762340f9cc87e26a97619fdd75b549e9c866a83d8305e6493",
+    "after/update-checking.png": "14593ca4b2bc60ee4e593f0075e5002f5fae2bbac83f04627247e08aece4f73b",
+    "after/library.png": "9f83b1096089dd6cb49d85391cbc153ee471fc9f18773e9fb370cf2feeca22cd",
+    "after/tools.png": "17f4be70dc74c90139628496717d7f38155a63448957d12ec42768ca2e50296a",
+    "after/library-save-failed.png": "4b228e48c4d8b0ae27372f5bb6cb09da19659f043e6c91f5d7c17dbebc802c44",
+    "after/check-server-failed.png": "1984a86efd1d3639e7218b0ad03a1ac1d7b6110aa6ec83e246067bad7e10dc1c",
+    "after/reading-settings.png": "66c204d1fa83f8392dcc5f01f9a6b770644a3c1df8acbde3d31a377ab0284b51",
+    "after/library-settings.png": "a8555b41267a374ed77ff877c9c97b39833dad2ad083e401f7c806ed8b93ff40",
+    "after/power-save-failed.png": "f75402900de2c09ae8476f41c5c39a1282e69fd675bb7d93ad7a630e63cc31b0",
+    "after/check-wifi-failed.png": "93779c76b1a21faebd0bfad90dd6dfd882c79519186c184ba3b5017a6e2086f2",
+    "after/refresh.png": "f34c6cfc4f24586daf976ef2bde406a82b45943d49e472cc34133cffc9a2ca92"
+  },
+  "scripts_logs": ".local/design-system-implementation-20261028",
+  "limitations": "Host frames only; no panel optical, touch, resource or timing acceptance. Common page captures precede final library failure copy edit; that edit is covered by the final injected library-save-failed capture."
+}

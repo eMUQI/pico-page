@@ -234,9 +234,9 @@ void ReaderApp::Impl::draw_entry() {
         x += ui.advance(shown[i]);
     }
     ui.draw(canvas, U'|', x, baseline, 5, false);
-    button(EntryClear, "清空", 540, 284, 120, 60, false, 24);
-    if (entry_secret()) button(EntryMask, entry.masked ? "显示" : "隐藏", 408, 284, 120, 60, false, 24);
-    else if (entry_url()) button(EntryDefault, "恢复默认", 380, 284, 148, 60, false, 24);
+    button(EntryClear, "清空", 540, 284, 120, 88);
+    if (entry_secret()) button(EntryMask, entry.masked ? "显示" : "隐藏", 408, 284, 120, 88);
+    else if (entry_url()) button(EntryDefault, "恢复默认", 380, 284, 148, 88);
     text(hint, 36, 372, 24, 612, 3);
     canvas.fill_rect(0, keyboard_top, 684, 3, 1);
     const auto keys = keyboard();
@@ -245,7 +245,7 @@ void ReaderApp::Impl::draw_entry() {
         const bool enter = key.kind == KeyKind::Enter;
         const int size = key.kind == KeyKind::Character && key.text.size() == 1 && key.text != " " ? 34 : 24;
         if (enter && !entry_ready()) {
-            disabled_button(key.label, key.x, key.y, key.w, key.h);
+            disabled_button(key.label, key.x, key.y, key.w, key.h, size);
             continue;
         }
         if (enter) canvas.fill_rect(key.x, key.y, key.w, key.h, 1);

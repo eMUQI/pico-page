@@ -1,0 +1,62 @@
+[
+  {
+    "name": "typography",
+    "crop": [
+      0,
+      600,
+      684,
+      1216
+    ],
+    "inputs": {
+      "before": {
+        "file": "artifacts/design-system-implementation-20261028/before/typography.png",
+        "sha256": "89b2ee2c4466a81469a45a6fb8414f9812f5bd0c808b653b35461028b5b7b1a3"
+      },
+      "after": {
+        "file": "artifacts/design-system-implementation-20261028/after/typography.png",
+        "sha256": "211f01b2455f75ea51a91c2acc0e2650221739f637c5c9f719b02fcb6c243825"
+      }
+    },
+    "output": "artifacts/design-system-implementation-20261028/comparisons/typography-comparison.png"
+  },
+  {
+    "name": "font-picker",
+    "crop": [
+      0,
+      500,
+      684,
+      1216
+    ],
+    "inputs": {
+      "before": {
+        "file": "artifacts/design-system-implementation-20261028/before/font-picker.png",
+        "sha256": "8a6228d72ca8ef633a31abcb3ae1c2fbcae1d6d8f1dd396927c3417446720213"
+      },
+      "after": {
+        "file": "artifacts/design-system-implementation-20261028/after/font-picker.png",
+        "sha256": "dfe6465c83b7b6c38c3ce3af08b1d476569c74d85262648e1f84604a041042f3"
+      }
+    },
+    "output": "artifacts/design-system-implementation-20261028/comparisons/font-picker-comparison.png"
+  },
+  {
+    "name": "refresh",
+    "crop": [
+      0,
+      446,
+      684,
+      1216
+    ],
+    "inputs": {
+      "before": {
+        "file": "artifacts/design-system-implementation-20261028/before/refresh.png",
+        "sha256": "a62589cab995b7f7c997a6603b07be2608260c62ef36b275ceac33b114cec7f9"
+      },
+      "after": {
+        "file": "artifacts/design-system-implementation-20261028/after/refresh.png",
+        "sha256": "f34c6cfc4f24586daf976ef2bde406a82b45943d49e472cc34133cffc9a2ca92"
+      }
+    },
+    "output": "artifacts/design-system-implementation-20261028/comparisons/refresh-comparison.png"
+  }
+]

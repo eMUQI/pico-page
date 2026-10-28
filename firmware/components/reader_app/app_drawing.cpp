@@ -133,7 +133,7 @@ void ReaderApp::Impl::reading_header(bool panel) {
     text(body, document.metadata().title, 132, 60, 22, title_width, 3);
     text(percent, 132 + title_width, 60, 22, percent_width, 3);
     if (unsaved || differs) {
-        button(Sync, unsaved ? "尚未保存" : "位置不同 ›", edge - 148, 26, 148, 54, true, 22);
+        button(Sync, unsaved ? "尚未保存" : "位置不同 ›", edge - 148, 26, 148, 54, true, 20);
         if (view == View::Sync) hits.pop_back();
     }
     if (marking) {

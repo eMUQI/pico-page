@@ -331,17 +331,25 @@ void ReaderApp::Impl::draw_library(bool decode) {
     std::string count = folders ? std::to_string(folders) + " 个文件夹" : "";
     if (folders < entries.size()) count += (count.empty() ? "" : " · ") + std::to_string(entries.size() - folders) + " 本书";
     if (folders && folders < entries.size()) {
-        text((library_resume_omitted ? "另有 " : "") + std::to_string(entries.size() - folders) + " 本书", 36, top + 8, 22, 254, 3);
-        text(std::to_string(folders) + " 个文件夹", 36, top + 38, 20, 254, 3);
+        text((library_resume_omitted ? "另有 " : "") + std::to_string(entries.size() - folders) + " 本书", 36, top + 10, 22, 254, 3);
+        text(std::to_string(folders) + " 个文件夹", 36, top + 44, 20, 254, 3);
     } else {
         if (library_resume_omitted) count = "另有 " + std::to_string(entries.size() - folders) + " 本书";
-        text(count, 36, top + 24, 22, 254, 3);
+        text(count, 36, top + 30, 22, 254, 3);
     }
-    button(LibrarySort, library_sort == "recent" ? (library_recent ? "最近阅读 ⇅" : "书名（回退）") : library_sort == "name_desc" ? "书名 ↓" : "书名 ↑", 300, top + 4, 164, 60, false, 22);
-    button(LibraryList, "列表", 476, top + 4, 92, 60, !library_grid, 22);
-    button(LibraryGrid, "卡片", 568, top + 4, 92, 60, library_grid, 22);
-    canvas.line(0, top + 76, 683, top + 76, 1, 2);
+    const auto controls_begin = hits.size();
+    button(LibrarySort, library_sort == "recent" ? (library_recent ? "最近阅读 ⇅" : "书名（回退）") : library_sort == "name_desc" ? "书名 ↓" : "书名 ↑", 300, top + 14, 164, 60, false, 22);
+    button(LibraryList, "列表", 476, top + 14, 92, 60, !library_grid, 22);
+    button(LibraryGrid, "卡片", 568, top + 14, 92, 60, library_grid, 22);
+    // Compact controls retain the full toolbar height as their touch target.
+    for (auto i = controls_begin; i < hits.size(); ++i) {
+        hits[i].y = top;
+        hits[i].h = 88;
+    }
+    canvas.line(0, top + 88, 683, top + 88, 1, 2);
     const auto size = library_page_size(), begin = library_begin();
+    const bool has_recent_group = library_recent && (library_resume() ||
+        std::any_of(entries.begin(), entries.end(), [](const Entry& entry) { return entry.recent_rank < 128; }));
     int group_gap = 0;
     for (std::size_t i = begin; i < std::min(begin + size, entries.size()); ++i) {
         auto &entry = entries[i];
@@ -349,7 +357,7 @@ void ReaderApp::Impl::draw_library(bool decode) {
         const auto label = entry_title(entry);
         if (library_grid) {
             const int x = 36 + static_cast<int>((i - begin) % 3) * 214;
-            const int y = top + 100 + static_cast<int>((i - begin) / 3) * 320;
+            const int y = top + 112 + static_cast<int>((i - begin) / 3) * 320;
             if (entry.directory) {
                 // A tabbed frame distinguishes a folder from a book without a cover.
                 canvas.fill_rect(x, y, 84, 2, 1);
@@ -369,14 +377,14 @@ void ReaderApp::Impl::draw_library(bool decode) {
             text(entry.status, x, y + 264, 22, kLibraryCoverWidth, 3);
             hits.push_back({x, y, kLibraryCoverWidth, 296, EntryBase + static_cast<int>(i)});
         } else {
-            if (library_recent && !entry.directory && entry.recent_rank == 128 &&
+            if (has_recent_group && !entry.directory && entry.recent_rank == 128 &&
                 (i == begin || entries[i - 1].directory || entries[i - 1].recent_rank < 128)) {
-                const int divider = top + 78 + static_cast<int>(i - begin) * 126;
+                const int divider = top + 90 + static_cast<int>(i - begin) * 126;
                 text("其他书籍", 36, divider + 4, 20, 150, 5);
                 canvas.line(156, divider + 18, 648, divider + 18, 12);
                 group_gap = 32;
             }
-            const int y = top + 78 + static_cast<int>(i - begin) * 126 + group_gap;
+            const int y = top + 90 + static_cast<int>(i - begin) * 126 + group_gap;
             // A book without a cover leaves no empty slot; its title starts at the margin.
             const auto cover = entry.directory ? Cover::None : draw_cover(entry, 37, y + 22, decode,
                                                                             kRowCoverWidth, kRowCoverHeight);
@@ -468,8 +476,8 @@ void ReaderApp::Impl::draw_details() {
     if (detail_error.empty()) button(DetailOpen, detail_progress.record ? "继续阅读" : "打开书籍", 36, 630, 612, 96, true);
     else wrapped("无法打开：" + reason(detail_error, "无法解析文件内容") + "。", 36, 620, 612, 24);
     canvas.line(0, 764, 683, 764, 1, 3);
-    if (detail_error.empty()) button(DetailReset, "清除本地阅读进度", 36, 880, 612, 76);
-    button(DetailDelete, "删除原书文件", 36, 972, 612, 76);
+    if (detail_error.empty()) button(DetailReset, "清除本地阅读进度", 36, 872, 612, 96);
+    button(DetailDelete, "删除原书文件", 36, 972, 612, 96);
     footer_bar(notice());
 }
 

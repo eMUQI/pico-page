@@ -91,8 +91,7 @@ void ReaderApp::Impl::draw_toolbar() {
         const int x = i * 137, width = std::min(137, 684 - x);
         if (i) canvas.line(x, toolbar_top, x, 1215, 1, 2);
         tool_icon(kToolbarIds[i], x + 68, 1126);
-        const int size = kToolbarIds[i] == Refresh ? 26 : 28;
-        center(kToolbarLabels[i], x, 1160 + (28 - size) / 2, width, size);
+        center(kToolbarLabels[i], x, 1160, width, 28);
         hits.push_back({x, toolbar_top, width, 136, kToolbarIds[i]});
     }
 }

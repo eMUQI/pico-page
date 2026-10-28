@@ -374,18 +374,18 @@ struct ReaderApp::Impl final : DisplayBackend {
         view = View::PowerMenu;
         hits.clear(); canvas.clear(); header("电源", 0);
         if (!power_save_failed) {
-            text("关机或重启", 36, 184, 36, 612, 1, true);
-            wrapped("菜单出现后松开电源键。选择后保存本地阅读位置，不等待云端同步。", 36, 276, 612, 26);
+            text("关机或重启", 36, 184, 32, 612, 1, true);
+            wrapped("菜单出现后松开电源键。选择后保存本地阅读位置，不等待云端同步。", 36, 276, 612, 24);
             button(PowerShutdown, "关机", 24, 480, 636, 96);
             button(PowerRestart, "重启", 24, 612, 636, 96);
             button(PowerCancel, "取消", 24, 1080, 636, 96);
         } else {
             const bool restart = power_selected == PowerAction::Restart;
-            text("本地保存未完成", 36, 184, 36, 612, 1, true);
-            wrapped(message, 36, 276, 612, 26);
-            wrapped("继续可能丢失最后一段阅读进度。", 36, 456, 612, 26);
-            button(PowerCancel, "返回", 24, 1080, 306, 96);
-            button(PowerForce, restart ? "仍然重启" : "仍然关机", 354, 1080, 306, 96, true);
+            text("本地保存未完成", 36, 184, 32, 612, 1, true);
+            wrapped(message, 36, 276, 612, 24);
+            wrapped("继续可能丢失最后一段阅读进度。", 36, 456, 612, 24);
+            button(PowerCancel, "返回", 24, 1080, 306, 96, true);
+            danger_button(PowerForce, restart ? "仍然重启" : "仍然关机", 354, 1080, 306, 96);
         }
     }
     void close_power_menu() {
@@ -1196,10 +1196,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         const int value_width = std::min(text_width(shown, 24), 400);
         const int title_width = 612 - value_width - 16;
         if (description.empty())
-            text(title, 36, y + (height - 26) / 2 - 6, 26, title_width);
+            text(title, 36, y + (height - 28) / 2 - 6, 28, title_width);
         else {
-            text(title, 36, y + height / 2 - 42, 26, title_width);
-            text(description, 36, y + height / 2 + 4, 20, title_width, 3);
+            text(title, 36, y + height / 2 - 42, 28, title_width);
+            text(description, 36, y + height / 2 + 4, 24, title_width, 3);
         }
         text(shown, 648 - value_width, y + (height - 24) / 2 - 6, 24, value_width, 1, bold_value);
         canvas.line(36, y + height - 1, 647, y + height - 1, 12, 2);
@@ -1239,9 +1239,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         text(title_font ? *title_font : ui, title, left, 30, 32, right_edge - left, 1, true);
         canvas.line(0, 103, 683, 103, 1, 3);
     }
-    void disabled_button(const std::string &label, int x, int y, int w, int h = 88) {
-        outline(x, y, w, h, 2, 5);
-        center(label, x, y + (h - 26) / 2 - 3, w, 26, 5);
+    void disabled_button(const std::string &label, int x, int y, int w, int h = 88, int size = 28) {
+        center(label, x, y + (h - size) / 2 - 3, w, size, 5);
     }
     /** An action that cannot be undone: solid frame, never the filled recommended style. */
     void danger_button(int id, const std::string &label, int x, int y, int w, int h = 96) {
@@ -1279,7 +1278,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             hits.push_back({479, footer_zone, 205, 96, Next});
         }
         if (hint.empty()) center(std::to_string(index + 1) + " / " + std::to_string(total), 205, footer_zone + 34, 274, 24, 3);
-        else center(hint, 213, footer_zone + 36, 258, 22);
+        else center(hint, 213, footer_zone + 34, 258, 24);
     }
     /** Measures or draws the same bounded title layout, retaining closing punctuation with its preceding character. */
     int title_lines(const std::string &value, int x, int y, int width, int size, bool bold = false, int max_rows = 2,
@@ -1420,7 +1419,7 @@ struct ReaderApp::Impl final : DisplayBackend {
      */
     void tabs(int top, int active) {
         const int ids[] = {Contents, Typography, Sync, Refresh};
-        const char *names[] = {"目录", "排版", "同步", "刷新"};
+        const char *names[] = {"目录", "排版", "同步", "刷新模式"};
         canvas.fill_rect(0, top - panel_strip, 684, panel_strip + 100, 15);
         canvas.line(0, top - panel_strip, 683, top - panel_strip, 1, 3);
         text("收起", 574, top - panel_strip + 14, 24, 60, 3);
@@ -1431,7 +1430,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             const int x = i * 171;
             if (ids[i] == active) canvas.fill_rect(x, top, 171, 100, 1);
             else if (i) canvas.line(x, top, x, top + 99, 1, 2);
-            center(names[i], x, top + 32, 171, 26, ids[i] == active ? 15 : 1, ids[i] == active);
+            center(names[i], x, top + 31, 171, 28, ids[i] == active ? 15 : 1, ids[i] == active);
             hits.push_back({x, top, 171, 100, ids[i]});
         }
         canvas.line(0, top, 683, top, 1, 2);
@@ -2270,24 +2269,19 @@ struct ReaderApp::Impl final : DisplayBackend {
     static int refresh_interval(const ReaderSettings &values) {
         return values.refresh_preset == "fast" ? values.fast_full_refresh_pages : values.balanced_full_refresh_pages;
     }
-    /** One radio row. framed adds the outline and the state tag of a choice that needs saving. */
+    /** A radio row; show_save_state distinguishes saved and pending selections with text. */
     void choice(int id, const std::string &title, const std::string &description, int y, bool selected,
-                bool pending_choice = false, bool framed = true) {
-        if (!framed) {}
-        else if (selected && pending_choice) outline(24, y, 636, 116, 2);
-        else if (selected) outline(24, y, 636, 116, 3);
+                bool pending_choice = false, bool show_save_state = true) {
         for (int row = -18; row <= 18; ++row)
             for (int col = -18; col <= 18; ++col) {
                 const int radius = row * row + col * col;
                 if ((radius <= 324 && radius >= 225) || (selected && radius <= 100))
                     canvas.pixel(62 + col, y + 48 + row, 1);
             }
-        text(title, 102, y + 16, 28, 430, 1, true);
-        text(description, 102, y + 65, 22, 540, 3);
-        if (selected && framed) {
-            canvas.fill_rect(540, y + 20, 102, 36, 1);
-            center(pending_choice ? "待保存" : "当前", 540, y + 22, 102, 22, 15);
-        }
+        text(title, 102, y + 16, 28, selected && show_save_state ? 426 : 540, 1, true);
+        text(description, 102, y + 65, 24, 540, 3);
+        if (selected && show_save_state)
+            center(pending_choice ? "待保存" : "当前", 540, y + 20, 108, 24);
         hits.push_back({24, y, 636, 116, id});
     }
     /**
@@ -2376,7 +2370,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                       int height = 132) {
         const int lift = (132 - height) / 2;
         text(title, 36, y + 20 - lift, 28, 554, 1, true);
-        text(value, 36, y + 70 - lift, 22, 554, 3);
+        text(value, 36, y + 70 - lift, 24, 554, 3);
         canvas.line(36, y + height - 1, 647, y + height - 1, rule, 2);
         if (!id) return;
         text("›", 636, y + 42 - lift, 28, 24);
@@ -2722,28 +2716,25 @@ struct ReaderApp::Impl final : DisplayBackend {
         else {
             disabled_button(label, 24, y, 636, 96);
             // Battery and activity change without a redraw; a tap evaluates them again.
-            if (update_installable(offer)) hits.push_back({24, y, 636, 96, UpdateStart});
+            if (update_installable(offer)) {
+                outline(24, y, 636, 96);
+                hits.push_back({24, y, 636, 96, UpdateStart});
+            }
         }
     }
     enum class CellState : std::uint8_t { Done, Active, Failed, Waiting };
-    /** One of the three check-status cells (Wi-Fi, internet, update server) at x; Waiting is dashed and gray. */
+    /** One of the three solid-frame check-status cells; Waiting uses gray and Failed adds an exclamation mark. */
     void check_cell(int x, int y, const char* label, CellState state, const std::string& value, const std::string& note = "") {
         static constexpr int w = 196, h = 176;
         const std::uint8_t ink = state == CellState::Waiting ? 5 : 1;
-        if (state != CellState::Waiting) outline(x, y, w, h, state == CellState::Failed ? 3 : 2);
-        else {
-            for (int i = 0; i < w; i += 12) {
-                canvas.fill_rect(x + i, y, std::min(6, w - i), 2, ink);
-                canvas.fill_rect(x + i, y + h - 2, std::min(6, w - i), 2, ink);
-            }
-            for (int i = 0; i < h; i += 12) {
-                canvas.fill_rect(x, y + i, 2, std::min(6, h - i), ink);
-                canvas.fill_rect(x + w - 2, y + i, 2, std::min(6, h - i), ink);
-            }
+        outline(x, y, w, h, state == CellState::Failed ? 3 : 2, ink);
+        if (state == CellState::Failed) {
+            canvas.fill_rect(x + w - 44, y + 14, 30, 30, 1);
+            center("!", x + w - 44, y + 14, 30, 24, 15, true);
         }
-        text(label, x + 20, y + 20, 22, w - 36, ink);
-        text(value, x + 20, y + 68, 28, w - 36, ink, true);
-        if (!note.empty()) text(note, x + 20, y + 126, 22, w - 36, ink);
+        text(label, x + 20, y + 20, 24, state == CellState::Failed ? w - 72 : w - 40, ink);
+        text(value, x + 20, y + 68, 28, w - 40, ink, true);
+        if (!note.empty()) text(note, x + 20, y + 126, 24, w - 40, ink);
     }
     /** The three cells from y: steps before failed are done, the failed one is framed in 3 px, later ones did not run. */
     void check_cells(int y, CheckStage failed, const std::string& ssid, const std::string& note) {
@@ -3026,10 +3017,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto values = store.load_settings().settings;
         value_row(LibraryView, "书库默认视图", "点按切换", values.library_view == "grid" ? "卡片" : "列表", 104, 104, false, false);
         value_row(LibraryFolders, "书库文件夹", "最近阅读排序时生效", values.library_folders == "first" ? "置顶" : "跟随最近", 208, 104, false, false);
-        if (!notice().empty()) {
-            canvas.line(0, 1012, 683, 1012, 1, 3);
-            wrapped(message, 36, 1044, 612, 22);
-        }
+        footer_bar(notice());
     }
     /** Loads the saved account into the draft; called when the page is opened from another page. */
     void open_account() {
@@ -3115,7 +3103,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     void confirm_page(const std::string &origin, const std::string &question, const std::string &object,
                       const std::string &path, const std::string &consequence) {
         hits.clear(); canvas.clear(); header(origin, 0);
-        text(question, 36, 160, 40, 612, 1, true);
+        text(question, 36, 160, 32, 612, 1, true);
         int y = 244;
         if (!object.empty()) {
             title_lines(library_text_font(), object, 36, y, 612, 30);
@@ -3162,19 +3150,19 @@ struct ReaderApp::Impl final : DisplayBackend {
         graphics::render_page(canvas, body, title_page);
     }
     void draw_sleep(const std::string &sync_state);
-    /** A row of the network page: 30 px title, optional 24 px subtitle and a value with a chevron. */
+    /** A network row with a label, optional description and a value followed by a chevron. */
     void entry_row(int id, const std::string &title, const std::string &subtitle, const std::string &value,
                    int y, int height) {
         const auto shown = value.empty() ? std::string("›") : value + " ›";
-        const int value_width = std::min(text_width(shown, 30), 300);
+        const int value_width = std::min(text_width(shown, 24), 300);
         const int title_width = 612 - value_width - 16;
         if (subtitle.empty())
-            text(title, 36, y + (height - 30) / 2 - 6, 30, title_width);
+            text(title, 36, y + (height - 28) / 2 - 6, 28, title_width);
         else {
-            text(title, 36, y + height / 2 - 46, 30, title_width);
+            text(title, 36, y + height / 2 - 46, 28, title_width);
             text(subtitle, 36, y + height / 2 + 6, 24, title_width, 3);
         }
-        text(shown, 648 - value_width, y + (height - 30) / 2 - 6, 30, value_width, 3);
+        text(shown, 648 - value_width, y + (height - 24) / 2 - 6, 24, value_width, 3);
         canvas.line(36, y + height - 1, 647, y + height - 1, 12, 2);
         hits.push_back({24, y, 636, height, id});
     }

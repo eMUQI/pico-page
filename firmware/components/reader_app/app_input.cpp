@@ -774,7 +774,7 @@ void ReaderApp::Impl::control(int id) {
             library_page = 0;
             message.clear();
         } else
-            message = "「书库默认视图」未保存，仍按原设置（" + previous + "）生效。请检查 TF 卡。";
+            message = "视图未保存，仍用「" + previous + "」。请检查 TF 卡。";
         draw_input_settings();
         break;
     }

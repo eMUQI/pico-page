@@ -56,14 +56,14 @@ void ReaderApp::Impl::draw_font_picker() {
     const bool unavailable = font_fallback || weight_unavailable;
     canvas.fill_rect(0, 500, 684, 716, 15);
     canvas.line(0, 500, 683, 500, 1, 2);
-    text("预览 · 尚未应用", 36, 514, 22, 350, 3);
+    text("预览 · 尚未应用", 36, 514, 24, 350, 3);
     const auto label = font_name(draft.font);
-    const auto width = std::min(220, text_width(label, 22));
-    text(label, 648 - width, 514, 22, width, 3);
+    const auto width = std::min(220, text_width(label, 24));
+    text(label, 648 - width, 514, 24, width, 3);
     canvas.line(0, 550, 683, 550, 1, 2);
-    text("选择字体", 36, 576, 30, 350, 1, true);
+    text("选择字体", 36, 576, 32, 350, 1, true);
     const auto count = "共 " + std::to_string(fonts.size()) + " 款";
-    text(count, 648 - text_width(count, 22), 582, 22, 220);
+    text(count, 648 - text_width(count, 24), 582, 24, 220);
     const auto pages = std::max<std::size_t>(1, (fonts.size() + fonts_per_screen - 1) / fonts_per_screen);
     font_picker_page = std::min(font_picker_page, pages - 1);
     for (std::size_t row = 0; row < fonts_per_screen; ++row) {
@@ -80,26 +80,26 @@ void ReaderApp::Impl::draw_font_picker() {
             else if (path.find("-Bold.") != std::string::npos) name += " · 粗";
         }
         const int name_width = current ? 444 : 552;
-        const bool multiline = text_width(name, 26) > name_width;
-        title_lines(name, 36, y + (multiline ? 10 : 28), name_width, 26, false, 2);
-        if (current) text("当前使用", 500, y + 32, 22, 100, 3);
+        const bool multiline = text_width(name, 28) > name_width;
+        title_lines(name, 36, y + (multiline ? 10 : 28), name_width, 28, false, 2);
+        if (current) text("当前使用", 500, y + 32, 24, 100, 3);
         for (int dy = -18; dy <= 18; ++dy)
             for (int dx = -18; dx <= 18; ++dx) {
                 const int radius = dx * dx + dy * dy;
                 if ((radius <= 324 && radius >= 256) || (path == draft.font && radius <= 144))
                     canvas.pixel(624 + dx, y + 45 + dy, 1);
             }
-        canvas.line(36, y + 89, 648, y + 89, 9);
+        canvas.line(36, y + 89, 648, y + 89, 12, 2);
         hits.push_back({24, y, 636, 90, FontEntryBase + static_cast<int>(index)});
     }
-    if (font_picker_page) button(Prev, "上一页", 36, 1008, 216, 64, false, 24);
-    else disabled_button("上一页", 36, 1008, 216, 64);
-    center(std::to_string(font_picker_page + 1) + " / " + std::to_string(pages), 252, 1026, 180, 24);
-    if (font_picker_page + 1 < pages) button(Next, "下一页", 432, 1008, 216, 64, false, 24);
-    else disabled_button("下一页", 432, 1008, 216, 64);
-    button(FontCancel, "取消", 24, 1104, 312, 80, false, 26);
-    if (!unavailable) button(FontAccept, "选用此字体", 348, 1104, 312, 80, true, 26);
-    else disabled_button("选用此字体", 348, 1104, 312, 80);
+    if (font_picker_page) button(Prev, "上一页", 36, 1008, 216, 88);
+    else disabled_button("上一页", 36, 1008, 216, 88);
+    center(std::to_string(font_picker_page + 1) + " / " + std::to_string(pages), 252, 1038, 180, 24);
+    if (font_picker_page + 1 < pages) button(Next, "下一页", 432, 1008, 216, 88);
+    else disabled_button("下一页", 432, 1008, 216, 88);
+    button(FontCancel, "取消", 24, 1104, 312, 96);
+    if (!unavailable) button(FontAccept, "选用此字体", 348, 1104, 312, 96, true);
+    else disabled_button("选用此字体", 348, 1104, 312, 96);
 }
 
 
@@ -162,7 +162,7 @@ void ReaderApp::Impl::draw_typography(bool prepare_images) {
     const bool changed = typography_changed();
     tabs(656, Typography);
     canvas.fill_rect(24, 605, 636, 44, 15);
-    text(changed ? "预览 · 尚未应用" : "当前排版 · 此书", 36, 614, 22, 432, 3);
+    text(changed ? "预览 · 尚未应用" : "当前排版 · 此书", 36, 614, 24, 432, 3);
     text(changed ? "放弃修改" : "收起", changed ? 540 : 600, 614, 24, 120);
     const std::array<int, 8> ids{{FontChoice, FontWeight, FontSize, LineHeight, Margin, Gap, Indent, Defaults}};
     auto name = [](int id) -> std::string {
@@ -194,8 +194,8 @@ void ReaderApp::Impl::draw_typography(bool prepare_images) {
             outline(x, y, 150, 80, 1);
             center("恢复默认", x, y + 21, 150, 24);
         } else {
-            outline(x, y, 150, 80, parameter == ids[i] ? 3 : 1, parameter == ids[i] ? 1 : 9);
-            center(name(ids[i]), x, y + 5, 150, 22);
+            outline(x, y, 150, 80, parameter == ids[i] ? 3 : 1);
+            center(name(ids[i]), x, y + 5, 150, 24);
             center(value(ids[i]), x + 6, y + 37, 138, 24, 1, true);
         }
         hits.push_back({x, y, 150, 80, ids[i]});
@@ -211,13 +211,13 @@ void ReaderApp::Impl::draw_typography(bool prepare_images) {
         }
     };
     if (can_step(-1)) button(Minus, "−", 24, 976, 150, 88, false, 40);
-    else disabled_button("−", 24, 976, 150, 88);
-    center(value(parameter), 186, 1000, 312, 30, 1, true);
+    else disabled_button("−", 24, 976, 150, 88, 40);
+    center(value(parameter), 186, 999, 312, 32, 1, true);
     if (can_step(1)) button(Plus, "+", 510, 976, 150, 88, false, 40);
-    else disabled_button("+", 510, 976, 150, 88);
-    if (!font_fallback && !weight_unavailable) button(Scope, "设为阅读默认", 24, 1088, 312, 96, false, 26);
+    else disabled_button("+", 510, 976, 150, 88, 40);
+    if (!font_fallback && !weight_unavailable) button(Scope, "设为阅读默认", 24, 1088, 312, 96);
     else disabled_button("设为阅读默认", 24, 1088, 312, 96);
-    if (!font_fallback && !weight_unavailable && changed) button(Apply, "应用到此书", 348, 1088, 312, 96, true, 26);
+    if (!font_fallback && !weight_unavailable && changed) button(Apply, "应用到此书", 348, 1088, 312, 96, true);
     else disabled_button(font_fallback || weight_unavailable ? "无法应用" : "已应用", 348, 1088, 312, 96);
     if (font_fallback || weight_unavailable) {
         canvas.fill_rect(24, preview_bottom - 70, 636, 58, 15);
@@ -230,18 +230,18 @@ void ReaderApp::Impl::draw_reading_settings() {
     view = View::Refresh;
     hits.clear(); canvas.clear(); header("阅读", Back, "设置");
     const auto &values = edit_snapshot.config.settings;
-    text("阅读默认值 · 单本书的调整不受影响", 36, 118, 22, 612, 5);
-    text("排版", 36, 192, 22, 612, 5);
+    text("阅读默认值 · 单本书的调整不受影响", 36, 118, 24, 612, 5);
+    text("排版", 36, 192, 24, 612, 5);
     canvas.line(36, 234, 647, 234, 12, 2);
-    text("默认排版", 36, 250, 26, 440);
-    text(typography_summary(values), 36, 294, 22, 440, 3);
+    text("默认排版", 36, 250, 28, 440);
+    text(typography_summary(values), 36, 294, 24, 440, 3);
     // The typography page previews and edits through the open book.
     if (has_book()) {
         text("›", 636, 268, 28, 24);
         hits.push_back({24, 234, 636, 108, Typography});
-    } else text("打开书后可调整", 648 - text_width("打开书后可调整", 22), 272, 22, 200, 3);
+    } else text("打开书后可调整", 648 - text_width("打开书后可调整", 24), 272, 24, 200, 3);
     canvas.line(36, 341, 647, 341, 12, 2);
-    text("刷新", 36, 374, 22, 612, 5);
+    text("刷新", 36, 374, 24, 612, 5);
     const std::array<std::pair<const char*, const char*>, 3> modes{{
         {"清晰", "每页执行全刷，减少残影"}, {"均衡", "灰阶更新，定期全刷"}, {"快速", "优先响应速度，可能更易留痕"}}};
     const std::array<const char*, 3> presets{{"clear", "balanced", "fast"}};
@@ -254,12 +254,12 @@ void ReaderApp::Impl::draw_reading_settings() {
                 if ((radius <= 225 && radius >= 144) || (selected && radius <= 49)) canvas.pixel(51 + col, y + 56 + row, 1);
             }
         text(modes[i].first, 88, y + 17, 28, 540, 1, selected);
-        text(modes[i].second, 88, y + 63, 22, 540, 3);
+        text(modes[i].second, 88, y + 63, 24, 540, 3);
         canvas.line(36, y + 113, 647, y + 113, 12, 2);
         hits.push_back({24, y, 636, 114, RefreshClear + i});
     }
     const auto value_line = [&](int id, const std::string& title, const std::string& value, int y) {
-        text(title, 36, y + 25, 26, 360);
+        text(title, 36, y + 25, 28, 360);
         text(value, 648 - text_width(value, 24), y + 27, 24, 280, 3);
         canvas.line(36, y + 89, 647, y + 89, 12, 2);
         if (id) hits.push_back({24, y, 636, 90, id});
@@ -302,8 +302,8 @@ void ReaderApp::Impl::draw_settings() {
     row(StorageSettings, "存储", measured ? "可用 " + file_size(card_free) : "可用空间未知");
     // Secondary entries: regular weight, 40 px below the groups.
     const auto minor = [&](int id, const std::string& title, const std::string& value, bool bold, int top) {
-        text(title, 36, top + 21, 26, 400);
-        if (!value.empty()) text(value, 628 - text_width(value, 22), top + 24, 22, 260, bold ? 1 : 3, bold);
+        text(title, 36, top + 21, 28, 400);
+        if (!value.empty()) text(value, 628 - text_width(value, 24), top + 24, 24, 260, bold ? 1 : 3, bold);
         text("›", 636, top + 20, 28, 24);
         canvas.line(36, top + 81, 647, top + 81, 12, 2);
         hits.push_back({24, top, 636, 82, id});
@@ -356,11 +356,11 @@ void ReaderApp::Impl::draw_help_demo() {
         const int id = HelpPrevious + i, y = 290 + i * 88;
         if (help_zone == id) canvas.fill_rect(330, y, 330, 72, 1);
         text(labels[i], 342, y + 22, 24, 306, help_zone == id ? 15 : 1);
-        hits.push_back({330, y, 330, 72, id});
+        hits.push_back({330, y, 330, 88, id});
     }
     text("点示意图或说明，查看对应区域", 36, 786, 24, 612, 3);
     for (int i = 0; i < 3; ++i)
-        button(HelpKey1 + i, "K" + std::to_string(i + 1), 24 + i * 216, 842, 204, 72, help_key == HelpKey1 + i, 26);
+        button(HelpKey1 + i, "K" + std::to_string(i + 1), 24 + i * 216, 842, 204, 88, help_key == HelpKey1 + i);
     const char* description = help_key == HelpKey2 ? "所有可交互页面：立即全刷。" :
         help_key == HelpKey1 ? "正文：上一页。书库、目录、书签、说明：上一屏。" : "正文：下一页。书库、目录、书签、说明：下一屏。";
     wrapped(description, 36, 942, 612, 24);

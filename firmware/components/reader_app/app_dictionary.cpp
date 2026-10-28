@@ -69,7 +69,7 @@ void ReaderApp::Impl::draw_dictionary_settings() {
             if (order) button(DictionaryUpBase + static_cast<int>(index), "上移", 24, y + 100, 198, 60, false, 23);
             if (order + 1 < settings.dictionary_enabled.size()) button(DictionaryDownBase + static_cast<int>(index), "下移", 234, y + 100, 198, 60, false, 23);
         }
-        canvas.line(36, y + 176, 648, y + 176, 10);
+        canvas.line(36, y + 176, 648, y + 176, 12, 2);
     }
     // A failed scan reports its cause below instead of claiming that no dictionary exists.
     if (dictionary_items.empty() && !content_loading)
@@ -383,7 +383,7 @@ void ReaderApp::Impl::draw_dictionary_sources() {
         text(body, name, 36, y + 24, 26, 490, 1, index == dictionary_source);
         if (index == dictionary_source) text("当前", 560, y + 24, 23, 100);
         if (found != dictionary_items.end() && !found->status) text("暂不可用", 36, y + 70, 21, 490, 3);
-        canvas.line(24, y + 128, 660, y + 128, 10);
+        canvas.line(24, y + 128, 660, y + 128, 12, 2);
         if (!content_loading) hits.push_back({24, y, 636, 128, DictionarySourceBase + static_cast<int>(index)});
     }
     if (!content_loading && dictionary_picker_page) button(Prev, "上一页", 24, 872, 198, 64, false, 24);
