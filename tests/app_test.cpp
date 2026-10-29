@@ -1377,6 +1377,43 @@ static void library_resume_pagination_test(const fs::path& root, const fs::path&
         const int slot = target == 2 ? 0 : page_size - 1;
         const int x = grid ? 36 + (slot % 3) * 214 + 80 : 100;
         const int y = grid ? 466 + (slot / 3) * 320 + 100 : 444 + slot * 126 + 60;
+        if (target == 0) {
+            using namespace pico_page::platform;
+            for (const auto& point : {std::pair<int, int>{300, 220}, {x, y}}) {
+                ReleasedTap contact;
+                const Event begin{EventKind::Touch, EventPhase::Begin, ++driver.sequence,
+                                  point.first, point.second, 1000};
+                assert(!contact.accept(begin, 1));
+                assert(!contact.due(begin.time_us + kLongPressUs - 1, 1));
+                const auto held = contact.due(begin.time_us + kLongPressUs, 1);
+                assert(held && app.can_long_press_at(held->x, held->y));
+                assert(contact.accept({EventKind::Touch, EventPhase::End, begin.sequence,
+                                       held->x, held->y, begin.time_us + kLongPressUs}, 1));
+                AppInput input{{driver.sequence, Phase::Begin, Input::TouchCenter}, true,
+                               held->x, held->y, false, true};
+                app.input(input);
+                input.event.phase = Phase::End;
+                app.input(input);
+                driver.present(); driver.complete_content();
+                // Details become visible while the physical contact is still held.
+                assert(app.view() == View::BookDetails && !app.saved_record());
+                const auto pixels = app.canvas().pixels();
+                input.long_press = false;
+                input.x = input.y = 50;
+                input.event.phase = Phase::Move;
+                assert(!contact.accept({EventKind::Touch, EventPhase::Move, begin.sequence,
+                                        50, 50, begin.time_us + kLongPressUs + 1}, 2));
+                app.input(input);
+                input.event.phase = point.first == 300 ? Phase::End : Phase::Cancel;
+                app.input(input);
+                assert(!contact.accept({EventKind::Touch, EventPhase::End, begin.sequence,
+                                        50, 50, begin.time_us + 2 * kLongPressUs}, 2));
+                assert(app.view() == View::BookDetails && !app.pending_frame() && app.canvas().pixels() == pixels);
+                assert(store.load_last_book(detail) == std::optional<std::string>("Archive/resume.epub"));
+                driver.tap(50, 50); driver.present();
+                assert(app.view() == View::Library);
+            }
+        }
         driver.tap(x, y); driver.present(); driver.complete_content();
         assert(app.view() == View::Reading);
         assert(store.load_last_book(detail) == std::optional<std::string>(book_path(target * page_size + slot)));

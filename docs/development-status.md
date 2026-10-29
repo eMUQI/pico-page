@@ -2,6 +2,8 @@
 
 ## 当前摘要（2026-10-29）
 
+2026-10-29 书库长按详情候选：列表、卡片和「继续阅读」按住达到 600 ms 即触发详情，不再等待松手；到时完成应用输入序列，使详情异步加载能够继续，丢弃同次触摸的移动、松手和取消尾部。host Debug 与 ASan／UBSan 各 31/31 通过；标准固件构建结果及真机待测范围见本批记录。未刷写。
+
 2026-10-29 自托管 CI 候选：PR #167 将 Host checks 和 Website build 改用本仓库专用的 `homelab` runner，保留原检查名称、测试与部署规则；改为预装系统依赖并隔离 COS Python 依赖。实现 head `28b19a3` 已在 homelab 通过 Debug 31/31、ASan／UBSan／LSan 31/31 和网站检查；首次字体下载重试及 GCC 15 测试兼容修正见下方记录。PR 尚未合并，生产部署未执行。
 
 2026-10-29 清缓存响应性候选：保留存储设置中的低频维护入口，说明清理保留书籍、设置和进度，首次重新开书或查词可能较慢。清理及占用统计移到既有内容 worker，先呈现等待画面，支持取消和 K2 全刷；取消说明可能已有部分缓存被删除。host、sanitizer、标准与诊断固件验证及连接限制见下方本批记录；设备未刷入本候选，原 22.3 秒样本的真机复测仍待完成。
@@ -1021,3 +1023,16 @@ Host checks 和 Website build 的 `runs-on` 改为 `[self-hosted, linux, x64, pi
 用户授权 CI 与 review 通过后合并。原 head `26ba65d` 的 Codex review 已完成且无发现、无未解决线程；Website build 通过，homelab 的 Debug 与 ASan／UBSan／LSan 均为 31/31。Host checks 最后因基准报告的四个截图链接失败：截图保存在忽略的本地 `artifacts/`，本机能找到文件，干净 checkout 中不存在。
 
 保留本地证据及原始记录，将四个不随仓库提交的截图引用改为明确的本地路径说明；没有提交截图、个人书籍或原始日志，也没有修改检查器或跳过检查。以 `git archive` 导出的干净文件树复现原四项链接失败，再覆盖本批两份文档运行同一交接检查并通过；本机交接和 `git diff --check` 通过。完整前后输出位于 `.local/cache-feedback-merge-20261029/clean-export-before.log` 与 `clean-export-after.log`。本批仅改文档，不重复固件或 C++ 测试；随后提交推送并在新 head 等待完整 CI、review 与线程检查。未刷写或发布。
+
+
+## 2026-10-29 · 书库长按到时触发详情
+
+用户要求书库长按达到时限即激活详情。基线为干净主线 `f3e2a48`。主循环复用 `ReleasedTap::due()` 的 600 ms、两轴 28 px 与呈现代次校验，允许书籍条目和「继续阅读」触发；文件夹仍不进入详情。到时派发完整的应用输入序列并清除物理序列映射，使现有详情 worker 不因手指仍按住而延后启动／回收结果；后续物理移动、松手或取消因序列不匹配被忽略。正文图片和文字选区沿用既有连续接触路径。
+
+执行仍在应用任务与原有详情 worker，不新增任务、定时器、队列或持久状态；到时判定不新增扫描、解压、分配或等待。详情解析、错误反馈及资源不足处理沿用原路径，既有 TF I/O 的不可取消区间不变，未测量设备峰值内存及输入至面板完成的耗时分布。更新 D22、轻扫边界、UI 说明与 IN04；在既有书库分页回归中覆盖列表／卡片、继续阅读／普通条目、同步／异步详情、到时前边界、未松手完成详情、尾部移动／松手／取消不误点、进度不变及新触摸返回。现有 core 回归继续覆盖位移、呈现代次和重复释放边界，未新增测试目标。
+
+本机 AppleClang 21.0.0.21000101。执行 `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host -N` 与完整 CTest，31/31 通过。独立 `build/sanitized` 使用环境说明中的 ASan／UBSan 配置、相同构建与注册检查，`ASAN_OPTIONS=halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 ctest --test-dir build/sanitized --output-on-failure` 为 31/31 通过；本机结果不记为 LSan。保留原有 Homebrew 动态库系统版本警告。
+
+固件按 EIM 安装记录使用既有 ESP-IDF v6.1 `fff9895c82d744c7237be8847347bdd1b07c6643`、ESP32-S3 与 BSP `5f3406deec33304de8801046db583dec7c49e55b`，保留 SDK 原有链接脚本差异及额外 requirements 文件。标准命令为 `sh tools/build_firmware.sh`；沙箱首次在 psutil 的 sysctl 探测阶段受限，随后以相同命令在获准的构建权限下执行。最终标准固件结果、镜像大小、4 MiB 应用槽余量及 SHA-256 保存在 `.local/library-hold-20261029/firmware-result.json`，来源记录为 `firmware/build/provenance.json`；本批构建与测试原始日志保存在同一 `.local/` 目录。资料交接与差异检查另记录于该目录，不替代 C++ 或设备验证。
+
+未刷写、提交、推送或发布。下一步按 IN04／IN09 真机确认列表、卡片和继续阅读持续按住时的详情反馈、实际刷新完成时机、慢 TF 详情等待、28 px 阈值、轻扫互斥，以及松手／取消不误点和下一次触摸可用；冷／热路径响应时间及动态资源仍待测量，host 回归与构建不作为真机性能或实体触控验收。

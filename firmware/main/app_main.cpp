@@ -1093,12 +1093,18 @@ extern "C" void app_main() {
             const auto now = esp_timer_get_time();
             const auto held = released_tap.due(now, presentation_sequence);
             if (held && held->sequence == physical_source && held->time_us >= settled_us &&
-                app->view() == pico_page::View::Reading && app->can_long_press_at(held->x, held->y)) {
+                app->can_long_press_at(held->x, held->y)) {
                 const pico_page::platform::Event end{EventKind::Touch, pico_page::platform::EventPhase::End,
                                                       held->sequence, held->x, held->y, now};
                 released_tap.accept(end, presentation_sequence);
-                continuous_contact = true;
-                dispatch_contact(pico_page::Phase::Begin, held->x, held->y, true);
+                if (app->view() == pico_page::View::Library) {
+                    dispatch_tap(*held, end);
+                    // Complete input ownership so inspection can progress before physical release.
+                    physical_source = physical_sequence = 0;
+                } else {
+                    continuous_contact = true;
+                    dispatch_contact(pico_page::Phase::Begin, held->x, held->y, true);
+                }
                 last_activity = now;
                 present(*app);
             }
