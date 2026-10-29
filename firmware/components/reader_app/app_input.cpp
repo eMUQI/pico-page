@@ -735,22 +735,11 @@ void ReaderApp::Impl::control(int id) {
         break;
     }
     case StorageSettings:
-        message.clear(); draw_storage();
-        break;
+        begin_storage();
+        return;
     case ClearCache:
-        if (!bookmark_io_ready()) return;
-        if (cancel_custom_preparation()) {
-            clear_cache_pending = true;
-            message = "正在停止图片准备，完成后清理缓存";
-            draw_storage();
-            break;
-        }
-        clear_cache_pending = false;
-        abandon_content(); foreground_job.reset(); stop_covers(); clear_prefetch(); stop_counting_job();
-        covers.clear(); custom_prepare_finished = false; custom_sleep_image.reset();
-        message = store.clear_cache() == StoreStatus::Ok ? "缓存已清理，原书与阅读记录保留" : "缓存未完全清理，请检查 TF 卡";
-        draw_storage();
-        break;
+        begin_storage(true);
+        return;
     case InputSettings:
         message.clear();
         draw_input_settings();
@@ -1017,6 +1006,11 @@ void ReaderApp::Impl::input(const AppInput &input) {
             const bool preview = request.preview;
             const bool mapping = kind == ContentJob::Kind::MapUpload || kind == ContentJob::Kind::MapDownload;
             abandon_content();
+            if (kind == ContentJob::Kind::StorageScan || kind == ContentJob::Kind::ClearCache) {
+                storage_usage.books.reset(); storage_usage.cache.reset(); storage_usage.available.reset();
+                message = kind == ContentJob::Kind::ClearCache ? "已取消清理，部分缓存可能已删除" : "已取消统计";
+                draw_storage(); overlay(); return;
+            }
             if (kind == ContentJob::Kind::ImageViewer) { close_image_viewer(); return; }
             link_return = confirmed_link_return;
             sync_return = confirmed_sync_return;

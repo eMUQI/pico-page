@@ -370,7 +370,9 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
     if (!foreground_job->started()) {
         if (!content_loading && !inline_image_pending) { foreground_job.reset(); return; }
         if (display.busy() || counting_job || save_job || cover_job || bookmark_job) return;
-        if ((foreground_job->request.kind == ContentJob::Kind::Open || ContentJob::dictionary_kind(foreground_job->request.kind)) && session.needs_save()) {
+        if ((foreground_job->request.kind == ContentJob::Kind::Open ||
+             foreground_job->request.kind == ContentJob::Kind::StorageScan || foreground_job->request.kind == ContentJob::Kind::ClearCache ||
+             ContentJob::dictionary_kind(foreground_job->request.kind)) && session.needs_save()) {
             if (save_failed && ContentJob::dictionary_kind(foreground_job->request.kind)) {
                 foreground_job.reset(); content_loading = false; dictionary_notice = "进度尚未保存，请先关闭词典并重试保存。";
                 if (view == View::Dictionary) draw_dictionary(); else draw_dictionary_settings(); overlay(); return;
@@ -383,6 +385,11 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
                              foreground_job->request.kind == ContentJob::Kind::MapUpload;
         if (mapping && std::chrono::steady_clock::now() < mapping_start_retry) return;
         if (!foreground_job->start()) {
+            if (foreground_job->request.kind == ContentJob::Kind::StorageScan || foreground_job->request.kind == ContentJob::Kind::ClearCache) {
+                message = "暂时无法开始，请稍后重试";
+                foreground_job.reset(); content_loading = false;
+                draw_storage(); overlay(); return;
+            }
             if (ContentJob::dictionary_kind(foreground_job->request.kind)) {
                 foreground_job.reset(); content_loading = false; dictionary_notice = "暂时无法查词，请稍后重试。";
                 if (view == View::Dictionary) draw_dictionary(); else draw_dictionary_settings(); overlay(); return;
@@ -432,6 +439,13 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
     auto job = std::move(foreground_job);
     const auto& request = job->request;
     if ((!content_loading && !inline_image_pending) || request.generation != foreground_generation) return;
+    if (request.kind == ContentJob::Kind::StorageScan || request.kind == ContentJob::Kind::ClearCache) {
+        content_loading = false;
+        storage_usage = std::move(job->result.storage);
+        if (request.kind == ContentJob::Kind::ClearCache)
+            message = job->result.clear_cache_status == StoreStatus::Ok ? "缓存已清理，书籍、设置和阅读进度保留" : "缓存未完全清理，请检查 TF 卡";
+        draw_storage(); overlay(); return;
+    }
     if (request.progressive) { complete_inline_image(*job); return; }
     if (ContentJob::dictionary_kind(request.kind)) { content_loading = false; finish_dictionary(*job); return; }
     if (request.kind == ContentJob::Kind::LockScreenList) {

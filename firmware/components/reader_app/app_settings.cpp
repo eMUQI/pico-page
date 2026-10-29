@@ -366,75 +366,43 @@ void ReaderApp::Impl::draw_help_demo() {
 }
 
 
-std::optional<std::uint64_t> ReaderApp::Impl::tree_bytes(const std::string &relative, bool books_only) {
-    unsigned remaining = 2000;
-    std::uint64_t total = 0;
-    std::vector<std::string> pending{relative};
-    while (!pending.empty()) {
-        const auto directory = std::move(pending.back());
-        pending.pop_back();
-        DIR *dir = opendir((root + "/" + directory).c_str());
-        if (!dir) return std::nullopt;
-        while (const auto *item = readdir(dir)) {
-            const std::string name = item->d_name;
-            if (name == "." || name == "..") continue;
-            struct stat st{};
-#ifdef ESP_PLATFORM
-            const int result = stat((root + "/" + directory + "/" + name).c_str(), &st);
-#else
-            const int result = lstat((root + "/" + directory + "/" + name).c_str(), &st);
-#endif
-            if (result != 0 || !remaining--) {
-                closedir(dir);
-                return std::nullopt;
-            }
-            if (S_ISDIR(st.st_mode)) pending.push_back(directory + "/" + name);
-            else if (S_ISREG(st.st_mode) && (!books_only || book_name(name))) total += static_cast<std::uint64_t>(st.st_size);
-        }
-        closedir(dir);
+void ReaderApp::Impl::begin_storage(bool clear_cache) {
+    abandon_content();
+    if (counting_job) counting_job->cancel();
+    counting_session.reset(); font_scan.reset();
+    clear_prefetch();
+    if (clear_cache) {
+        covers.clear(); dictionary_session.reset();
+        custom_prepare_finished = false; custom_sleep_image.reset();
     }
-    return total;
+    storage_usage = {};
+    storage_usage.roots = settings.library_roots;
+    message.clear();
+    ContentJob::Request request;
+    request.kind = clear_cache ? ContentJob::Kind::ClearCache : ContentJob::Kind::StorageScan;
+    request.root = root; request.generation = foreground_generation;
+    pending_content = std::move(request);
+    draw_storage();
+    loading(clear_cache ? "正在清理缓存…" : "正在统计存储空间…");
 }
 
-
 void ReaderApp::Impl::draw_storage() {
-    if (!bookmark_io_ready()) return;
     view = View::StorageSettings;
     hits.clear(); canvas.clear(); header("存储", Back, "设置");
-    std::uint64_t book_bytes = 0;
-    bool books_known = true;
-    const auto roots = store.load_settings().settings.library_roots;
-    for (const auto &path : roots) {
-        struct stat st{};
-        errno = 0;
-        // A missing root holds no books; any other failure leaves the total unknown.
-        if (stat((root + "/" + path).c_str(), &st) != 0 || !safe_existing(root, path)) {
-            if (errno != ENOENT) books_known = false;
-            continue;
-        }
-        const auto bytes = tree_bytes(path, true);
-        if (bytes) book_bytes += *bytes;
-        else books_known = false;
-    }
-    const auto books = books_known ? std::optional<std::uint64_t>(book_bytes) : std::nullopt;
-    struct stat cache_directory{};
-    errno = 0;
-    const auto cache = stat((root + "/PicoPage/cache").c_str(), &cache_directory) == 0 ? tree_bytes("PicoPage/cache", false)
-                       : errno == ENOENT ? std::optional<std::uint64_t>(0) : std::nullopt;
-    std::uint64_t card_total = 0, card_free = 0;
-    const bool measured = store.card_space(card_total, card_free);
+    const auto& roots = storage_usage.roots;
     const auto size = [](const std::optional<std::uint64_t> &bytes) { return bytes ? file_size(*bytes) : std::string("未知"); };
     text("TF 卡", 36, 128, 22, 612, 3);
-    value_row(0, "书籍原文件", "", size(books), 164, 70);
-    value_row(0, "缓存（可重建）", "", size(cache), 234, 70);
-    value_row(0, "可用空间", "", measured ? file_size(card_free) : "未知", 304, 70, true);
+    value_row(0, "书籍原文件", "", size(storage_usage.books), 164, 70);
+    value_row(0, "缓存（可重建）", "", size(storage_usage.cache), 234, 70);
+    value_row(0, "可用空间", "", size(storage_usage.available), 304, 70, true);
     text("文件位置", 36, 402, 22, 612, 3);
     value_row(0, "书籍与文章", "", roots.size() == 1 ? roots.front() + "/" : "多个目录（见设置文件）", 438, 70);
     value_row(0, "自行添加的字体", "", "Fonts/", 508, 70);
     value_row(0, "设备设置", "", "PicoPage/settings.toml", 578, 70);
     value_row(0, "阅读进度", "", "原书旁的 .picopage/", 648, 70);
     note(notice().empty() ? "文章可放扫描目录下的 Articles/；保留 PicoPage/。" : message, 950);
-    note("清理缓存不会删除书和阅读进度，下次打开会稍慢。", 1020);
+    note("保留书籍、设置和阅读进度。", 988);
+    note("清理后首次开书或查词可能较慢。", 1026);
     button(ClearCache, "清理全部缓存", 24, 1080, 636, 96);
 }
 

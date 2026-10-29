@@ -643,10 +643,30 @@ int main() {
         assert(get(lock_cache) == "payload");
         assert(store.begin_cache("../escape", 32, writer) != StoreStatus::Ok && !writer);
     }
+    {
+        const auto storage_root = root / "StorageUsage";
+        put(storage_root / "PicoPage/settings.toml", "schema_version=1\n[library]\nroots=['/Books', '/Missing']\n");
+        put(storage_root / "Books/one.EPUB", "book");
+        put(storage_root / "Books/Sub/two.txt", "txt");
+        put(storage_root / "Books/one.EPUB.picopage/progress.json", "record");
+        put(storage_root / "PicoPage/cache/entry", "data");
+        FileStore storage(storage_root.string());
+        const auto usage = storage.storage_usage();
+        assert(usage.books == 7 && usage.cache == 4 && usage.available.has_value());
+        assert(!storage.storage_usage([] { return true; }).books);
+        fs::remove_all(storage_root / "PicoPage/cache");
+        fs::create_directory_symlink(root / "outside", storage_root / "PicoPage/cache");
+        assert(!storage.storage_usage().cache);
+    }
     assert(store.save_cache("../outside/keep", cache_payload, "prefix", "suffix") == StoreStatus::UnsafePath);
     put(root / "PicoPage/cache/books/one/layout", "disposable");
     put(root / "outside/keep", "keep");
     fs::create_directory_symlink(root / "outside", root / "PicoPage/cache/external");
+    assert(store.clear_cache([] { return true; }) == StoreStatus::Cancelled);
+    assert(fs::exists(root / "PicoPage/cache/books/one/layout"));
+    unsigned clear_checks = 0;
+    assert(store.clear_cache([&] { return ++clear_checks > 4; }) == StoreStatus::Cancelled);
+    assert(get(root / book) == "original epub" && get(root / "outside/keep") == "keep");
     assert(store.clear_cache() == StoreStatus::Ok);
     assert(fs::is_empty(root / "PicoPage/cache"));
     assert(get(root / book) == "original epub" && get(sidecar / "prepared/map") == "required");

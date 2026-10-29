@@ -221,7 +221,8 @@ void ContentJob::run() {
     execute();
     const bool failed = !result.error.empty() || !result.failed_images.empty() ||
         (request.kind == Kind::SaveProgress && result.progress.status != StoreStatus::Ok) ||
-        (request.kind == Kind::SaveBookmarks && result.bookmark_status != StoreStatus::Ok);
+        (request.kind == Kind::SaveBookmarks && result.bookmark_status != StoreStatus::Ok) ||
+        (request.kind == Kind::ClearCache && result.clear_cache_status != StoreStatus::Ok);
     diagnostics::end(measurement_, cancelled_.load() ? diagnostics::Outcome::Cancelled :
         failed ? diagnostics::Outcome::Failure : diagnostics::Outcome::Success);
 }
@@ -241,6 +242,18 @@ void ContentJob::run() {
     } finish{*this};
     result.offset = request.offset;
     const auto stop = [this] { return checkpoint(); };
+    if (request.kind == Kind::StorageScan || request.kind == Kind::ClearCache) {
+        FileStore store(request.root);
+        if (request.kind == Kind::ClearCache) {
+            const StageTimer timer{"cache_clear"};
+            result.clear_cache_status = store.clear_cache(stop);
+        }
+        if (!stop()) {
+            const StageTimer timer{"storage_scan"};
+            result.storage = store.storage_usage(stop);
+        }
+        return;
+    }
     if (request.kind == Kind::ContentCacheWrite) {
         result.cache_finished = request.content_cache && save_content_cache(FileStore(request.root), *request.content_cache, stop);
         return;

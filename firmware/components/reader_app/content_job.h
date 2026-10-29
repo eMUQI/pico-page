@@ -112,7 +112,7 @@ struct DictionaryItem {
 /** A single job owns its parser and font, or borrows them from a PaginationSession. Only done() permits access to its result. */
 class ContentJob {
 public:
-    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks, LockScreenList, LockScreen, ContentCacheWrite, LockScreenPreview, DictionaryList, DictionaryPrepare, DictionaryLookup, DictionaryRead, DictionaryPage };
+    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks, LockScreenList, LockScreen, ContentCacheWrite, LockScreenPreview, DictionaryList, DictionaryPrepare, DictionaryLookup, DictionaryRead, DictionaryPage, StorageScan, ClearCache };
     static bool dictionary_kind(Kind kind) {
         return kind == Kind::DictionaryList || kind == Kind::DictionaryPrepare ||
                kind == Kind::DictionaryLookup || kind == Kind::DictionaryRead || kind == Kind::DictionaryPage;
@@ -212,6 +212,8 @@ public:
         std::uint32_t part = 0;
     };
     struct Result {
+        StorageUsage storage;
+        StoreStatus clear_cache_status = StoreStatus::IoError;
         std::vector<std::uint32_t> starts;
         std::size_t offset = 0;
         bool part_done = false, last_part = false;

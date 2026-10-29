@@ -536,6 +536,59 @@ static void network_setup_test(const fs::path& root, const fs::path& fixtures, b
     app.stop_wifi();
 }
 
+static void storage_feedback_test(const fs::path& root, bool async) {
+    write(root / "PicoPage/settings.toml", "schema_version=1\n[onboarding]\ndone=true\n");
+    write(root / "Books/keep.txt", "Original text");
+    write(root / "Books/keep.txt.picopage/progress.json", "saved position");
+    write(root / "Dictionaries/keep.ifo", "dictionary source");
+    write(root / "PicoPage/cache/entry", "derived data");
+    const auto settings = read(root / "PicoPage/settings.toml");
+    ReaderApp app(root.string(), "storage-test", true, async); Driver driver{app};
+    assert(app.initialize()); driver.present();
+    driver.tap(600, 50); driver.present();
+    driver.tap(300, 760);
+    assert(app.view() == View::Loading && app.pending_frame());
+    driver.present(); driver.complete_content();
+    assert(app.view() == View::StorageSettings);
+    driver.refresh();
+    const auto keep = [&] {
+        assert(read(root / "PicoPage/settings.toml") == settings);
+        assert(read(root / "Books/keep.txt") == "Original text");
+        assert(read(root / "Books/keep.txt.picopage/progress.json") == "saved position");
+        assert(read(root / "Dictionaries/keep.ifo") == "dictionary source");
+    };
+    // No deletion may start before the waiting frame has completed.
+    driver.tap(300, 1120); app.poll_background();
+    assert(app.view() == View::Loading && fs::exists(root / "PicoPage/cache/entry"));
+    driver.present();
+    driver.tap(550, 1160); driver.present(); driver.complete_content();
+    assert(app.view() == View::StorageSettings && fs::exists(root / "PicoPage/cache/entry"));
+    assert(app.status() == "已取消清理，部分缓存可能已删除");
+    keep();
+    // A cancelled running job retains its resources until completion and does not publish a late result.
+    ContentJob::delay_starts_for_test(ContentJob::Kind::ClearCache, std::chrono::seconds(1));
+    driver.tap(300, 1120); driver.present(); app.poll_background();
+    assert(app.content_busy()); driver.refresh();
+    driver.tap(550, 1160); driver.present(); driver.complete_content();
+    assert(app.view() == View::StorageSettings && fs::exists(root / "PicoPage/cache/entry"));
+    ContentJob::delay_starts_for_test(ContentJob::Kind::ClearCache, std::chrono::milliseconds(0));
+    keep();
+    ContentJob::fail_starts_for_test(ContentJob::Kind::ClearCache, 1, ContentJob::StartFailure::TaskCreate);
+    driver.tap(300, 1120); driver.present(); driver.complete_content();
+    assert(app.view() == View::StorageSettings && fs::exists(root / "PicoPage/cache/entry"));
+    assert(app.status() == "暂时无法开始，请稍后重试");
+    keep();
+    driver.tap(300, 1120); driver.present(); driver.complete_content();
+    assert(app.view() == View::StorageSettings && !fs::exists(root / "PicoPage/cache/entry"));
+    assert(app.status() == "缓存已清理，书籍、设置和阅读进度保留");
+    keep();
+    write(root / "PicoPage/cache/entry", "derived data");
+    driver.tap(300, 1120); assert(app.pending_frame()); app.complete_frame(false); driver.present();
+    driver.complete_content();
+    assert(fs::exists(root / "PicoPage/cache/entry"));
+    keep();
+}
+
 static void help_test(const fs::path& root, const fs::path& fixtures, bool async, bool with_book) {
     ReaderApp app(root.string(), "help-test", true, async); Driver driver{app};
     assert(app.initialize()); driver.present();
@@ -3763,6 +3816,8 @@ int main(int argc, char** argv) {
                                            (async ? "Async" : "Sync")), fixtures, grid, async);
     swipe_test(card / "SwipeList", fixtures, false);
     swipe_test(card / "SwipeGrid", fixtures, true);
+    storage_feedback_test(card / "StorageFeedbackSync", false);
+    storage_feedback_test(card / "StorageFeedbackAsync", true);
     help_test(card / "HelpNoCard", fixtures, false, false);
     help_test(card / "HelpSync", fixtures, false, true);
     help_test(card / "HelpAsync", fixtures, true, true);
@@ -3848,7 +3903,7 @@ int main(int argc, char** argv) {
             assert(app.initialize()); driver.present();
             const auto library = app.canvas().pixels();
             driver.tap(600, 50); driver.present();
-            driver.tap(300, 760); driver.present();
+            driver.tap(300, 760); driver.present(); driver.complete_content();
             assert(app.view() == View::StorageSettings);
             return std::pair{library, app.canvas().pixels()};
         };
@@ -5556,12 +5611,17 @@ int main(int argc, char** argv) {
         driver.present(); assert(*app.saved_record() == saved);
         driver.key(Input::K3); assert(!app.pending_frame());
         app.wake(); driver.present(); assert(app.view() == View::Settings && *app.saved_record() == saved);
-        driver.tap(340, 760); driver.present();
+        driver.tap(340, 760); driver.present(); driver.complete_content();
         assert(app.view() == View::StorageSettings); driver.refresh();
         write(card / "PicoPage/cache/layout", "cache");
         const auto book_before = read(card / "Books/book.epub");
         const auto progress_before = read(progress);
-        driver.tap(340, 1120); driver.present();
+        driver.tap(340, 1120);
+        assert(app.view() == View::Loading && app.pending_frame());
+        app.poll_background();
+        assert(fs::exists(card / "PicoPage/cache/layout"));
+        driver.present(); driver.complete_content();
+        assert(app.view() == View::StorageSettings);
         assert(!fs::exists(card / "PicoPage/cache/layout") && read(progress) == progress_before);
         assert(read(card / "Books/book.epub") == book_before && *app.saved_record() == saved);
         driver.close(); driver.present(); driver.tap(340, 640); driver.present();
@@ -5701,7 +5761,7 @@ int main(int argc, char** argv) {
         driver.tap(60, 50); driver.present(); assert(app.view() == View::Settings);
         driver.tap(300, 310); driver.present(); assert(app.view() == View::SyncSettings); driver.refresh();
         driver.tap(60, 50); driver.present(); assert(app.view() == View::Settings);
-        driver.tap(300, 760); driver.present(); assert(app.view() == View::StorageSettings); driver.refresh();
+        driver.tap(300, 760); driver.present(); driver.complete_content(); assert(app.view() == View::StorageSettings); driver.refresh();
         driver.tap(60, 50); driver.present(); assert(app.view() == View::Settings);
         driver.tap(300, 580); driver.present(); assert(app.view() == View::InputSettings);
         assert(FileStore(card.string()).load_settings().settings.library_view == "list");

@@ -12,7 +12,7 @@
 
 namespace pico_page {
 
-enum class StoreStatus { Ok, Missing, Invalid, UnsupportedVersion, IdentityMismatch, IoError, UnsafePath, ExternalChange, Cleared };
+enum class StoreStatus { Ok, Missing, Invalid, UnsupportedVersion, IdentityMismatch, IoError, UnsafePath, ExternalChange, Cleared, Cancelled };
 
 struct ProgressResult {
     StoreStatus status = StoreStatus::Missing;
@@ -216,6 +216,12 @@ private:
     bool failed_ = false, committed_ = false;
 };
 
+/** Optional byte counts are unknown when a scan fails or exceeds its entry budget. */
+struct StorageUsage {
+    std::optional<std::uint64_t> books, cache, available;
+    std::vector<std::string> roots;
+};
+
 /**
  * Serial file access for one mounted card. The caller must stop all operations
  * before unmounting or transferring filesystem ownership to another writer.
@@ -356,9 +362,17 @@ public:
 
     /** Reports the capacity and free space of the mounted card in bytes; false when unavailable. */
     bool card_space(std::uint64_t& total, std::uint64_t& available) const;
+    /** Measures configured book roots and cache with at most 2000 entries per tree.
+     * Runs blocking filesystem calls; invoke outside the application/input task.
+     * Checks stop between entries. A cancelled result must be discarded by the caller.
+     */
+    StorageUsage storage_usage(const std::function<bool()>& stop = {}) const;
 
-    /** Delete only PicoPage/cache children after users of those files stop. */
-    StoreStatus clear_cache() const;
+    /** Deletes only PicoPage/cache children after all users of those files stop.
+     * Checks stop between directory entries; cancellation returns Cancelled and may leave
+     * some children deleted. A single filesystem operation cannot be interrupted.
+     */
+    StoreStatus clear_cache(const std::function<bool()>& stop = {}) const;
     /**
      * Creates a missing top-level directory such as Books or Fonts; never replaces an existing
      * entry. error_number reports a failed mkdir call (EROFS, ENOSPC, ...); otherwise it is 0.

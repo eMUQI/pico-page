@@ -542,12 +542,47 @@ bool resource_parents(const std::string& root, const std::string& path) {
     return true;
 }
 
-StoreStatus remove_children(const std::string& directory, unsigned depth) {
+std::optional<std::uint64_t> tree_bytes(const std::string& root, const std::string& relative,
+                                         bool books_only, const std::function<bool()>& stop) {
+    unsigned remaining = 2000;
+    std::uint64_t total = 0;
+    std::vector<std::string> pending{relative};
+    while (!pending.empty()) {
+        if (stop && stop()) return std::nullopt;
+        const auto directory = std::move(pending.back());
+        pending.pop_back();
+        DIR* entries = opendir((root + "/" + directory).c_str());
+        if (!entries) return std::nullopt;
+        bool complete = true;
+        while (true) {
+            if (stop && stop()) { complete = false; break; }
+            errno = 0;
+            const auto* item = readdir(entries);
+            if (!item) { complete = errno == 0; break; }
+            const std::string name = item->d_name;
+            if (name == "." || name == "..") continue;
+            const auto path = directory + "/" + name;
+            struct stat info{};
+            if (!remaining-- || path.size() > 1024 || inspect((root + "/" + path).c_str(), &info) != 0) {
+                complete = false; break;
+            }
+            if (S_ISDIR(info.st_mode)) pending.push_back(path);
+            else if (S_ISREG(info.st_mode) && (!books_only || asset_path("Books/" + name)))
+                total += static_cast<std::uint64_t>(info.st_size);
+        }
+        if (closedir(entries) != 0) complete = false;
+        if (!complete) return std::nullopt;
+    }
+    return total;
+}
+
+StoreStatus remove_children(const std::string& directory, unsigned depth, const std::function<bool()>& stop) {
     if (depth > 32) return StoreStatus::Invalid;
     DIR* entries = opendir(directory.c_str());
     if (!entries) return StoreStatus::IoError;
     StoreStatus status = StoreStatus::Ok;
     while (true) {
+        if (stop && stop()) { status = StoreStatus::Cancelled; break; }
         errno = 0;
         auto* entry = readdir(entries);
         if (!entry) {
@@ -560,7 +595,7 @@ StoreStatus remove_children(const std::string& directory, unsigned depth) {
         struct stat info{};
         if (inspect(path.c_str(), &info) != 0) { status = StoreStatus::IoError; break; }
         if (S_ISDIR(info.st_mode)) {
-            status = remove_children(path, depth + 1);
+            status = remove_children(path, depth + 1, stop);
             if (status != StoreStatus::Ok) break;
             if (rmdir(path.c_str()) != 0) { status = StoreStatus::IoError; break; }
         } else if (unlink(path.c_str()) != 0) { status = StoreStatus::IoError; break; }
@@ -1093,12 +1128,39 @@ StoreStatus FileStore::create_top_level_directory(const std::string& name, int& 
     return sync_directory(root_) ? StoreStatus::Ok : StoreStatus::IoError;
 }
 
-StoreStatus FileStore::clear_cache() const {
+StoreStatus FileStore::clear_cache(const std::function<bool()>& stop) const {
+    if (stop && stop()) return StoreStatus::Cancelled;
     const std::string path = "PicoPage/cache";
     const auto safe = store_internal::safe_path(root_, path);
     if (safe == StoreStatus::Missing) return StoreStatus::Ok;
     if (safe != StoreStatus::Ok) return safe;
-    return remove_children(root_ + "/" + path, 0);
+    return remove_children(root_ + "/" + path, 0, stop);
+}
+
+StorageUsage FileStore::storage_usage(const std::function<bool()>& stop) const {
+    StorageUsage usage;
+    if (stop && stop()) return usage;
+    usage.roots = load_settings().settings.library_roots;
+    std::uint64_t books = 0;
+    bool books_known = true;
+    for (const auto& path : usage.roots) {
+        if (stop && stop()) return {};
+        const auto safe = store_internal::safe_path(root_, path);
+        if (safe == StoreStatus::Missing) continue;
+        if (safe != StoreStatus::Ok) { books_known = false; continue; }
+        const auto bytes = tree_bytes(root_, path, true, stop);
+        if (bytes) books += *bytes;
+        else books_known = false;
+    }
+    if (books_known) usage.books = books;
+    if (stop && stop()) return {};
+    const auto safe = store_internal::safe_path(root_, "PicoPage/cache");
+    if (safe == StoreStatus::Missing) usage.cache = 0;
+    else if (safe == StoreStatus::Ok) usage.cache = tree_bytes(root_, "PicoPage/cache", false, stop);
+    if (stop && stop()) return {};
+    std::uint64_t total = 0, available = 0;
+    if (card_space(total, available)) usage.available = available;
+    return usage;
 }
 
 bool FileStore::card_space(std::uint64_t& total, std::uint64_t& available) const {

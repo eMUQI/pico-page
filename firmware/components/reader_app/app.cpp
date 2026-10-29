@@ -848,11 +848,6 @@ void ReaderApp::poll_background(bool cancel) {
     // Keep completed background work from replacing the sleep feedback before preparation.
     if (impl_->sleep_wait_footer && !impl_->sleep_wait_restore_pending && impl_->view == impl_->sleep_wait_view) return;
     if (!cancel || !impl_->dictionary_contact) impl_->flush_dictionary_selection();
-    if (impl_->clear_cache_pending) {
-        if (impl_->view != View::StorageSettings || !impl_->card_available) impl_->clear_cache_pending = false;
-        else if (!cancel && !impl_->counting_job && !impl_->display.busy() && !impl_->save_job && !impl_->bookmark_job)
-            impl_->control(ClearCache);
-    }
     // The counting session lives only while the reading page is shown.
     if (impl_->view != View::Reading && !impl_->counting_job) impl_->counting_session.reset();
     impl_->poll_covers();

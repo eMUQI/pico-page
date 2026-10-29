@@ -917,7 +917,8 @@ struct ReaderApp::Impl final : DisplayBackend {
                            view == View::Refresh || view == View::Sync || view == View::Confirmation;
         if (panel && body_canvas) canvas = *body_canvas;
         else if (panel || view == View::Error) canvas.fill_rect(0, 104, 684, 1112, 15);
-        const int top = panel || view == View::Reading || view == View::Error ? footer_top : footer_zone;
+        const int top = view == View::StorageSettings ? 1080 :
+            panel || view == View::Reading || view == View::Error ? footer_top : footer_zone;
         content_loading = true;
         view = View::Loading;
         hits.clear();
@@ -2918,7 +2919,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::unique_ptr<std::uint8_t, decltype(&std::free)> sleep_wait_footer{nullptr, &std::free};
     bool sleep_wait_restore_pending = false;
     View sleep_wait_view = View::Library;
-    bool clear_cache_pending = false;
     bool custom_prepare_finished = false, custom_sleep_attempted = false, custom_notice_pending = false;
     std::unique_ptr<graphics::Canvas> custom_sleep_image;
     void list_lock_screens() {
@@ -3037,12 +3037,8 @@ struct ReaderApp::Impl final : DisplayBackend {
         return PICO_PAGE_VERSION;
 #endif
     }
-    /**
-     * Sums regular files below a card-relative directory; books_only keeps EPUB and TXT names.
-     * The walk blocks the application task, so it stops after 2000 entries. nullopt when a
-     * directory cannot be read or that limit is exceeded.
-     */
-    std::optional<std::uint64_t> tree_bytes(const std::string &relative, bool books_only);
+    StorageUsage storage_usage;
+    void begin_storage(bool clear_cache = false);
     void draw_storage();
     void draw_input_settings() {
         if (!bookmark_io_ready()) return;
