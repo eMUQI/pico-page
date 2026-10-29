@@ -408,12 +408,16 @@ void ReaderApp::Impl::draw_dictionary() {
         const auto found = std::find_if(dictionary_items.begin(), dictionary_items.end(), [&](const auto& item) { return item.id == id; });
         const auto name = !dictionary_name.empty() ? dictionary_name : found != dictionary_items.end() && !found->info.name.empty() ? found->info.name : basename(id);
         // Numbering skips sources already known to be unusable, as source navigation does; the
-        // current source keeps its place so a failing choice still shows where it is.
+        // current source keeps its place so a failing choice still shows where it is. Only format,
+        // support and missing-file results are definitive; memory and I/O failures may recover.
         const auto unusable = [&](const std::string& source) {
             return std::any_of(dictionary_failed_sources.begin(), dictionary_failed_sources.end(),
                                [&](const auto& item) { return item.id == source; }) ||
-                   std::any_of(dictionary_items.begin(), dictionary_items.end(),
-                               [&](const auto& item) { return item.id == source && !item.status; });
+                   std::any_of(dictionary_items.begin(), dictionary_items.end(), [&](const auto& item) {
+                       return item.id == source && (item.status.status == dictionary::Status::InvalidFormat ||
+                              item.status.status == dictionary::Status::Unsupported ||
+                              item.status.message == kMissingDictionary);
+                   });
         };
         std::size_t usable_before = 0, usable_after = 0;
         for (std::size_t i = 0; i < settings.dictionary_enabled.size(); ++i)
