@@ -1,6 +1,8 @@
 # 开发状态
 
-## 当前摘要（2026-10-28）
+## 当前摘要（2026-10-29）
+
+2026-10-29 自托管 CI 候选：PR #167 将 Host checks 和 Website build 改用本仓库专用的 `homelab` runner，保留原检查名称、测试与部署规则；改为预装系统依赖并隔离 COS Python 依赖。实现 head `28b19a3` 已在 homelab 通过 Debug 31/31、ASan／UBSan／LSan 31/31 和网站检查；首次字体下载重试及 GCC 15 测试兼容修正见下方记录。PR 尚未合并，生产部署未执行。
 
 2026-10-28 D48 查词按钮表候选：查词面板底部改为范围、来源、翻页三行相连格，可按词／字调整选区端点并立即重查；下方面板移到 y 656 并覆盖阅读页脚。PR #166 的本地 review 修正限制字符回退仅用于收缩，保留按词超限时的长按入口，并统一跳过端点分隔符；第二轮以 Unicode 分类修正其他文字与日文标点的判断。Debug 与完整 ASan／UBSan 各 31/31、标准固件构建通过，host 画面已检查；未刷写，真机触控与近黑白显示待验证，详见下方本批记录。
 
@@ -948,3 +950,20 @@ Debug host 重新配置、构建和完整 CTest 31/31 通过。标准固件构�
 按当前完整 PR 差异运行 `python3 tools/ci_changes.py --base origin/main`，结果为 `host=true`、`web=false`，因此网站构建无适用输入变化。本地执行工作流中的四组 Python 测试：`test_ci_changes.py`、`test_deploy_firmware.py`、`test_cos_guard.py`、`test_publish_cos.py`，共 13 项通过。上一轮代码与本轮分类修正均补跑完整 sanitizer；最终本轮 `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、host 构建与完整 CTest 31/31 通过。`build/ci-sanitized` 使用工作流的 `-O1 -g`、Clang、ASan／UBSan、BSP 波形与 `PICO_PAGE_HOST_TRACE_EVENTS=ON` 配置，完整 CTest 注册及运行 31/31 通过；本机为 macOS，不作为 Linux CI 或 LSan 结果。首次该目录构建因 ccache 默认路径权限失败，指定工作流同样的仓库 `.local/ccache` 与临时目录后重跑通过，未修改依赖或测试内容。
 
 标准 `sh tools/build_firmware.sh` 使用上一批相同的 EIM／ESP-IDF 6.1、固定 BSP 与本地 SDK 差异通过，应用为 `0x3c43b0` 字节，比上一轮 `0x3c2a60` 增加 6,480 字节；4 MiB 应用槽剩余 `0x3bc50` 字节（6%）。生效配置与依赖锁未修改。交接检查与 `git diff --check` 通过；构建、测试、复现与固定版本 Unicode 源数据保存在 `.local/pr166-review/` 下的 `unicode-*` 日志及 `unicode/` 目录。下一步推送本轮并复核最终 head 的 review；实际合并状态以 GitHub 为准。未刷写或发布，实体触控、面板、慢 TF 与目标资源专项仍待验证。
+
+
+## 2026-10-29 · 本仓库专用自托管 runner 候选
+
+用户已在 Ubuntu 26.04 x86_64 笔记本安装 runner 服务，并授权将 Actions 切换至该机器，确认 runner 当前只用于本项目。基线为 `fix/cache-cleanup-feedback eaebe35`，本批开始时工作区干净；保留该分支已有缓存反馈提交，不修改固件。通过 `gh api repos/eMUQI/pico-page/actions/runners` 确认 `homelab` 在线且空闲，实际标签为 `self-hosted`、`Linux`、`X64`、`pico-page`，仓库为私有。
+
+Host checks 和 Website build 的 `runs-on` 改为 `[self-hosted, linux, x64, pico-page]`，保留固定 `host`／`web` 名称、触发条件、路径选择、超时、取消规则、完整 Debug／sanitizer／网站检查及生产部署校验。移除 host 的 sudo、apt 及 GitHub 镜像专用包源修改，改为检查预装工具与 pkg-config 依赖；新增 host 的 Node 24 准备，避免缺少 Node 时上传页条件测试未注册。Python 3.12 设置保留，已核对官方发行清单包含 Ubuntu 26.04 x64 包，工具缓存须由 runner 用户可写。两个 checkout 显式清理旧工作区；COS 包只安装至本任务临时目录中的虚拟环境。新增 actionlint 自定义标签配置，环境说明记录管理员依赖安装命令、普通用户权限、单 runner 排队与清理边界。
+
+本地验证环境为 macOS、Python 3.14.7；从官方发布下载 actionlint v1.7.12 至 `/tmp/pico-page-actionlint-20261029/` 并校验 SHA-256，检查两个工作流；通过 Ruby YAML 解析逐项执行 `bash -n`。现有 `test_ci_changes.py` 三项回归通过，覆盖 PR 差异、异常比较与部署过期判断；临时虚拟环境中确认 Python 前缀独立且 pip 可用。交接检查和 diff 检查通过。本批仅修改 CI 与文档，未新增测试、未重复固件／host／sanitizer 构建、未操作设备。上述本机检查不证明 Ubuntu 系统依赖、Python 下载、Linux sanitizer、OIDC 或生产部署已通过。
+
+候选尚未提交、推送或触发远端任务。下一步由管理员按环境说明安装依赖，取得推送授权后将本批 CI 差异独立提交并在 `homelab` 上验证首次 PR 运行；正式部署另按原有触发规则核对，不将 runner 在线状态记为 CI 通过。
+
+2026-10-29 后续：用户明确授权独立提交、推送和创建 PR，并确认 homelab 系统依赖已安装。本批 CI 改动移入从最新 `origin/main 8c7d589` 创建的独立 worktree，原缓存反馈分支及提交保持不变；将以首次远端运行核对实际依赖和 Linux 检查，尚不宣称生产部署已验证。
+
+首次远端运行：网站 job `123223347703` 已在 homelab 完成固件附件校验、网页测试与构建；PR 按原规则跳过部署。Host 第一次因下载 Noto 字体时连接重置失败，原样重试后通过资源摘要校验，未修改下载源或 TLS 检查。后续 GCC 15 编译在既有 `provision_test.cpp` 的复合断言处报告临时 vector 的悬垂指针警告；`connection_order()` 返回拥有字符串的 vector，不借用参数。本批仅将两个返回值保存到具名局部变量后执行原断言，保留原输入、断言、`-Werror` 和 sanitizer，不修改固件实现。修正后重新执行完整远端检查。
+
+远端验证收尾：实现 head `28b19a35e4ed8142f282df9ec06cea2ac88961b9` 的 Host run `40806147096`、job `123225457671` 与 Website run `40806147097`、job `123225457383` 均由 `homelab` 执行并成功。Host 使用 Python 3.12.16，完成四组既有 Python 回归、Debug 31/31、独立 Clang ASan／UBSan／LSan 31/31 及交接检查；sanitizer 明确保留 `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1` 和 `UBSAN_OPTIONS=halt_on_error=1`。网站完成发布固件附件校验、安装页回归和构建。没有减少测试、关闭断言或放宽编译诊断；除现有测试的两个返回值具名化外，固件源码不变。PR #167 已推送并保持开放，尚未合并；COS 发布、OIDC、Cloudflare 部署及线上读回按 PR 原有条件跳过，不能记为本轮已通过。原 `fix/cache-cleanup-feedback eaebe35` 分支保持干净且未混入 PR。

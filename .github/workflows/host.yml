@@ -7,7 +7,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   host:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, pico-page]
     timeout-minutes: 20
     env:
       CCACHE_DIR: ${{ github.workspace }}/.local/ccache
@@ -17,6 +17,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          clean: true
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -30,14 +31,19 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python3 tools/ci_changes.py --base "$PR_BASE_SHA" | tee -a "$GITHUB_OUTPUT"
-      - name: Install host dependencies
+      - if: steps.changes.outputs.host == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Check host dependencies
         id: dependencies
         if: steps.changes.outputs.host == 'true'
         run: |
-          # Prefer the Ubuntu archive while retaining the security mirror fallback.
-          sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
-          sudo apt-get update
-          sudo apt-get install -y ccache libsdl2-dev libcurl4-openssl-dev
+          cmake --version
+          c++ --version
+          clang++ --version
+          ccache --version
+          pkg-config --modversion sdl2 openssl libcurl
       - name: Cache font downloads
         if: steps.changes.outputs.host == 'true'
         uses: actions/cache@v5

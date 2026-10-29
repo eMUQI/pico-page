@@ -87,7 +87,20 @@ python3 tools/check_koreader_mapping.py
 
 网站、发布说明、OTA 清单脚本及网站或共用路径脚本的改动执行 PR 网站构建与发布固件校验。分支 push 不单独触发工作流；main 仅在上述网站输入变更时构建并部署，发布 Release 和手动部署入口保留。host 合并后不自动重跑，直接推送 main 的代码需要手动补验；合并前应验证包含当前目标分支变更的结果。PR 新提交取消旧检查，正式部署继续串行并保留下载源比较及线上读回检查。COS 返回 403 时，仅允许候选清单与全部镜像均同官网现有副本逐字节一致的页面更新，并明确告警；新固件、内容变化、其他错误及认证发布失败仍阻止部署，不自动恢复桶权限。部署前通过共用路径脚本直接比较构建提交与最新 main 的网站输入：网站输入变化才让位给替代运行，只有文档或固件代码变化时仍完成当前部署；读取比较结果失败时停止部署。
 
-两个工作流固定 `ubuntu-24.04`，host 超时为 20 分钟，网站超时为 25 分钟（包含固件上传及完整公网读回）。host 保留固定 Python 3.12，复用镜像预装的 Clang、pkg-config 和 OpenSSL 开发文件，仅通过 apt 安装 ccache、SDL2 和 curl 开发文件。runner 的优先镜像列表中移除 Azure 项，改由官方 Ubuntu archive 优先并保留 security fallback；依赖包、签名校验、测试集合和 20 分钟超时不变。列表格式核对固定镜像的[配置脚本](https://github.com/actions/runner-images/blob/ubuntu24/20261012.334/images/ubuntu/scripts/build/configure-apt-sources.sh)，不修改用户主机的包源。镜像清单见 [Ubuntu 24.04 runner 软件](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md)；镜像内工具仍会更新，固定系统版本不等于固定所有工具版本。
+两个工作流通过 `[self-hosted, linux, x64, pico-page]` 路由至本仓库专用的 `homelab` runner；当前主机为 Ubuntu 26.04 x86_64，以独立普通用户运行，不授予 sudo 或 Docker 管理权限。单个 runner 串行领取任务，离线时任务排队，不自动回退至 GitHub 托管机器。host 超时为 20 分钟，网站超时为 25 分钟（包含固件上传及完整公网读回）。工作流不执行 apt、不修改主机包源；host 检查 CMake、C++、Clang、ccache 及 pkg-config 依赖，网站检查 gh 和 curl，缺少依赖时失败。
+
+管理员在 Ubuntu 主机上预先安装系统依赖，不能在 runner 用户中执行：
+
+```sh
+sudo apt-get update
+sudo apt-get install -y build-essential cmake clang libclang-rt-dev ccache pkg-config \
+  libsdl2-dev libssl-dev libcurl4-openssl-dev python3 python3-venv \
+  git gh curl ca-certificates tar gzip unzip
+```
+
+host 和 COS 发布继续通过 `actions/setup-python@v5` 使用 Python 3.12；runner 用户须能写入 `RUNNER_TOOL_CACHE`，Python 发行包须匹配 Ubuntu 版本，来源见 [actions/python-versions](https://github.com/actions/python-versions/blob/main/versions-manifest.json)。不替换系统 Python。host 正文相关检查和网站构建均显式准备 Node 24，防止新机器缺少 Node 时条件测试未注册。COS 依赖安装在本任务 `RUNNER_TEMP/pico-page-cos` 虚拟环境中，不写入系统 Python 或共享工具缓存中的 Python 环境。
+
+两个工作流均显式启用 checkout 清理，移除上次任务留下的未跟踪及忽略文件，再恢复所需缓存，避免复用旧构建目录、网站产物或下载的固件。缓存不保存构建结果；长期运行的 runner 不视为每次新建的隔离环境。runner 仍可访问主机允许的网络服务，专用用户不能代替内网访问控制。
 
 Debug 保持原优化配置；CI sanitizer 使用 Debug 配置及 `-O1 -g`，保留断言、事件跟踪和原有 sanitizer 选项。两种构建通过 CMake compiler launcher 共用 ccache，编译器内容和编译参数参与命中判断，单份本地缓存上限为 256 MiB。缓存只影响编译，完整 CTest 每次仍执行。字体与 FreeType 仅缓存下载输入，`setup_fonts.py` 每次重新核对摘要并按需解包，不缓存测试结果或构建目录。新增缓存使用 GitHub 官方 `actions/cache@v5`，不提高仓库的缓存付费容量上限。
 

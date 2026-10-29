@@ -27,7 +27,7 @@ concurrency:
   cancel-in-progress: ${{ !(github.event_name == 'release' || (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')) }}
 jobs:
   web:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, pico-page]
     timeout-minutes: 25
     permissions:
       contents: read
@@ -43,6 +43,7 @@ jobs:
         with:
           ref: ${{ github.event_name == 'release' && github.event.repository.default_branch || '' }}
           fetch-depth: 0
+          clean: true
       - name: Select checks
         id: changes
         shell: bash
@@ -50,6 +51,11 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python3 tools/ci_changes.py --base "$PR_BASE_SHA" | tee -a "$GITHUB_OUTPUT"
+      - name: Check website dependencies
+        if: steps.changes.outputs.web == 'true'
+        run: |
+          gh --version
+          curl --version
       - if: steps.changes.outputs.web == 'true'
         uses: actions/setup-node@v7
         with:
@@ -122,8 +128,9 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           if [ ! -f web/dist/firmware/manifest.json ]; then exit 0; fi
-          python3 -m pip install -r tools/cos-requirements.txt
-          python3 tools/publish_cos.py web/dist/firmware
+          python3 -m venv "$RUNNER_TEMP/pico-page-cos"
+          "$RUNNER_TEMP/pico-page-cos/bin/python" -m pip install -r tools/cos-requirements.txt
+          "$RUNNER_TEMP/pico-page-cos/bin/python" tools/publish_cos.py web/dist/firmware
       # The deployment carries the firmware fetched above: devices install what it publishes.
       # deployment.txt identifies this run, so the check below can tell whether production serves it.
       - name: Deploy to Cloudflare Pages

@@ -186,7 +186,9 @@ int main() {
     auto order = provision::connection_order(known, {{"cafe", -30, true}, {"phone", -45, true}, {"home", -60, false},
                                                      {"phone", -70, true}});
     assert(order.size() == 2 && order[0].ssid == "phone" && order[1].ssid == "home" && order[1].password == "password");
-    assert(provision::connection_order(known, {{"cafe", -30, true}}).empty() && provision::connection_order({}, {{"home", -30, false}}).empty());
+    const auto unknown_network_order = provision::connection_order(known, {{"cafe", -30, true}});
+    const auto unsaved_network_order = provision::connection_order({}, {{"home", -30, false}});
+    assert(unknown_network_order.empty() && unsaved_network_order.empty());
     assert(provision::network_absent(201) && provision::network_absent(211) && !provision::network_absent(15));
     assert(provision::password_rejected(15) && provision::password_rejected(202) && !provision::password_rejected(201) &&
            !provision::password_rejected(8));
