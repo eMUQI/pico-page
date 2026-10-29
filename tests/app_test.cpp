@@ -114,6 +114,24 @@ static void opened(ReaderApp& app, const std::string& book) {
     }
     assert(app.pending_frame() && app.pending_frame()->purpose == FramePurpose::Body);
 }
+// The panel's 2-pixel top rule, centred on its top row, is the first black run in column 0;
+// text and handles stay right of it.
+static int dictionary_panel_top(const ReaderApp& app) {
+    for (int y = 0; y < 1216; ++y) if (app.canvas().pixel(0, y) == 1) return y ? y + 1 : 0;
+    assert(false); return 0;
+}
+
+// Compares packed canvases (two pixels per byte, 342 bytes per row) outside the lower panel's
+// source row, whose numbering changes once a lookup or scan finds an unusable source.
+static bool same_outside_source_row(const std::vector<std::uint8_t>& shown, const std::vector<std::uint8_t>& expected) {
+    if (shown.size() != expected.size()) return false;
+    for (std::size_t index = 0; index < shown.size(); ++index) {
+        const auto y = index / 342;
+        if ((y <= 1056 || y >= 1128) && shown[index] != expected[index]) return false;
+    }
+    return true;
+}
+
 static bool sleep_frame(ReaderApp& app) {
     if (!app.begin_sleep()) return false;
     if (app.pending_frame()) app.complete_frame(true);
@@ -3072,7 +3090,7 @@ static void dictionary_query_failure_test(const fs::path& root, const fs::path& 
     assert(dictionary_preparations == 1 && app.canvas().pixels() != short_hit);
     driver.tap(342, 1172); driver.present(); driver.complete_content();
     assert(dictionary_preparations == 2);
-    driver.tap(636, 692); driver.present();
+    driver.tap(636, dictionary_panel_top(app) + 36); driver.present();
     driver.hold(hit_x, hit_y); driver.present(); driver.complete_content();
     assert(dictionary_preparations == 2 && app.canvas().pixels() == short_hit);
     assert(app.saved_record() == saved);
@@ -3128,13 +3146,19 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     app.poll_background(true);
     assert(!app.pending_frame() && app.canvas().pixels() == before_release);
     // After the preview, a slow lookup shows its loading panel only after dictionary_panel_delay.
-    ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryLookup, std::chrono::milliseconds(800));
+    ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryLookup, std::chrono::milliseconds(3300));
     contact(Phase::End, 250, hit_y + 130);
     assert(app.content_busy() && !app.pending_frame());
     app.poll_background(); assert(!app.pending_frame() && app.canvas().pixels() == before_release);
     std::this_thread::sleep_for(std::chrono::milliseconds(550));
     app.poll_background(); assert(app.pending_frame() && app.content_busy());
     driver.present();
+    // A lookup still running after kDictionarySlowDelay replaces the loading text once.
+    const auto loading = app.canvas().pixels();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+    app.poll_background(); assert(app.pending_frame() && app.content_busy() && app.canvas().pixels() != loading);
+    driver.present(); shot("dictionary-slow", app);
+    app.poll_background(); assert(!app.pending_frame());
     ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryLookup, std::chrono::milliseconds(0));
     unsigned slow_frames = 0;
     driver.frame_observer = [&](const Frame&) { ++slow_frames; };
@@ -3142,7 +3166,7 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     driver.frame_observer = {};
     assert(slow_frames == 1 && app.view() == View::Dictionary);
     assert(app.saved_record() == saved);
-    driver.tap(636, 692); driver.present();
+    driver.tap(636, dictionary_panel_top(app) + 36); driver.present();
     assert(app.canvas().pixels() == body);
     // Cancellation during a refresh consumes the late release and restores the same body.
     contact(Phase::Begin, hit_x, hit_y, true);
@@ -3175,7 +3199,7 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     contact(Phase::End, hit_x, hit_y);
     assert(!app.content_busy() && app.canvas().pixels() == preview);
     driver.present(); app.poll_background(); driver.complete_content();
-    driver.tap(636, 692); driver.present();
+    driver.tap(636, dictionary_panel_top(app) + 36); driver.present();
     // A fast lookup followed by slow page layout still shows the loading panel after the delay.
     ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryPage, std::chrono::milliseconds(800));
     contact(Phase::Begin, hit_x, hit_y, true); driver.present();
@@ -3187,7 +3211,7 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     driver.present();
     ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryPage, std::chrono::milliseconds(0));
     driver.complete_content();
-    driver.tap(636, 692); driver.present();
+    driver.tap(636, dictionary_panel_top(app) + 36); driver.present();
     contact(Phase::Begin, hit_x, hit_y, true); driver.present();
     contact(Phase::End, hit_x, hit_y);
     // A fast lookup replaces the preview with its result without a loading panel.
@@ -3199,7 +3223,7 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     assert(fast_frames == 1);
     const auto automatic = app.canvas().pixels();
     // The removed edit control has no hit area; selection remains available through its handles.
-    driver.tap(480, 692);
+    driver.tap(480, dictionary_panel_top(app) + 36);
     assert(!app.content_busy() && !app.pending_frame() && app.canvas().pixels() == automatic);
     int handle_x = -1, handle_y = -1;
     for (int y = 0; y < 1128 && handle_x < 0; ++y)
@@ -3217,7 +3241,7 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     contact(Phase::Move, 400, hit_y); driver.present();
     contact(Phase::End, 400, hit_y); driver.complete_content();
     assert(app.canvas().pixels() != automatic && app.saved_record() == saved);
-    driver.tap(636, 692); driver.present();
+    driver.tap(636, dictionary_panel_top(app) + 36); driver.present();
     driver.hold(hit_x, hit_y); assert(app.view() == View::Dictionary && app.content_busy());
     driver.present();
     // The missing first source falls through to the next one behind the loading panel; only the result is presented.
@@ -3292,11 +3316,12 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     driver.tap(598, 1092);
     assert(!app.content_busy() && !app.pending_frame() && app.canvas().pixels() == exhausted);
     shot("dictionary-source-navigation", app);
-    driver.tap(636, 692); driver.present(); driver.hold(hit_x, hit_y); driver.present(); driver.complete_content();
+    driver.tap(636, dictionary_panel_top(app) + 36); driver.present(); driver.hold(hit_x, hit_y); driver.present(); driver.complete_content();
     assert(app.canvas().pixels() == first);
     driver.key(Input::K3); driver.present(); driver.complete_content();
     const auto second_page = app.canvas().pixels();
     const auto second_canvas = app.canvas();
+    const int second_definition_top = dictionary_panel_top(app) + 108;
     // A failed reflow keeps the previous layout and can be retried after the font returns.
     fs::rename(root / "Fonts/LXGWWenKai-Regular.ttf", root / "Fonts/held.ttf");
     driver.tap(342, 1172); driver.present(); driver.complete_content();
@@ -3309,17 +3334,17 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     assert(app.view() == View::Dictionary && app.saved_record() == saved);
     for (int y = 0; y < 42; ++y)
         for (int x = 36; x < 648; ++x)
-            assert(app.canvas().pixel(x, 108 + y) == second_canvas.pixel(x, 764 + y));
+            assert(app.canvas().pixel(x, 108 + y) == second_canvas.pixel(x, second_definition_top + y));
     driver.tap(342, 1172); driver.present(); driver.complete_content();
     assert(app.canvas().pixels() == second_page);
     driver.key(Input::K1); driver.present(); driver.complete_content();
     assert(app.canvas().pixels() == first);
-    driver.tap(636, 692); driver.present();
+    driver.tap(636, dictionary_panel_top(app) + 36); driver.present();
     assert(app.view() == View::Reading && app.saved_record() == saved && app.canvas().pixels() == body);
     // Closing a delayed lookup discards its result without waiting in input dispatch.
     ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryLookup, std::chrono::milliseconds(200));
     driver.hold(hit_x, hit_y); driver.present(); app.poll_background();
-    driver.tap(636, 692); driver.present();
+    driver.tap(636, dictionary_panel_top(app) + 36); driver.present();
     assert(app.view() == View::Reading && app.saved_record() == saved);
     std::this_thread::sleep_for(std::chrono::milliseconds(220)); app.poll_background();
     assert(app.view() == View::Reading && !app.pending_frame());
@@ -3340,13 +3365,13 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     }
     assert(app.view() == View::PowerMenu && app.saved_record() == saved);
     driver.tap(300, 1120); driver.present(); assert(app.view() == View::Dictionary);
-    driver.tap(636, 692); driver.present();
+    driver.tap(636, dictionary_panel_top(app) + 36); driver.present();
     driver.hold(hit_x, hit_y); driver.present(); app.poll_background();
     assert(app.begin_sleep()); driver.present();
     assert(!app.prepare_sleep() && app.sleep_pending());
     app.cancel_sleep(); if (app.pending_frame()) driver.present(); driver.complete_content();
     assert(app.view() == View::Dictionary && app.saved_record() == saved);
-    driver.tap(636, 692); driver.present();
+    driver.tap(636, dictionary_panel_top(app) + 36); driver.present();
     driver.hold(hit_x, hit_y); driver.present(); app.poll_background();
     assert(sleep_frame(app)); driver.present();
     assert(app.view() == View::Sleeping && app.saved_record() == saved);
@@ -3418,8 +3443,10 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
                 assert(!expected_font.missing(U'發'));
                 graphics::Canvas expected;
                 expected.clear();
-                assert(expected_font.draw(expected, U'發', 24, 672 + expected_font.metrics().ascender, 1, true));
-                for (int row = 672; row < 708; ++row)
+                int above = 0, rows = 0; assert(expected_font.ink_rows(U'中', above, rows));
+                const int heading_top = dictionary_panel_top(reader) + 36 + above - rows / 2 - expected_font.metrics().ascender;
+                assert(expected_font.draw(expected, U'發', 24, heading_top + expected_font.metrics().ascender, 1, true));
+                for (int row = heading_top; row < heading_top + 36; ++row)
                     for (int col = 24; col < 64; ++col)
                         assert(reader.canvas().pixel(col, row) == expected.pixel(col, row));
             }
@@ -3439,7 +3466,7 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
                 }
                 assert(reader.canvas().pixels() == first_page);
             }
-            d.refresh(); d.tap(636, 692); d.present();
+            d.refresh(); d.tap(636, dictionary_panel_top(reader) + 36); d.present();
             assert(reader.view() == View::Reading && reader.canvas().pixels() == original && reader.saved_record() == position);
         }
     }
@@ -3518,7 +3545,7 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
         d.tap(580, 190); d.present();  // Disable one enabled source while preserving the chosen source.
         d.tap(500, 1140); d.present(); d.complete_content();
         assert(reader.view() == View::Dictionary && reader.saved_record() == saved_position);
-        d.tap(636, 692); d.present(); assert(reader.canvas().pixels() == original);
+        d.tap(636, dictionary_panel_top(reader) + 36); d.present(); assert(reader.canvas().pixels() == original);
     }
     // Result navigation skips unusable sources in both directions and discards a cancelled lookup.
     {
@@ -3553,7 +3580,9 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
         d.tap(598, 1092); assert(!reader.content_busy() && !reader.pending_frame());
         shot("dictionary-navigation-skipped", reader);
         d.tap(85, 1092); d.present(); d.complete_content();
-        assert(reader.canvas().pixels() == first_result && reader.saved_record() == position);
+        // The invalid bad.ifo found during navigation no longer counts, so only the numbering changes.
+        assert(reader.canvas().pixels() != first_result);
+        assert(same_outside_source_row(reader.canvas().pixels(), first_result) && reader.saved_record() == position);
         d.tap(85, 1092); assert(!reader.content_busy() && !reader.pending_frame());
         // A new definition cannot use the previous definition's next-page cursor after layout fails.
         ContentJob::fail_starts_for_test(ContentJob::Kind::DictionaryPage, 1, ContentJob::StartFailure::TaskCreate);
@@ -3564,15 +3593,15 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
         d.tap(342, 1172); d.present(); d.complete_content();
         assert(reader.canvas().pixels() == last_result && reader.saved_record() == position);
         d.tap(85, 1092); d.present(); d.complete_content();
-        assert(reader.canvas().pixels() == first_result);
+        assert(same_outside_source_row(reader.canvas().pixels(), first_result));
         d.tap(342, 1092); d.present(); d.complete_content();
         d.tap(400, 1140); d.present(); d.complete_content();
         assert(reader.view() == View::DictionarySettings); shot("dictionary-known-source-error", reader);
         d.tap(500, 1140); d.present();
-        assert(reader.canvas().pixels() == first_result);
+        assert(same_outside_source_row(reader.canvas().pixels(), first_result));
         ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryLookup, std::chrono::milliseconds(200));
         d.tap(598, 1092); d.present(); reader.poll_background();
-        d.tap(636, 692); d.present();
+        d.tap(636, dictionary_panel_top(reader) + 36); d.present();
         std::this_thread::sleep_for(std::chrono::milliseconds(220)); reader.poll_background();
         ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryLookup, std::chrono::milliseconds(0));
         assert(reader.view() == View::Reading && !reader.pending_frame() && !reader.content_busy());
@@ -3595,6 +3624,27 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
             for (int x = 0; x < 684; ++x) assert(reader.canvas().pixel(x, y) == empty_result.pixel(x, y));
         assert(reader.saved_record() == empty_position);
     }
+    // When every source was read and none has the selection, both source arrows are disabled.
+    {
+        const auto card = root / "AllMissing";
+        fs::create_directories(card / "Fonts"); fs::copy_file(font, card / "Fonts/LXGWWenKai-Regular.ttf");
+        fs::create_directories(card / "Dictionaries");
+        for (const auto* source : {"first", "second"})
+            for (const auto* suffix : {".ifo", ".idx", ".dict.dz", ".syn.dz"})
+                fs::copy_file(dict / (std::string("compressed") + suffix), card / "Dictionaries" / (std::string(source) + suffix));
+        write(card / "Books/sample.txt", "unlisted\n");
+        write(card / "PicoPage/settings.toml", "schema_version=1\n[dictionary]\nenabled=['first.ifo','second.ifo']\n");
+        ReaderApp reader(card.string(), "dictionary", true, true); Driver d{reader};
+        assert(reader.initialize()); d.present(); opened(reader, "Books/sample.txt"); d.present();
+        int x = -1, y = -1;
+        for (int row = 64; row < 150 && x < 0; ++row)
+            for (int col = 36; col < 640; ++col) if (reader.can_long_press_at(col, row)) { x = col; y = row; break; }
+        assert(x >= 0); d.hold(x, y); d.present(); d.complete_content();
+        assert(reader.view() == View::Dictionary);
+        const auto missing = reader.canvas().pixels();
+        d.tap(598, 1092); d.tap(85, 1092);
+        assert(!reader.content_busy() && !reader.pending_frame() && reader.canvas().pixels() == missing);
+    }
     // A final one-entry batch still exposes the action that wraps to the first result.
     {
         const auto card = root / "Entries";
@@ -3609,8 +3659,9 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
         const auto position = reader.saved_record();
         d.hold(130, 94); d.present(); d.complete_content();
         const auto first_entry = reader.canvas().pixels();
+        const int next_entry_y = dictionary_panel_top(reader) + 130;
         for (int index = 0; index < 33; ++index) {
-            d.tap(570, 786); d.present(); d.complete_content();
+            d.tap(570, next_entry_y); d.present(); d.complete_content();
             assert(reader.saved_record() == position);
             if (index == 31) { assert(reader.canvas().pixels() != first_entry); shot("dictionary-entry-33", reader); }
         }
@@ -3773,7 +3824,7 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
                 assert(reader.canvas().pixels() != whole);
             }
             assert(reader.view() == View::Dictionary && reader.saved_record() == position);
-            d.tap(636, 692); d.present();
+            d.tap(636, dictionary_panel_top(reader) + 36); d.present();
         }
     }
 }

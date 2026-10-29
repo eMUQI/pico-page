@@ -64,7 +64,7 @@ def main():
     make(root, 'empty-last', [('sample', b'phonetic\0')], types='tm')
     make(root, 'binary-last', [('sample', b'text\0\0\1\2')], types='mW')
     make(root, 'known-only', [('sample', b'text')])
-    rich = ''.join(f'<p><b>{i:03d}.</b> Definition with an example.</p>' for i in range(1200))
+    rich = ''.join(f'<p><b>{i:04d}.</b> Example.</p>' for i in range(3000))
     make(root, 'ui-rich', [('sample', ('fəˈnetɪk\0' + rich).encode()),
                            ('abcdefgh' * 8, 'əˈlɒŋ\0<p>A long query remains readable.</p>'.encode()),
                            ('missing', '\0<p>Missing glyph: \U0010ffff</p>'.encode()),
