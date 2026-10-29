@@ -3268,33 +3268,27 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     // Source selection and management cancellation retain the displayed result and book position.
     driver.tap(342, 1092); driver.present(); driver.complete_content(); shot("dictionary-sources", app);
     driver.refresh(); driver.tap(600, 50); driver.present();
-    assert(app.saved_record() == saved);
-    // The name scan finds the missing first source, so only the source numbering changes from 2/2 to 1/1.
-    {
-        const auto shown = app.canvas().pixels();
-        assert(shown != first && same_outside_source_row(shown, first));
-    }
-    const auto first_known = app.canvas().pixels();
+    assert(app.canvas().pixels() == first && app.saved_record() == saved);
     driver.tap(342, 1092); driver.present(); driver.complete_content();
     driver.tap(100, 350); driver.present();
-    assert(app.canvas().pixels() == first_known && !app.content_busy());
+    assert(app.canvas().pixels() == first && !app.content_busy());
     driver.tap(342, 1092); driver.present(); driver.complete_content();
     driver.tap(400, 1140); driver.present(); driver.complete_content();
     assert(app.view() == View::DictionarySettings);
     driver.tap(100, 1140); driver.present(); driver.complete_content();
     driver.tap(500, 1140); driver.present();
-    assert(app.view() == View::Dictionary && app.canvas().pixels() == first_known);
+    assert(app.view() == View::Dictionary && app.canvas().pixels() == first);
     ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryList, std::chrono::milliseconds(200));
     driver.tap(342, 1092); driver.present(); app.poll_background();
     driver.tap(600, 50); driver.present();
-    assert(app.canvas().pixels() == first_known);
+    assert(app.canvas().pixels() == first);
     std::this_thread::sleep_for(std::chrono::milliseconds(220)); app.poll_background();
-    assert(app.canvas().pixels() == first_known && !app.pending_frame());
+    assert(app.canvas().pixels() == first && !app.pending_frame());
     ContentJob::delay_starts_for_test(ContentJob::Kind::DictionaryList, std::chrono::milliseconds(0));
     // Changing source does not fall through to another source when the selected one fails.
     driver.tap(342, 1092); driver.present(); driver.complete_content();
     driver.tap(100, 230); driver.present(); driver.complete_content();
-    assert(app.canvas().pixels() != first_known && app.saved_record() == saved);
+    assert(app.canvas().pixels() != first && app.saved_record() == saved);
     shot("dictionary-source-error", app);
     const auto unavailable_source = app.canvas().pixels();
     driver.tap(342, 1172); driver.present(); driver.complete_content();
@@ -3303,15 +3297,19 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     driver.tap(100, 350); driver.present(); driver.complete_content();
     assert(app.view() == View::Dictionary && app.saved_record() == saved);
     const auto chosen_source = app.canvas().pixels();
-    assert(chosen_source == first_known);
+    const auto chosen_canvas = app.canvas();
+    assert(chosen_source == first);
     driver.tap(300, 750);
     driver.tap(300, 750);
     assert(!app.content_busy() && !app.pending_frame() && app.canvas().pixels() == chosen_source);
     driver.tap(598, 1092);
     assert(!app.content_busy() && !app.pending_frame() && app.canvas().pixels() == chosen_source);
-    // The only earlier source is known to be missing, so the previous-source icon is already disabled.
-    driver.tap(85, 1092);
-    assert(!app.content_busy() && !app.pending_frame() && app.canvas().pixels() == chosen_source);
+    driver.tap(85, 1092); driver.present(); driver.complete_content();
+    assert(app.view() == View::Dictionary && app.saved_record() == saved && app.canvas().pixels() != chosen_source);
+    // Exhausting earlier sources changes only the previous-source icon, retaining the definition.
+    for (int y = 730; y < 984; ++y)
+        for (int x = 0; x < 684; ++x)
+            assert(app.canvas().pixel(x, y) == chosen_canvas.pixel(x, y));
     const auto exhausted = app.canvas().pixels();
     driver.tap(85, 1092);
     assert(!app.content_busy() && !app.pending_frame());
@@ -3319,7 +3317,7 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     assert(!app.content_busy() && !app.pending_frame() && app.canvas().pixels() == exhausted);
     shot("dictionary-source-navigation", app);
     driver.tap(636, dictionary_panel_top(app) + 36); driver.present(); driver.hold(hit_x, hit_y); driver.present(); driver.complete_content();
-    assert(app.canvas().pixels() == first_known);
+    assert(app.canvas().pixels() == first);
     driver.key(Input::K3); driver.present(); driver.complete_content();
     const auto second_page = app.canvas().pixels();
     const auto second_canvas = app.canvas();
@@ -3340,7 +3338,7 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     driver.tap(342, 1172); driver.present(); driver.complete_content();
     assert(app.canvas().pixels() == second_page);
     driver.key(Input::K1); driver.present(); driver.complete_content();
-    assert(app.canvas().pixels() == first_known);
+    assert(app.canvas().pixels() == first);
     driver.tap(636, dictionary_panel_top(app) + 36); driver.present();
     assert(app.view() == View::Reading && app.saved_record() == saved && app.canvas().pixels() == body);
     // Closing a delayed lookup discards its result without waiting in input dispatch.
@@ -3582,6 +3580,8 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
         d.tap(598, 1092); assert(!reader.content_busy() && !reader.pending_frame());
         shot("dictionary-navigation-skipped", reader);
         d.tap(85, 1092); d.present(); d.complete_content();
+        // The invalid bad.ifo found during navigation no longer counts, so only the numbering changes.
+        assert(reader.canvas().pixels() != first_result);
         assert(same_outside_source_row(reader.canvas().pixels(), first_result) && reader.saved_record() == position);
         d.tap(85, 1092); assert(!reader.content_busy() && !reader.pending_frame());
         // A new definition cannot use the previous definition's next-page cursor after layout fails.
