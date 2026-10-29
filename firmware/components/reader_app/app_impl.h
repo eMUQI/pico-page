@@ -804,7 +804,9 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::chrono::steady_clock::time_point mapping_start_retry{};
     std::optional<ContentJob::Request> pending_content;
     std::shared_ptr<DictionarySession> dictionary_session;
-    std::chrono::steady_clock::time_point dictionary_panel_due{};
+    std::chrono::steady_clock::time_point dictionary_panel_due{}, dictionary_slow_due{};
+    /** The current lookup outlasted kDictionarySlowDelay; the loading text explains first-use preparation. */
+    bool dictionary_slow = false;
     std::vector<DictionaryItem> dictionary_items;
     std::vector<DictionaryItem> dictionary_failed_sources;
     std::size_t dictionary_list_page = 0, dictionary_source = 0, dictionary_entry = 0, dictionary_entry_base = 0;
@@ -859,7 +861,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     void close_dictionary();
     /** The selection after one range control step, or nullopt when that edge cannot move or the query would be too long. */
     std::optional<dictionary::Selection> dictionary_range_step(int id, bool by_scalar) const;
-    int dictionary_top(bool full) const;
+    /** Top and bottom screen rows of the definition panel. */
+    std::pair<int, int> dictionary_bounds(bool full) const;
     graphics::LayoutSpec dictionary_layout(bool full) const;
     std::shared_ptr<const ContentCacheEntry> chapter_cache, recent_chapter_cache;
     bool chapter_cache_write_needed = false, recent_cache_write_needed = false;
@@ -1186,6 +1189,15 @@ struct ReaderApp::Impl final : DisplayBackend {
         for (auto c : decode_utf8(value))
             length += font.advance(c);
         return length;
+    }
+    /** The text() top that centres a CJK character's drawn rows, or a Latin capital's for faces
+     * without CJK, on middle; labels of one face and size then share a baseline. */
+    int top_for_middle(graphics::Font& font, int size, int middle) {
+        const FontSizeRestore restore(font, &font == &body);
+        if (!font.set_pixel_size(size)) return middle - size / 2;
+        int above = 0, rows = 0;
+        if (!font.ink_rows(font.contains(U'中') ? U'中' : U'H', above, rows) || !rows) return middle - size / 2;
+        return middle + above - rows / 2 - font.metrics().ascender;
     }
     void center(const std::string &value, int x, int top, int w, int size = 28,
                 std::uint8_t gray = 1, bool bold = false) {

@@ -85,6 +85,9 @@ public:
     /** Rasterizes into the existing bounded glyph cache without modifying a canvas. */
     bool warm(char32_t scalar, bool bold = false);
     bool draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8_t gray = 1, bool bold = false);
+    /** Rows of drawn coverage for scalar at the current size: above_baseline is the first row's
+     * distance above the baseline. False when the glyph cannot be rasterized. */
+    bool ink_rows(char32_t scalar, int& above_baseline, int& rows);
 private:
     void* library_ = nullptr;
     void* face_ = nullptr;

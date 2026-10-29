@@ -345,6 +345,15 @@ bool Font::draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8
     return true;
 }
 
+bool Font::ink_rows(char32_t scalar, int& above_baseline, int& rows) {
+    if (!warm(scalar)) return false;
+    const auto found = glyphs_.find(glyph_key(scalar, false));
+    if (found == glyphs_.end()) return false;
+    above_baseline = found->second.top;
+    rows = static_cast<int>(found->second.rows);
+    return true;
+}
+
 namespace {
 bool closing(char32_t c) { return std::u32string_view(U"，。！？、：；）】》」』〉…’”﹐﹑﹒﹔﹕﹖﹗﹚﹜﹞｡､｣,.!?;:)]}").find(c) != std::u32string_view::npos; }
 bool opening(char32_t c) { return std::u32string_view(U"（【《「『〈‘“﹙﹛﹝｢([{").find(c) != std::u32string_view::npos; }
