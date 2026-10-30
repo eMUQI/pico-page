@@ -1053,15 +1053,19 @@ struct ReaderApp::Impl final : DisplayBackend {
     /** Set while a sleep request waits for its cover worker; holds the time to request cancellation. */
     std::optional<std::chrono::steady_clock::time_point> sleep_cover_deadline;
     bool sleep_waiting_for_cover = false;
+    std::unique_ptr<graphics::Canvas> sleep_cover_image;
     /** Starts the cover worker for a sleep request. The caller has stopped pagination and released prefetch memory. */
     void prepare_sleep_cover() {
         if (counting_job) return;
+        sleep_cover_image.reset();
         struct stat info{};
         if (stat((root + "/" + book_path).c_str(), &info) != 0) return;
         const auto cover = cover_entry(book_path, info, 684, 1040, true);
         ContentJob::Request request;
         request.kind = ContentJob::Kind::SleepCover; request.root = root; request.path = root + "/" + book_path;
         request.cache_name = cover.name; request.cache_header = cover.header; request.cover_crop = true;
+        // Older sleep entries may record transient image-read failures as missing covers.
+        request.cache_header.replace(0, 8, "PPCOVER4");
         request.layout.width = 684; request.layout.height = 1040; request.generation = counting_generation;
         counting_job = std::make_unique<ContentJob>(std::move(request));
         if (!counting_job->start()) counting_job.reset();
@@ -1999,6 +2003,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         for (const auto& cover : covers) usage.cover_pixels += cover.pixels.capacity();
         if (detail_cover) usage.cover_pixels += detail_cover->pixels().capacity();
         if (custom_sleep_image) usage.cover_pixels += custom_sleep_image->pixels().capacity();
+        if (sleep_cover_image) usage.cover_pixels += sleep_cover_image->pixels().capacity();
         usage.cover_pixels += sleep_wait_footer ? kSleepWaitFooterBytes : 0;
         usage.ui_glyph_bytes = ui.cached_glyph_bytes(); usage.body_glyph_bytes = body.cached_glyph_bytes();
         usage.ui_glyphs = ui.cached_glyphs(); usage.body_glyphs = body.cached_glyphs();

@@ -836,25 +836,44 @@ void ContentJob::prepare_cover() {
     FileStore store(request.root);
     const auto width = request.layout.width, height = request.layout.height;
     const auto count = static_cast<std::size_t>((width + 1) / 2) * height;
+    if (stop()) return;
     {
-        std::string cached;
-        if (store.load_cache(request.cache_name, request.cache_header.size() + count, cached) == StoreStatus::Ok &&
-            cached.compare(0, request.cache_header.size(), request.cache_header) == 0) {
-            if (cached.size() == request.cache_header.size()) { result.cache_finished = true; return; }
-            if (cached.size() == request.cache_header.size() + count) {
-                if (request.kind != Kind::SleepCover) {
-                    result.image = std::make_unique<graphics::Canvas>(width, height);
-                    std::memcpy(result.image->data(), cached.data() + request.cache_header.size(), count);
+        std::unique_ptr<CacheReader> reader;
+        std::string header(request.cache_header.size(), '\0');
+        if (store.open_cache(request.cache_name, header.size() + count, reader) == StoreStatus::Ok &&
+            reader->read(header.data(), header.size()) && header == request.cache_header) {
+            if (reader->size() == header.size()) { result.cache_finished = true; return; }
+            if (reader->size() == header.size() + count) {
+#ifdef ESP_PLATFORM
+                if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < count + 256U * 1024 ||
+                    heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < count) {
+                    if (request.kind == Kind::SleepCover) result.error = "Cover cache memory unavailable";
+                    return;
                 }
-                result.cache_finished = true;
-                return;
+#endif
+                auto image = std::make_unique<graphics::Canvas>(width, height);
+                std::size_t at = 0;
+                while (at < count && !stop()) {
+                    const auto size = std::min<std::size_t>(16 * 1024, count - at);
+                    if (!reader->read(reinterpret_cast<char*>(image->data() + at), size)) break;
+                    at += size;
+                }
+                if (at == count && !stop()) {
+                    result.image = std::move(image);
+                    result.cache_finished = true;
+                    return;
+                }
             }
         }
     }
     if (stop()) return;
 #ifdef ESP_PLATFORM
-    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 3U * 1024 * 1024 ||
-        heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 2U * 1024 * 1024) return;
+    // The document reader admits encoded bytes by their actual size; reserve the output and decoder here.
+    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < image_room ||
+        heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < count) {
+        if (request.kind == Kind::SleepCover) result.error = "Cover preparation memory unavailable";
+        return;
+    }
 #endif
     std::vector<std::uint8_t> encoded;
     std::string error;
@@ -862,12 +881,14 @@ void ContentJob::prepare_cover() {
     const bool read = EpubDocument::read_cover(request.path, encoded, error, stop);
     const bool loaded = read && graphics::render_image(*image, encoded, 0, 0, width, height, error, request.cover_crop, stop);
     if (stop()) return;
+    if (!loaded && request.kind == Kind::SleepCover) result.error = error;
     std::vector<std::uint8_t>().swap(encoded);
     if (loaded) {
         std::string bytes = request.cache_header;
         bytes.append(reinterpret_cast<const char*>(image->data()), image->pixels().size());
         result.cache_finished = store.save_cache(request.cache_name, bytes) == StoreStatus::Ok;
-        if (request.kind != Kind::SleepCover) result.image = std::move(image);
+        // The image was complete before the optional commit; the app discards it if the sleep request ended.
+        result.image = std::move(image);
     } else if ((read && error.find("allocation") == std::string::npos && error.find("memory") == std::string::npos) ||
                error == "EPUB has no supported cover" || error == "Invalid internal image path" ||
                error == "Missing EPUB image" || error == "EPUB image exceeds 2 MiB limit" ||

@@ -113,14 +113,18 @@ void ReaderApp::Impl::draw_sleep(const std::string &sync_state) {
         canvas.clear();
         bool covered = false;
         if (has_book() && settings.sleep_screen == "cover") {
-            struct stat info{};
-            std::vector<std::uint8_t> cover;
-            if (safe_existing(root, book_path) && stat((root + "/" + book_path).c_str(), &info) == 0) {
-                if (async_content) cached_cover(cover_entry(book_path, info, 684, 1040, true), cover);
-                else cover = cover_pixels(book_path, info, 684, 1040, true);
+            if (async_content) {
+                covered = bool(sleep_cover_image);
+                if (covered) blit(sleep_cover_image->pixels(), 0, 0, 684, 1040);
+                sleep_cover_image.reset();
+            } else {
+                struct stat info{};
+                std::vector<std::uint8_t> cover;
+                if (safe_existing(root, book_path) && stat((root + "/" + book_path).c_str(), &info) == 0)
+                    cover = cover_pixels(book_path, info, 684, 1040, true);
+                covered = !cover.empty();
+                if (covered) blit(cover, 0, 0, 684, 1040);
             }
-            covered = !cover.empty();
-            if (covered) blit(cover, 0, 0, 684, 1040);
         }
         if (!covered) {
             if (settings.sleep_screen == "cover") outline(56, 56, 572, 928, 3);

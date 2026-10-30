@@ -632,6 +632,7 @@ void ReaderApp::cancel_sleep() {
     impl_->custom_sleep_attempted = false;
     impl_->custom_prepare_finished = false;
     impl_->custom_sleep_image.reset();
+    impl_->sleep_cover_image.reset();
     impl_->custom_sleep_deadline.reset();
     impl_->custom_rotation_name.clear();
     impl_->sleep_wait_restore_pending = bool(impl_->sleep_wait_footer);
@@ -683,6 +684,8 @@ bool ReaderApp::prepare_sleep() {
             if (!impl_->custom_sleep_deadline)
                 impl_->custom_sleep_deadline = std::chrono::steady_clock::now() + kLockScreenPrepareBudget;
             impl_->sleep_cover_deadline = impl_->custom_sleep_deadline;
+        } else if (kind == ContentJob::Kind::SleepCover) {
+            impl_->sleep_cover_deadline = std::chrono::steady_clock::now() + kLockScreenPrepareBudget;
         } else impl_->sleep_cover_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         return false;
     }
@@ -705,10 +708,11 @@ bool ReaderApp::prepare_sleep() {
     }
     if (!cover_attempted && impl_->async_content && impl_->has_book() && !txt_name(impl_->book_path) &&
         impl_->settings.sleep_screen == "cover") {
+        impl_->covers.clear(); impl_->make_image_room();
         impl_->prepare_sleep_cover();
         if (impl_->counting_job) {
             impl_->sleep_waiting_for_cover = true;
-            impl_->sleep_cover_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            impl_->sleep_cover_deadline = std::chrono::steady_clock::now() + kLockScreenPrepareBudget;
             return false;
         }
     }
@@ -733,6 +737,7 @@ void ReaderApp::wake(bool slept) {
     impl_->wifi_status.manual = false;
     impl_->wifi_status.ssid.clear(); impl_->wifi_status.detail.clear();
     impl_->wifi_notice.clear();
+    impl_->sleep_cover_image.reset();
     impl_->custom_sleep_attempted = false;
     impl_->custom_prepare_finished = false;
     impl_->custom_sleep_deadline.reset();

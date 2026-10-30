@@ -1520,11 +1520,17 @@ bool EpubDocument::read_cover(const std::string& path, std::vector<std::uint8_t>
     bytes.clear(); error.clear();
     EpubDocument book;
     if (!book.open_impl(path, error, true, nullptr, stop)) return false;
+    const auto unavailable = [&error] {
+        return error == "Image allocation unavailable" || error == "Cannot read EPUB image";
+    };
     if (!book.impl_->cover.empty() && book.read_image(book.impl_->cover, bytes, error, stop)) return true;
+    // A transient failure of a declared image must not become a negative result from fallback probing.
+    if (unavailable()) return false;
     if (stop && stop()) return fail(error, kChapterCancelled);
     Chapter unused;
     const auto resource = book.impl_->cover_page.empty() ? book.impl_->spine.front().resource : book.impl_->cover_page;
     if (!book.impl_->cover_page.empty() && book.read_image(resource, bytes, error, stop)) return true;
+    if (unavailable()) return false;
     if (stop && stop()) return fail(error, kChapterCancelled);
     error.clear();
     // A cover page is a single image; a page long enough to span parts is not one.
