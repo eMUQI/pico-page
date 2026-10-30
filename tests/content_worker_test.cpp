@@ -265,9 +265,10 @@ int main(int argc, char** argv) {
         assert(pico_page::FileStore(root.string()).last_lock_screen() == "01-good.png");
         custom.lock_screen_shown.clear();
 
+        constexpr std::size_t cover_bytes = 684U * 1040U / 2;
         for (const bool fragmented : {false, true}) {
-            psram_free = fragmented ? 4 * 1024 * 1024 : 3 * 1024 * 1024 - 1;
-            psram_largest = fragmented ? 2 * 1024 * 1024 - 1 : 3 * 1024 * 1024;
+            psram_free = fragmented ? 4 * 1024 * 1024 : ContentJob::image_room - 1;
+            psram_largest = fragmented ? cover_bytes - 1 : 3 * 1024 * 1024;
             ContentJob deferred(cover); assert(deferred.start()); finish(deferred);
             assert(!deferred.result.cache_finished && !deferred.result.image && !fs::exists(cache));
         }
@@ -289,17 +290,25 @@ int main(int argc, char** argv) {
         fs::rename(root / "hidden.epub", cover.path);
         fs::create_directories(cache.parent_path());
         fs::create_directory(cache.string() + ".tmp");
+        // A small cover fits even when neither the old total nor contiguous 2 MiB gate is met.
+        psram_free = 2 * 1024 * 1024; psram_largest = 1024 * 1024;
         ContentJob unwritable(cover); assert(unwritable.start()); finish(unwritable);
         assert(!unwritable.result.cache_finished && !fs::exists(cache));
+        assert(unwritable.result.image && unwritable.result.image->pixel(50, 100) == 0 &&
+               unwritable.result.image->pixel(50, 900) == 5);
         fs::remove(cache.string() + ".tmp");
         ContentJob recovered(cover); assert(recovered.start()); finish(recovered);
-        assert(recovered.result.cache_finished && !recovered.result.image);
+        assert(recovered.result.cache_finished && recovered.result.image);
         assert(fs::file_size(cache) == cover.cache_header.size() + 684U * 1040U / 2);
         const auto decodes = pico_page::graphics::image_decode_count();
-        psram_free = psram_largest = 512 * 1024;
+        psram_free = cover_bytes + 256 * 1024; psram_largest = cover_bytes;
         ContentJob cached(cover); assert(cached.start()); finish(cached);
-        assert(cached.result.cache_finished && !cached.result.image);
+        assert(cached.result.cache_finished && cached.result.image);
+        assert(cached.result.image->pixels() == recovered.result.image->pixels());
         assert(pico_page::graphics::image_decode_count() == decodes);
+        psram_largest = cover_bytes - 1;
+        ContentJob fragmented_cache(cover); assert(fragmented_cache.start()); finish(fragmented_cache);
+        assert(!fragmented_cache.result.image && fs::exists(cache));
         {
             const pico_page::graphics::Canvas pixels;
             std::string bytes(reinterpret_cast<const char*>(pixels.data()), pixels.pixels().size());
@@ -361,8 +370,8 @@ int main(int argc, char** argv) {
         std::string preserved;
         const auto gif_decodes = pico_page::graphics::image_decode_count();
         for (const bool fragmented : {false, true}) {
-            psram_free = fragmented ? 4 * 1024 * 1024 : 3 * 1024 * 1024 - 1;
-            psram_largest = fragmented ? 2 * 1024 * 1024 - 1 : 3 * 1024 * 1024;
+            psram_free = fragmented ? 4 * 1024 * 1024 : ContentJob::image_room - 1;
+            psram_largest = fragmented ? cover_bytes - 1 : 3 * 1024 * 1024;
             ContentJob deferred_gif(cover); assert(deferred_gif.start()); finish(deferred_gif);
             assert(!deferred_gif.result.cache_finished && !deferred_gif.result.image);
             assert(cover_store.load_cache(cover.cache_name, obsolete.size(), preserved) == pico_page::StoreStatus::Ok && preserved == obsolete);
@@ -373,12 +382,13 @@ int main(int argc, char** argv) {
         assert(!cancelled_gif.result.cache_finished);
         assert(cover_store.load_cache(cover.cache_name, obsolete.size(), preserved) == pico_page::StoreStatus::Ok && preserved == obsolete);
         ContentJob recovered_gif(cover); assert(recovered_gif.start()); finish(recovered_gif);
-        assert(recovered_gif.result.cache_finished && !recovered_gif.result.image);
+        assert(recovered_gif.result.cache_finished && recovered_gif.result.image);
         assert(fs::file_size(gif_cache) == cover.cache_header.size() + 684U * 1040U / 2);
         assert(pico_page::graphics::image_decode_count() == gif_decodes + 1);
-        psram_free = psram_largest = 512 * 1024;
+        psram_free = cover_bytes + 256 * 1024; psram_largest = cover_bytes;
         ContentJob cached_gif(cover); assert(cached_gif.start()); finish(cached_gif);
-        assert(cached_gif.result.cache_finished && !cached_gif.result.image);
+        assert(cached_gif.result.cache_finished && cached_gif.result.image);
+        assert(cached_gif.result.image->pixels() == recovered_gif.result.image->pixels());
         assert(pico_page::graphics::image_decode_count() == gif_decodes + 1);
         psram_free = 4 * 1024 * 1024; psram_largest = 3 * 1024 * 1024;
         fs::copy_file(cover.path, root / "gif.epub");

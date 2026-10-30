@@ -240,6 +240,7 @@ public:
         Anchor mapped_anchor;
         sync::PartPosition mapped_place;  // Valid with mapped_anchor after a successful MapDownload.
         double progress_fraction = 0;
+        /** SleepCover retains completed pixels independently of the optional cache commit result. */
         std::unique_ptr<graphics::Canvas> image;
         std::vector<std::size_t> failed_images;
         PP_DIAGNOSTIC(std::uint32_t decoded_images = 0;)

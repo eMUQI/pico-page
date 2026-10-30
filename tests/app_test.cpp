@@ -6348,12 +6348,31 @@ int main(int argc, char** argv) {
         const auto saved = *app.saved_record();
         const auto body_pixels = app.canvas().pixels();
         assert(!app.book_pages());
+        ContentJob::delay_starts_for_test(ContentJob::Kind::SleepCover, std::chrono::seconds(6));
         assert(!app.prepare_sleep() && app.sleep_pending());
+        ContentJob::delay_starts_for_test(ContentJob::Kind::SleepCover, std::chrono::milliseconds(0));
         assert(!app.pending_frame() && app.canvas().pixels() == body_pixels && *app.saved_record() == saved);
         assert(sleep_frame(app)); driver.present();
         assert(graphics::image_decode_count() == cold_decodes + 1 && app.view() == View::Sleeping);
         assert(app.canvas().pixel(50, 100) == 0 && app.canvas().pixel(50, 900) == 5);
         assert(*app.saved_record() == saved);
+        app.wake(); driver.present(); driver.complete_content();
+        // An older negative entry may have resulted from a transient image read failure.
+        bool old_entry_written = false;
+        for (const auto& entry : fs::directory_iterator(root / "PicoPage/cache/covers")) {
+            if (entry.path().filename().string().find("-684x1040c") == std::string::npos) continue;
+            auto bytes = read(entry.path());
+            assert(bytes.rfind("PPCOVER4\n", 0) == 0);
+            std::size_t header_end = 0;
+            for (int line = 0; line < 3; ++line) header_end = bytes.find('\n', header_end) + 1;
+            assert(header_end > 0 && header_end < bytes.size());
+            bytes.resize(header_end); bytes.replace(0, 8, "PPCOVER3");
+            write(entry.path(), bytes); old_entry_written = true;
+        }
+        assert(old_entry_written);
+        assert(sleep_frame(app)); driver.present();
+        assert(graphics::image_decode_count() == cold_decodes + 2);
+        assert(app.canvas().pixel(50, 100) == 0 && app.canvas().pixel(50, 900) == 5);
         app.wake(); driver.present(); driver.complete_content();
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
         const auto prepared_decodes = graphics::image_decode_count();
@@ -6451,10 +6470,12 @@ int main(int argc, char** argv) {
         assert(sleep_frame(app)); driver.present();
         assert(graphics::image_decode_count() == retry_decodes + 1);
         assert(app.view() == View::Sleeping && *app.saved_record() == saved);
+        assert(app.canvas().pixel(50, 100) == 0 && app.canvas().pixel(50, 900) == 5);
         app.wake(); driver.present(); driver.complete_content();
         ContentJob::fail_starts_for_test(ContentJob::Kind::SleepCover, 1, ContentJob::StartFailure::InternalMemory);
         assert(app.prepare_sleep() && !app.sleep_pending()); driver.present();
         assert(app.view() == View::Sleeping && *app.saved_record() == saved);
+        assert(app.canvas().pixel(50, 900) != 5);
         app.wake(); driver.present(); driver.complete_content();
         assert(sleep_frame(app)); driver.present();
         assert(app.view() == View::Sleeping && *app.saved_record() == saved);

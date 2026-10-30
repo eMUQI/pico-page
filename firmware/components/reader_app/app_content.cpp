@@ -591,8 +591,14 @@ void ReaderApp::Impl::poll_counting_job() {
     }
     if (request.generation != counting_generation) return;
     if (request.kind == ContentJob::Kind::ContentCacheWrite) return;
-    // The lock screen reads the cover cache itself; a failed or cancelled attempt falls back to the title.
-    if (request.kind == ContentJob::Kind::SleepCover) return;
+    if (request.kind == ContentJob::Kind::SleepCover) {
+#ifdef ESP_PLATFORM
+        if (!result.error.empty()) ESP_LOGW("reader_app", "Sleep cover: %s", result.error.c_str());
+#endif
+        if (sleep_cover_deadline && settings.sleep_screen == "cover" && request.path == root + "/" + book_path)
+            sleep_cover_image = std::move(job->result.image);
+        return;
+    }
     if (request.kind == ContentJob::Kind::LockScreen) {
 #ifdef ESP_PLATFORM
         if (!result.error.empty())
