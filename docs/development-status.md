@@ -1147,3 +1147,8 @@ host 回归改为从画面读取面板顶边，不再写死 656；释义回翻�
 `python3 -m unittest discover -s tests -p test_project_version.py -v` 为 4/4 通过，`python3 tools/check_handoff.py` 为 732 项通过，`git diff --check` 通过，`npm run build --prefix web` 成功生成五个页面。沿用现有 ESP-IDF v6.1 commit `fff9895c82d744c7237be8847347bdd1b07c6643`，核对并保留已有 SDK 链接脚本差异及 requirements 文件。没有修改固件逻辑或新增测试；release 配置构建结果随后追加。尚未创建发布标签，因此版本解析应保留开发构建后缀，不能将候选镜像作为正式 0.5.0 更新附件。
 
 同日构建追加：本地准备提交为 `9eb5395`。在干净检出上经 EIM 执行 `sh tools/build_firmware.sh release` 成功；版本为 `0.5.0+g9eb5395`，应用 3,927,584 字节，4 MiB 槽余量 266,720 字节，SHA-256 `cf16339af2b675343f3e61eb2dddb44017744004a813ff9f61606656c2a55602`。来源记录确认 `source_dirty=false`、模式 `release`；核对实际 sdkconfig 及生成头文件，诊断串口、聚合指标、事件跟踪和旧阶段日志均未启用，依赖未满足而未生成的配置项按未启用处理。镜像、ELF、配置及来源记录保留于 `.local/release-device-20261030/prepare-050-images/`，构建日志为同目录上级的 `prepare-050-build.log`。首次 EIM 构建在依赖配置阶段受沙箱 `psutil/sysctl` 权限限制，以相同命令在允许系统查询的环境重跑成功，未修改依赖或检查。构建不等于刷写或本次 release 配置的真机验收；未生成正式清单或全量发布附件，最终仍须从干净匹配的 `v0.5.0` 标签重建、核对与打包。未刷写、创建标签、推送或发布。
+
+
+## 2026-10-30 · 0.5.0 发布说明分类调整
+
+按用户要求，将离线词典和首次使用操作引导单列为「新增」，其余既有功能优化保留在「改进」，发布说明采用「新增／改进／修复／说明」结构。仅调整分类与顺序，未变更功能描述、版本号或固件。`python3 tools/check_handoff.py` 与 `git diff --check` 通过；没有重跑固件构建或设备测试。本批留在工作区供用户审阅，未提交、推送或发布。
