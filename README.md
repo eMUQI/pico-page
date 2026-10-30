@@ -13,7 +13,7 @@ Pico Page 是为 Read Pico 墨水屏阅读器开发的阅读固件。把 EPUB、
 </p>
 <p align="center">书库 · 阅读 · 排版预览<br>固件界面预览，使用演示数据，非设备实拍。</p>
 
-当前发布版本为 **0.4.0**，固件仍处于测试阶段，功能和兼容范围还会调整。仅支持 Read Pico；完整真机验收与长期稳定性验证仍在进行，具体范围见[开发状态](docs/development-status.md)。项目总许可证尚未确定。
+当前发布版本为 **0.4.0**，固件仍处于测试阶段，功能和兼容范围还会调整。仅支持 Read Pico；完整真机验收与长期稳定性验证仍在进行，具体范围见[开发状态](docs/development-status.md)。
 
 ## 能做什么
 
@@ -95,4 +95,6 @@ sh tools/build_firmware.sh
 
 感谢 [Read Pico](https://github.com/MindReset/read_pico_firmware) 的硬件与 BSP、[ESP-IDF](https://github.com/espressif/esp-idf)、epdiy，以及提供解析、字体和图像处理能力的第三方项目；也感谢 KOReader/CREngine、CrossPoint 等阅读器项目的公开资料。具体采用、修改与仅供研究的范围见[依赖审查](docs/development/dependency-review.md)和[调研参考](docs/planning/references.md)。
 
-**项目总许可证尚未选定，目前不宣称按某一开源许可证授权。** 第三方组件分别保留其许可证和声明，例如 epdiy 使用 LGPL-3.0-or-later，随附字体使用 OFL 1.1；这些许可不代表整个项目的许可。来源、固定版本及待完成的分发核对见[依赖审查](docs/development/dependency-review.md)与 [BSP 审查](docs/development/bsp-review.md)。
+Pico Page 按 [GPL-3.0-or-later](LICENSE) 发布，并附加 ESP-IDF 二进制库链接许可。可以商用；分发固件或修改版时，须同时提供完整源码。修改版请勿以「Pico Page」名义发布或销售。适用范围、附加许可和名称使用见[许可说明](LICENSING.md)。
+
+第三方组件保留各自的许可证和声明，例如 epdiy 使用 LGPL-3.0-or-later，随附字体使用 OFL 1.1。来源、固定版本及待完成的分发核对见[依赖审查](docs/development/dependency-review.md)与 [BSP 审查](docs/development/bsp-review.md)。
