@@ -233,6 +233,13 @@ target_compile_features(sleep_io_test PRIVATE cxx_std_17)
 target_compile_options(sleep_io_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME sleep_io COMMAND sleep_io_test)
 
+add_executable(sleep_usb_console_test tests/sleep_usb_console_test.cpp
+    firmware/components/platform_read_pico/sleep_usb_console.cpp)
+target_include_directories(sleep_usb_console_test PRIVATE tests/sleep_io_stubs firmware/components/platform_read_pico)
+target_compile_features(sleep_usb_console_test PRIVATE cxx_std_17)
+target_compile_options(sleep_usb_console_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME sleep_usb_console COMMAND sleep_usb_console_test)
+
 add_executable(portal_server_test tests/portal_server_test.cpp
     firmware/components/platform_read_pico/portal_server.cpp)
 target_include_directories(portal_server_test PRIVATE tests/portal_stubs

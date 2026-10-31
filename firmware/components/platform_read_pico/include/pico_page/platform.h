@@ -163,10 +163,11 @@ Battery battery();
  * suppressed until release after the controller returns from standby.
  * The wake input is consumed; this function does not advance reading state.
  * Periodic PMU events and rejected sleep requests are handled without returning.
- * entered_sleep remains true after a sleep request even if wake cleanup fails.
+ * entered_sleep becomes true only after ESP_OK and remains true if wake cleanup fails.
  * An aborted preparation preserves a cancelling long press for the next poll.
- * USB storage must be stopped. After an actual sleep, the USB console is briefly
- * disconnected to request host enumeration; existing host handles must reopen.
+ * USB storage must be stopped. The USB console stays detached across sleep and
+ * periodic PMU wakeups, then restores its original PHY state outside the touch lock.
+ * Rejected attempts alone add no reconnect wait; existing host handles must reopen.
  * Panel/TF pins use sleep-only pulldowns. Saved IO-expander registers are restored
  * before touch reset on wake, cancellation or preparation failure. Incomplete
  * recovery is retried before sampling or display control can resume.

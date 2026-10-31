@@ -15,6 +15,8 @@ ctest --test-dir build/host --output-on-failure
 
 `sleep_io` 编译固件实际使用的 GPIO／IO 扩展器停放实现，故障替身覆盖后台探卡仍忙时在寄存器／GPIO 修改前拒绝浅睡、浅睡与关机的 CW_INT 区别、睡眠引脚范围、每一步准备／恢复失败、写入已生效但返回错误、触摸复位失败、重复调用及恢复后再次进入。它验证寄存器恢复与重试契约，不证明 PMU 实际唤醒、TF 电气行为、面板效果或功耗。
 
+`sleep_usb_console` 编译固件实际使用的 USB 浅睡交接实现，替身按 ESP-IDF 6.1 的引脚快照／恢复顺序执行。覆盖准备取消、拒绝或失败、拒绝后成功、多个周期唤醒、成功后失败、原 PHY 关闭、原电阻与覆盖状态恢复、重复恢复，以及短睡眠补足断开间隔和长睡眠不额外等待。它验证寄存器与成功标志的边界，不证明真实 USB 电气断开、电脑枚举或串口响应。
+
 Linux `app_test` 使用链接包装注入当前书库目录的 `readdir` 与 `lstat` 失败，覆盖首项／中途 EIO、条目 EIO／ENOENT、正常 EOF 前残留 errno、空目录、512 项上限及界面重试；不修改生产 I/O 接口或真实文件。
 
 测试 EPUB 均由脚本生成；不提交个人书籍。`app_test` 使用 setup_fonts 下载的完整文楷字体。`tools/check_koreader_mapping.py` 是独立的真实 CREngine 兼容性对照，不是模拟期望值。墨水屏、TF 掉电、网络真实账户与双向接续仍需按 `docs/development/acceptance.md` 验收。

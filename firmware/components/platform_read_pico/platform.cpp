@@ -15,6 +15,7 @@
 #include "ripple.h"
 #include "rtc_clock.h"
 #include "sleep_io.h"
+#include "sleep_usb_console.h"
 
 #include <algorithm>
 #include <atomic>
@@ -36,7 +37,6 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "hal/usb_serial_jtag_ll.h"
 #include "read_pico_board.h"
 #include "read_pico_epd_timing.h"
 #include "read_pico_pmu.h"
@@ -50,7 +50,6 @@ constexpr char tag[] = "pico_platform";
 constexpr int key_area_top = 1300;
 constexpr int key_pitch = 160;
 constexpr std::int64_t rails_idle_us = 8'000'000;
-constexpr std::uint32_t usb_reconnect_delay_ms = 100;
 TaskHandle_t owner = nullptr;
 bool attempted = false;
 bool ready = false;
@@ -886,21 +885,6 @@ bool input_waiting_before(std::int64_t time_us) {
     return touch_events && xQueuePeek(touch_events, &next, 0) == pdTRUE && next.time_us < time_us;
 }
 
-static void reconnect_usb_console() {
-    if (!usb_serial_jtag_ll_phy_is_pad_enabled()) return;
-    decltype(USB_SERIAL_JTAG.conf0) config{};
-    config.val = USB_SERIAL_JTAG.conf0.val;
-    const usb_serial_jtag_pull_override_vals_t original{
-        bool(config.dp_pullup), bool(config.dm_pullup),
-        bool(config.dp_pulldown), bool(config.dm_pulldown)};
-    const usb_serial_jtag_pull_override_vals_t disconnected{};
-    // Clock gating does not guarantee a host-visible disconnect; remove the D+ pull-up.
-    usb_serial_jtag_ll_phy_enable_pull_override(&disconnected);
-    vTaskDelay(pdMS_TO_TICKS(usb_reconnect_delay_ms));
-    usb_serial_jtag_ll_phy_enable_pull_override(&original);
-    if (!config.pad_pull_override) usb_serial_jtag_ll_phy_disable_pull_override();
-}
-
 bool sleep(std::string& error, bool& entered_sleep) {
     entered_sleep = false;
     error.clear();
@@ -927,6 +911,7 @@ bool sleep(std::string& error, bool& entered_sleep) {
     config.mode = GPIO_MODE_INPUT;
     config.pull_up_en = GPIO_PULLUP_ENABLE;
     auto result = gpio_config(&config);
+    SleepUsbConsole usb_console;
     bool slept = false;
     const auto idle_deadline = esp_timer_get_time() + 2'000'000;
     while (result == ESP_OK && esp_timer_get_time() < idle_deadline) {
@@ -953,7 +938,8 @@ bool sleep(std::string& error, bool& entered_sleep) {
                     ++sleep_report.touch_edges;
                 }
                 if (cst836u_int_asserted(touch)) ++sleep_report.touch_low;
-                result = esp_light_sleep_start();
+                result = usb_console.enter_light_sleep();
+                entered_sleep = usb_console.entered_sleep();
                 // The request is rejected when the wake line is already low. The pending
                 // event is then handled as a wake; the delay bounds the rate of repeats.
                 if (result == ESP_ERR_SLEEP_REJECT) {
@@ -964,10 +950,13 @@ bool sleep(std::string& error, bool& entered_sleep) {
                     ++sleep_report.wakes;
                 }
                 if (result != ESP_OK) break;
-                entered_sleep = true;
                 if (!settle_wake_interrupt(irq, wake_press, error)) break;
                 if (wake_press) {
-                    slept = true;
+                    slept = entered_sleep;
+                    if (!slept) {
+                        power_key.cancel_sleep_press();
+                        error = "Sleep cancelled by power key";
+                    }
                     break;
                 }
             }
@@ -987,8 +976,8 @@ bool sleep(std::string& error, bool& entered_sleep) {
     xSemaphoreGive(touch_lock);
     suppress_power = entered_sleep;
     if (entered_sleep) power_ignore_until = esp_timer_get_time() + 300'000;
-    // Reconnect outside touch_lock, including when wake cleanup failed.
-    if (entered_sleep) reconnect_usb_console();
+    // Restore outside touch_lock, including after rejected sleep or failed wake cleanup.
+    usb_console.resume();
     if (!slept && error.empty()) error = "Power key or wake interrupt did not become idle";
     if (entered_sleep) {
         sleep_report.result = error;
