@@ -1658,6 +1658,15 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     driver.present(); unchanged();
     app.set_battery(75, true);
     assert(!app.pending_frame());
+    const auto charging_margin = footer_pixels(app, 540, 613);
+    assert(std::all_of(charging_margin.begin(), charging_margin.end(), [](auto pixel) { return pixel == 15; }));
+    for (int percent : {0, 100}) {
+        app.set_battery(percent, true);
+        assert(!app.pending_frame());
+        toggle(600); toggle(600); toggle(600);
+        assert(footer_pixels(app, 540, 684) == charging);
+    }
+    app.set_battery(75, true);
     toggle(600);
     const auto charging_clock = footer_pixels(app, 540, 684);
     assert(charging_clock != charging);
@@ -1688,6 +1697,7 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     app.set_battery(std::nullopt, true);
     assert(app.pending_frame());
     const auto unknown_charging = footer_pixels(app, 540, 684);
+    assert(unknown_charging == charging);
     driver.present(); unchanged();
     app.set_battery(std::nullopt, false);
     assert(app.pending_frame() && footer_pixels(app, 540, 684) != unknown_charging);
