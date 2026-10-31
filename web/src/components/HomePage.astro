@@ -8,6 +8,7 @@ const screens = [
   { id: "reading", title: "正文", description: "按键或轻点屏幕两侧翻页，底部随时查看阅读进度。", alt: "示例书籍正文，底部显示页码和电量" },
   { id: "tools", title: "阅读工具", description: "轻点正文中部，打开目录、排版、同步、刷新模式和全刷。", alt: "正文上的阅读工具，包含目录、排版、同步、刷新模式和全刷入口" },
   { id: "typography", title: "排版", description: "字体、字重、字号、行距等设置，先看预览，再应用到这本书。", alt: "示例书籍的排版面板，字号改为 40 px，尚未应用" },
+  { id: "dictionary", title: "查词", description: "长按正文选词，释义显示在当前页。可调整选区、切换词典。", alt: "英文正文中选中 fortune，下方面板显示朗道英汉字典 5.0 的音标和中文释义" },
   { id: "sync", title: "位置接续", description: "检查远端位置后，选择继续阅读的位置；上传前确认。", alt: "示例书籍的同步面板，分别显示本机与远端阅读位置" },
   { id: "sleep", title: "休眠", description: "封面、正文、简洁屏保或自己的锁屏图片。", alt: "休眠画面，显示示例书籍封面和已保存的阅读进度" },
 ];
@@ -18,8 +19,13 @@ const lockscreens = [
   { file: "04-offline.png", title: "暂时离线，进入书中。", alt: "打开的书中浮现门廊与阶梯，配文：暂时离线，进入书中。" },
   { file: "05-next-page.png", title: "下一页，自有天地。", alt: "书页旋转展开，配以 Pico Page 字样和文字：下一页，自有天地。" },
 ];
+const dictionaries = [
+  { audience: "读英文书", title: "朗道英汉字典 5.0", entries: "435,468", size: "8.7 MB" },
+  { audience: "读中文书", title: "汉语大词典 离线版", entries: "349,514", size: "73 MB" },
+  { audience: "两种都读", title: "21 世纪英汉汉英双向词典", entries: "213,741", size: "13 MB" },
+];
 ---
-<Site title="Pico Page · 读自己的书，接着读下去" description="Pico Page，为 Read Pico 设计的墨水屏阅读固件。离线阅读 TF 卡上的 EPUB 和 TXT，与 KOReader 接续同一本 EPUB 的阅读位置。书籍、进度和设置，以本地文件保存。" current="home">
+<Site title="Pico Page · 读自己的书，接着读下去" description="Pico Page，为 Read Pico 设计的墨水屏阅读固件。离线阅读 TF 卡上的 EPUB 和 TXT，与 KOReader 接续同一本 EPUB 的阅读位置，长按正文可离线查词。书籍、进度和设置，以本地文件保存。" current="home">
   <section class="hero">
     <div class="hero-copy">
       <p class="lede">为 Read Pico 4.7 英寸墨水屏设计的阅读固件</p>
@@ -105,7 +111,7 @@ const lockscreens = [
         <p class="note">推荐字体</p>
         <h3 class="wenkai">霞鹜文楷 Regular</h3>
         <p class="wenkai specimen">读自己的书，接着读下去。</p>
-        <p class="credit">v1.520 · 作者 <a href="https://github.com/lxgw/LxgwWenKai/releases/tag/v1.520">LXGW</a> · SIL Open Font License 1.1</p>
+        <p class="credit">v1.520 · 作者 <a href="https://github.com/lxgw/LxgwWenKai/releases/tag/v1.520" target="_blank" rel="noopener">LXGW</a> · SIL Open Font License 1.1</p>
         <a class="primary spread" href="/downloads/LXGWWenKai-Regular-v1.520.zip" download>下载字体包（ZIP） <span aria-hidden="true">↓</span></a>
         <ol class="numbered">
           <li><span>1</span><span>解压，把字体文件和许可证复制到 TF 卡的 <code>Fonts/</code>。</span></li>
@@ -113,6 +119,59 @@ const lockscreens = [
         </ol>
         <p class="own">也可以放入自己的 TTF / OTF 字体，记得附上许可证。<a href="/downloads/LXGWWenKai-v1.520-OFL.txt">查看许可证</a></p>
         <a class="more" href="#lockscreens"><span>另有阅读图文、古印、现代文字印与植物锁屏，可按喜好选择。</span><span>查看锁屏 ↓</span></a>
+      </div>
+    </div>
+  </section>
+
+  <section id="dictionaries" class="band" aria-labelledby="dictionaries-title">
+    <div class="dictionary-intro">
+      <div>
+        <p class="eyebrow">离线词典</p>
+        <h2 id="dictionaries-title">读到不懂的词，就地查一查。</h2>
+        <p class="lead">长按正文选词，释义显示在当前页。可以安装多套词典，随时切换。</p>
+        <p class="dictionary-version">0.5.0 起支持离线词典，较早版本需更新后使用。</p>
+        <h3 class="dictionary-list-title">已测试的词典</h3>
+        <ul class="dictionary-list">
+          {dictionaries.map((dictionary) => (
+            <li>
+              <span class="dictionary-audience">{dictionary.audience}</span>
+              <div>
+                <h4>{dictionary.title}</h4>
+                <p>{dictionary.entries} 个词条 · 压缩包约 {dictionary.size}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+        <p class="footnote">本站不提供词典文件，也无法确认第三方文件的授权，请自行核实。可以在 <a href="https://stardict.uber.space/zh_CN/index.html" target="_blank" rel="noopener">StarDict 第三方目录 ↗</a> 查找，也可以使用自己的 StarDict 词典。</p>
+      </div>
+      <figure class="dictionary-screen">
+        <img src="/assets/screens/dictionary.webp" width="684" height="1216" alt="英文正文中选中 fortune，下方面板显示朗道英汉字典 5.0 的音标和中文释义，底部可调整选区、切换词典和翻页" loading="lazy" decoding="async">
+        <figcaption class="note">设备截图</figcaption>
+      </figure>
+    </div>
+    <div class="dictionary-setup">
+      <div>
+        <h3>放入 TF 卡，就能离线使用。</h3>
+        <ol class="numbered">
+          <li><span>1</span><span>在电脑上解压词典压缩包，得到一个文件夹。其中的 <code>.dict.dz</code> 文件无需继续解压。</span></li>
+          <li><span>2</span><span>用 USB 文件传输或读卡器，把整个文件夹复制到 TF 卡的 <code>Dictionaries/</code>。</span></li>
+          <li><span>3</span><span>退出 USB 文件传输，或把 TF 卡插回设备，让设备重新读取。</span></li>
+          <li><span>4</span><span>打开「设置 → 阅读 → 离线词典」，启用需要的词典。列表中没有时，点「重新扫描」。</span></li>
+        </ol>
+        <p class="footnote">首次查词需要建立索引，可能等待较长时间。可以关闭面板取消，稍后重试。<a href="/docs/#dictionaries">查看安装与查词说明 →</a></p>
+      </div>
+      <div>
+        <p class="dictionary-tree-label">每套词典单独一个文件夹：</p>
+        <pre class="tree dictionary-tree" aria-label="TF 卡词典目录示例"><code>TF 卡/
+└─ Dictionaries/
+   ├─ stardict-chibigenc-2.4.2/
+   │  ├─ chibigenc.ifo
+   │  ├─ chibigenc.idx
+   │  ├─ chibigenc.dict.dz
+   │  └─ chibigenc.syn
+   └─ 另一套词典/
+      └─ …</code></pre>
+        <p class="footnote">文件夹名称可以自定，文件夹内的文件保留原名。</p>
       </div>
     </div>
   </section>
@@ -142,7 +201,7 @@ const lockscreens = [
     <details>
       <summary>格式与功能限制</summary>
       <ul>
-        <li>支持 EPUB，以及 UTF-8、GB18030 编码的 TXT。暂不支持 PDF、批注、高亮和词典。</li>
+        <li>支持 EPUB，以及 UTF-8、GB18030 编码的 TXT。暂不支持 PDF、批注和高亮。</li>
         <li>移动书籍时，把原书旁同名的 <code>.picopage/</code> 目录一起移动，进度和单书设置才会跟随。</li>
         <li>KOReader 位置接续仅支持 EPUB；超出精确定位范围时，不提供跳转。TXT 仅保存本地进度。</li>
         <li>EPUB 使用统一正文排版。表格与复杂版式可能简化显示；不支持的内容可能无法打开。</li>
@@ -162,7 +221,7 @@ const lockscreens = [
         </li>
       ))}
     </ol>
-    <p class="note">固件界面预览 · 演示数据 · 非设备实拍</p>
+    <p class="note">固件界面预览 · 演示数据 · 查词图为设备截图</p>
     <dl id="devices" class="specs">
       <div><dt>屏幕</dt><dd>4.7 英寸 · 684 × 1216</dd></div>
       <div><dt>灰阶</dt><dd>16 级</dd></div>
@@ -218,7 +277,7 @@ const lockscreens = [
           <figcaption>
             <strong>{art.title}</strong>
             <p>{art.author}{"year" in art && ` · ${art.year} 年`}</p>
-            <p class="seal-source">来源：<a href={art.source_url}>{art.source_name}</a>{"catalog_short" in art && <><br />{art.catalog_short}</>}</p>
+            <p class="seal-source">来源：<a href={art.source_url} {...(art.source_url.startsWith("https://picopage.wulu.zone/") ? {} : { target: "_blank", rel: "noopener" })}>{art.source_name}</a>{"catalog_short" in art && <><br />{art.catalog_short}</>}</p>
             <a href={`/downloads/transparent-lockscreens/${art.file}`} download aria-label={`下载透明 PNG：${art.title}`}>下载 PNG <span aria-hidden="true">↓</span></a>
           </figcaption>
         </figure>
@@ -575,6 +634,93 @@ const lockscreens = [
   }
   .more span + span {
     white-space: nowrap;
+  }
+
+  /* Dictionaries */
+  .dictionary-version {
+    margin-top: 14px;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--accent);
+  }
+  .dictionary-intro {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: 40px 64px;
+    align-items: start;
+  }
+  .dictionary-list-title {
+    margin-top: 32px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--muted);
+  }
+  .dictionary-list {
+    margin-top: 10px;
+    border-top: 1px solid var(--ink);
+  }
+  .dictionary-list li {
+    display: grid;
+    grid-template-columns: 5em minmax(0, 1fr);
+    gap: 16px;
+    align-items: baseline;
+    border-bottom: 1px solid var(--line);
+    padding: 16px 0;
+  }
+  .dictionary-audience {
+    font-size: 14px;
+    color: var(--accent);
+  }
+  .dictionary-list h4,
+  .dictionary-setup h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.6;
+  }
+  .dictionary-list p {
+    margin-top: 2px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--muted);
+  }
+  .dictionary-screen img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--line);
+  }
+  .dictionary-screen figcaption {
+    margin-top: 10px;
+  }
+  .dictionary-setup {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 32px 64px;
+    margin-top: 48px;
+    border-top: 1px solid var(--ink);
+    padding-top: 24px;
+  }
+  .dictionary-tree-label {
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text);
+  }
+  .dictionary-tree {
+    margin: 12px 0 0;
+    overflow-x: auto;
+  }
+  .dictionary-tree code {
+    font-size: inherit;
+  }
+  @media (max-width: 800px) {
+    .dictionary-intro,
+    .dictionary-setup {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .dictionary-screen {
+      max-width: 300px;
+    }
   }
 
   /* Features */
