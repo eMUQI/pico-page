@@ -30,7 +30,7 @@ const { title, description, current, noindex = false } = Astro.props;
           </div>
         </div>
         <nav aria-label="主导航">
-          <a href="/#start">开始使用</a><a href="/#fonts">字体</a><a href="/#features">功能</a><a href="/#screens">界面</a><a href="/#lockscreens">锁屏</a>
+          <a href="/#start">开始使用</a><a href="/#fonts">字体</a><a href="/#dictionaries">词典</a><a href="/#features">功能</a><a href="/#screens">界面</a><a href="/#lockscreens">锁屏</a>
         </nav>
       </header>
       <main id="main">
@@ -47,7 +47,7 @@ const { title, description, current, noindex = false } = Astro.props;
           {current !== "changelog" && <a href="/changelog/">更新日志</a>}
           {current === "install" && <a href="/assets/third-party-licenses.txt">第三方许可</a>}
           {current !== "home" && <a href="/">返回首页</a>}
-          {current === "home" && <a class="muted" href="https://quotaframe.com">QuotaFrame</a>}
+          {current === "home" && <a class="muted" href="https://quotaframe.com" target="_blank" rel="noopener">QuotaFrame</a>}
         </nav>
       </footer>
     </div>

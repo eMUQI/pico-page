@@ -7,6 +7,7 @@ const sections = [
   ["controls", "按键与触摸"],
   ["typography", "排版与刷新"],
   ["bookmarks", "书签与页脚"],
+  ["dictionaries", "离线词典"],
   ["transfer", "传书"],
   ["files", "TF 卡上的文件"],
   ["sync", "与 KOReader 接续位置"],
@@ -82,6 +83,21 @@ const sections = [
         <li>点正文页脚右侧，依次切换电量、时钟、不显示。</li>
         <li>两侧互不影响。隐藏后点原位置恢复；时钟的校准方法见<a href="#wifi">Wi‑Fi 设置与时间</a>。</li>
       </ul>
+
+      <h2 id="dictionaries">离线词典</h2>
+      <p>0.5.0 起支持 StarDict 离线词典，较早版本需更新后使用。本站不提供词典文件；已测试的词典见<a href="/#dictionaries">首页词典区</a>，也可以使用自己的 StarDict 词典。</p>
+      <ol>
+        <li>在电脑上解压词典外层的 ZIP、<code>.tar.bz2</code> 等压缩包。保留内部的 <code>.dict.dz</code> 文件，无需继续解压。</li>
+        <li>用 USB 文件传输或读卡器，将每套词典的整个文件夹复制到 TF 卡根目录的 <code>Dictionaries/</code> 中。Wi‑Fi 传书不支持上传词典。</li>
+        <li>退出 USB 文件传输或把 TF 卡插回设备，让设备重新读取。打开「设置 → 阅读 → 离线词典」，启用需要的词典，可按使用习惯调整顺序。列表中没有时，点「重新扫描」。</li>
+      </ol>
+      <p>每套词典单独一个文件夹，其中应有同名的 <code>.ifo</code>、<code>.idx</code> 和 <code>.dict</code> 或 <code>.dict.dz</code>；包内如有 <code>.syn</code> 等附加文件，也要一并保留。最多识别 32 套词典，不显示释义中的图片和音频。<code>.idx</code> 超过 64 MiB 或词条数超过 2,097,152 的词典无法使用，查词时会提示超出资源限制。</p>
+      <pre><code>Dictionaries/
+└─ 我的词典/
+   ├─ dictionary.ifo
+   ├─ dictionary.idx
+   └─ dictionary.dict.dz</code></pre>
+      <p>在正文中长按文字并拖动选词，松手后查询。查词面板可调整选区、切换词典、翻阅释义和展开显示；关闭后继续阅读。首次使用或清理缓存后可能等待较长时间，可关闭面板取消，稍后重试。</p>
 
       <h2 id="transfer">传书</h2>
       <p>除了把 TF 卡取出接到电脑，还有三种不拔卡的方式。USB 文件传输可以管理 TF 卡上的所有文件。Wi‑Fi 传书把 EPUB，以及 UTF-8 或 GB18030 编码的 TXT 上传到 <code>Books/</code>。固件 0.2.0-beta.3 起，同一页面还能把 TTF、OTF 字体上传到 <code>Fonts/</code>，把 PNG、JPEG 锁屏图片上传到 <code>LockScreens/</code>；更早的版本只能传书。字体的许可证要用 USB 文件传输或读卡器放入。</p>
@@ -192,9 +208,9 @@ PicoPage/sync.toml         KOReader 同步账户，含凭据</pre>
 
       <h2 id="limits">限制</h2>
       <ul>
-        <li>发布版 0.4.0 支持 EPUB，以及 UTF-8（可带 BOM）和 GB18030 编码的 TXT。后续开发版另支持带 BOM 的 UTF-16LE／UTF-16BE；使用 0.4.0 时仍需先转码。</li>
-        <li>EPUB 使用统一的正文排版。表格、复杂的图形和样式会简化显示，或无法打开。发布版 0.4.0 的图片支持 PNG 和 JPEG，后续开发版另支持 GIF 首帧；文字不环绕图片。</li>
-        <li>不支持 PDF、批注、高亮、词典、插件、阅读统计和多个主题。</li>
+        <li>支持 EPUB，以及 UTF-8（可带 BOM）、带 BOM 的 UTF-16LE／UTF-16BE 和 GB18030 编码的 TXT。</li>
+        <li>EPUB 使用统一的正文排版。表格、复杂的图形和样式会简化显示，或无法打开。图片支持 PNG、JPEG 和 GIF 首帧；文字不环绕图片。</li>
+        <li>不支持 PDF、批注、高亮、插件、阅读统计和多个主题。</li>
         <li>与 KOReader 接续位置仅支持 EPUB。</li>
       </ul>
 
