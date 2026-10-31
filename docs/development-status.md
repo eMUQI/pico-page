@@ -1175,7 +1175,7 @@ host 回归改为从画面读取面板顶边，不再写死 656；释义回翻�
 
 补充主导航「词典」入口、官网文档的安装与查词说明，以及文件目录示例；安装步骤保留内部 `.dict.dz`、各套词典分目录、USB／读卡器传输、重新扫描与启用。版本要求明确为 0.5.0 起支持，首页与官网文档的旧限制说明改为区分版本，未把尚未发布的功能描述为当前线上安装版已有能力。未修改固件、发布清单或线上安装产物。
 
-Node v26.7.0，复用已有 `web/node_modules` 和监听 `127.0.0.1:4321` 的本地预览。`npm run build --prefix web` 成功生成五个页面；`npm test --prefix web` 的既有安装器回归通过，未新增测试。三个第三方下载地址本次 HEAD 均返回 HTTP 200、`application/x-bzip2`；首页本地 HTTP 200。浏览器检查 1280 × 900 与 390 × 844 两种尺寸，页面无横向溢出、三套入口完整显示；安装说明链接通过键盘激活后到达 `/docs/#dictionaries`，恢复默认视口并保留词典区预览。画面见[桌面](../artifacts/website-dictionaries-20261030/desktop.jpg)与[手机](../artifacts/website-dictionaries-20261030/mobile.jpg)。`python3 tools/check_handoff.py`（741 项）与 `git diff --check` 通过。
+Node v26.7.0，复用已有 `web/node_modules` 和监听 `127.0.0.1:4321` 的本地预览。`npm run build --prefix web` 成功生成五个页面；`npm test --prefix web` 的既有安装器回归通过，未新增测试。三个第三方下载地址本次 HEAD 均返回 HTTP 200、`application/x-bzip2`；首页本地 HTTP 200。浏览器检查 1280 × 900 与 390 × 844 两种尺寸，页面无横向溢出、三套入口完整显示；安装说明链接通过键盘激活后到达 `/docs/#dictionaries`，恢复默认视口并保留词典区预览。画面见`artifacts/website-dictionaries-20261030/desktop.jpg`与`artifacts/website-dictionaries-20261030/mobile.jpg`。`python3 tools/check_handoff.py`（741 项）与 `git diff --check` 通过。
 
 本批仅为供用户审阅的本地候选，未提交、推送、部署、发布固件或操作设备。外部下载地址的可访问性不证明原始权利人的授权；正式上线前仍需核实来源授权及与 0.5.0 发布节奏的一致性。未重跑不受本次静态页面改动影响的 host、sanitizer 和固件构建。下一步按用户对预览的反馈调整内容与版式。
 
@@ -1184,7 +1184,7 @@ Node v26.7.0，复用已有 `web/node_modules` 和监听 `127.0.0.1:4321` 的本
 
 按用户对本地预览的反馈，在首页词典安装步骤后补充从 TF 卡根目录开始的树状示例。完整列出《汉语大词典》的 `chibigenc.ifo`、`.idx`、`.dict.dz` 与 `.syn`，并以同级文件夹展示另外两套词典；说明省略号代表包内全部文件、文件夹名称可自定、包内文件保留原名。沿用网站字体、纸色背景和细线，不新增脚本或测试，保留前批未提交改动。
 
-`npm run build --prefix web` 成功生成五个页面；浏览器检查 1280 × 1000 版式及 390 × 844 窄屏，窄屏页面宽度与视口均为 390 px，目录内容宽度和可见宽度均为 348 px，无横向溢出。恢复默认视口并保留本地预览；见[目录树桌面预览](../artifacts/website-dictionaries-20261030/directory-desktop.jpg)。`python3 tools/check_handoff.py` 与 `git diff --check` 通过。静态说明变更未重跑安装器、host 或固件测试；未提交、推送或部署。
+`npm run build --prefix web` 成功生成五个页面；浏览器检查 1280 × 1000 版式及 390 × 844 窄屏，窄屏页面宽度与视口均为 390 px，目录内容宽度和可见宽度均为 348 px，无横向溢出。恢复默认视口并保留本地预览；见`artifacts/website-dictionaries-20261030/directory-desktop.jpg`。`python3 tools/check_handoff.py` 与 `git diff --check` 通过。静态说明变更未重跑安装器、host 或固件测试；未提交、推送或部署。
 
 
 ## 2026-10-30 · 官网词典区审阅修改
