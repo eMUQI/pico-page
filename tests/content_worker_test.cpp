@@ -433,6 +433,12 @@ int main(int argc, char** argv) {
         ContentJob absent_library(library); assert(absent_library.start()); finish(absent_library);
         assert(absent_library.result.covers.size() == 1 && absent_library.result.covers[0] && absent_library.result.covers[0]->empty());
         assert(fs::file_size(root / "PicoPage/cache" / library.covers[0].cache_name) == cover.cache_header.size());
+        std::ofstream(root / "no-cover.txt") << "第一章\n正文。\n";
+        assert(stat((root / "no-cover.txt").c_str(), &gif_info) == 0);
+        library.covers = {{"no-cover.txt", "covers/library-txt-no-cover", cover.cache_header, gif_info.st_size, gif_info.st_mtime}};
+        ContentJob txt_library(library); assert(txt_library.start()); finish(txt_library);
+        assert(txt_library.result.covers.size() == 1 && txt_library.result.covers[0] && txt_library.result.covers[0]->empty());
+        assert(fs::file_size(root / "PicoPage/cache" / library.covers[0].cache_name) == cover.cache_header.size());
         fs::remove_all(root);
     }
     {

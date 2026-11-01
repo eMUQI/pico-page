@@ -833,7 +833,7 @@ void ContentJob::prepare_lock_screen() {
 }
 bool cover_failure_is_permanent(bool image_read, const std::string& error) {
     if (error.find("allocation") != std::string::npos || error.find("memory") != std::string::npos) return false;
-    return image_read || error == "EPUB has no supported cover" || error == "Invalid internal image path" ||
+    return image_read || error == "EPUB has no supported cover" || error == "TXT 没有内嵌封面" || error == "Invalid internal image path" ||
            error == "Missing EPUB image" || error == "EPUB image exceeds 2 MiB limit" ||
            error == "Image format is not PNG, JPEG or GIF" || error == "Invalid compressed EPUB image";
 }

@@ -78,6 +78,8 @@ ZIP 校验遍历收集条目编号和已校验的解压尺寸，按完整路径�
 
 ## 依赖与验证
 
+TXT 没有内嵌封面，封面读取入口返回确定的无封面结果；书库与休眠封面沿用该结果缓存，不按暂时读取失败重试。
+
 固定来源、独立许可证、配置差异与文件摘要见 [reader_document 第三方记录](../../firmware/components/reader_document/third_party/README.md)。直接复用 ZIP/XML 和平台摘要实现，不复制 CrossPoint 应用或 KOReader 引擎代码。
 
 `tests/make_document_fixtures.py` 复用原创 EPUB 生成器，产生普通书、错误 ZIP、超限第二章和带 CSS/图片占位的书；`tests/document_test.cpp` 检查真实摘要、目录、中文与非 BMP、内联来源往返、脚注目标、章节隔离和明确失败。首轮独立 host 构建及上述检查通过；主仓库 CTest、sanitizer 与固件构建结果由开发状态记录。没有刷写设备，没有把 host 通过写成真机通过。
