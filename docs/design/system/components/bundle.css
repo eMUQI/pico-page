@@ -112,10 +112,10 @@
 
 /* Reading footer, 88 px from y 1128; no rule. */
 .pp-reading-footer { height: 88px; display: flex; align-items: center; justify-content: space-between; padding: 0 36px; font-size: 24px; }
-.pp-battery { display: flex; align-items: center; gap: 10px; }
-.pp-battery__case { position: relative; width: 32px; height: 18px; border: 2px solid var(--ink, #111111); margin-right: 3px; }
-.pp-battery__case::after { content: ""; position: absolute; right: -5px; top: 4px; width: 3px; height: 6px; background: var(--ink, #111111); }
-.pp-battery__fill { position: absolute; left: 2px; top: 2px; bottom: 2px; background: var(--ink, #111111); }
+.pp-battery { display: flex; align-items: center; }
+.pp-battery__case { position: relative; display: flex; gap: 2px; padding: 2px; width: 46px; height: 22px; border: 2px solid var(--secondary, #333333); margin-right: 3px; }
+.pp-battery__case::after { content: ""; position: absolute; right: -5px; top: 5px; width: 3px; height: 8px; background: var(--secondary, #333333); }
+.pp-battery__cell { flex: 0 0 6px; height: 14px; background: var(--disabled, #555555); }
 
 /* Status check cell, 196 × 176. Failed: 3 px frame plus an ink 「!」 block; not run: solid disabled frame. */
 .pp-check { position: relative; width: 196px; height: 176px; padding: 20px; border: 2px solid var(--ink, #111111); display: flex; flex-direction: column; }

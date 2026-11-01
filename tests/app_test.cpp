@@ -1531,6 +1531,7 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     const auto progress = read(root / "Books/book.epub.picopage/progress.json");
     const auto body = app.canvas().pixels();
     const auto battery = footer_pixels(app, 540, 684);
+    if (fixture == "valid.epub") shot("footer-battery-75", app);
     const auto page_waiting = footer_pixels(app, 0, 540);
     const auto unchanged = [&]() {
         assert(app.view() == View::Reading && app.saved_record() == saved && !app.save_due());
@@ -1658,7 +1659,7 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     driver.present(); unchanged();
     app.set_battery(75, true);
     assert(!app.pending_frame());
-    const auto charging_margin = footer_pixels(app, 540, 613);
+    const auto charging_margin = footer_pixels(app, 540, 599);
     assert(std::all_of(charging_margin.begin(), charging_margin.end(), [](auto pixel) { return pixel == 15; }));
     for (int percent : {0, 100}) {
         app.set_battery(percent, true);
@@ -1705,6 +1706,42 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
     app.set_battery(75, false);
     toggle(600); toggle(600); toggle(600);
     assert(footer_pixels(app, 540, 684) == battery);
+
+    if (fixture == "valid.epub") {
+        std::vector<std::uint8_t> empty_battery;
+        for (const auto [percent, cells] : {std::pair{0, 0}, {1, 1}, {20, 1}, {21, 2}, {40, 2},
+                                          {41, 3}, {60, 3}, {61, 4}, {80, 4}, {81, 5}, {100, 5}}) {
+            app.set_battery(percent);
+            assert(!app.pending_frame());
+            toggle(600); toggle(600); toggle(600);
+            for (int y = 1128; y < 1216; ++y) {
+                for (int x = 540; x < 684; ++x) {
+                    const bool edge = x >= 599 && x < 645 && y >= 1164 && y < 1186 &&
+                        (x < 601 || x >= 643 || y < 1166 || y >= 1184);
+                    const bool terminal = x >= 645 && x < 648 && y >= 1171 && y < 1179;
+                    bool filled = false;
+                    for (int cell = 0; cell < cells; ++cell)
+                        filled |= x >= 603 + cell * 8 && x < 609 + cell * 8 && y >= 1168 && y < 1182;
+                    assert(app.canvas().pixel(x, y) == (edge || terminal ? 3 : filled ? 5 : 15));
+                }
+            }
+            shot(("footer-battery-" + std::to_string(percent)).c_str(), app);
+            if (!percent) empty_battery = footer_pixels(app, 540, 684);
+        }
+        app.set_battery(std::nullopt);
+        toggle(600); toggle(600); toggle(600);
+        const auto unknown = footer_pixels(app, 540, 684);
+        assert(unknown != empty_battery && unknown != battery && unknown != charging);
+        assert(std::all_of(unknown.begin(), unknown.end(), [](auto pixel) { return pixel == 15; }));
+        shot("footer-battery-unknown", app);
+        app.set_battery(std::nullopt, true);
+        assert(app.pending_frame() && footer_pixels(app, 540, 684) == charging);
+        shot("footer-battery-charging", app);
+        driver.present(); unchanged();
+        app.set_battery(75, false);
+        driver.present(); unchanged();
+        assert(footer_pixels(app, 540, 684) == battery);
+    }
 
     if (fixture == "nonlinear-footer.epub") {
         driver.tap(342, 500); driver.present();

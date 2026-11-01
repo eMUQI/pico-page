@@ -2,6 +2,10 @@
 
 ## 当前摘要（2026-11-01）
 
+2026-11-01 五格电量浅色微调：根据用户实拍反馈，仅将内部实心格从灰阶 3 调浅为灰阶 5，外框、端子、闪电、尺寸和交互保持不变。Debug 32/32、标准固件构建及独立 Flash 校验通过，已按用户授权更新同一设备应用分区并确认 TF 挂载与书库首帧；本次没有内存或并发改动，未重复 ASan／UBSan。最终浅色版的实机观感已由用户确认，独立分支 PR 交付见下方；未发布。
+
+2026-11-01 五格电量本地候选：阅读页脚取消电量百分比，改为最多五个实心格，没电的位置留白；空电保留空框，未知电量隐藏图标，充电保留静态闪电。Debug 与 ASan／UBSan 各 32/32、标准固件构建、真实应用画面对照和交接检查通过；已按用户授权仅更新设备应用分区并确认启动、TF 挂载和书库首帧；未提交或推送，最终浅色版的实机观感已由用户确认，IN07 的真实充电切换与长期残影继续保留验收边界，详见下方本批记录。
+
 2026-11-01 正文字体错误诊断本地候选：字体错误显示具体原因及 F01–F12 稳定编号，未知正文绘制错误使用 F00；可用时附加原始 FreeType 错误码与 Unicode 码位。正文绘制日志补充字体、字号、字重和源位置；保留现有恢复入口。Debug 与 ASan／UBSan 各 32/32、标准固件构建及三张真实应用错误面板预览检查通过；该批未刷写，原用户截图故障仍未复现。编号说明见[错误、返回与恢复](development/ui-implementation.md#错误返回与恢复)。
 
 2026-11-01 TXT 与刷新分支收尾：`feat/txt-toc-refresh-controls` 已逐项本地提交，支持均衡／快速间隔 0（关闭定期全刷），快速缺省值提高为 30；TXT 自动目录、当前章节名称／序号与回翻历史去重已完成。最终 Debug／ASan／UBSan 各 32/32、标准与 Diagnostic 构建通过，设备安装干净的 `0.5.0+gbcd5f46`。候选与最终镜像累计 5,190 次计分真机翻页，长篇 3,500 页覆盖 158 章；最终固件 500 页前进／500 页回退及重启恢复准确。跨段回翻仍有约 3.8 秒长尾，实体输入、残影、慢卡与 TF 掉电专项未验收；未推送或发布。详见[本批验收记录](development/baselines/2026-11-01-txt-toc-refresh.md)。
@@ -1322,3 +1326,50 @@ Diagnostic 候选 `0.5.0+g5b940a3.dirty`（3,976,992 字节）已刷入串号 `1
 验证：AppleClang 21／macOS arm64；重新配置 Debug，注册 32 项并全部通过（92.79 sec）；重新配置 ASan／UBSan，32/32 通过（191.28 sec），未将其视为 LSan 结果。最终日志为 `/tmp/pico-font-errors-final-{host,asan}-{config,build,test}.log`，字体故障回归包含在现有 graphics 项内。`sh tools/build_firmware.sh` 使用 EIM 已安装 ESP-IDF 6.1（`fff9895c`）通过，日志 `/tmp/pico-font-errors-final2-firmware.log`；保留 SDK 既有链接脚本修改和 requirements 文件，未替换工具链。构建来源为 `98495a8` 工作区候选，版本 `0.5.0+g98495a8.dirty`，应用 3,962,320 字节，SHA-256 `ed43d0f03b4f517d24dc8adc07ddf575f0979dc9f72d276d974508f026a29cd0`；完整来源记录在 `firmware/build/provenance.json`。交接检查 748 项及 `git diff --check` 通过。
 
 资源与边界：诊断在原应用任务及字体调用的失败返回路径生成，新增常量映射和短诊断文本；没有新增任务、缓存或正常翻页扫描，没有新增不可取消的文件操作。字形和画布所有权、失败恢复与进度提交规则保持原状。没有刷写、推送或发布；原用户截图的触发原因、真实字体库内存故障与实体面板仍未验收。后续用户反馈可先按错误编号、FT 原始码、Unicode 码位及固件版本定位，再结合对应书籍和字体复现。
+
+
+## 2026-11-01 · 阅读页脚五格电量与未知读数留白
+
+用户选定「五格电池 · 留白版」后授权实现，并在实现期间明确要求绝大多数情况不显示问号。本批将没有有效电量且未报告充电的状态改为隐藏图标，不显示问号，不将未知误画为空电；保留原点击热区。有效电量按每 20% 一档显示一至五个实心格，0% 显示空框。内部固定五个位置，只从左向右绘制剩余电量，未充满的位置完全留白。外框按设计稿采用 46 × 22 px、2 px 线宽，端子另占 3 px，整体仍对齐 x=648；充电时仅显示原有静态闪电。设计系统、UI 说明、产品决定、使用指南和 IN07 预期已同步，原始设计文件未改动；官网及设备帮助原有页脚切换说明仍然准确，本批不扩展其内容。
+
+实现位于 `reader_app/app_reading.cpp::footer()`，沿用既有应用执行上下文与画布所有权。未新增任务、定时器、持久状态或堆缓冲；常规电量最多绘制五个固定矩形，不引入 I/O、等待或新的不可取消长区间。沿用原充电变化的空闲局刷、在途画布保护和失败恢复，格数随既有翻页或页脚重画更新，不为 SOC 变化额外提交刷新。PMU、校准、OTA 电量门槛和显示波形未改变；本批不作设备耗时、功耗或 PMU 精度改善结论。
+
+验证基线为本地分支 `feat/txt-toc-refresh-controls` 的 `4e62319e6f69` 加本批未提交改动。命令与结果：
+
+- `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host -N` 以及完整 CTest：实际注册并通过 32/32，最终回归 147.09 秒；已有 BSP 波形测试开关为 ON，Node 条件测试已注册。复用 `footer_test`，同步与异步应用模式覆盖各档分界、实心格/空位的像素、百分比消失、未知留白和充电优先级，并继续执行隐藏/时钟、在途、睡眠和失败恢复场景。
+- 按开发环境的 ASan／UBSan 参数重新配置、构建 `build/sanitized` 并执行完整 CTest：32/32，382.66 秒；本次仅记 ASan／UBSan，不宣称已执行 LSan。host 编译器为 AppleClang 21，构建保留既有 Homebrew 动态库面向较新 macOS 的链接警告；不据此推定其他系统版本兼容。
+- `PICO_PAGE_UI_SHOTS="$PWD/.local/battery-five-cell-final-shots" ctest --test-dir build/host --output-on-failure` 导出真实 `ReaderApp` 画面；`artifacts/battery-five-cell-20261101/` 保存完整 PNG、页脚裁剪、状态图、设计对照与视觉核对说明。未知隐藏的最新用户要求优先于概念稿中的问号；画面为合成夹具与注入快照，不是真机或 PMU 数据证据。
+- `sh tools/build_firmware.sh` 标准构建通过。首次沙箱配置因依赖管理器的 `psutil/sysctl` 权限失败，在批准的环境中原样重试；中途收到用户更新后，初次候选被来源校验拒绝，本批按最终源码重建通过，记录更新后再次按标准入口构建并生成 `firmware/build/provenance.json`。未替换依赖或关闭检查。
+- EIM 确认现有 IDF v6.1.0，commit `fff9895c82d744c7237be8847347bdd1b07c6643`，沿用该安装已有的 `components/esp_system/ld/ld.ext_ram.sections` 修改及未跟踪 requirements 文件；BSP 固定 `5f3406deec33304de8801046db583dec7c49e55b`，依赖锁保持 TinyUSB 2.4.0／0.21.0~1，生效目标为 ESP32-S3。标准镜像为 `0.5.0+g4e62319.dirty`，3,962,592 字节，距构建中 4 MiB 应用槽上限余 231,712 字节；构建分区不代表已安装设备的真实分区。源码及产物摘要以本次 provenance 文件为准。
+- `python3 tools/check_handoff.py`：748 项通过；`git diff --check` 通过。原始命令日志保存在上述 artifacts 目录。
+
+未提交、推送、创建 PR、发布或刷写。尚未验证 IN07 的真实 PMU/充电变化、目标面板上的可辨识度、灰阶、残影与实体触控；后续需在用户授权设备操作后验收，host 回归和固件构建不替代这些结果。
+
+
+## 2026-11-01 · 五格电量候选应用更新到设备
+
+用户明确授权刷到设备查看实际效果。烧录前，诊断状态确认原正文位置已保存，`save_due=0`、`save_busy=0`、`content_busy=0`、`pending=0`；重新核对唯一连接的 USB 设备为 ESP32-S3，MAC 尾号 `7d:38`，不复用历史设备身份。读回实际分区为 `nvs@0x9000/20 KiB`、`phy_init@0xe000/4 KiB`、`factory@0x10000/4 MiB` 和 `storage@0x410000/5 MiB`，没有 OTA 槽或 otadata。
+
+核验烧录前工作区与 `firmware/build/provenance.json` 一致，并确认应用 SHA-256 为 `45318d0241e9d8081756faa339297ae305c712aafdea8204ebd2a304b0d62cf6`。使用现有 ESP-IDF Python 环境中的 esptool v5.3.1，仅执行 `write-flash 0x10000 firmware/build/pico_page.bin`；版本为 `0.5.0+g4e62319.dirty`，3,962,592 字节。写入报告 `Hash of data verified`；独立 `verify-flash 0x10000 firmware/build/pico_page.bin` 再次报告 `Verification successful (digest matched)`。写前和写后读回前 64 KiB 并逐字节比较一致，确认此次应用写入未改 bootloader、分区表、NVS 或 PHY。未擦除整片 Flash、改分区、写工厂校准或操作 TF 文件。
+
+首次硬复位后，12 秒采集没有串口字节，随后诊断查询超时；使用 `--before usb-reset --after hard-reset run` 做一次受控重启后恢复。最终只读状态为 `view=library`、`card=1`、`frame=1`、`frame_ok=1`、`clean=1`、`pending=0`，电量快照有效。设备留在书库，由用户打开书查看实际页脚；本次不自动翻页、改变排版或代替用户确认面板观感。书库状态中的未加载阅读修订不作为原单书进度丢失或已验证的证据。
+
+设备原始日志、实际分区、保留元数据、独立校验、最终状态与烧录时 provenance 快照位于忽略目录 `.local/battery-five-cell-device-20261101/`。本条记录是烧录后的文档追加，固件源码未再改变，已安装镜像的来源以该次快照和镜像摘要为准。文档追加后执行 `python3 tools/check_handoff.py` 与 `git diff --check`；未提交、推送或发布。IN07 的实际五格可辨识度、充电状态切换、残影与实体触控仍待用户观察；正在充电时仅显示静态闪电，停止充电后恢复电量格数。
+
+
+## 2026-11-01 · 五格电量填充调浅并直接更新设备
+
+用户提供实拍并认为满格时偏重，确认内部实心格调浅一档、保留轮廓，随后明确要求直接烧录。本批仅将 `app_reading.cpp::footer()` 中电量格的灰阶由 3（#333333）改为 5（#555555）；外框、端子和充电闪电仍为灰阶 3，几何尺寸、阈值、未知隐藏、热区与刷新调度均保持不变。同步调整已有逐像素回归的填充值、设计系统示例、UI 说明和 IN07 预期；未新增测试入口、任务、资源或等待区间。
+
+`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4` 和完整 `ctest --test-dir build/host --output-on-failure` 通过 32/32，78.32 秒；既有同步／异步 footer 场景核对了浅色填充与原色轮廓。标准 `sh tools/build_firmware.sh` 使用既有 IDF v6.1.0 与原 BSP 锁定构建通过；首次自动权限审核超时未执行，按工具允许原样重试后通过，没有替换工具链、依赖或关闭检查。本次为固定绘制色值调整，不涉及分配、生命周期或并发，未重复 ASan／UBSan，不将此前深色版本的 sanitizer 结果记作本批结果。`python3 tools/check_handoff.py` 748 项与 `git diff --check` 均通过。
+
+按用户「直接烧录」授权，在写入前重新核对唯一连接的 USB 设备、MAC 尾号 `7d:38`、保存与显示空闲状态、实际分区以及镜像来源。实际仍为唯一 `factory` 应用槽 `0x10000/4 MiB`；仅写入该应用槽，版本 `0.5.0+g4e62319.dirty`，3,962,592 字节，SHA-256 为 `7eca31303433d348b590731a82b50d52f0c42885d96ef7b1892f5a91dce68862`。写入摘要校验和独立 `verify-flash` 均通过，写前／写后读回前 64 KiB 逐字节一致，未改 bootloader、分区表、NVS、PHY、校准或 TF 文件。重启后确认 `view=library`、`card=1`、`frame_ok=1`、`pending=0`，设备留在书库，由用户打开书观察浅色效果。
+
+本批原始构建／回归日志、分区与元数据、独立校验、状态和烧录时 provenance 快照位于忽略目录 `.local/battery-light-device-20261101/`。本条为烧录后的文档追加，已安装镜像按该快照及摘要追溯；固件源码未再改变。未生成新的设计稿或预览，未提交、推送或发布。实际面板的灰阶可辨识度、满格视觉重量和残影仍需用户确认，不以软件色值或校验成功代替实拍验收。
+
+
+## 2026-11-01 · 五格电量实机视觉确认与 PR 交付
+
+用户明确表示「我看过了 ok」，本次最终浅色版的实机观感按用户反馈记为通过；这是用户实测确认，不是 host 截图或串口画布代替的光学验收。本次确认不扩展为 IN07 真实充电切换、长期残影和所有实体输入场景均已通过。
+
+用户授权提交、推送并创建 PR。在现有检出中获取最新主线 `6b9ce4f51e67`，确认原 `4e62319` 的文件树与主线一致后，新建 `feat/battery-five-cell`，仅纳入本批页脚绘制、既有回归与对应文档；不携带此前已压缩合并的 TXT 提交，不创建 worktree。最新固件绘制源码已通过 Debug 32/32、标准固件构建、应用写入与独立校验；浅色调整未涉及内存或并发，未重复 sanitizer，原五格逻辑的 ASan／UBSan 结果仍按原批次记录。PR 准备阶段仅更新 Git 状态和交接文字，执行交接 748 项与 diff 检查；远端 CI 及 review 以新 PR 的实际 head 状态为准。本次不合并或发布。
