@@ -580,6 +580,46 @@ int main(int argc, char** argv) {
         assert(txt.open(directory + "sample.txt", error));
         assert(txt.metadata().title == "sample" && txt.spine().size() == 1 && txt.toc().size() == 1);
         assert(txt.metadata().book_id == sha256_file(directory + "sample.txt"));
+        for (const auto* encoding : {"utf-8", "gb18030", "utf-16-le", "utf-16-be"}) {
+            EpubDocument headings;
+            const auto path = directory + "toc-" + encoding + ".txt";
+            assert(headings.open(path, error));
+            const std::vector<std::string> labels = {"序章 开始", "第一章 边界😀", "Chapter II: Café", "尾声 结束"};
+            assert(headings.toc().size() == labels.size());
+            const auto& entries = headings.metadata().txt_headings;
+            assert(entries.size() == labels.size() && entries[1].byte_offset == 49150 && entries[1].part == 0);
+            for (std::size_t i = 0; i < entries.size(); ++i) {
+                assert(entries[i].label == labels[i] && headings.toc()[i].label == labels[i]);
+                Chapter target;
+                assert(headings.load_chapter(0, target, error, ChapterLoad::Reading, entries[i].part));
+                assert(entries[i].offset < target.text.size());
+                assert(target.text[entries[i].offset] == (i == 0 ? U'序' : i == 1 ? U'第' : i == 2 ? U'C' : U'尾'));
+                Anchor anchor;
+                assert(target.anchor_at(entries[i].offset, anchor) && anchor.node == "part:" + std::to_string(entries[i].part));
+            }
+            EpubDocument reopened;
+            assert(reopened.open_verified(path, headings.metadata(), error));
+            assert(reopened.toc().size() == labels.size() && reopened.metadata().txt_headings[2].offset == entries[2].offset);
+            EpubDocument cancelled;
+            unsigned checkpoints = 0;
+            assert(!cancelled.open(path, error, [&] { return ++checkpoints == 3; }));
+            assert(cancelled.toc().empty() && cancelled.metadata().txt_headings.empty());
+            set_chapter_memory_probe([](std::size_t) { return false; });
+            EpubDocument without_toc;
+            assert(without_toc.open(path, error));
+            assert(without_toc.metadata().txt_headings.empty() && without_toc.toc().size() == 1 && without_toc.toc()[0].label == "正文");
+            set_chapter_memory_probe(nullptr);
+        }
+        {
+            const auto path = directory + "toc-limit.txt";
+            std::ofstream file(path, std::ios::binary);
+            for (unsigned i = 0; i < 2050; ++i) file << "Chapter " << i << "\n";
+            file.close();
+            EpubDocument limited;
+            assert(limited.open(path, error));
+            assert(limited.metadata().txt_headings.empty() && limited.toc().size() == 1 && limited.toc()[0].label == "正文");
+            assert(!limited.open(path, error, [] { return true; }));
+        }
         EpubDocument verified;
         assert(verified.open_verified(directory + "sample.txt", txt.metadata(), error));
         std::u32string joined;

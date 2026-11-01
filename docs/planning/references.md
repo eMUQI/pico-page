@@ -83,3 +83,8 @@ KOReader 的 [移植说明](https://github.com/koreader/koreader/blob/master/doc
 本次采用文件分块读取的通用思路，继续使用已有 pngle，独立实现最终采样直接合成与行缓冲临时缓存。保留现有精度、Adam7、取消恢复、画布所有权和单张缓存，不引入 libpng、新任务或外部代码。取舍是以有界 TF 随机读写承接交错行重访，须测量慢卡冷路径；内存预算不再随编码文件大小或整屏透明层增加。热缓存仍免解码，缓存失败仍能显示本次输出。来源代码观察、host 像素验证和真机耗时分别记录，不据其他固件的实现宣称其稳定性更高。
 
 同机压力测试再次复现内容 worker 在 EPUB 解压／XML 解析期间触发 IDLE0。核对乐鑫文档 MCP 和本机 IDF v6.1 的 [Task Priorities](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/api-guides/performance/speed.html#task-priorities)：持续计算任务需要阻塞让步，单纯 `taskYIELD()` 不保证低优先级空闲任务得到运行。修正现有解析块及分页页边界，不增加任务、不关闭或延长看门狗，也不主动代替空闲任务喂狗。
+
+
+## TXT 目录识别（2026-10-31）
+
+核对已有独立研究检出 KOReader CREngine `f4a8be93255a439db4777d00f0bc53316acabebd` 的 `crengine/src/lvxml.cpp`：`DetectHeadingLevelByText` 使用卷、部、章的前缀与数字模式，TXT 导入另有短行长度判定。该引擎依赖完整 DOM／文本导入，不能直接作为 ESP32-S3 原生分段阅读的目录实现；源码按 GPL 分文件许可，本批只参考模式识别思路，没有复制实现或增加依赖。Pico Page 独立实现中文与英文短标题识别，在既有编码／身份扫描中收集分段标量锚点，避免额外整书读取。调度依据乐鑫文档 MCP 的 [任务看门狗说明](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/api-reference/system/wdts.html#task-watchdog-timer-twdt)及本机 IDF v6.1 FreeRTOS 接口：计算期间阻塞让出，保留 Idle 运行，不主动喂狗或改变看门狗配置。

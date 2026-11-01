@@ -466,6 +466,14 @@ void ReaderApp::Impl::control(int id) {
             error("目录目标不在正文中");
             return;
         }
+        const auto& txt_headings = document.metadata().txt_headings;
+        if (index < txt_headings.size()) {
+            const auto heading = txt_headings[index];
+            clear_page_history();
+            if (async_content) begin_chapter(target, heading.part, ContentJob::Target::Start, heading.offset);
+            else if (load_chapter(target, heading.part)) show_page(heading.offset);
+            return;
+        }
         if (async_content) {
             clear_page_history();
             begin_chapter(target, 0, ContentJob::Target::Fragment, 0, {}, item.fragment);
@@ -694,7 +702,7 @@ void ReaderApp::Impl::control(int id) {
     case IntervalLess:
     case IntervalMore: {
         auto &interval = draft.refresh_preset == "fast" ? draft.fast_full_refresh_pages : draft.balanced_full_refresh_pages;
-        interval = std::clamp(interval + (id == IntervalMore ? 1 : -1), 1, 30);
+        interval = std::clamp(interval + (id == IntervalMore ? 1 : -1), 0, 30);
         draw_interval();
         break;
     }

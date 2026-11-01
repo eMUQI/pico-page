@@ -4035,6 +4035,104 @@ int main(int argc, char** argv) {
         assert(app.pending_frame()->anchor == txt_saved.anchor);
         driver.present();
     }
+    for (const std::string encoding : {"utf-8", "gb18030", "utf-16-le", "utf-16-be"})
+    for (const bool async : {false, true}) {
+        const auto home = card / ("toc-" + encoding + (async ? "-async" : "-sync"));
+        fs::create_directories(home / "Books");
+        const std::string path = "Books/book.txt";
+        fs::copy_file(fixtures / ("toc-" + encoding + ".txt"), home / path);
+        EpubDocument source; Chapter part; std::string detail;
+        assert(source.open((home / path).string(), detail));
+        const auto heading = source.metadata().txt_headings[1];
+        assert(source.load_chapter(0, part, detail, ChapterLoad::Reading, heading.part));
+        Anchor expected;
+        assert(part.anchor_at(heading.offset, expected));
+        ReaderApp app(home.string(), "txt-toc", true, async); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, path); driver.present();
+        const auto original = *app.saved_record();
+        driver.tap(342, 500); driver.present();
+        const auto first_heading_pixels = app.canvas().pixels();
+        driver.tap(68, 1150); driver.present();
+        assert(app.view() == View::Contents && *app.saved_record() == original);
+        driver.key(Input::K2); driver.present();
+        driver.tap(200, 660); driver.present(); driver.complete_content();
+        assert(app.view() == View::Reading && app.saved_record()->anchor == expected);
+        driver.tap(342, 500); driver.present();
+        bool heading_changed = false;
+        for (int y = 0; y < 54; ++y)
+            for (int x = 132; x < 636; ++x) {
+                const auto at = static_cast<std::size_t>(y) * 342 + x / 2;
+                if (first_heading_pixels[at] != app.canvas().pixels()[at]) heading_changed = true;
+            }
+        assert(heading_changed);
+        driver.close(); driver.present();
+        driver.key(Input::K3); driver.present(); driver.complete_content();
+        assert(app.saved_record()->anchor.node == "part:1");
+        driver.key(Input::K1); driver.present(); driver.complete_content();
+        assert(app.saved_record()->anchor == expected);
+        if (encoding == "utf-8" && async) {
+            std::vector<Anchor> shown{expected};
+            for (unsigned turn = 0; turn < 40; ++turn) {
+                driver.key(Input::K3); driver.present(); driver.complete_content();
+                shown.push_back(app.saved_record()->anchor);
+            }
+            for (unsigned turn = 0; turn < 40; ++turn) {
+                driver.key(Input::K1); driver.present(); driver.complete_content();
+                assert(app.saved_record()->anchor == shown[39 - turn]);
+            }
+        }
+        driver.tap(342, 500); driver.present(); driver.tap(60, 50); driver.present(); driver.complete_content();
+        opened(app, path); driver.present();
+        assert(app.saved_record()->anchor == expected);
+    }
+    {
+        const auto home = card / "txt-continuous-stress";
+        fs::create_directories(home / "Books");
+        const std::string path = "Books/stress.txt";
+        fs::copy_file(fixtures / "txt-stress.txt", home / path);
+        ReaderApp app(home.string(), "txt-stress", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, path); driver.present();
+        std::vector<Anchor> shown{app.saved_record()->anchor};
+        for (unsigned turn = 0; turn < 1200; ++turn) {
+            driver.key(Input::K3); driver.present(); driver.complete_content();
+            assert(app.view() == View::Reading && app.saved_record()->anchor != shown.back());
+            const auto& current = app.saved_record()->anchor;
+            const auto& previous = shown.back();
+            const auto part = std::stoul(current.node.substr(5)), prior_part = std::stoul(previous.node.substr(5));
+            assert(part > prior_part || (part == prior_part && current.offset > previous.offset));
+            shown.push_back(current);
+        }
+        for (unsigned turn = 0; turn < 200; ++turn) {
+            driver.key(Input::K1); driver.present(); driver.complete_content();
+            assert(app.saved_record()->anchor == shown[1199 - turn]);
+        }
+        for (unsigned turn = 0; turn < 200; ++turn) {
+            driver.key(Input::K3); driver.present(); driver.complete_content();
+            assert(app.saved_record()->anchor == shown[1001 + turn]);
+        }
+        driver.key(Input::K3); driver.present(); driver.complete_content();
+        driver.key(Input::K3); driver.present(); driver.complete_content();
+        const auto two_pages_later = app.saved_record()->anchor;
+        driver.key(Input::K1); driver.present(); driver.complete_content();
+        driver.key(Input::K1); driver.present(); driver.complete_content();
+        unsigned queued_body_frames = 0;
+        driver.frame_observer = [&](const Frame& frame) { if (frame.purpose == FramePurpose::Body) ++queued_body_frames; };
+        driver.key(Input::K3);
+        assert(app.pending_frame());
+        driver.present(); driver.complete_content();
+        // The firmware dispatches contacts sampled during scanning after the first frame completes.
+        for (unsigned input = 0; input < 8; ++input) driver.queued(Input::K3);
+        driver.present(); driver.complete_content();
+        assert(queued_body_frames == 2 && app.saved_record()->anchor == two_pages_later);
+        driver.frame_observer = {};
+        driver.key(Input::K2); driver.present();
+        assert(app.saved_record()->anchor == two_pages_later);
+        const auto final = *app.saved_record();
+        driver.tap(342, 500); driver.present(); driver.tap(60, 50); driver.present(); driver.complete_content();
+        ReaderApp restarted(home.string(), "txt-stress-restarted", true, true); Driver again{restarted};
+        assert(restarted.initialize()); again.present(); opened(restarted, path); again.present();
+        assert(restarted.saved_record()->anchor == final.anchor);
+    }
     for (const auto encoding : {TxtEncoding::Gb18030, TxtEncoding::Utf16Le, TxtEncoding::Utf16Be})
     for (const bool async : {false, true}) {
         const std::string name = encoding == TxtEncoding::Gb18030 ? "gb18030" :
@@ -5671,6 +5769,35 @@ int main(int argc, char** argv) {
         driver.tap(615, 568); driver.present();
         driver.tap(200, 660); driver.present();
         assert(app.view() == View::Reading && app.saved_record()->anchor != saved.anchor);
+    }
+    for (const std::string mode : {"balanced", "fast", "clear"}) {
+        write(card / "PicoPage/settings.toml", "schema_version=1\n");
+        write(settings, "schema_version=1\n[display]\nrefresh_preset=\"" + mode +
+            "\"\nbalanced_full_refresh_pages=0\nfast_full_refresh_pages=0\n");
+        ReaderApp app(card.string()); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, "Books/book.epub"); driver.present();
+        unsigned body_frames = 0;
+        driver.frame_observer = [&](const Frame& frame) {
+            if (frame.purpose != FramePurpose::Body) return;
+            ++body_frames;
+            assert(frame.refresh == (mode == "clear" ? RefreshIntent::FullClean : RefreshIntent::Content));
+        };
+        for (unsigned turn = 0; turn < 64; ++turn) {
+            driver.key(turn % 2 ? Input::K1 : Input::K3); driver.present();
+        }
+        assert(body_frames == 64);
+        driver.frame_observer = {};
+        driver.key(Input::K2);
+        assert(app.pending_frame() && app.pending_frame()->refresh == RefreshIntent::FullClean);
+        driver.present();
+        if (mode != "clear") {
+            driver.tap(340, 500); driver.present(); driver.tap(480, 1140); driver.present();
+            driver.tap(340, 1170); driver.present();
+            assert(app.view() == View::RefreshInterval);
+            driver.tap(90, 480); driver.present(); driver.tap(500, 1120); driver.present();
+            const auto saved = FileStore(card.string()).load_settings("Books/book.epub").settings;
+            assert(saved.balanced_full_refresh_pages == 0 && saved.fast_full_refresh_pages == 0);
+        }
     }
     {
         write(card / "PicoPage/settings.toml", "schema_version=1\n# preserved\n");

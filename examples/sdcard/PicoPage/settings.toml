@@ -22,9 +22,9 @@ margin_x_px = 36
 [display]
 # Refresh presets: clear / balanced / fast. Physical behavior still requires device validation.
 refresh_preset = "balanced"
-# Body updates between full refreshes in each mode; valid range 1..30.
+# Body updates between full refreshes in each mode; valid range 0..30; zero disables automatic full refresh.
 balanced_full_refresh_pages = 25
-fast_full_refresh_pages = 15
+fast_full_refresh_pages = 30
 
 [network]
 # Disables sync, phone setup and both Wi-Fi upload paths; retains saved networks/accounts.

@@ -136,8 +136,8 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
         value = toml_seek(table, field);
         if (value.type == TOML_UNKNOWN) continue;
         diagnostic.field = field;
-        diagnostic.detail = "expected integer in range 1..30";
-        if (value.type != TOML_INT64 || value.u.int64 < 1 || value.u.int64 > 30) return false;
+        diagnostic.detail = "expected integer in range 0..30";
+        if (value.type != TOML_INT64 || value.u.int64 < 0 || value.u.int64 > 30) return false;
         (std::strcmp(field, "display.fast_full_refresh_pages") == 0 ? settings.fast_full_refresh_pages
                                                                  : settings.balanced_full_refresh_pages) = static_cast<int>(value.u.int64);
     }

@@ -171,6 +171,91 @@ bool decode_utf16(std::string_view bytes, bool big_endian, std::u32string& text)
     }
     return !decoder.pending();
 }
+// TXT recognition is deliberately limited to short, explicit chapter labels.
+class TxtTocBuilder {
+public:
+    std::vector<TxtHeading> headings;
+    void feed(char32_t scalar, std::uint32_t byte_start) {
+        if (!enabled_) return;
+        if (!byte_start && scalar == 0xfeff) return;
+        auto part = byte_start / kTxtPartBytes;
+        if (scalar == U'\n' && previous_ == U'\r' && part > part_) part = part_;
+        if (part != part_) { part_ = part; offset_ = 0; }
+        if (scalar == U'\r' || scalar == U'\n') {
+            finish_line();
+            line_.clear(); long_line_ = false;
+        } else if (!long_line_) {
+            if (line_.empty() && (space(scalar) || scalar == 0x3000)) {
+                ++offset_; previous_ = scalar; return;
+            }
+            if (line_.empty()) { line_part_ = part_; line_offset_ = offset_; line_byte_offset_ = byte_start; }
+            if (line_.size() < 80) line_.push_back(scalar);
+            else { line_.clear(); long_line_ = true; }
+        }
+        ++offset_; previous_ = scalar;
+    }
+    void finish_line() {
+        if (!enabled_) return;
+        while (!line_.empty() && (space(line_.back()) || line_.back() == 0x3000)) line_.pop_back();
+        if (long_line_ || line_.empty() || !heading(line_)) return;
+        const auto bytes = line_.size() * 4 + sizeof(TxtHeading);
+        const auto growth = headings.size() == headings.capacity() ?
+            std::max<std::size_t>(1, headings.capacity() * 2) * sizeof(TxtHeading) : 0;
+        if (headings.size() >= 2048 || retained_ + bytes > 256 * 1024 || !memory_room(growth + bytes * 2)) {
+            std::vector<TxtHeading>().swap(headings); enabled_ = false; return;
+        }
+        std::string label;
+        for (const auto scalar : line_) {
+            if (scalar < 0x80) label.push_back(static_cast<char>(scalar));
+            else if (scalar < 0x800) {
+                label.push_back(static_cast<char>(0xc0 | (scalar >> 6)));
+                label.push_back(static_cast<char>(0x80 | (scalar & 63)));
+            } else {
+                if (scalar >= 0x10000) label.push_back(static_cast<char>(0xf0 | (scalar >> 18)));
+                label.push_back(static_cast<char>((scalar < 0x10000 ? 0xe0 : 0x80) | ((scalar >> 12) & 63)));
+                label.push_back(static_cast<char>(0x80 | ((scalar >> 6) & 63)));
+                label.push_back(static_cast<char>(0x80 | (scalar & 63)));
+            }
+        }
+        retained_ += bytes;
+        headings.push_back({std::move(label), line_part_, line_offset_, line_byte_offset_});
+    }
+private:
+    static bool heading(const std::u32string& line) {
+        if (line[0] == U'第') {
+            constexpr std::u32string_view numbers = U"0123456789０１２３４５６７８９零〇一二三四五六七八九十百千万两壹贰叁肆伍陆柒捌玖拾佰仟";
+            std::size_t end = 1;
+            while (end < line.size() && numbers.find(line[end]) != std::u32string::npos) ++end;
+            if (end > 1 && end < line.size() && std::u32string_view(U"章回节卷部篇集").find(line[end]) != std::u32string::npos)
+                return true;
+        }
+        for (const auto* prefix : {U"序章", U"楔子", U"前言", U"序言", U"引言", U"后记", U"尾声", U"终章", U"附录"}) {
+            const std::u32string_view word(prefix);
+            if (line == word || (line.size() > word.size() && line.compare(0, word.size(), word) == 0 &&
+                (space(line[word.size()]) || line[word.size()] == U'：' || line[word.size()] == U':'))) return true;
+        }
+        const auto first = line[0] >= U'A' && line[0] <= U'Z' ? line[0] + U'a' - U'A' : line[0];
+        if (first != U'c' && first != U'p' && first != U'b' && first != U'v') return false;
+        std::u32string lower = line;
+        for (auto& scalar : lower) if (scalar >= U'A' && scalar <= U'Z') scalar += U'a' - U'A';
+        for (const auto* prefix : {U"chapter", U"part", U"book", U"volume"}) {
+            const std::u32string_view word(prefix);
+            if (lower.size() <= word.size() || lower.compare(0, word.size(), word) != 0 || !space(lower[word.size()])) continue;
+            auto number = word.size();
+            while (number < lower.size() && space(lower[number])) ++number;
+            auto end = number;
+            while (end < lower.size() && std::u32string_view(U"0123456789ivxlcdm").find(lower[end]) != std::u32string::npos) ++end;
+            if (end > number && (end == lower.size() || space(lower[end]) || lower[end] == U':' || lower[end] == U'.' || lower[end] == U'-')) return true;
+        }
+        return false;
+    }
+    std::u32string line_;
+    std::uint32_t part_ = 0, offset_ = 0, line_part_ = 0, line_offset_ = 0, line_byte_offset_ = 0;
+    char32_t previous_ = 0;
+    std::size_t retained_ = 0;
+    bool enabled_ = true, long_line_ = false;
+};
+
 int hex_digit(char c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -1120,6 +1205,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
             next->metadata.partial_md5 = identity->partial_md5;
             next->metadata.txt_encoding = identity->txt_encoding;
             next->metadata.txt_offsets = identity->txt_offsets;
+            next->metadata.txt_headings = identity->txt_headings;
             if (identity->txt_encoding != TxtEncoding::Utf8 && identity->txt_encoding != TxtEncoding::Gb18030 &&
                 identity->txt_encoding != TxtEncoding::Utf16Le && identity->txt_encoding != TxtEncoding::Utf16Be)
                 return fail(error, "TXT 编码标识无效");
@@ -1143,12 +1229,22 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
             gb18030::Decoder gb_decoder;
             Utf16Decoder utf16_decoder;
             bool utf16 = false, utf16_has_text = false;
+            TxtTocBuilder unicode_toc, gb_toc;
+            std::uint32_t utf8_start = 0, gb_start = 0;
+#ifdef ESP_PLATFORM
+            auto yielded_at = xTaskGetTickCount();
+#endif
             char32_t previous_gb_scalar = 0;
             std::vector<std::uint32_t> part_offsets{0};
             std::uint32_t utf16_cr_boundary = 0;
             std::uint32_t position = 0, next_boundary = kTxtPartBytes;
             for (;;) {
                 if (stop && stop()) return fail(error, "TXT 读取已取消");
+#ifdef ESP_PLATFORM
+                if (xTaskGetTickCount() - yielded_at >= pdMS_TO_TICKS(20)) {
+                    vTaskDelay(1); yielded_at = xTaskGetTickCount();
+                }
+#endif
                 const auto count = std::fread(buffer.data(), 1, buffer.size(), next->file);
                 if (count && !sha.update(buffer.data(), count)) return fail(error, "TXT SHA-256 failed");
                 if (!position && count >= 2 && ((buffer[0] == 0xff && buffer[1] == 0xfe) || (buffer[0] == 0xfe && buffer[1] == 0xff))) {
@@ -1165,6 +1261,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
                         if (result == Utf16Decoder::Result::Complete) {
                             if (!space(scalar) && scalar != 0xfeff) utf16_has_text = true;
                             const auto end = static_cast<std::uint32_t>(position + i + 1);
+                            unicode_toc.feed(scalar, end - (scalar >= 0x10000 ? 4 : 2));
                             if (utf16_cr_boundary) {
                                 const auto split = scalar == U'\n' ? end : utf16_cr_boundary;
                                 if (split < next->txt_bytes) { part_offsets.push_back(split); next_boundary += kTxtPartBytes; }
@@ -1179,6 +1276,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
                     }
                     if (byte == 0) return fail(error, "TXT 文件包含 NUL 字节");
                     if (utf8_valid) {
+                        if (!remaining) utf8_start = position + i;
                         if (remaining) {
                             if ((byte & 0xc0) != 0x80) utf8_valid = false;
                             else {
@@ -1191,6 +1289,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
                         else if (byte >= 0xe0 && byte <= 0xef) { cp = byte & 15; minimum = 0x800; remaining = 2; }
                         else if (byte >= 0xf0 && byte <= 0xf4) { cp = byte & 7; minimum = 0x10000; remaining = 3; }
                         else utf8_valid = false;
+                        if (utf8_valid && !remaining) unicode_toc.feed(cp, utf8_start);
                         if (utf8_valid && !remaining && !space(cp) && cp != 0xfeff) utf8_has_text = true;
                     }
                     if (gb_valid) {
@@ -1200,10 +1299,12 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
                             part_offsets.push_back(split);
                             next_boundary += kTxtPartBytes;
                         }
+                        if (!gb_decoder.pending()) gb_start = position + i;
                         char32_t scalar = 0;
                         const auto result = gb_decoder.feed(byte, scalar);
                         if (result == gb18030::Decoder::Result::Invalid) gb_valid = false;
                         else if (result == gb18030::Decoder::Result::Complete) {
+                            gb_toc.feed(scalar, gb_start);
                             previous_gb_scalar = scalar;
                             if (!space(scalar) && scalar != 0xfeff) gb_has_text = true;
                         }
@@ -1225,6 +1326,9 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
                 if (part_offsets.back() != next->txt_bytes) part_offsets.push_back(next->txt_bytes);
                 next->metadata.txt_offsets = std::move(part_offsets);
             }
+            auto& selected_toc = utf16 || utf8_valid ? unicode_toc : gb_toc;
+            selected_toc.finish_line();
+            next->metadata.txt_headings = std::move(selected_toc.headings);
             if (!sha.finish(next->metadata.book_id)) return fail(error, "TXT SHA-256 failed");
             for (std::uint64_t offset = 0; offset < static_cast<std::uint64_t>(length); offset = offset == 0 ? 1024 : offset * 4) {
                 const auto size = static_cast<std::size_t>(std::min<std::uint64_t>(1024, length - offset));
@@ -1237,7 +1341,9 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
         next->metadata.title = path.substr(slash == std::string::npos ? 0 : slash + 1);
         next->metadata.title.resize(next->metadata.title.size() - 4);
         next->spine.push_back({"text", "text", true, static_cast<std::uint32_t>(length)});
-        next->toc.push_back({"正文", "text", "", 0});
+        for (const auto& heading : next->metadata.txt_headings)
+            next->toc.push_back({heading.label, "text", "", 0});
+        if (next->toc.empty()) next->toc.push_back({"正文", "text", "", 0});
         impl_ = std::move(next);
         return true;
     }
@@ -1642,8 +1748,10 @@ std::size_t EpubDocument::retained_bytes() const {
     std::size_t bytes = sizeof(Impl) + owner.zip_allocated + owner.zip_entries * sizeof(Impl::ZipEntry) +
         metadata.title.capacity() + metadata.author.capacity() + metadata.language.capacity() +
         metadata.book_id.capacity() + metadata.partial_md5.capacity() + metadata.txt_offsets.capacity() * sizeof(std::uint32_t) +
+        metadata.txt_headings.capacity() * sizeof(TxtHeading) +
         owner.spine.capacity() * sizeof(SpineItem) + owner.toc.capacity() * sizeof(TocEntry) +
         owner.cover.capacity() + owner.cover_page.capacity() + owner.html_repair_offsets.capacity() * sizeof(std::uint32_t);
+    for (const auto& heading : metadata.txt_headings) bytes += heading.label.capacity();
     for (const auto& item : owner.spine) bytes += item.resource.capacity() + item.id.capacity();
     for (const auto& item : owner.toc) bytes += item.label.capacity() + item.resource.capacity() + item.fragment.capacity();
     if (!owner.chapter_stream) return bytes;

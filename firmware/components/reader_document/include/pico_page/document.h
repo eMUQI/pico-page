@@ -13,6 +13,14 @@ namespace pico_page {
 
 enum class TxtEncoding { Utf8, Gb18030, Utf16Le, Utf16Be };
 
+/** Recognized TXT heading and its unchanged part-local Unicode scalar position. */
+struct TxtHeading {
+    std::string label;
+    std::uint32_t part = 0;
+    std::uint32_t offset = 0;
+    std::uint32_t byte_offset = 0;
+};
+
 struct DocumentMetadata {
     std::string title;
     std::string author;
@@ -20,6 +28,7 @@ struct DocumentMetadata {
     std::string book_id;  // SHA-256 of the unchanged original file.
     std::string partial_md5;
     TxtEncoding txt_encoding = TxtEncoding::Utf8;  // Selected decoder; EPUB retains the default.
+    std::vector<TxtHeading> txt_headings;
     std::vector<std::uint32_t> txt_offsets;  // Non-UTF-8 part starts and EOF, measured in original file bytes.
 };
 struct SpineItem {

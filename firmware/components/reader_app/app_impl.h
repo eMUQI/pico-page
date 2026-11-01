@@ -6,6 +6,7 @@
 #include "content_cache.h"
 #include "content_job.h"
 #include "help_content.h"
+#include "font_error_message.h"
 #include "reading_footer.h"
 #include "pico_page/stage_timer.h"
 #include "pico_page/app.h"
@@ -542,8 +543,12 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::vector<PageBoundary> page_history, computed_pages;
     void clear_page_history() { page_history.clear(); computed_pages.clear(); }
     void record_boundary(std::vector<PageBoundary>& entries, std::size_t start, std::size_t end) {
-        if (entries.size() == 64) entries.erase(entries.begin());
         const auto next = readable_offset(end);
+        // Revisited spans must not evict distinct pages needed for an exact return path.
+        for (const auto& entry : entries)
+            if (entry.chapter == chapter_index && entry.part == chapter.part &&
+                entry.return_bar == link_return.has_value() && entry.start == start && entry.end == next) return;
+        if (entries.size() == 64) entries.erase(entries.begin());
         entries.push_back({chapter_index, start, next, chapter.part, link_return.has_value(),
                            next == chapter.text.size(), chapter.last_part});
     }
@@ -1313,6 +1318,11 @@ struct ReaderApp::Impl final : DisplayBackend {
             draft.paragraph_gap_lines != applied.paragraph_gap_lines || draft.indent_chars != applied.indent_chars;
     }
     std::string chapter_label() const {
+        if (!document.metadata().txt_headings.empty()) {
+            const auto current = current_toc();
+            return current < document.toc().size() ?
+                reading_footer::chapter_label(document.toc()[current].label, current) : "正文";
+        }
         for (const auto &item : document.toc())
             if (item.resource == chapter.resource) return reading_footer::chapter_label(item.label, chapter_index);
         return reading_footer::chapter_label({}, chapter_index);
@@ -1395,6 +1405,12 @@ struct ReaderApp::Impl final : DisplayBackend {
         case reading_footer::Position::Hidden:
             return {};
         case reading_footer::Position::Chapters:
+            if (!document.metadata().txt_headings.empty()) {
+                const auto current = current_toc();
+                const auto total = std::to_string(document.toc().size());
+                return current < document.toc().size() ?
+                    "第 " + std::to_string(current + 1) + " 章 / 共 " + total + " 章" : "正文 · 共 " + total + " 章";
+            }
             return "第 " + std::to_string(chapter_index + 1) + " 章 / 共 " + std::to_string(document.spine().size()) + " 章";
         case reading_footer::Position::ChapterName:
             return chapter_label();
@@ -2087,7 +2103,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     bool render_body(std::size_t start);
     bool show_page(std::size_t start, bool reverse_page_effect = false);
-    /** Records only successfully presented body pages; at most 64 recent spans are retained. */
+    /** Records only successfully presented body pages; at most 64 distinct spans are retained. */
     void remember_page() {
         record_boundary(page_history, page.start, page.end);
     }
@@ -2167,6 +2183,15 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::size_t current_toc() const {
         const auto &toc = document.toc();
         std::size_t current = toc.size();
+        const auto& txt_headings = document.metadata().txt_headings;
+        if (!txt_headings.empty()) {
+            const auto next = std::upper_bound(txt_headings.begin(), txt_headings.end(),
+                std::make_pair(chapter.part, offset), [](const auto& position, const TxtHeading& heading) {
+                    return position.first < heading.part ||
+                        (position.first == heading.part && position.second < heading.offset);
+                });
+            return next == txt_headings.begin() ? toc.size() : static_cast<std::size_t>(next - txt_headings.begin() - 1);
+        }
         std::uint32_t best = 0;
         for (std::size_t i = 0; i < toc.size(); ++i) {
             if (toc[i].resource != chapter.resource) continue;
@@ -2188,6 +2213,12 @@ struct ReaderApp::Impl final : DisplayBackend {
     int toc_percent(std::size_t index) const {
         const auto &toc = document.toc();
         const auto &spine = document.spine();
+        const auto& txt_headings = document.metadata().txt_headings;
+        if (index < txt_headings.size()) {
+            const auto& heading = txt_headings[index];
+            return spine.empty() || !spine[0].bytes ? -1 :
+                static_cast<int>(static_cast<std::uint64_t>(heading.byte_offset) * 100 / spine[0].bytes);
+        }
         std::size_t target;
         if (!document.chapter_index_for(toc[index].resource, target) || target >= spine.size()) return -1;
         if (!toc[index].fragment.empty())
@@ -2291,6 +2322,11 @@ struct ReaderApp::Impl final : DisplayBackend {
     static int refresh_interval(const ReaderSettings &values) {
         return values.refresh_preset == "fast" ? values.fast_full_refresh_pages : values.balanced_full_refresh_pages;
     }
+    static std::string refresh_interval_label(const ReaderSettings &values) {
+        const auto pages = refresh_interval(values);
+        return pages == 0 ? "不自动全刷" : "每 " + std::to_string(pages) + " 页";
+    }
+
     /** A radio row; show_save_state distinguishes saved and pending selections with text. */
     void choice(int id, const std::string &title, const std::string &description, int y, bool selected,
                 bool pending_choice = false, bool show_save_state = true) {
@@ -2369,7 +2405,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (values.refresh_preset == "clear") note("自动全刷间隔：每页", 1150);
         else {
             text("自动全刷间隔", 36, 1150, 24, 360);
-            text("每 " + std::to_string(refresh_interval(values)) + " 页 ›", 490, 1150, 24, 170);
+            text(refresh_interval_label(values) + " ›", 490, 1150, 24, 170);
             hits.push_back({24, 1128, 636, 88, RefreshInterval});
         }
     }
@@ -2403,9 +2439,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         text(refresh_name(draft) + "模式", 36, 170, 32, 612, 1, true);
         wrapped("间隔越短，清理残影越频繁。此设置不影响 K2 手动全刷。", 36, 246, 612, 26);
         button(IntervalLess, "−", 36, 440, 120, 96);
-        center("每 " + std::to_string(refresh_interval(draft)) + " 页", 168, 460, 348, 34);
+        center(refresh_interval_label(draft), 168, 460, 348, 34);
         button(IntervalMore, "+", 528, 440, 120, 96);
-        note("可设为 1 至 30 页。", 582);
+        note("可设为 0 至 30 页，0 表示不自动全刷。", 582);
         button(Back, "取消", 24, 1080, 306, 96);
         button(IntervalSave, "保存间隔", 354, 1080, 306, 96, true);
     }
@@ -3453,6 +3489,12 @@ struct ReaderApp::Impl final : DisplayBackend {
      * error codes; an unknown diagnostic uses the caller's fallback or a generic failure message.
      */
     static std::string reason(const std::string &detail, const char *fallback = "操作失败") {
+        if (auto message = font_error_message(detail); !message.empty()) {
+#ifdef ESP_PLATFORM
+            ESP_LOGW("reader_app", "Font failure: %s", detail.c_str());
+#endif
+            return message;
+        }
         std::string lower = detail;
         for (auto &c : lower) if (c >= 'A' && c <= 'Z') c += 32;
         const auto has = [&](const char *word) { return lower.find(word) != std::string::npos; };

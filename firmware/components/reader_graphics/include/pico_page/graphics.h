@@ -67,6 +67,7 @@ public:
     /** Synthetic stroke strength: 0 regular, 1 medium, 2 bold; larger values clamp to 2. Advances are unchanged. */
     void set_synthetic_weight(unsigned strength) { weight_ = strength > 2 ? 2 : strength; }
     bool valid() const { return face_ != nullptr; }
+    /** Failure stage, with the native FreeType error and Unicode scalar when available. */
     const std::string& error() const { return error_; }
     int pixel_size() const { return pixel_size_; }
     /** Pixel payload and entry counts exclude allocator and hash-container overhead. */
@@ -109,6 +110,7 @@ private:
     std::uint64_t glyph_key(char32_t scalar, bool bold) const;
     bool rasterize(char32_t scalar, bool bold, Glyph& glyph);
     bool placeholder(char32_t scalar, Glyph& glyph);
+    bool fail(const char* stage, int native_error = 0, std::optional<char32_t> scalar = std::nullopt);
 
 };
 

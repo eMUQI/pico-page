@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <cstdio>
 #include <limits>
 
 #include <ft2build.h>
@@ -101,7 +102,7 @@ Font::Font(std::size_t glyph_cache_limit_bytes, std::size_t advance_cache_limit)
 #else
     const auto result = FT_Init_FreeType(&library);
 #endif
-    if (result) error_ = "FreeType initialization failed";
+    if (result) fail("FreeType initialization failed", result);
     library_ = library;
 }
 
@@ -125,16 +126,33 @@ void Font::close() {
     pixel_size_ = 0;
 }
 
+bool Font::fail(const char* stage, int native_error, std::optional<char32_t> scalar) {
+    error_ = stage;
+    if (native_error && FT_ERROR_BASE(native_error) == FT_Err_Out_Of_Memory)
+        error_ += ": FreeType out of memory";
+    if (native_error) error_ += " [FT=" + std::to_string(native_error) + "]";
+    if (scalar) {
+        char codepoint[16];
+        std::snprintf(codepoint, sizeof(codepoint), " [U+%04lX]", static_cast<unsigned long>(*scalar));
+        error_ += codepoint;
+    }
+    return false;
+}
+
 bool Font::open(const std::string& path) {
     close();
     FT_Face face = nullptr;
-    if (!library_ || FT_New_Face(static_cast<FT_Library>(library_), path.c_str(), 0, &face)) {
-        error_ = "Cannot open font: " + path;
+    if (!library_) return fail("FreeType initialization failed");
+    const auto opened = FT_New_Face(static_cast<FT_Library>(library_), path.c_str(), 0, &face);
+    if (opened) {
+        fail("Cannot open font", opened);
+        error_ += "; path=" + path;
         return false;
     }
     face_ = face;
-    if (FT_Select_Charmap(face, FT_ENCODING_UNICODE)) {
-        close(); error_ = "Font has no Unicode character map"; return false;
+    const auto mapped = FT_Select_Charmap(face, FT_ENCODING_UNICODE);
+    if (mapped) {
+        close(); return fail("Font has no Unicode character map", mapped);
     }
     error_.clear();
     return set_pixel_size(28);
@@ -143,15 +161,16 @@ bool Font::open(const std::string& path) {
 bool Font::open_memory(const unsigned char* bytes, std::size_t length) {
     close();
     FT_Face face = nullptr;
-    if (!bytes || length > static_cast<std::size_t>(std::numeric_limits<FT_Long>::max()) ||
-        !library_ || FT_New_Memory_Face(static_cast<FT_Library>(library_), bytes,
-                                      static_cast<FT_Long>(length), 0, &face)) {
-        error_ = "Cannot open embedded font";
-        return false;
-    }
+    if (!library_) return fail("FreeType initialization failed");
+    if (!bytes || length > static_cast<std::size_t>(std::numeric_limits<FT_Long>::max()))
+        return fail("Cannot open embedded font");
+    const auto opened = FT_New_Memory_Face(static_cast<FT_Library>(library_), bytes,
+                                         static_cast<FT_Long>(length), 0, &face);
+    if (opened) return fail("Cannot open embedded font", opened);
     face_ = face;
-    if (FT_Select_Charmap(face, FT_ENCODING_UNICODE)) {
-        close(); error_ = "Font has no Unicode character map"; return false;
+    const auto mapped = FT_Select_Charmap(face, FT_ENCODING_UNICODE);
+    if (mapped) {
+        close(); return fail("Font has no Unicode character map", mapped);
     }
     error_.clear();
     return set_pixel_size(28);
@@ -162,10 +181,10 @@ const char* Font::fallback_identity() { return kFallbackIdentity; }
 bool Font::open_fallback() { return open_memory(kFallbackFont, kFallbackFontSize); }
 
 bool Font::set_pixel_size(int pixels) {
-    if (!face_ || pixels < 8 || pixels > 256 ||
-        FT_Set_Pixel_Sizes(static_cast<FT_Face>(face_), 0, pixels)) {
-        error_ = "Invalid font size or unavailable font"; return false;
-    }
+    if (!face_) return fail("Font face unavailable");
+    if (pixels < 8 || pixels > 256) return fail("Invalid font size");
+    const auto sized = FT_Set_Pixel_Sizes(static_cast<FT_Face>(face_), 0, pixels);
+    if (sized) return fail("Invalid font size", sized);
     pixel_size_ = pixels;
     error_.clear();
     return true;
@@ -208,23 +227,24 @@ int Font::advance(char32_t scalar) {
     const auto cached = advances_.find(key);
     if (cached != advances_.end()) return cached->second;
     const auto face = static_cast<FT_Face>(face_);
-    if (!face) { error_ = "Font glyph metrics failed"; return -1; }
+    if (!face) { fail("Font face unavailable", 0, scalar); return -1; }
     int width;
     FT_Fixed design = 0;
     if (!FT_Get_Char_Index(face, scalar)) {
         // A missing character takes the cell of a present one, whatever the face's own .notdef
         // advance is: a full em where line breaking treats it as CJK, half an em otherwise.
         width = blank(scalar) ? 0 : cjk(scalar) ? pixel_size_ : (pixel_size_ + 1) / 2;
-    } else
-    // For static SFNT faces the hinted loader yields the scaled design advance rounded to a whole
-    // pixel. Reading that advance alone avoids fetching and scaling the outline from storage.
-    if (FT_IS_SFNT(face) && !FT_HAS_MULTIPLE_MASTERS(face) &&
-        !FT_Get_Advance(face, FT_Get_Char_Index(face, scalar), FT_LOAD_NO_SCALE, &design)) {
-        width = static_cast<int>((FT_MulFix(design, face->size->metrics.x_scale) + 32) >> 6);
-    } else if (!FT_Load_Char(face, scalar, FT_LOAD_DEFAULT)) {
-        width = static_cast<int>((face->glyph->advance.x + 32) >> 6);
     } else {
-        error_ = "Font glyph metrics failed"; return -1;
+        // For static SFNT faces the hinted loader yields the scaled design advance rounded to a whole
+        // pixel. Reading that advance alone avoids fetching and scaling the outline from storage.
+        if (FT_IS_SFNT(face) && !FT_HAS_MULTIPLE_MASTERS(face) &&
+            !FT_Get_Advance(face, FT_Get_Char_Index(face, scalar), FT_LOAD_NO_SCALE, &design)) {
+            width = static_cast<int>((FT_MulFix(design, face->size->metrics.x_scale) + 32) >> 6);
+        } else {
+            const auto loaded = FT_Load_Char(face, scalar, FT_LOAD_DEFAULT);
+            if (loaded) { fail("Font glyph metrics failed", loaded, scalar); return -1; }
+            width = static_cast<int>((face->glyph->advance.x + 32) >> 6);
+        }
     }
     // Bound per-face metrics memory across all sizes; reopening invalidates every entry.
     if (advances_.size() >= advance_cache_limit_) {
@@ -270,21 +290,19 @@ bool Font::placeholder(char32_t scalar, Glyph& glyph) {
 }
 
 bool Font::rasterize(char32_t scalar, bool bold, Glyph& glyph) {
-    if (FT_Load_Char(static_cast<FT_Face>(face_), scalar, FT_LOAD_DEFAULT | FT_LOAD_TARGET_NORMAL)) {
-        error_ = "Font glyph rasterization failed"; return false;
-    }
+    const auto loaded = FT_Load_Char(static_cast<FT_Face>(face_), scalar, FT_LOAD_DEFAULT | FT_LOAD_TARGET_NORMAL);
+    if (loaded) return fail("Font glyph load failed", loaded, scalar);
     const auto slot = static_cast<FT_Face>(face_)->glyph;
-    if (weight_ && slot->format == FT_GLYPH_FORMAT_OUTLINE &&
-        FT_Outline_Embolden(&slot->outline, static_cast<FT_Pos>(pixel_size_ * weight_))) {
-        error_ = "Font stroke adjustment failed"; return false;
+    if (weight_ && slot->format == FT_GLYPH_FORMAT_OUTLINE) {
+        const auto adjusted = FT_Outline_Embolden(&slot->outline, static_cast<FT_Pos>(pixel_size_ * weight_));
+        if (adjusted) return fail("Font stroke adjustment failed", adjusted, scalar);
     }
     if (bold) FT_GlyphSlot_Embolden(slot);
-    if (FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL)) {
-        error_ = "Font glyph rasterization failed"; return false;
-    }
+    const auto rendered = FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL);
+    if (rendered) return fail("Font glyph rasterization failed", rendered, scalar);
     const auto& bitmap = slot->bitmap;
     if (bitmap.pixel_mode != FT_PIXEL_MODE_GRAY && bitmap.pixel_mode != FT_PIXEL_MODE_MONO &&
-        bitmap.rows) { error_ = "Unsupported glyph pixel format"; return false; }
+        bitmap.rows) return fail("Unsupported glyph pixel format", 0, scalar);
     glyph.left = slot->bitmap_left; glyph.top = slot->bitmap_top;
     glyph.width = bitmap.width; glyph.rows = bitmap.rows;
     glyph.coverage.resize(static_cast<std::size_t>(bitmap.width) * bitmap.rows);
@@ -301,15 +319,14 @@ bool Font::rasterize(char32_t scalar, bool bold, Glyph& glyph) {
 
 bool Font::warm(char32_t scalar, bool bold) {
     if (scalar == U'\n' || scalar == U'\r' || scalar == U'\t') return true;
-    if (!face_) { error_ = "Font glyph rasterization failed"; return false; }
+    if (!face_) return fail("Font face unavailable", 0, scalar);
     const auto key = glyph_key(scalar, bold);
     auto cached = glyphs_.find(key);
     if (cached == glyphs_.end()) {
         Glyph glyph;
         if (!(contains(scalar) ? rasterize(scalar, bold, glyph) : placeholder(scalar, glyph))) return false;
         if (glyph.coverage.size() > glyph_cache_limit_bytes_) {
-            error_ = "Font glyph exceeds cache budget";
-            return false;
+            return fail("Font glyph exceeds cache budget", 0, scalar);
         }
         while (!glyph_order_.empty() && glyph_bytes_ + glyph.coverage.size() > glyph_cache_limit_bytes_) {
             const auto oldest = glyph_order_.front();

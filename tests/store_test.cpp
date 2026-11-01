@@ -558,6 +558,15 @@ int main() {
     assert(store.apply_settings(snapshot, preview, true, error) == StoreStatus::Invalid);
     preview = snapshot.config.settings; preview.fast_full_refresh_pages = 31;
     assert(store.apply_settings(snapshot, preview, true, error) == StoreStatus::Invalid);
+    preview = snapshot.config.settings;
+    preview.fast_full_refresh_pages = -1;
+    assert(store.apply_settings(snapshot, preview, true, error) == StoreStatus::Invalid);
+    preview.fast_full_refresh_pages = 0;
+    preview.balanced_full_refresh_pages = 0;
+    assert(store.apply_settings(snapshot, preview, true, error) == StoreStatus::Ok);
+    assert(store.load_settings(book).settings.fast_full_refresh_pages == 0);
+    assert(store.load_settings(book).settings.balanced_full_refresh_pages == 0);
+    snapshot = store.settings_snapshot(book);
     preview = snapshot.config.settings; preview.fast_full_refresh_pages = 1;
     assert(store.apply_settings(snapshot, preview, true, error) == StoreStatus::Ok);
     snapshot = store.settings_snapshot(book);

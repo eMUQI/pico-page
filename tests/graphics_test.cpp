@@ -1,4 +1,5 @@
 #include "pico_page/graphics.h"
+#include "../firmware/components/reader_app/font_error_message.h"
 extern "C" {
 #include "qrcodegen.h"
 }
@@ -86,6 +87,46 @@ int main(int argc, char** argv) {
         Font insufficient(1, 1);
         assert(insufficient.open_fallback() && !insufficient.warm(U'读'));
         assert(!insufficient.cached_glyph_bytes() && !insufficient.cached_glyphs());
+        assert(insufficient.error() == "Font glyph exceeds cache budget [U+8BFB]");
+        assert(pico_page::font_error_message(insufficient.error()) == "单个字形超过缓存上限（F10） [U+8BFB]");
+        Font unavailable;
+        assert(!unavailable.warm(U'读'));
+        assert(pico_page::font_error_message(unavailable.error()) == "正文字体未就绪（F11） [U+8BFB]");
+        assert(!unavailable.set_pixel_size(28));
+        assert(pico_page::font_error_message(unavailable.error()) == "正文字体未就绪（F11）");
+        assert(unavailable.open_fallback() && !unavailable.set_pixel_size(257));
+        assert(pico_page::font_error_message(unavailable.error()) == "字体字号设置失败（F04）");
+        assert(unavailable.set_pixel_size(28) && unavailable.error().empty());
+        const unsigned char invalid_font[] = {0, 1, 2, 3};
+        assert(!unavailable.open_memory(invalid_font, sizeof(invalid_font)));
+        assert(unavailable.error().find("Cannot open embedded font [FT=") == 0);
+        assert(pico_page::font_error_message(unavailable.error()).find("内置字体打开失败（F02） [FT=") == 0);
+        assert(unavailable.open_fallback() && unavailable.error().empty());
+        assert(!unavailable.open("/pico-page-missing-font.ttf"));
+        assert(unavailable.error().find("Cannot open font [FT=") == 0);
+        assert(unavailable.error().find("; path=/pico-page-missing-font.ttf") != std::string::npos);
+        assert(pico_page::font_error_message(unavailable.error()).find("字体文件打开失败（F02） [FT=") == 0);
+        assert(pico_page::font_error_message("Cannot open font [FT=1]; path=FreeType out of memory [U+FFFF].ttf") ==
+               "字体文件打开失败（F02） [FT=1]");
+        assert(pico_page::font_error_message("Cannot read chapter").empty());
+        const std::pair<const char*, const char*> failures[] = {
+            {"FreeType initialization failed", "字体引擎初始化失败（F01）"},
+            {"Cannot open font", "字体文件打开失败（F02）"},
+            {"Font has no Unicode character map", "字体字符表不可用（F03）"},
+            {"Font glyph metrics failed", "字形尺寸读取失败（F05）"},
+            {"Font glyph load failed", "字形读取失败（F06）"},
+            {"Font stroke adjustment failed", "字形加粗处理失败（F07）"},
+            {"Font glyph rasterization failed", "字形绘制失败（F08）"},
+            {"Unsupported glyph pixel format", "字形像素格式不支持（F09）"},
+        };
+        for (const auto& failure : failures) {
+            const auto message = pico_page::font_error_message(std::string(failure.first) + " [FT=6] [U+1F600]");
+            assert(message == std::string(failure.second) + " [FT=6] [U+1F600]");
+            for (const auto scalar : decode_utf8(message)) assert(font.contains(scalar));
+        }
+        const auto memory = pico_page::font_error_message("Font glyph rasterization failed: FreeType out of memory [FT=64] [U+8BFB]");
+        assert(memory == "字体处理内存不足（F12） [FT=64] [U+8BFB]");
+        for (const auto scalar : decode_utf8(memory)) assert(font.contains(scalar));
     }
     if (argc > 1) assert(font.open(argv[1]));
 

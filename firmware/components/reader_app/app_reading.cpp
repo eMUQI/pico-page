@@ -413,7 +413,13 @@ bool ReaderApp::Impl::render_body(std::size_t start) {
         ++bitmap_hits;
     }
     else if (!draw_page_content(candidate, spec, true)) {
-        error("正文绘制失败。" + reason(body.error()) + "。");
+#ifdef ESP_PLATFORM
+        ESP_LOGW("reader_app", "Body rendering failed: font=%s size_px=%d weight=%s chapter=%u part=%u start=%u; %s",
+                 effective_font.c_str(), body.pixel_size(), settings.font_weight.c_str(),
+                 static_cast<unsigned>(chapter_index), static_cast<unsigned>(chapter.part),
+                 static_cast<unsigned>(candidate.start), body.error().c_str());
+#endif
+        error("正文绘制失败。" + reason(body.error(), "绘制失败原因未记录（F00）") + "。");
         return false;
     }
     page = std::move(candidate);
@@ -483,7 +489,8 @@ bool ReaderApp::Impl::show_page(std::size_t start, bool reverse_page_effect) {
     hits.clear();
     const auto token = session.request_page(
         anchor, (settings.refresh_preset == "clear" ||
-                 body_updates >= static_cast<unsigned>(refresh_interval(settings)))
+                 (refresh_interval(settings) > 0 &&
+                  body_updates >= static_cast<unsigned>(refresh_interval(settings))))
                     ? RefreshIntent::FullClean
                     : RefreshIntent::Content, reverse_page_effect);
     inline_image_after = std::chrono::steady_clock::time_point::max();

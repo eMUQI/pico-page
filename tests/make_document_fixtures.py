@@ -12,6 +12,17 @@ def generate(directory: Path) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "sample.txt").write_bytes(("\ufeff" + "甲" * 16384 + "\r\n第二段😀\n" +
                                             "长段文字。" * 12000).encode("utf-8"))
+    for encoding, bom in (("utf-8", b"\xef\xbb\xbf"), ("gb18030", b""),
+                          ("utf-16-le", b"\xff\xfe"), ("utf-16-be", b"\xfe\xff")):
+        prefix = "序章 开始\r\n这是一行正文。\n"
+        unit_bytes = len("x".encode(encoding))
+        padding = (49150 - len(bom) - len((prefix + "\n").encode(encoding))) // unit_bytes
+        text = prefix + "x" * padding + "\n第一章 边界😀\r\n" + "边界正文。\n" * 5000 + "Chapter II: Café\n尾声 结束\n"
+        (directory / ("toc-" + encoding + ".txt")).write_bytes(bom + text.encode(encoding))
+    stress = "".join(f"第{chapter}章 压力测试\n" +
+        "".join(f"第{paragraph}段：" + "连续阅读应当保持每页文字与来源位置一致。" * 10 + "\n" for paragraph in range(18))
+        for chapter in range(220))
+    (directory / "txt-stress.txt").write_text(stress, encoding="utf-8")
     (directory / "invalid.txt").write_bytes(b"valid\xffinvalid")
     for encoding in ("utf-16-le", "utf-16-be"):
         bom = b"\xff\xfe" if encoding.endswith("le") else b"\xfe\xff"
