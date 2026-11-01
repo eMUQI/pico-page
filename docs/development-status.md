@@ -2,6 +2,8 @@
 
 ## 当前摘要（2026-10-31）
 
+2026-10-31 充电页脚本地候选：充电时只显示静态闪电电池图标，隐藏百分比与未知值占位；停止充电后恢复电量。host Debug 32/32、标准固件构建及合成卡画面检查通过；候选分支为 `fix/hide-battery-percent-while-charging`，用户已授权提交、推送并创建 PR。未发布或刷写，真实充电切换与面板效果待 IN07 验收。
+
 2026-10-31 USB 浅睡交接修复候选：整段逻辑睡眠保持串口 PHY 断开，周期 PMU 事件不重新启用；仅 SDK 返回 `ESP_OK` 才标记已睡眠，拒绝入睡不再误走成功唤醒路径。Debug 与 ASan／UBSan 完整回归各 32/32，末次计时边界调整的专项补验通过，标准及 release 固件构建通过。候选位于 `fix/usb-sleep-enumeration`，用户已授权提交、推送并创建 PR；未发布或刷写。电脑端真实重新枚举及 PW06 仍待验收，不能据此宣称 0.4 用户反馈已解决。
 
 2026-10-31 `0.5.0` 已正式发布：标签 `v0.5.0`（`89623cb`），应用 3,927,872 字节。用户决定跳过发布前 OTA 真机验证，发布后自行测试；0.4.0→0.5.0 联网更新与回滚目前没有真机结果。release 配置未做真机冒烟。
@@ -1236,3 +1238,20 @@ Node v26.7.0，复用已有 `web/node_modules` 和监听 `127.0.0.1:4321` 的本
 本批未提交、推送、发布、连接串口、复位或刷写设备。下一步按 PW06 在反馈用户使用的系统实测：连线入睡、睡眠中插线、跨多个电池周期的长睡眠、重复至少三轮、电源键取消／拒绝边界、触摸恢复异常，以及 MSC 安全退出重启；分别记录 USB 枚举、串口响应与存储盘状态。实体唤醒、进度保持、电气断开与跨系统恢复尚未验收，不能把 host 或构建通过记作识别故障已解决。
 
 同日追加：用户授权将本批改动提交、推送并创建 PR。提交前重新读取远端，`origin/main` 仍为 `a999c3d`，无新增上游提交；复核完整回归、最终专项补验及两种固件产物记录，交接检查与 diff 检查通过。本次交付继续保留上述真机验收边界，不合并、发布或操作设备。
+
+
+## 2026-10-31 · 充电时隐藏电量百分比
+
+用户要求充电时不显示电量。本批从干净 `main 58a588e281ba6f9cf21a9e8282e6f9bd6701f6f3` 开始，仅调整阅读页脚绘制：PMU 报告正在充电时，电池图标内保留静态闪电，隐藏百分比及「—」，图标含端子的右边界保持 x=648；停止充电后恢复电量填充与百分比，SOC 无效时恢复「—」。热区、时钟／隐藏模式、空闲局刷、在途画布及休眠约束沿用现有实现。同步更新产品决定、UI 说明及 IN07，未修改 PMU 采样、充电判断或 OTA 电量条件。
+
+复用 `footer_test`，检查充电图标左侧留白、0%／75%／100%／未知 SOC 的充电画面一致，并沿用充电结束、延迟刷新、时钟／隐藏、保存不变及显示失败回归；同步与固件对应的异步模式均覆盖，未新增测试入口。主循环执行既有绘制，不新增任务、I/O、等待、定时器或缓冲；充电时仅省略数字绘制，闪电仍是固定 9 × 13 px 位图。最长不可取消区间及失败全刷回退沿用原页脚路径，未进行设备耗时或内存测量，不作性能改善结论。
+
+本机验证：`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host -N` 及 `ctest --test-dir build/host --output-on-failure` 通过，注册并完成 32/32，耗时 68.19 秒；字体与 Node 条件入口均存在。日志为 `.local/charging-footer-{configure,build,ctest}.log`，注册列表为 `.local/charging-footer-tests.txt`。本批没有内存所有权或生命周期改动，未追加 sanitizer 验证。
+
+EIM 安装记录确认使用既有 `/Users/wulu/.espressif/v6.1/esp-idf`，`idf.py --version` 为 `ESP-IDF v6.1-dirty`；保留 SDK 原有 `components/esp_system/ld/ld.ext_ram.sections` 修改和未跟踪 requirements 文件。`sh tools/build_firmware.sh` 首次在组件管理器的 psutil／sysctl 进程查询阶段被沙箱阻止，经权限复核后以同一入口构建通过，没有替换依赖或关闭检查。实际 sdkconfig 仍为 ESP32-S3、性能优化及开发串口开启；BSP、依赖锁和配置无改动。产物版本 `0.5.0+g58a588e.dirty`，应用 3,954,640 字节，4 MiB 槽剩余 239,664 字节；SHA-256 为 `ee51584ace5dcb5f8cc1cfffd52c102d7b6797e0d59142bfbbe8a0926aeff046`，来源记录为 `firmware/build/provenance.json`，日志为 `.local/charging-footer-firmware.log`。host 链接保留既有 Homebrew dylib 系统版本警告，固件保留 SDK FATFS Kconfig 布尔默认值提示。
+
+画面证据使用真实 host `ReaderApp` 与合成 `valid.epub`，在忽略目录的 host 副本加入临时 `battery` 脚本命令注入 75%／充电状态，不改产品 host 命令。生成方法及脚本位于 `.local/charging-footer-preview/`；截图位于 `artifacts/charging-footer-20261031/`，已逐张检查 `battery`、`charging`、`restored` 的页脚裁图，停止充电后恢复原布局。充电时图标从图标与数字组改为单独靠右，尺寸与纵向位置不变。初次 PNG 转换因系统 Python 缺少 Pillow 中止，已改用系统 sips 转换既有原始 BMP；不新增依赖。
+
+`python3 tools/check_handoff.py` 与 `git diff --check` 通过，交接日志为 `.local/charging-footer-handoff.log`。未提交、推送、发布或刷写；IN07 的实际充电开始／结束、充满状态、PMU 无效状态、排队输入及面板残影仍待真机验收，host 注入不能证明 PMU 行为改善。下一步审阅本地差异，并在设备上核对充电状态与恢复画面。
+
+同日追加：用户授权提交、推送并创建 PR。提交范围为上述页脚绘制、既有回归及配套资料，分支为 `fix/hide-battery-percent-while-charging`；沿用本批已通过的 Debug 32/32、固件构建与画面检查结果，提交前复核交接和差异检查。本次授权不含合并、发布或设备操作。

@@ -113,10 +113,10 @@ void ReaderApp::Impl::footer() {
         center(reading_footer::clock(std::time(nullptr), 8 * 60), reading_footer::device_left, 1156,
                684 - reading_footer::device_left, 24, 3);
     } else if (footer_device == reading_footer::Device::Battery) {
-        const auto level = battery_percent ? std::to_string(*battery_percent) + "%" : "—";
+        const auto level = battery_charging ? std::string{} : battery_percent ? std::to_string(*battery_percent) + "%" : "—";
         const int level_width = text_width(level, 24);
         const int level_x = 648 - level_width;
-        const int icon_x = level_x - 10 - 35;
+        const int icon_x = level_x - (battery_charging ? 0 : 10) - 35;
         outline(icon_x, 1166, 32, 18, 2, 3);
         canvas.fill_rect(icon_x + 32, 1171, 3, 8, 3);
         if (battery_charging) {
@@ -126,7 +126,7 @@ void ReaderApp::Impl::footer() {
                 for (int x = 0; x < 9; ++x)
                     if (bolt[y] & (1U << (8 - x))) canvas.pixel(icon_x + 11 + x, 1168 + y, 3);
         } else if (battery_percent) canvas.fill_rect(icon_x + 4, 1170, *battery_percent * 24 / 100, 10, 3);
-        text(level, level_x, 1156, 24, level_width, 3);
+        if (!battery_charging) text(level, level_x, 1156, 24, level_width, 3);
     }
 }
 
