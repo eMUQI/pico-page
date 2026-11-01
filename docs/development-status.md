@@ -2,13 +2,13 @@
 
 ## 当前摘要（2026-11-01）
 
-当前正式发布版本为 **0.5.0**（`v0.5.0`，`89623cb`）。本地主线已合入后续改动，下一版按项目所有者确认准备为 **0.5.1**，见[候选发布说明](releases/0.5.1.md)；版本文件已更新，尚未提交、创建标签或发布。
+当前正式发布版本为 **0.5.1**（`v0.5.1`，`fed9891`），[发布说明](releases/0.5.1.md)。PR #181 的当前 head CI、Codex review 及讨论核对通过后已合并；正式 Release 已发布并设为 Latest，四附件回下载核对通过。腾讯云与官网部署及独立线上读回已通过，结果见下方发布记录。
 
 0.5.0 之后的主线改动包括：TXT 自动目录与当前章节显示、连续回翻位置修复、均衡／快速自动全刷间隔 0–30、五格电量、正文字体错误编号、书库封面暂时失败重试，以及 USB 浅睡串口交接修复。各批原始验证、设备安装和未测项保留在下方记录；合入主线不代表这些专项已全部验收。
 
-本轮快速检查及 TXT 无封面误报修复已完成：最终 Debug 与 ASan／UBSan 各 32/32，Diagnostic／Release 构建与最终 Release 应用安装、独立校验和启动检查通过。首轮完成 60 步界面、四编码 TXT 64 次翻页及两组 EPUB 72 次翻页、重启恢复；修复后另复查 TXT／EPUB 混排书库。详细来源、trace 截点限制与未测项见本日末尾记录，不能替代完整硬件验收。
+本轮快速检查及 TXT 无封面误报修复已完成：最终 Debug 与 ASan／UBSan 各 32/32，Diagnostic／Release 构建与候选 Release 应用安装、独立校验和启动检查通过。首轮完成 60 步界面、四编码 TXT 64 次翻页及两组 EPUB 72 次翻页、重启恢复；修复后另复查 TXT／EPUB 混排书库。详细来源、trace 截点限制与未测项见本日末尾记录，不能替代完整硬件验收。
 
-连接设备此前实测为单个 factory 应用槽，没有 OTA 槽或 otadata；每次写入仍须重新读取分区确认。本轮只更新实际应用槽，不迁移分区或改写工厂校准，不能用该设备的有线升级验证 OTA。
+设备最后安装的是此前 `0.5.1+g5c99d13.dirty` Release 候选；正式标签镜像额外烧录因串口未枚举而未执行。此前实测为单个 factory 应用槽，没有 OTA 槽或 otadata；每次写入仍须重新读取分区确认。本轮只更新实际应用槽，不迁移分区或改写工厂校准，不能用该设备的有线升级验证 OTA。
 
 ## 待验证与后续工作
 
@@ -1357,3 +1357,18 @@ Diagnostic 候选 `0.5.0+g5b940a3.dirty`（3,976,992 字节）已刷入串号 `1
 证据边界：首轮 TXT 功能断言通过，但 trace 在离开书库时截断了一个可选任务，`txt-toc/analysis.json` 保留 `operations_unfinished`，不将其计为完整性能分布；后续重启回归的资源空闲断言通过，其他完整场景无失败、超时或未完成操作。`tools/summarize_reader_perf.py` 对首轮六组原始串口记录汇总的观测最低值为内部 RAM 80,231、最大内部连续块 34,816、PSRAM 1,790,216、最大 PSRAM 连续块 1,572,864、应用剩余栈 3,268、输入剩余栈 2,640 字节，输入溢出为 0；这是混合缓存条件的采样，不是全部瞬时峰值或性能改进结论。设备导出画面含私有书籍，仅保留在忽略目录，不作为实体面板光学验收。
 
 本轮未覆盖实体触摸／电容键压力、面板残影、真实充电切换、PW06 电源键唤醒枚举、慢 TF、掉电、实际 KOReader 双向接续及 OTA／回滚。当前设备没有 OTA 槽，不能用本次有线安装代替 OTA 验收。下一步审阅本批改动与发布说明，提交后从干净匹配的 `v0.5.1` 标签重建正式 Release、生成清单与全量镜像；发布仍需单独授权，不能直接发布本次带构建元数据的候选。
+
+
+## 2026-11-01 · 0.5.1 PR 合并与正式发布
+
+用户授权「PR，可以发布」。七文件改动提交为 `15eea1aa87506e2bcad47197aec3b25330c2285b`，通过 [PR #181](https://github.com/eMUQI/pico-page/pull/181) 交付。合并前逐项核对该 head 的 Host／Website CI 均成功、Codex review 状态 completed 且无 findings／未解决项、讨论线程为空及 mergeable_state=clean；使用 expected head 压缩合并为 `fed9891ce986a9022b0955b6d4a8b395f558f435`，本地主线快进后与已验 PR 内容完全一致。首次推送被自动审批要求核对目标身份后，通过已连接 GitHub 账户确认 `eMUQI/pico-page` 的私有可见性、管理员／推送权限及 origin 一致，再推送同一仓库分支；未改仓库可见性。
+
+在同一现有检出创建并推送 `v0.5.1`，未使用 worktree；`python3 tools/project_version.py --check-release` 通过。使用既有 EIM／ESP-IDF 6.1 执行 `sh tools/build_firmware.sh release`，来源记录确认版本 `0.5.1`、模式 release、source_dirty=false、提交 `fed9891`。`tools/ota_manifest.py --full --published 2026-11-01` 生成应用、全量镜像与清单，并以 `--check --expect-version 0.5.1` 核对；来源记录作为第四个附件。原发布说明全文保持用户确认内容。
+
+正式应用 3,942,336 字节，SHA-256 `18c9522c24d11894f0d76e878865cb9ea59884dd150e409218b42694b6ac2327`；全量镜像 4,007,872 字节，SHA-256 `902dda7d5bf3a8e846eca82cf7e42cc838e4d8e39d347f4d6892c2826d0429d7`。草稿与发布后均重新下载全部四附件，文件集合、逐字节内容和清单校验通过；发布元数据确认非草稿、非预发布并设为 Latest。正式发布于 2026-11-01 11:53（Asia/Singapore），[Release](https://github.com/eMUQI/pico-page/releases/tag/v0.5.1) 的应用、全量、manifest 与 provenance 保持一致。
+
+正式镜像额外烧录的前置检查未找到目标 USB Serial/JTAG 枚举，因而在设备读写前停止；不推断其为休眠、断线或故障，没有复用历史端口强行写入。此前同代码候选的 60 步界面、136 次计分翻页、重启恢复及修复后 TXT 封面检查仍按上一批来源记录；本批不将其改写为正式标签镜像的新真机验收。PW06、实际 OTA／回滚、实体输入、面板、慢卡与掉电边界保持未完成。
+
+Release 事件的[网站部署运行 `41270907824`](https://github.com/eMUQI/pico-page/actions/runs/41270907824) 成功完成：COS 上传与认证／匿名读回、Cloudflare Pages 部署及生产核对均通过。本机另带官网 Origin 独立匿名下载两个 COS 镜像，与已发布附件逐字节一致，CORS 允许官网；无查询参数的正式域名 `deployment.txt` 为 `fed9891ce986a9022b0955b6d4a8b395f558f435 41270907824 1`，固定更新清单除下载源切换到已确认 COS 外与发布附件一致，安装页使用 0.5.1 全量镜像，更新日志已显示本版说明。对应证据为 `cos-readback.json`、`website-readback.json` 及各读回目录。
+
+本轮原始检查与产物保存在 `.local/release-051-publish/`：`pr-merge.json`、`build.log`、`assets/`、`draft-download/`、`published-download/`、`publication.json` 及设备前置失败日志。后续仅更新发布状态文档，不改固件、标签或已发布附件；完整检查范围与物理未测项沿用本批及上一批记录。
