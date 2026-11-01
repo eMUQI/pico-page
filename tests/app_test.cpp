@@ -4269,14 +4269,14 @@ int main(int argc, char** argv) {
         assert(read(cached).size() > thumbnail_bytes);
         // A previous decoder's negative cache must not hide a newly supported cover.
         auto obsolete = read(cached);
-        assert(obsolete.find("PPCOVER3\n") == 0);
-        obsolete[7] = '2';
+        assert(obsolete.find("PPCOVER4\n") == 0);
+        obsolete[7] = '3';
         obsolete.resize(obsolete.size() - thumbnail_bytes);
         write(cached, obsolete);
         const auto decodes = graphics::image_decode_count();
         assert(grid_pixel(300, 572) == 0 && grid_pixel(270, 622) == 5);
         assert(graphics::image_decode_count() == decodes + 1);
-        assert(read(cached).find("PPCOVER3\n") == 0 && read(cached).size() > thumbnail_bytes);
+        assert(read(cached).find("PPCOVER4\n") == 0 && read(cached).size() > thumbnail_bytes);
     }
     for (const auto* fixture : {"gif-image-cover", "image-cover", "valid"}) {
         const auto home = card / (std::string("CoverDecoderUpgrade-") + fixture);
@@ -4294,7 +4294,7 @@ int main(int argc, char** argv) {
         const auto previous = read(cache);
         const auto header_bytes = previous.size() - (has_cover ? thumbnail_bytes : 0);
         auto obsolete = previous.substr(0, header_bytes);
-        obsolete[7] = '2';
+        obsolete[7] = '3';
         write(cache, obsolete);
         const auto decodes = graphics::image_decode_count();
         if (std::string_view(fixture) == "gif-image-cover") {
@@ -4312,7 +4312,7 @@ int main(int argc, char** argv) {
         }
         assert(graphics::image_decode_count() == decodes + (has_cover ? 1 : 0));
         const auto recovered = read(cache);
-        assert(recovered.find("PPCOVER3\n") == 0);
+        assert(recovered.find("PPCOVER4\n") == 0);
         assert(recovered.size() == header_bytes + (has_cover ? thumbnail_bytes : 0));
         {
             ReaderApp app(home.string()); Driver driver{app};
@@ -4360,6 +4360,62 @@ int main(int argc, char** argv) {
                 assert(app.canvas().pixel(60, 250) == 0 && app.canvas().pixel(270, 400) == 5);
             }
         }
+    }
+    {
+        const auto root = card / "CoverRetry";
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "image-cover.epub", root / "Books/book.epub");
+        write(root / "PicoPage/settings.toml", "schema_version=1\n[library]\nview='grid'\n");
+        for (const unsigned failures : {0U, 1U, 3U}) {
+            fs::remove_all(root / "PicoPage/cache/covers");
+            ReaderApp app(root.string(), "cover-retry", true, true); Driver driver{app};
+            assert(app.initialize()); driver.present();
+            ContentJob::fail_starts_for_test(ContentJob::Kind::LibraryCovers, failures, ContentJob::StartFailure::TaskCreate);
+            static std::atomic<bool> refuse_cover_memory{false};
+            refuse_cover_memory = failures == 0;
+            if (failures == 0) set_chapter_memory_probe([](std::size_t) { return !refuse_cover_memory.exchange(false); });
+            const auto decodes = graphics::image_decode_count();
+            app.poll_background();
+            assert(app.background_due() && !app.pending_frame());
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            while (app.background_due()) {
+                app.poll_background();
+                if (app.pending_frame()) driver.present();
+                assert(std::chrono::steady_clock::now() < deadline);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            set_chapter_memory_probe(nullptr);
+            assert(app.view() == View::Library && !app.saved_record());
+            if (failures < 3) {
+                assert(graphics::image_decode_count() == decodes + 1);
+                assert(app.canvas().pixel(60, 250) == 0);
+            } else {
+                assert(graphics::image_decode_count() == decodes);
+                assert(app.status() == "封面暂未生成，可继续阅读");
+                driver.key(Input::K2); driver.present();
+                assert(!app.background_due());
+                driver.tap(500, 134); driver.present();
+                driver.complete_content();
+                while (app.background_due()) {
+                    app.poll_background();
+                    if (app.pending_frame()) driver.present();
+                    assert(std::chrono::steady_clock::now() < deadline);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                assert(graphics::image_decode_count() == decodes + 1);
+            }
+        }
+        fs::remove_all(root / "PicoPage/cache/covers");
+        ReaderApp app(root.string(), "cover-retry-cancel", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        ContentJob::fail_starts_for_test(ContentJob::Kind::LibraryCovers, 1, ContentJob::StartFailure::TaskCreate);
+        const auto decodes = graphics::image_decode_count();
+        app.poll_background();
+        assert(app.background_due() && !app.pending_frame());
+        driver.tap(600, 50); driver.present();
+        app.poll_background();
+        assert(app.view() == View::Settings && !app.background_due());
+        assert(graphics::image_decode_count() == decodes);
     }
     {
         const auto root = card / "CoverWorker";

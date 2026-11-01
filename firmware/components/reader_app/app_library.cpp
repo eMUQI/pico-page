@@ -235,12 +235,15 @@ ReaderApp::Impl::Cover ReaderApp::Impl::draw_cover(const Entry &entry, int x, in
         std::vector<std::uint8_t> pixels;
         if (!cached_cover(cached, pixels)) {
             if (!decode || async_content) {
+                if (async_content && cover_attempts >= kCoverAttempts) return Cover::None;
                 if (async_content && std::none_of(missing_covers.begin(), missing_covers.end(),
                     [&](const auto &source) { return source.path == entry.path; }))
                     missing_covers.push_back({entry.path, cached.name, cached.header, info.st_size, info.st_mtime});
                 return Cover::Undecoded;
             }
-            pixels = decode_cover(entry.path, cached, kLibraryCoverWidth, kLibraryCoverHeight, true);
+            auto decoded = decode_cover(entry.path, cached, kLibraryCoverWidth, kLibraryCoverHeight, true);
+            if (!decoded) return Cover::None;
+            pixels = std::move(*decoded);
         }
         if (covers.size() == kCoverSlots) covers.erase(covers.begin());
         covers.push_back({entry.path, info.st_size, info.st_mtime, std::move(pixels)});
@@ -256,9 +259,13 @@ ReaderApp::Impl::Cover ReaderApp::Impl::draw_cover(const Entry &entry, int x, in
 }
 
 
-void ReaderApp::Impl::draw_library(bool decode) {
+void ReaderApp::Impl::draw_library(bool decode, bool keep_cover_attempts) {
     release_chapter_session();
     if (async_content) cancel_covers();
+    if (!keep_cover_attempts) {
+        cover_attempts = 0; cover_retry_after = {};
+        if (message == "封面暂未生成，可继续阅读") message.clear();
+    }
     decode = decode || display.busy();
     bool undecoded = false;
     auto& font = library_text_font();

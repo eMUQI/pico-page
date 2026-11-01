@@ -525,6 +525,9 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::optional<ContentJob::Request> pending_covers;
     std::vector<ContentJob::CoverSource> missing_covers;
     std::uint64_t cover_generation = 0;
+    static constexpr unsigned kCoverAttempts = 3;
+    unsigned cover_attempts = 0;
+    std::chrono::steady_clock::time_point cover_retry_after{};
     void cancel_covers() {
         ++cover_generation; pending_covers.reset(); missing_covers.clear();
         if (cover_job) cover_job->cancel();
@@ -1069,8 +1072,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         ContentJob::Request request;
         request.kind = ContentJob::Kind::SleepCover; request.root = root; request.path = root + "/" + book_path;
         request.cache_name = cover.name; request.cache_header = cover.header; request.cover_crop = true;
-        // Older sleep entries may record transient image-read failures as missing covers.
-        request.cache_header.replace(0, 8, "PPCOVER4");
         request.layout.width = 684; request.layout.height = 1040; request.generation = counting_generation;
         counting_job = std::make_unique<ContentJob>(std::move(request));
         if (!counting_job->start()) counting_job.reset();
@@ -1661,7 +1662,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         char name[64];
         std::snprintf(name, sizeof(name), "covers/%016llx-%dx%d%s", path_hash(relative),
                       width, height, crop ? "c" : "");
-        return {name, "PPCOVER3\n" + relative + "\n" + std::to_string(info.st_size) + " " +
+        return {name, "PPCOVER4\n" + relative + "\n" + std::to_string(info.st_size) + " " +
                           std::to_string(static_cast<long long>(info.st_mtime)) + "\n",
                 static_cast<std::size_t>((width + 1) / 2) * height};
     }
@@ -1675,18 +1676,18 @@ struct ReaderApp::Impl final : DisplayBackend {
         pixels.assign(cached.begin() + static_cast<std::ptrdiff_t>(entry.header.size()), cached.end());
         return true;
     }
-    /** Decodes the cover from the EPUB and caches the result, so each file version decodes once. */
-    std::vector<std::uint8_t> decode_cover(const std::string &relative, const CoverEntry &entry,
+    /** Decodes the cover, caching only usable pixels or confirmed absence; temporary failures return no value. */
+    std::optional<std::vector<std::uint8_t>> decode_cover(const std::string &relative, const CoverEntry &entry,
                                            int width, int height, bool crop) {
         graphics::Canvas thumbnail(width, height);
         std::vector<std::uint8_t> encoded;
         std::string detail;
-        const bool loaded = EpubDocument::read_cover(root + "/" + relative, encoded, detail) &&
+        const bool read = EpubDocument::read_cover(root + "/" + relative, encoded, detail);
+        const bool loaded = read &&
             graphics::render_image(thumbnail, encoded, 0, 0, width, height, detail, crop);
-        // Allocation and parser memory failures must not be remembered as missing covers.
-        if (loaded || (detail.find("allocation") == std::string::npos && detail.find("memory") == std::string::npos))
-            store.save_cache(entry.name, loaded ? entry.header + std::string(thumbnail.pixels().begin(), thumbnail.pixels().end())
-                                                : entry.header);
+        if (!loaded && !cover_failure_is_permanent(read, detail)) return std::nullopt;
+        store.save_cache(entry.name, loaded ? entry.header + std::string(thumbnail.pixels().begin(), thumbnail.pixels().end())
+                                           : entry.header);
         return loaded ? thumbnail.pixels() : std::vector<std::uint8_t>{};
     }
     /** Packed width x height cover pixels of a book file, or empty when it has no usable cover. */
@@ -1694,7 +1695,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                                            int width, int height, bool crop) {
         const auto entry = cover_entry(relative, info, width, height, crop);
         std::vector<std::uint8_t> pixels;
-        return cached_cover(entry, pixels) ? pixels : decode_cover(relative, entry, width, height, crop);
+        return cached_cover(entry, pixels) ? pixels : decode_cover(relative, entry, width, height, crop).value_or(std::vector<std::uint8_t>{});
     }
     /** Copies packed cover pixels, as returned by cover_pixels, to the canvas. */
     void blit(const std::vector<std::uint8_t> &pixels, int x, int y, int width, int height) {
@@ -1772,8 +1773,9 @@ struct ReaderApp::Impl final : DisplayBackend {
     /**
      * Draws the library. Covers that still need decoding first appear as titles with a status
      * line. Native asynchronous mode prepares a visible batch and merges its display update.
+     * Worker completion preserves the attempt budget; a user-requested redraw starts a new budget.
      */
-    void draw_library(bool decode = false);
+    void draw_library(bool decode = false, bool keep_cover_attempts = false);
     bool open(std::string path);
     bool finish_open(const std::string& path, ContentJob::Result* loaded = nullptr);
     bool restore_confirmed_position() {

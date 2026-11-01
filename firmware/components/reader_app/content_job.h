@@ -19,6 +19,8 @@
 #endif
 
 namespace pico_page {
+/** Returns whether a failed cover read or decode confirms an unusable source rather than a temporary failure. */
+bool cover_failure_is_permanent(bool image_read, const std::string& error);
 inline constexpr char kTxtUtf8Revision[] = "txt-utf8-v1";
 inline constexpr char kTxtGb18030Revision[] = "txt-gb18030-v1";
 inline constexpr char kTxtUtf16LeRevision[] = "txt-utf16le-v1";
@@ -244,7 +246,8 @@ public:
         std::unique_ptr<graphics::Canvas> image;
         std::vector<std::size_t> failed_images;
         PP_DIAGNOSTIC(std::uint32_t decoded_images = 0;)
-        std::vector<std::vector<std::uint8_t>> covers;
+        /** Missing value: retryable failure. Empty pixels: confirmed absence. Nonempty pixels: decoded cover. */
+        std::vector<std::optional<std::vector<std::uint8_t>>> covers;
         std::unique_ptr<EpubDocument> document;
         Chapter chapter;
         ContentCacheEntry content_cache;

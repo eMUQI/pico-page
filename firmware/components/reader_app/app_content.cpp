@@ -120,23 +120,33 @@ void ReaderApp::Impl::poll_covers() {
         if (view == View::Library && job->request.generation == cover_generation &&
             job->result.covers.size() == job->request.covers.size()) {
             if (display.busy()) { cover_job = std::move(job); return; }
+            bool changed = false;
             for (std::size_t i = 0; i < job->request.covers.size(); ++i) {
+                if (!job->result.covers[i]) continue;
                 const auto& source = job->request.covers[i];
                 if (covers.size() == kCoverSlots) covers.erase(covers.begin());
-                covers.push_back({source.path, source.size, source.modified, std::move(job->result.covers[i])});
+                covers.push_back({source.path, source.size, source.modified, std::move(*job->result.covers[i])});
+                changed = true;
             }
-            draw_library(); overlay();
+            cover_retry_after = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+            if (changed || cover_attempts >= kCoverAttempts) {
+                if (std::any_of(job->result.covers.begin(), job->result.covers.end(), [](const auto& pixels) { return !pixels; }) &&
+                    cover_attempts >= kCoverAttempts) message = "封面暂未生成，可继续阅读";
+                draw_library(false, true); overlay();
+            } else pending_covers = std::move(job->request);
         }
     }
-    if (!pending_covers || display.busy() || save_job || bookmark_job || foreground_job || pending_content || counting_job) return;
+    if (!pending_covers || display.busy() || save_job || bookmark_job || foreground_job || pending_content || counting_job ||
+        std::chrono::steady_clock::now() < cover_retry_after) return;
     cover_job = std::make_unique<ContentJob>(std::move(*pending_covers)); pending_covers.reset();
+    ++cover_attempts;
     if (!cover_job->start()) {
-        cover_job.reset(); message = "封面暂未生成，可继续阅读";
-        for (const auto& source : missing_covers) {
-            if (covers.size() == kCoverSlots) covers.erase(covers.begin());
-            covers.push_back({source.path, source.size, source.modified, {}});
+        pending_covers = std::move(cover_job->request); cover_job.reset();
+        cover_retry_after = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        if (cover_attempts >= kCoverAttempts) {
+            message = "封面暂未生成，可继续阅读";
+            draw_library(false, true); overlay();
         }
-        draw_library(); overlay();
     }
 }
 

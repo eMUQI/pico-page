@@ -2,6 +2,7 @@
 #include "freertos/FreeRTOS.h"
 #include "esp_heap_caps.h"
 #include <cassert>
+#include <cerrno>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
@@ -30,6 +31,7 @@ unsigned allocations = 0, creations = 0;
 #ifdef PICO_PAGE_WRAP_CALLOC_TEST
 std::atomic<unsigned> fail_calloc_on{0}, failed_callocs{0};
 std::string counted_dictionary;
+std::string unreadable_cover;
 std::atomic<unsigned> preparation_attempts{0};
 #endif
 std::size_t internal_free = 128 * 1024, internal_largest = 64 * 1024;
@@ -46,6 +48,7 @@ void finish(pico_page::ContentJob& job) {
 extern "C" FILE* __real_fopen(const char*, const char*);
 extern "C" FILE* __wrap_fopen(const char* path, const char* mode) {
     if (path == counted_dictionary) ++preparation_attempts;
+    if (path == unreadable_cover) { errno = EIO; return nullptr; }
     return __real_fopen(path, mode);
 }
 extern "C" void* __real_calloc(std::size_t count, std::size_t size);
@@ -401,10 +404,35 @@ int main(int argc, char** argv) {
         pico_page::set_chapter_memory_probe([](std::size_t) { return false; });
         ContentJob refused_library(library); assert(refused_library.start()); finish(refused_library);
         pico_page::set_chapter_memory_probe(nullptr);
-        assert(refused_library.result.covers.size() == 1 && refused_library.result.covers[0].empty());
+        assert(refused_library.result.covers.size() == 1 && !refused_library.result.covers[0]);
         assert(cover_store.load_cache(library.covers[0].cache_name, obsolete.size(), preserved) == pico_page::StoreStatus::Ok && preserved == obsolete);
+        for (const bool fragmented : {false, true}) {
+            psram_free = fragmented ? 4 * 1024 * 1024 : 512 * 1024;
+            psram_largest = fragmented ? 23000 - 1 : 3 * 1024 * 1024;
+            ContentJob exhausted_library(library); assert(exhausted_library.start()); finish(exhausted_library);
+            assert(exhausted_library.result.covers.size() == 1 && !exhausted_library.result.covers[0]);
+            assert(cover_store.load_cache(library.covers[0].cache_name, obsolete.size(), preserved) == pico_page::StoreStatus::Ok && preserved == obsolete);
+        }
+#ifdef PICO_PAGE_WRAP_CALLOC_TEST
+        psram_free = 4 * 1024 * 1024; psram_largest = 3 * 1024 * 1024;
+        unreadable_cover = (root / "gif.epub").string();
+        ContentJob unreadable_library(library); assert(unreadable_library.start()); finish(unreadable_library);
+        unreadable_cover.clear();
+        assert(unreadable_library.result.covers.size() == 1 && !unreadable_library.result.covers[0]);
+        assert(cover_store.load_cache(library.covers[0].cache_name, obsolete.size(), preserved) == pico_page::StoreStatus::Ok && preserved == obsolete);
+#endif
+        psram_free = 2 * 1024 * 1024; psram_largest = 512 * 1024;
+        ContentJob small_library(library); assert(small_library.start()); finish(small_library);
+        assert(small_library.result.covers.size() == 1 && small_library.result.covers[0] && !small_library.result.covers[0]->empty());
+        psram_free = 4 * 1024 * 1024; psram_largest = 3 * 1024 * 1024;
         ContentJob recovered_library(library); assert(recovered_library.start()); finish(recovered_library);
-        assert(recovered_library.result.covers.size() == 1 && !recovered_library.result.covers[0].empty());
+        assert(recovered_library.result.covers.size() == 1 && recovered_library.result.covers[0] && !recovered_library.result.covers[0]->empty());
+        fs::copy_file(fs::path(argv[1]).parent_path() / "valid.epub", root / "no-cover.epub");
+        assert(stat((root / "no-cover.epub").c_str(), &gif_info) == 0);
+        library.covers = {{"no-cover.epub", "covers/library-no-cover", cover.cache_header, gif_info.st_size, gif_info.st_mtime}};
+        ContentJob absent_library(library); assert(absent_library.start()); finish(absent_library);
+        assert(absent_library.result.covers.size() == 1 && absent_library.result.covers[0] && absent_library.result.covers[0]->empty());
+        assert(fs::file_size(root / "PicoPage/cache" / library.covers[0].cache_name) == cover.cache_header.size());
         fs::remove_all(root);
     }
     {

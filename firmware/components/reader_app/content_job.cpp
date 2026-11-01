@@ -831,6 +831,13 @@ void ContentJob::prepare_lock_screen() {
     if (request.sleep_image.empty()) result.error = "轮播图片均不可用：" + result.error;
     result.lock_screen.clear();
 }
+bool cover_failure_is_permanent(bool image_read, const std::string& error) {
+    if (error.find("allocation") != std::string::npos || error.find("memory") != std::string::npos) return false;
+    return image_read || error == "EPUB has no supported cover" || error == "Invalid internal image path" ||
+           error == "Missing EPUB image" || error == "EPUB image exceeds 2 MiB limit" ||
+           error == "Image format is not PNG, JPEG or GIF" || error == "Invalid compressed EPUB image";
+}
+
 void ContentJob::prepare_cover() {
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
     FileStore store(request.root);
@@ -889,10 +896,7 @@ void ContentJob::prepare_cover() {
         result.cache_finished = store.save_cache(request.cache_name, bytes) == StoreStatus::Ok;
         // The image was complete before the optional commit; the app discards it if the sleep request ended.
         result.image = std::move(image);
-    } else if ((read && error.find("allocation") == std::string::npos && error.find("memory") == std::string::npos) ||
-               error == "EPUB has no supported cover" || error == "Invalid internal image path" ||
-               error == "Missing EPUB image" || error == "EPUB image exceeds 2 MiB limit" ||
-               error == "Image format is not PNG, JPEG or GIF" || error == "Invalid compressed EPUB image") {
+    } else if (cover_failure_is_permanent(read, error)) {
         // Read failures may be transient; only a confirmed unusable cover gets a negative entry.
         result.cache_finished = store.save_cache(request.cache_name, request.cache_header) == StoreStatus::Ok;
     }
@@ -1035,21 +1039,26 @@ void ContentJob::library_covers() {
         if (stop()) return;
         result.covers.emplace_back();
 #ifdef ESP_PLATFORM
-        if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 3U * 1024 * 1024) continue;
+        constexpr std::size_t thumbnail_bytes = kLibraryCoverWidth * kLibraryCoverHeight / 2;
+        // Reserve both output copies and parser/decoder headroom; encoded bytes have a separate admission check.
+        if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2 * thumbnail_bytes + 768U * 1024 ||
+            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < thumbnail_bytes) continue;
 #endif
         graphics::Canvas thumbnail(kLibraryCoverWidth, kLibraryCoverHeight);
         std::vector<std::uint8_t> encoded;
         std::string error;
-        const bool loaded = EpubDocument::read_cover(request.root + "/" + source.path, encoded, error, stop) &&
+        const bool read = EpubDocument::read_cover(request.root + "/" + source.path, encoded, error, stop);
+        const bool loaded = read &&
             graphics::render_image(thumbnail, encoded, 0, 0, kLibraryCoverWidth, kLibraryCoverHeight, error, true, stop);
         if (stop()) return;
         struct stat info{};
         if (stat((request.root + "/" + source.path).c_str(), &info) != 0 ||
             info.st_size != source.size || info.st_mtime != source.modified) continue;
-        if (loaded) result.covers.back() = thumbnail.pixels();
-        if (loaded || (error.find("allocation") == std::string::npos && error.find("memory") == std::string::npos))
-            store.save_cache(source.cache_name, source.cache_header +
-                std::string(result.covers.back().begin(), result.covers.back().end()));
+        if (!loaded && !cover_failure_is_permanent(read, error)) continue;
+        auto& pixels = result.covers.back().emplace();
+        if (loaded) pixels = thumbnail.pixels();
+        std::vector<std::uint8_t>().swap(encoded);
+        store.save_cache(source.cache_name, source.cache_header + std::string(pixels.begin(), pixels.end()));
     }
 }
 
