@@ -112,21 +112,22 @@ void ReaderApp::Impl::footer() {
         // The system clock is restored from RTC or calibrated by on-demand networking.
         center(reading_footer::clock(std::time(nullptr), 8 * 60), reading_footer::device_left, 1156,
                684 - reading_footer::device_left, 24, 3);
-    } else if (footer_device == reading_footer::Device::Battery) {
-        const auto level = battery_charging ? std::string{} : battery_percent ? std::to_string(*battery_percent) + "%" : "—";
-        const int level_width = text_width(level, 24);
-        const int level_x = 648 - level_width;
-        const int icon_x = level_x - (battery_charging ? 0 : 10) - 35;
-        outline(icon_x, 1166, 32, 18, 2, 3);
-        canvas.fill_rect(icon_x + 32, 1171, 3, 8, 3);
+    } else if (footer_device == reading_footer::Device::Battery && (battery_charging || battery_percent)) {
+        constexpr int icon_width = 46, icon_height = 22;
+        constexpr int icon_x = 648 - icon_width - 3, icon_y = 1175 - icon_height / 2;
+        outline(icon_x, icon_y, icon_width, icon_height, 2, 3);
+        canvas.fill_rect(icon_x + icon_width, 1171, 3, 8, 3);
         if (battery_charging) {
             // Each row stores nine pixels, with the leftmost pixel in bit 8.
             static constexpr std::uint16_t bolt[] = {12, 28, 56, 112, 224, 510, 255, 14, 28, 56, 112, 224, 192};
             for (int y = 0; y < 13; ++y)
                 for (int x = 0; x < 9; ++x)
-                    if (bolt[y] & (1U << (8 - x))) canvas.pixel(icon_x + 11 + x, 1168 + y, 3);
-        } else if (battery_percent) canvas.fill_rect(icon_x + 4, 1170, *battery_percent * 24 / 100, 10, 3);
-        if (!battery_charging) text(level, level_x, 1156, 24, level_width, 3);
+                    if (bolt[y] & (1U << (8 - x))) canvas.pixel(icon_x + (icon_width - 9) / 2 + x, 1168 + y, 3);
+        } else if (battery_percent) {
+            const int filled_cells = (*battery_percent + 19) / 20;
+            for (int cell = 0; cell < filled_cells; ++cell)
+                canvas.fill_rect(icon_x + 4 + cell * 8, icon_y + 4, 6, 14, 5);
+        }
     }
 }
 
