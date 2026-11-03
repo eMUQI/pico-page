@@ -50,7 +50,8 @@ template<class Action> Measurement measure(const char* path, unsigned chapters, 
         else std::cout << ",,,";
         std::cout << '\n';
     }
-    std::cerr << "reader_perf stage=host_" << path << '_' << chapters << " us=" << us << " min_us=0\n";
+    std::cerr << "reader_perf: stage=host_" << path << (chapters == 300 ? "_small" : "_large")
+              << " us=" << us << " min_us=0\n";
     return result;
 }
 
@@ -162,7 +163,7 @@ int main(int argc, char** argv) {
             }
             fs::remove_all(root / "PicoPage/cache");
             ContentJob cover_job(std::move(covers));
-            measure("library_covers_4", chapters, sample, [&] { finish(cover_job); });
+            measure("library_covers", chapters, sample, [&] { finish(cover_job); });
             assert(cover_job.result.covers.size() == 4);
             for (const auto& cover : cover_job.result.covers) assert(cover && !cover->empty());
             LargeEpubProbe::reclaim(path, chapters, sample, false);
