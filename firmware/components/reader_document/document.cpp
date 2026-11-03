@@ -1652,6 +1652,7 @@ bool EpubDocument::read_cover(const std::string& path, std::vector<std::uint8_t>
     if (!failure_kind) failure_kind = &local_failure;
     const auto fail = content_failure_reporter(failure_kind);
     bytes.clear(); error.clear();
+    if (stop && stop()) return fail(error, kChapterCancelled, ContentFailureKind::Cancelled);
     EpubDocument book;
     if (!book.open_impl(path, error, true, nullptr, stop, failure_kind)) return false;
     const auto unavailable = [failure_kind] { return content_failure_is_retryable(*failure_kind); };

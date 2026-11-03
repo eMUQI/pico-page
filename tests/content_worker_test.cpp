@@ -226,6 +226,9 @@ int main(int argc, char** argv) {
 
         std::vector<std::uint8_t> png;
         std::string error;
+        pico_page::ContentFailureKind cancelled_kind = pico_page::ContentFailureKind::None;
+        assert(!pico_page::EpubDocument::read_cover("cancelled.txt", png, error, [] { return true; }, &cancelled_kind));
+        assert(cancelled_kind == pico_page::ContentFailureKind::Cancelled && png.empty());
         assert(pico_page::EpubDocument::read_cover(argv[1], png, error));
         std::ofstream(root / "LockScreens/01-good.png", std::ios::binary).write(
             reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));

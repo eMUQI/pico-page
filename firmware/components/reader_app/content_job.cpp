@@ -580,7 +580,7 @@ bool stream_lock_png(FileStore& store, std::unique_ptr<CacheReader>& source, con
     std::unique_ptr<char[]> batch;
     if (writer && !use_canvas) {
         batch.reset(new (std::nothrow) char[stride * batch_rows]);
-        if (!batch) writer.reset();
+        if (!batch) { failure_kind = ContentFailureKind::OutOfMemory; writer.reset(); }
     }
     for (std::size_t y = 0; writer && !use_canvas && y < height; y += batch_rows) {
         if (stop()) { failure_kind = ContentFailureKind::Cancelled; error = "休眠图片准备已取消或超时"; return false; }
@@ -620,7 +620,8 @@ bool stream_lock_png(FileStore& store, std::unique_ptr<CacheReader>& source, con
     cached = writer && sum.size() == 32 && !stop() && writer->write(0, header + (alpha ? 'A' : 'G')) &&
              writer->write(base + payload, sum) && writer->commit(base + payload + sum.size());
     if (stop()) { failure_kind = ContentFailureKind::Cancelled; error = "休眠图片准备已取消或超时"; return false; }
-    failure_kind = cached ? ContentFailureKind::None : ContentFailureKind::IoError;
+    if (cached) failure_kind = ContentFailureKind::None;
+    else if (failure_kind != ContentFailureKind::OutOfMemory) failure_kind = ContentFailureKind::IoError;
     error = cached ? "" : "休眠图片缓存未保存，下次将重新准备";
     return true;
 }
