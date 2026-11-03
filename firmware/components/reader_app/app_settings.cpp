@@ -373,7 +373,7 @@ void ReaderApp::Impl::begin_storage(bool clear_cache) {
     clear_prefetch();
     if (clear_cache) {
         covers.clear(); dictionary_session.reset();
-        custom_prepare_finished = false; custom_sleep_image.reset();
+        custom_prepare_finished = false; custom_prepare_attempts = 0; custom_sleep_image.reset();
     }
     storage_usage = {};
     storage_usage.roots = settings.library_roots;

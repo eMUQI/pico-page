@@ -279,7 +279,7 @@ void ContentJob::run() {
     }
     if (dictionary_kind(request.kind)) { read_dictionary(); return; }
     if (stop()) {
-        result.retryable_failure = request.kind == Kind::LockScreen;
+        result.failure_kind = ContentFailureKind::Cancelled;
         if (request.kind == Kind::Chapter) result.error = kChapterCancelled;
         return;
     }
@@ -501,8 +501,8 @@ bool read_lock_screen_cache(CacheReader& reader, const std::string& header, grap
 namespace {
 // Only the temporary cache holds full gray/alpha coverage. Adam7 revisits rows, never final pixels.
 bool stream_lock_png(FileStore& store, std::unique_ptr<CacheReader>& source, const std::string& header,
-                     graphics::Canvas* image, bool& alpha, bool& cached, std::string& error,
-                     const std::function<bool()>& stop, const std::function<bool()>& unchanged) {
+                     graphics::Canvas* image, bool& alpha, bool& cached, std::string& error, ContentFailureKind& failure_kind,
+                     const std::function<bool()>& stop, const std::function<ContentFailureKind()>& source_failure) {
     constexpr std::size_t stride = 684 * 2, height = 1216;
     std::unique_ptr<CacheWriter> writer;
     store.begin_cache("lockscreens/current", header.size() + 1 + stride * height + 32, writer);
@@ -545,13 +545,16 @@ bool stream_lock_png(FileStore& store, std::unique_ptr<CacheReader>& source, con
                     image->pixel(px, py, static_cast<std::uint8_t>((mixed * 15U + 127U) / 255U));
                 }
             }
-        }, bounds, alpha, error, stop);
+        }, bounds, alpha, error, stop, &failure_kind);
     if (!decoded) return false;
     flush();
     // The card permits eight open files. Release the decoder's handle before reopening for SHA-256.
     source.reset();
-    if (stop()) { error = "休眠图片准备已取消或超时"; return false; }
-    if (!unchanged()) { error = stop() ? "休眠图片准备已取消或超时" : "图片已改变或无法校验，请重试"; return false; }
+    if (stop()) { failure_kind = ContentFailureKind::Cancelled; error = "休眠图片准备已取消或超时"; return false; }
+    failure_kind = source_failure();
+    if (failure_kind != ContentFailureKind::None) {
+        error = "图片已改变或无法校验，请重试"; return false;
+    }
     // Opaque sources retain white fitted margins even when overlay is enabled.
     if (image && !alpha) {
         image->fill_rect(0, 0, 684, bounds.y, 15);
@@ -566,7 +569,7 @@ bool stream_lock_png(FileStore& store, std::unique_ptr<CacheReader>& source, con
         // The completed opaque canvas already has the cache's exact 4-bit representation.
         const auto size = image->pixels().size();
         for (std::size_t offset = 0; writer && offset < size; offset += 16U * 1024) {
-            if (stop()) { error = "休眠图片准备已取消或超时"; return false; }
+            if (stop()) { failure_kind = ContentFailureKind::Cancelled; error = "休眠图片准备已取消或超时"; return false; }
             const std::string_view bytes(reinterpret_cast<const char*>(image->data()) + offset,
                                           std::min<std::size_t>(16U * 1024, size - offset));
             if (!digest.update(bytes) || !writer->write(base + offset, bytes)) writer.reset();
@@ -580,7 +583,7 @@ bool stream_lock_png(FileStore& store, std::unique_ptr<CacheReader>& source, con
         if (!batch) writer.reset();
     }
     for (std::size_t y = 0; writer && !use_canvas && y < height; y += batch_rows) {
-        if (stop()) { error = "休眠图片准备已取消或超时"; return false; }
+        if (stop()) { failure_kind = ContentFailureKind::Cancelled; error = "休眠图片准备已取消或超时"; return false; }
         const auto rows = std::min(batch_rows, height - y);
         std::memset(batch.get(), 0, rows * stride);
         for (std::size_t first = 0; writer && first < rows;) {
@@ -616,7 +619,8 @@ bool stream_lock_png(FileStore& store, std::unique_ptr<CacheReader>& source, con
     const auto sum = digest.finish();
     cached = writer && sum.size() == 32 && !stop() && writer->write(0, header + (alpha ? 'A' : 'G')) &&
              writer->write(base + payload, sum) && writer->commit(base + payload + sum.size());
-    if (stop()) { error = "休眠图片准备已取消或超时"; return false; }
+    if (stop()) { failure_kind = ContentFailureKind::Cancelled; error = "休眠图片准备已取消或超时"; return false; }
+    failure_kind = cached ? ContentFailureKind::None : ContentFailureKind::IoError;
     error = cached ? "" : "休眠图片缓存未保存，下次将重新准备";
     return true;
 }
@@ -628,7 +632,8 @@ void ContentJob::prepare_lock_screen() {
         std::chrono::steady_clock::now() + kLockScreenPrepareBudget : request.lock_screen_deadline;
     const auto stop = [this, deadline] {
         const bool stopped = cancelled_.load(std::memory_order_relaxed) || std::chrono::steady_clock::now() >= deadline;
-        if (stopped) result.retryable_failure = true;
+        if (stopped) result.failure_kind = cancelled_.load(std::memory_order_relaxed) ?
+            ContentFailureKind::Cancelled : ContentFailureKind::TimedOut;
         return stopped;
     };
     FileStore store(request.root);
@@ -640,16 +645,18 @@ void ContentJob::prepare_lock_screen() {
     }
     const auto status = store.lock_screen_files(result.lock_screens, stop);
     if (status != StoreStatus::Ok && status != StoreStatus::Missing) {
+        if (!stop()) result.failure_kind = status == StoreStatus::Invalid || status == StoreStatus::UnsafePath ?
+            ContentFailureKind::InvalidFormat : ContentFailureKind::IoError;
         result.error = status == StoreStatus::Invalid ? "LockScreens/ 中的文件过多，最多支持 256 张图片"
                      : status == StoreStatus::UnsafePath ? "LockScreens 不是普通文件夹" : "无法读取 LockScreens/ 目录";
         return;
     }
     if (request.kind == Kind::LockScreenList) return;
-    if (result.lock_screens.empty()) { result.error = "LockScreens 中没有可用图片"; return; }
+    if (result.lock_screens.empty()) { result.failure_kind = ContentFailureKind::MissingResource; result.error = "LockScreens 中没有可用图片"; return; }
     std::size_t index = 0;
     if (!request.sleep_image.empty()) {
         const auto it = std::find(result.lock_screens.begin(), result.lock_screens.end(), request.sleep_image);
-        if (it == result.lock_screens.end()) { result.error = "指定图片已不存在"; return; }
+        if (it == result.lock_screens.end()) { result.failure_kind = ContentFailureKind::MissingResource; result.error = "指定图片已不存在"; return; }
         index = static_cast<std::size_t>(it - result.lock_screens.begin());
     } else {
         // The presented image advances this rotation even when its cursor commit failed.
@@ -660,19 +667,31 @@ void ContentJob::prepare_lock_screen() {
     const auto attempts = request.sleep_image.empty() ? result.lock_screens.size() : 1;
     for (std::size_t attempt = 0; attempt < attempts; ++attempt) {
         if (stop()) { result.error = "休眠图片准备已取消或超时"; return; }
+        result.failure_kind = ContentFailureKind::None;
         result.lock_screen = result.lock_screens[(index + attempt) % result.lock_screens.size()];
         const auto path = request.root + "/LockScreens/" + result.lock_screen;
         struct stat before{}, after{};
         if (stat(path.c_str(), &before)) {
-            result.error = "图片不可读"; result.retryable_failure = true; return;
+            result.error = "图片不可读"; result.failure_kind = ContentFailureKind::IoError; return;
         }
         if (!S_ISREG(before.st_mode) || before.st_size < 8 || before.st_size > 2 * 1024 * 1024) {
-            result.error = "图片不完整或超过 2 MiB"; continue;
+            result.failure_kind = ContentFailureKind::InvalidFormat; result.error = "图片不完整或超过 2 MiB"; continue;
         }
         const auto identity = sha256_file(path, stop);
         if (identity.empty() || stop()) {
-            result.retryable_failure = true; result.error = "图片读取失败或已取消"; return;
+            if (!stop()) result.failure_kind = ContentFailureKind::IoError;
+            result.error = "图片读取失败或已取消"; return;
         }
+        const auto source_failure = [&] {
+            if (stop()) return result.failure_kind;
+            if (stat(path.c_str(), &after)) return ContentFailureKind::IoError;
+            if (before.st_size != after.st_size || before.st_mtime != after.st_mtime)
+                return ContentFailureKind::SourceChanged;
+            const auto current_identity = sha256_file(path, stop);
+            if (stop()) return result.failure_kind;
+            if (current_identity.empty()) return ContentFailureKind::IoError;
+            return current_identity == identity ? ContentFailureKind::None : ContentFailureKind::SourceChanged;
+        };
         const std::string cache = "lockscreens/current";
         const auto header = "PPLOCK4\n" + identity + "\n" + result.lock_screen + "\n" + std::to_string(before.st_size) + "\n" +
                             std::to_string(before.st_mtime) + "\n684x1216-fit\n";
@@ -684,7 +703,7 @@ void ContentJob::prepare_lock_screen() {
 #else
             const bool available = !request.lock_canvas_limit_for_test || count <= request.lock_canvas_limit_for_test;
 #endif
-            if (!available) { result.retryable_failure = true; result.error = "图片准备内存不足"; }
+            if (!available) { result.failure_kind = ContentFailureKind::OutOfMemory; result.error = "图片准备内存不足"; }
             return available;
         };
         const auto prepare_canvas = [&](bool preserve_background = false) {
@@ -714,7 +733,7 @@ void ContentJob::prepare_lock_screen() {
             // Validate before moving the background; the second pass also verifies every consumed byte.
             if (!prepare_canvas()) return;
             if (!read_lock_screen_cache(*reader, header, result.image.get(), alpha, stop)) {
-                result.image.reset(); result.cache_finished = false; result.retryable_failure = true;
+                result.image.reset(); result.cache_finished = false; result.failure_kind = ContentFailureKind::IoError;
                 result.error = stop() ? "图片准备已取消" : "休眠图片缓存读取失败，请重试";
                 return;
             }
@@ -730,7 +749,7 @@ void ContentJob::prepare_lock_screen() {
             if (store.open_lock_screen(result.lock_screen, source) != StoreStatus::Ok ||
                 source->size() != static_cast<std::size_t>(before.st_size) ||
                 !source->read(signature.data(), signature.size())) {
-                result.retryable_failure = true; result.error = "图片读取失败或已改变"; return;
+                result.failure_kind = ContentFailureKind::IoError; result.error = "图片读取失败或已改变"; return;
             }
             if (!std::memcmp(signature.data(), "\x89PNG\r\n\x1a\n", 8)) {
                 // A damaged PNG can fail after painting; rotation needs an unchanged base for its next candidate.
@@ -741,29 +760,21 @@ void ContentJob::prepare_lock_screen() {
                     (request.sleep_overlay && request.lock_background && !preserve_background) ? 0U : count;
                 if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < output_bytes + 768U * 1024 ||
                     heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 128U * 1024) {
-                    result.retryable_failure = true; result.error = "图片准备内存不足"; return;
+                    result.failure_kind = ContentFailureKind::OutOfMemory; result.error = "图片准备内存不足"; return;
                 }
 #endif
                 if (!request.lock_screen_prepare && !prepare_canvas(preserve_background)) return;
-                const auto unchanged = [&] {
-                    return !stat(path.c_str(), &after) && before.st_size == after.st_size &&
-                        before.st_mtime == after.st_mtime && sha256_file(path, stop) == identity && !stop();
-                };
                 const bool rendered = stream_lock_png(store, source, header, result.image.get(), alpha,
-                                                       result.cache_finished, result.error, stop, unchanged);
+                                                       result.cache_finished, result.error, result.failure_kind, stop, source_failure);
                 if (!rendered) {
                     result.image.reset();
-                    if (result.error.find("allocation") != std::string::npos ||
-                        result.error.find("memory") != std::string::npos) {
-                        result.retryable_failure = true; result.error = "图片准备内存不足"; return;
+                    if (stop()) return;
+                    if (result.failure_kind == ContentFailureKind::OutOfMemory) {
+                        result.error = "图片准备内存不足"; return;
                     }
-                    if (stop() || result.error.find("read") != std::string::npos ||
-                        result.error == "图片已改变或无法校验，请重试") {
-                        result.retryable_failure = true; return;
-                    }
+                    if (result.retryable_failure()) return;
                     result.error = "图片损坏、不支持或像素超限"; continue;
                 }
-                result.retryable_failure = !result.cache_finished;
 #ifdef ESP_PLATFORM
                 ESP_LOGI("content_worker", "Lock screen ready: source=stream alpha=%d cached=%d prepare=%d overlay=%d free=%u largest=%u stack_free=%u",
                     alpha, result.cache_finished, request.lock_screen_prepare, request.sleep_overlay,
@@ -778,35 +789,37 @@ void ContentJob::prepare_lock_screen() {
             const auto encoded_size = static_cast<std::size_t>(before.st_size);
             if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < encoded_size + 2 * count + 768U * 1024 ||
                 heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < std::max(encoded_size, count)) {
-                result.retryable_failure = true; result.error = "图片准备内存不足"; return;
+                result.failure_kind = ContentFailureKind::OutOfMemory; result.error = "图片准备内存不足"; return;
             }
 #endif
             std::vector<std::uint8_t> encoded;
             if (stop() || store.read_lock_screen(result.lock_screen, encoded, stop) != StoreStatus::Ok) {
-                result.retryable_failure = true; result.error = "图片读取失败或已取消"; return;
+                if (!stop()) result.failure_kind = ContentFailureKind::IoError;
+                result.error = "图片读取失败或已取消"; return;
             }
             bool rendered;
             {
                 graphics::Canvas image;
-                rendered = graphics::render_image(image, encoded, 0, 0, 684, 1216, result.error, false, stop);
+                rendered = graphics::render_image(image, encoded, 0, 0, 684, 1216, result.error, false, stop, &result.failure_kind);
                 if (rendered) pixels.assign(reinterpret_cast<const char*>(image.data()), count);
             }
             std::vector<std::uint8_t>().swap(encoded);
             if (stop()) { result.error = "休眠图片准备已取消或超时"; return; }
             if (!rendered) {
-                if (result.error.find("allocation failed") != std::string::npos || result.error.find("memory") != std::string::npos) {
-                    result.retryable_failure = true; result.error = "图片准备内存不足"; return;
+                if (result.failure_kind == ContentFailureKind::OutOfMemory) {
+                    result.error = "图片准备内存不足"; return;
                 }
+                if (result.retryable_failure()) return;
                 result.error = "图片损坏、不支持或像素超限"; continue;
             }
-            if (stat(path.c_str(), &after) || before.st_size != after.st_size || before.st_mtime != after.st_mtime ||
-                sha256_file(path, stop) != identity || stop()) {
-                result.retryable_failure = true; result.error = "图片已改变，请重试"; return;
+            result.failure_kind = source_failure();
+            if (result.failure_kind != ContentFailureKind::None) {
+                result.error = "图片已改变，请重试"; return;
             }
             const auto digest = md5_hex(pixels);
             result.cache_finished = store.save_cache(cache, pixels, header + (alpha ? 'A' : 'G'), digest) == StoreStatus::Ok;
             if (!result.cache_finished) {
-                result.retryable_failure = true; result.error = "休眠图片缓存未保存，下次将重新准备";
+                result.failure_kind = ContentFailureKind::IoError; result.error = "休眠图片缓存未保存，下次将重新准备";
 #ifdef ESP_PLATFORM
                 ESP_LOGW("content_worker", "Lock screen cache was not saved");
 #endif
@@ -831,29 +844,49 @@ void ContentJob::prepare_lock_screen() {
     if (request.sleep_image.empty()) result.error = "轮播图片均不可用：" + result.error;
     result.lock_screen.clear();
 }
-bool cover_failure_is_permanent(bool image_read, const std::string& error) {
-    if (error.find("allocation") != std::string::npos || error.find("memory") != std::string::npos) return false;
-    return image_read || error == "EPUB has no supported cover" || error == "TXT 没有内嵌封面" || error == "Invalid internal image path" ||
-           error == "Missing EPUB image" || error == "EPUB image exceeds 2 MiB limit" ||
-           error == "Image format is not PNG, JPEG or GIF" || error == "Invalid compressed EPUB image";
+
+std::string cover_failure_payload(const std::string& identity, ContentFailureKind kind) {
+    if (identity.size() != 64 || !content_failure_is_permanent(kind)) return {};
+    return std::string("NEG1\n") + (kind == ContentFailureKind::MissingResource ? "M\n" : "I\n") + identity;
+}
+ContentFailureKind cached_cover_failure(std::string_view payload, const std::string& identity) {
+    if (identity.size() != 64 || payload.size() != kCoverFailureBytes ||
+        payload.substr(0, 5) != "NEG1\n" || payload[6] != '\n' || payload.substr(7) != identity)
+        return ContentFailureKind::None;
+    return payload[5] == 'M' ? ContentFailureKind::MissingResource :
+           payload[5] == 'I' ? ContentFailureKind::InvalidFormat : ContentFailureKind::None;
 }
 
 void ContentJob::prepare_cover() {
-    const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
+    const auto stop = [this] {
+        if (!cancelled_.load(std::memory_order_relaxed)) return false;
+        result.failure_kind = ContentFailureKind::Cancelled; return true;
+    };
     FileStore store(request.root);
     const auto width = request.layout.width, height = request.layout.height;
     const auto count = static_cast<std::size_t>((width + 1) / 2) * height;
     if (stop()) return;
+    std::string identity;
     {
         std::unique_ptr<CacheReader> reader;
         std::string header(request.cache_header.size(), '\0');
-        if (store.open_cache(request.cache_name, header.size() + count, reader) == StoreStatus::Ok &&
+        if (store.open_cache(request.cache_name, header.size() + std::max(count, kCoverFailureBytes), reader) == StoreStatus::Ok &&
             reader->read(header.data(), header.size()) && header == request.cache_header) {
-            if (reader->size() == header.size()) { result.cache_finished = true; return; }
-            if (reader->size() == header.size() + count) {
+            if (reader->size() == header.size() + kCoverFailureBytes) {
+                std::array<char, kCoverFailureBytes> payload;
+                if (reader->read(payload.data(), payload.size())) {
+                    reader.reset();
+                    identity = sha256_file(request.path, stop);
+                    if (stop()) return;
+                    result.failure_kind = cached_cover_failure({payload.data(), payload.size()}, identity);
+                    if (content_failure_is_permanent(result.failure_kind)) { result.cache_finished = true; return; }
+                }
+            }
+            if (reader && reader->size() == header.size() + count) {
 #ifdef ESP_PLATFORM
                 if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < count + 256U * 1024 ||
                     heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < count) {
+                    result.failure_kind = ContentFailureKind::OutOfMemory;
                     if (request.kind == Kind::SleepCover) result.error = "Cover cache memory unavailable";
                     return;
                 }
@@ -878,15 +911,19 @@ void ContentJob::prepare_cover() {
     // The document reader admits encoded bytes by their actual size; reserve the output and decoder here.
     if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < image_room ||
         heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < count) {
+        result.failure_kind = ContentFailureKind::OutOfMemory;
         if (request.kind == Kind::SleepCover) result.error = "Cover preparation memory unavailable";
         return;
     }
 #endif
+    if (identity.empty()) identity = sha256_file(request.path, stop);
+    if (stop()) return;
+    if (identity.empty()) { result.failure_kind = ContentFailureKind::IoError; result.error = "Cannot read cover source"; return; }
     std::vector<std::uint8_t> encoded;
     std::string error;
     auto image = std::make_unique<graphics::Canvas>(width, height);
-    const bool read = EpubDocument::read_cover(request.path, encoded, error, stop);
-    const bool loaded = read && graphics::render_image(*image, encoded, 0, 0, width, height, error, request.cover_crop, stop);
+    const bool read = EpubDocument::read_cover(request.path, encoded, error, stop, &result.failure_kind);
+    const bool loaded = read && graphics::render_image(*image, encoded, 0, 0, width, height, error, request.cover_crop, stop, &result.failure_kind);
     if (stop()) return;
     if (!loaded && request.kind == Kind::SleepCover) result.error = error;
     std::vector<std::uint8_t>().swap(encoded);
@@ -896,9 +933,13 @@ void ContentJob::prepare_cover() {
         result.cache_finished = store.save_cache(request.cache_name, bytes) == StoreStatus::Ok;
         // The image was complete before the optional commit; the app discards it if the sleep request ended.
         result.image = std::move(image);
-    } else if (cover_failure_is_permanent(read, error)) {
-        // Read failures may be transient; only a confirmed unusable cover gets a negative entry.
-        result.cache_finished = store.save_cache(request.cache_name, request.cache_header) == StoreStatus::Ok;
+    } else if (content_failure_is_permanent(result.failure_kind)) {
+        const auto current_identity = sha256_file(request.path, stop);
+        if (stop()) return;
+        if (current_identity.empty()) { result.failure_kind = ContentFailureKind::IoError; return; }
+        if (current_identity != identity) { result.failure_kind = ContentFailureKind::SourceChanged; return; }
+        result.cache_finished = store.save_cache(request.cache_name,
+            request.cache_header + cover_failure_payload(identity, result.failure_kind)) == StoreStatus::Ok;
     }
 }
 void ContentJob::open_book() {
@@ -1033,7 +1074,10 @@ void ContentJob::load_chapter() {
 }
 void ContentJob::library_covers() {
     const StageTimer timer{"library_covers"};
-    const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
+    const auto stop = [this] {
+        if (!cancelled_.load(std::memory_order_relaxed)) return false;
+        result.failure_kind = ContentFailureKind::Cancelled; return true;
+    };
     FileStore store(request.root);
     for (const auto& source : request.covers) {
         if (stop()) return;
@@ -1042,23 +1086,47 @@ void ContentJob::library_covers() {
         constexpr std::size_t thumbnail_bytes = kLibraryCoverWidth * kLibraryCoverHeight / 2;
         // Reserve both output copies and parser/decoder headroom; encoded bytes have a separate admission check.
         if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2 * thumbnail_bytes + 768U * 1024 ||
-            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < thumbnail_bytes) continue;
+            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < thumbnail_bytes) {
+            result.failure_kind = ContentFailureKind::OutOfMemory; continue;
+        }
 #endif
+        const auto path = request.root + "/" + source.path;
+        const auto identity = sha256_file(path, stop);
+        if (stop()) return;
+        if (identity.empty()) { result.failure_kind = ContentFailureKind::IoError; continue; }
+        std::string cached;
+        if (store.load_cache(source.cache_name, source.cache_header.size() + kCoverFailureBytes, cached) == StoreStatus::Ok &&
+            cached.compare(0, source.cache_header.size(), source.cache_header) == 0) {
+            const auto failure = cached_cover_failure(std::string_view(cached).substr(source.cache_header.size()), identity);
+            if (content_failure_is_permanent(failure)) {
+                result.failure_kind = failure; result.covers.back().emplace(); continue;
+            }
+        }
         graphics::Canvas thumbnail(kLibraryCoverWidth, kLibraryCoverHeight);
         std::vector<std::uint8_t> encoded;
         std::string error;
-        const bool read = EpubDocument::read_cover(request.root + "/" + source.path, encoded, error, stop);
+        ContentFailureKind failure_kind;
+        const bool read = EpubDocument::read_cover(request.root + "/" + source.path, encoded, error, stop, &failure_kind);
         const bool loaded = read &&
-            graphics::render_image(thumbnail, encoded, 0, 0, kLibraryCoverWidth, kLibraryCoverHeight, error, true, stop);
+            graphics::render_image(thumbnail, encoded, 0, 0, kLibraryCoverWidth, kLibraryCoverHeight, error, true, stop, &failure_kind);
         if (stop()) return;
+        if (!loaded) { result.failure_kind = failure_kind; result.error = error; }
         struct stat info{};
         if (stat((request.root + "/" + source.path).c_str(), &info) != 0 ||
-            info.st_size != source.size || info.st_mtime != source.modified) continue;
-        if (!loaded && !cover_failure_is_permanent(read, error)) continue;
+            info.st_size != source.size || info.st_mtime != source.modified) {
+            result.failure_kind = ContentFailureKind::SourceChanged; continue;
+        }
+        if (!loaded && !content_failure_is_permanent(failure_kind)) continue;
+        if (!loaded) {
+            const auto current_identity = sha256_file(path, stop);
+            if (stop()) return;
+            if (current_identity.empty()) { result.failure_kind = ContentFailureKind::IoError; continue; }
+            if (current_identity != identity) { result.failure_kind = ContentFailureKind::SourceChanged; continue; }
+        }
         auto& pixels = result.covers.back().emplace();
         if (loaded) pixels = thumbnail.pixels();
         std::vector<std::uint8_t>().swap(encoded);
-        store.save_cache(source.cache_name, source.cache_header + std::string(pixels.begin(), pixels.end()));
+        store.save_cache(source.cache_name, source.cache_header + (loaded ? std::string(pixels.begin(), pixels.end()) : cover_failure_payload(identity, failure_kind)));
     }
 }
 

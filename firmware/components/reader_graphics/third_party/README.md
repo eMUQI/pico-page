@@ -27,6 +27,8 @@ repository. The encoder allocates nothing: `qr.cpp` supplies two 407-byte buffer
 
 ## Local pngle changes
 
+- Expose an instance-local allocation-failure flag, cleared on reset, so retry policy never parses decoder text.
+
 - Cast the high byte to `uint32_t` before a 24-bit shift; avoid signed-shift undefined behavior.
 - Clamp empty Adam7 pass width before subtraction; prevent an underflow allocation for narrow images.
 - Ignore the optional `bKGD` suggestion while retaining CRC checking. The reader composites alpha

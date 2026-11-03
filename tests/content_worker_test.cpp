@@ -201,22 +201,27 @@ int main(int argc, char** argv) {
             psram_largest = fragmented ? 342 * 1216 - 1 : 3 * 1024 * 1024;
             ContentJob refused(custom); assert(refused.start()); finish(refused);
             assert(!refused.result.cache_finished && !refused.result.image && !refused.result.error.empty() &&
-                   refused.result.retryable_failure);
+                   refused.result.retryable_failure());
+            assert(refused.result.failure_kind == pico_page::ContentFailureKind::OutOfMemory);
+            refused.result.error = "提示文字已修改";
+            assert(refused.result.retryable_failure());
             assert(pico_page::graphics::image_decode_count() == custom_decodes);
         }
         psram_free = 2 * 1024 * 1024; psram_largest = 512 * 1024;
         ContentJob admitted(custom); assert(admitted.start()); finish(admitted);
-        assert(!admitted.result.cache_finished && !admitted.result.retryable_failure);
+        assert(!admitted.result.cache_finished && !admitted.result.retryable_failure());
         assert(admitted.result.error.find("损坏") != std::string::npos);
+        assert(admitted.result.failure_kind == pico_page::ContentFailureKind::InvalidFormat);
         std::ofstream(root / "LockScreens/test.png", std::ios::binary) << std::string(1800 * 1024, 'x');
         const auto before_large = pico_page::graphics::image_decode_count();
         ContentJob too_large(custom); assert(too_large.start()); finish(too_large);
-        assert(too_large.result.retryable_failure && !too_large.result.cache_finished);
+        assert(too_large.result.retryable_failure() && !too_large.result.cache_finished);
         assert(pico_page::graphics::image_decode_count() == before_large);
         psram_free = 4 * 1024 * 1024; psram_largest = 3 * 1024 * 1024;
         ContentJob cancelled_custom(custom); cancelled_custom.cancel();
         assert(cancelled_custom.start()); finish(cancelled_custom);
-        assert(!cancelled_custom.result.cache_finished && !cancelled_custom.result.image && cancelled_custom.result.retryable_failure);
+        assert(!cancelled_custom.result.cache_finished && !cancelled_custom.result.image && cancelled_custom.result.retryable_failure());
+        assert(cancelled_custom.result.failure_kind == pico_page::ContentFailureKind::Cancelled);
         assert(!fs::exists(root / "PicoPage/data/last-lock-screen.txt"));
 
         std::vector<std::uint8_t> png;
@@ -232,7 +237,8 @@ int main(int argc, char** argv) {
         fail_calloc_on = 2; // Decoder creation succeeds; its scanline allocation fails.
         ContentJob exhausted_custom(custom); assert(exhausted_custom.start()); finish(exhausted_custom);
         assert(fail_calloc_on == 0 && failed_callocs == 1);
-        assert(!exhausted_custom.result.image && !exhausted_custom.result.cache_finished && exhausted_custom.result.retryable_failure);
+        assert(!exhausted_custom.result.image && !exhausted_custom.result.cache_finished && exhausted_custom.result.retryable_failure());
+        assert(exhausted_custom.result.failure_kind == pico_page::ContentFailureKind::OutOfMemory);
         assert(exhausted_custom.result.error.find("内存不足") != std::string::npos);
         assert(pico_page::graphics::image_decode_count() == before_failure + 1);
         assert(!fs::exists(root / "PicoPage/cache/lockscreens/current"));
@@ -245,21 +251,22 @@ int main(int argc, char** argv) {
         assert(!fs::exists(root / "PicoPage/data/last-lock-screen.txt"));
         psram_free = 1024 * 1024;
         ContentJob warm_custom(custom); assert(warm_custom.start()); finish(warm_custom);
-        assert(warm_custom.result.image && warm_custom.result.cache_finished && !warm_custom.result.retryable_failure);
+        assert(warm_custom.result.image && warm_custom.result.cache_finished && !warm_custom.result.retryable_failure());
         assert(warm_custom.result.image->pixels() == cold_custom.result.image->pixels());
         for (bool fragmented : {false, true}) {
             psram_free = fragmented ? 4 * 1024 * 1024 : 342 * 1216 + 256 * 1024 - 1;
             psram_largest = fragmented ? 342 * 1216 - 1 : 3 * 1024 * 1024;
             ContentJob refused_warm_custom(custom); assert(refused_warm_custom.start()); finish(refused_warm_custom);
             assert(!refused_warm_custom.result.image && refused_warm_custom.result.cache_finished &&
-                   refused_warm_custom.result.retryable_failure);
+                   refused_warm_custom.result.retryable_failure());
             assert(pico_page::graphics::image_decode_count() == before_cold + 1);
         }
         psram_free = 4 * 1024 * 1024;
         psram_largest = 3 * 1024 * 1024;
         custom.lock_screen_deadline = std::chrono::steady_clock::now() - std::chrono::milliseconds(1);
         ContentJob expired_custom(custom); assert(expired_custom.start()); finish(expired_custom);
-        assert(!expired_custom.result.image && expired_custom.result.retryable_failure);
+        assert(!expired_custom.result.image && expired_custom.result.retryable_failure());
+        assert(expired_custom.result.failure_kind == pico_page::ContentFailureKind::TimedOut);
         assert(pico_page::graphics::image_decode_count() == before_cold + 1);
         // A job past its deadline still records the presented image before it returns.
         custom.lock_screen_shown = "01-good.png";
@@ -287,9 +294,11 @@ int main(int argc, char** argv) {
         }
         finish(cancelled_cover);
         assert(!cancelled_cover.result.cache_finished && !fs::exists(cache));
+        assert(cancelled_cover.result.failure_kind == pico_page::ContentFailureKind::Cancelled);
         fs::rename(cover.path, root / "hidden.epub");
         ContentJob unreadable(cover); assert(unreadable.start()); finish(unreadable);
         assert(!unreadable.result.cache_finished && !fs::exists(cache));
+        assert(unreadable.result.failure_kind == pico_page::ContentFailureKind::IoError && unreadable.result.retryable_failure());
         fs::rename(root / "hidden.epub", cover.path);
         fs::create_directories(cache.parent_path());
         fs::create_directory(cache.string() + ".tmp");
@@ -352,7 +361,8 @@ int main(int argc, char** argv) {
         cover.cache_name = "covers/no-cover";
         ContentJob absent(cover); assert(absent.start()); finish(absent);
         assert(absent.result.cache_finished && !absent.result.image);
-        assert(fs::file_size(root / "PicoPage/cache/covers/no-cover") == cover.cache_header.size());
+        assert(absent.result.failure_kind == pico_page::ContentFailureKind::MissingResource);
+        assert(fs::file_size(root / "PicoPage/cache/covers/no-cover") == cover.cache_header.size() + pico_page::kCoverFailureBytes);
         psram_free = psram_largest = 512 * 1024;
         ContentJob cached_absent(cover); assert(cached_absent.start()); finish(cached_absent);
         assert(cached_absent.result.cache_finished && !cached_absent.result.image);
@@ -362,7 +372,8 @@ int main(int argc, char** argv) {
             cover.cache_name = std::string("covers/") + kind;
             ContentJob invalid(cover); assert(invalid.start()); finish(invalid);
             assert(invalid.result.cache_finished && !invalid.result.image);
-            assert(fs::file_size(root / "PicoPage/cache" / cover.cache_name) == cover.cache_header.size());
+            assert(pico_page::content_failure_is_permanent(invalid.result.failure_kind) && !invalid.result.retryable_failure());
+            assert(fs::file_size(root / "PicoPage/cache" / cover.cache_name) == cover.cache_header.size() + pico_page::kCoverFailureBytes);
         }
         cover.path = (fs::path(argv[1]).parent_path() / "gif-image-cover.epub").string();
         cover.cache_name = "covers/gif-upgrade";
@@ -419,6 +430,7 @@ int main(int argc, char** argv) {
         ContentJob unreadable_library(library); assert(unreadable_library.start()); finish(unreadable_library);
         unreadable_cover.clear();
         assert(unreadable_library.result.covers.size() == 1 && !unreadable_library.result.covers[0]);
+        assert(unreadable_library.result.failure_kind == pico_page::ContentFailureKind::IoError && unreadable_library.result.retryable_failure());
         assert(cover_store.load_cache(library.covers[0].cache_name, obsolete.size(), preserved) == pico_page::StoreStatus::Ok && preserved == obsolete);
 #endif
         psram_free = 2 * 1024 * 1024; psram_largest = 512 * 1024;
@@ -432,13 +444,13 @@ int main(int argc, char** argv) {
         library.covers = {{"no-cover.epub", "covers/library-no-cover", cover.cache_header, gif_info.st_size, gif_info.st_mtime}};
         ContentJob absent_library(library); assert(absent_library.start()); finish(absent_library);
         assert(absent_library.result.covers.size() == 1 && absent_library.result.covers[0] && absent_library.result.covers[0]->empty());
-        assert(fs::file_size(root / "PicoPage/cache" / library.covers[0].cache_name) == cover.cache_header.size());
+        assert(fs::file_size(root / "PicoPage/cache" / library.covers[0].cache_name) == cover.cache_header.size() + pico_page::kCoverFailureBytes);
         std::ofstream(root / "no-cover.txt") << "第一章\n正文。\n";
         assert(stat((root / "no-cover.txt").c_str(), &gif_info) == 0);
         library.covers = {{"no-cover.txt", "covers/library-txt-no-cover", cover.cache_header, gif_info.st_size, gif_info.st_mtime}};
         ContentJob txt_library(library); assert(txt_library.start()); finish(txt_library);
         assert(txt_library.result.covers.size() == 1 && txt_library.result.covers[0] && txt_library.result.covers[0]->empty());
-        assert(fs::file_size(root / "PicoPage/cache" / library.covers[0].cache_name) == cover.cache_header.size());
+        assert(fs::file_size(root / "PicoPage/cache" / library.covers[0].cache_name) == cover.cache_header.size() + pico_page::kCoverFailureBytes);
         fs::remove_all(root);
     }
     {

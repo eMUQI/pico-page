@@ -9,7 +9,10 @@ void ReaderApp::Impl::prepare_custom_sleep(bool sleeping) {
     request.sleep_overlay = settings.sleep_overlay;
     request.lock_screen_prepare = !sleeping; request.preview = sleeping;
     request.lock_screen_shown = custom_rotation_shown;
-    if (!sleeping) custom_retry_at = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    if (!sleeping) {
+        ++custom_prepare_attempts;
+        custom_retry_at = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    }
     if (sleeping) {
         if (!custom_sleep_deadline) custom_sleep_deadline = std::chrono::steady_clock::now() + kLockScreenPrepareBudget;
         request.lock_screen_deadline = *custom_sleep_deadline;

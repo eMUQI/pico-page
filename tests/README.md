@@ -19,6 +19,8 @@ ctest --test-dir build/host --output-on-failure
 
 Linux `app_test` 使用链接包装注入当前书库目录的 `readdir` 与 `lstat` 失败，覆盖首项／中途 EIO、条目 EIO／ENOENT、正常 EOF 前残留 errno、空目录、512 项上限及界面重试；不修改生产 I/O 接口或真实文件。
 
+封面与锁屏失败回归在 `app_test`、`content_worker_test` 中验证类别与文案独立、PNG 内部分配失败、永久负缓存的 SHA-256 绑定、I/O 有界重试、取消与旧代次隔离。自定义锁屏空闲重试测试观察超过三个 5 秒间隔，再验证显式休眠仍可恢复。
+
 测试 EPUB 均由脚本生成；不提交个人书籍。`app_test` 使用 setup_fonts 下载的完整文楷字体。`tools/check_koreader_mapping.py` 是独立的真实 CREngine 兼容性对照，不是模拟期望值。墨水屏、TF 掉电、网络真实账户与双向接续仍需按 `docs/development/acceptance.md` 验收。
 
 ## 整页图片缓存性能对照

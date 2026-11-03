@@ -735,7 +735,7 @@ void ReaderApp::Impl::control(int id) {
         settings.sleep_screen = draft.sleep_screen;
         settings.sleep_image = draft.sleep_image;
         settings.sleep_overlay = draft.sleep_overlay;
-        custom_prepare_finished = custom_sleep_attempted = false;
+        custom_prepare_finished = custom_sleep_attempted = false; custom_prepare_attempts = 0;
         custom_notice.clear(); custom_notice_pending = false;
         custom_sleep_image.reset();
         message = "休眠设置已保存";
@@ -1059,7 +1059,9 @@ void ReaderApp::Impl::input(const AppInput &input) {
     turned = false;
     // A notice lasts until the input after the one that showed it; K2 only repaints the page.
     if (view != View::Import && view != View::WifiSettings && view != View::Portal &&
-        (input.touch || input.event.input != Input::K2) && std::exchange(notice_shown, false)) message.clear();
+        (input.touch || input.event.input != Input::K2) && std::exchange(notice_shown, false)) {
+        message.clear(); cover_notice.clear();
+    }
     if (input.touch) {
         if (view == View::Reading) {
             if (input.y >= footer_top) {

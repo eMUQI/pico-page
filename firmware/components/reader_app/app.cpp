@@ -254,7 +254,7 @@ View ReaderApp::view() const {
     return impl_->view;
 }
 const std::string &ReaderApp::status() const {
-    return impl_->message;
+    return impl_->current_notice();
 }
 const std::optional<ReadingRecord> &ReaderApp::saved_record() const {
     return impl_->session.saved_record();
@@ -460,7 +460,7 @@ void ReaderApp::show_portal(const PortalStatus &status) {
             // missing may now exist, so the next load opens it instead of keeping the fallback.
             impl_->scan_fonts();
             impl_->effective_font.clear();
-            impl_->custom_prepare_finished = false;
+            impl_->custom_prepare_finished = false; impl_->custom_prepare_attempts = 0;
         }
         if (view != View::Portal && view != View::WifiSettings && (!requested || view != impl_->portal_request_view)) return;
         if (open_wifi) {
@@ -630,7 +630,7 @@ bool ReaderApp::sleep_pending() const {
 void ReaderApp::cancel_sleep() {
     impl_->sleep_destination_captured = false;
     impl_->custom_sleep_attempted = false;
-    impl_->custom_prepare_finished = false;
+    impl_->custom_prepare_finished = false; impl_->custom_prepare_attempts = 0;
     impl_->custom_sleep_image.reset();
     impl_->sleep_cover_image.reset();
     impl_->custom_sleep_deadline.reset();
@@ -739,7 +739,7 @@ void ReaderApp::wake(bool slept) {
     impl_->wifi_notice.clear();
     impl_->sleep_cover_image.reset();
     impl_->custom_sleep_attempted = false;
-    impl_->custom_prepare_finished = false;
+    impl_->custom_prepare_finished = false; impl_->custom_prepare_attempts = 0;
     impl_->custom_sleep_deadline.reset();
     impl_->sleep_destination_captured = false;
     impl_->custom_notice_pending = slept && impl_->settings.sleep_screen == "custom" && !impl_->custom_notice.empty();

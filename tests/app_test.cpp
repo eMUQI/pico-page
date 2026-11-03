@@ -40,9 +40,15 @@ using namespace pico_page;
 #ifdef PICO_PAGE_WRAP_MALLOC_TEST
 static std::string counted_dictionary;
 static std::atomic<unsigned> dictionary_preparations{0};
+static std::string unreadable_cover;
+static std::atomic<unsigned> cover_read_attempts{0}, cover_read_failures{0};
 extern "C" FILE* __real_fopen(const char*, const char*);
 extern "C" FILE* __wrap_fopen(const char* path, const char* mode) {
     if (path == counted_dictionary) ++dictionary_preparations;
+    if (path == unreadable_cover) {
+        ++cover_read_attempts;
+        if (cover_read_failures.load() && cover_read_failures.fetch_sub(1)) { errno = EIO; return nullptr; }
+    }
     return __real_fopen(path, mode);
 }
 static std::atomic<bool> fail_wait_footer_malloc{false};
@@ -1962,7 +1968,7 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
                 };
                 const auto decoded = graphics::image_decode_count();
                 ContentJob failed(std::move(request)); assert(failed.start()); failed.wait();
-                assert(!failed.result.image && !failed.result.cache_finished && failed.result.retryable_failure);
+                assert(!failed.result.image && !failed.result.cache_finished && failed.result.retryable_failure());
                 assert(failed.result.error.find("缓存读取失败") != std::string::npos);
                 assert(graphics::image_decode_count() == decoded);
                 write(cache_path, cache_bytes);
@@ -1985,7 +1991,7 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
             blocked.lock_canvas_limit_for_test = 342 * 1216 - 1;
             const auto before = graphics::image_decode_count();
             ContentJob refused(std::move(blocked)); assert(refused.start()); refused.wait();
-            assert(refused.result.cache_finished && refused.result.retryable_failure && !refused.result.image);
+            assert(refused.result.cache_finished && refused.result.retryable_failure() && !refused.result.image);
             assert(!refused.result.error.empty() && graphics::image_decode_count() == before);
         }
         ContentJob::Request request;
@@ -2389,7 +2395,7 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         request.sleep_overlay = overlay;
         if (overlay) request.lock_background = std::make_shared<graphics::Canvas>();
         ContentJob job(request); assert(job.start()); job.wait();
-        assert(job.result.image && !job.result.cache_finished && job.result.retryable_failure);
+        assert(job.result.image && !job.result.cache_finished && job.result.retryable_failure());
         assert(job.result.error.find("缓存未保存") != std::string::npos);
         if (overlay) {
             std::string layer; bool alpha = false;
@@ -2401,7 +2407,7 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         request.lock_screen_deadline = std::chrono::steady_clock::now() - std::chrono::milliseconds(1);
         const auto decoded = graphics::image_decode_count();
         ContentJob expired(request); assert(expired.start()); expired.wait();
-        assert(!expired.result.image && !expired.result.cache_finished && expired.result.retryable_failure);
+        assert(!expired.result.image && !expired.result.cache_finished && expired.result.retryable_failure());
         assert(graphics::image_decode_count() == decoded);
     }
     {
@@ -2536,7 +2542,7 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
     assert(store.lock_screen_files(names) == StoreStatus::Invalid && names.empty());
     fs::remove_all(root / "LockScreens");
     const auto missing = run(false);
-    assert(!run(true).image && !missing.cache_finished && !missing.retryable_failure);
+    assert(!run(true).image && !missing.cache_finished && !missing.retryable_failure());
     {
         ReaderApp app(root.string(), "empty-locks", true, true); Driver driver{app};
         assert(app.initialize()); driver.present();
@@ -3878,6 +3884,81 @@ static void dictionary_ui_test(const fs::path& root, const fs::path& fixtures, c
     }
 }
 
+static void content_failure_test(const fs::path& root, const fs::path& fixtures) {
+    using Failure = ContentFailureKind;
+    std::vector<std::uint8_t> bytes;
+    std::string error;
+    Failure failure = Failure::IoError;
+    assert(EpubDocument::read_cover((fixtures / "image-cover.epub").string(), bytes, error, {}, &failure));
+    assert(failure == Failure::None && error.empty());
+    graphics::Canvas canvas;
+    auto corrupt = bytes; corrupt.resize(33);
+    assert(!graphics::render_image(canvas, corrupt, 0, 0, 684, 1216, error, false, {}, &failure));
+    assert(failure == Failure::InvalidFormat && content_failure_is_permanent(failure));
+    assert(!graphics::render_image(canvas, bytes, 0, 0, 684, 1216, error, false, [] { return true; }, &failure));
+    assert(failure == Failure::Cancelled && !content_failure_is_permanent(failure));
+    graphics::ImageBox painted{};
+    bool alpha = false;
+    assert(!graphics::decode_png_stream(bytes.size(), [](std::size_t, char*, std::size_t) { return false; },
+        684, 1216, [](int, int, int, int, std::uint8_t, std::uint8_t) {}, painted, alpha, error, {}, &failure));
+    assert(failure == Failure::IoError && content_failure_is_retryable(failure));
+    assert(!EpubDocument::read_cover((fixtures / "valid.epub").string(), bytes, error, {}, &failure));
+    assert(failure == Failure::MissingResource);
+    assert(!EpubDocument::read_cover((fixtures / "image-cover.epub").string(), bytes, error,
+        [] { return true; }, &failure));
+    assert(failure == Failure::Cancelled);
+    assert(cover_failure_payload(std::string(64, 'a'), Failure::Cancelled).empty());
+    assert(cover_failure_payload(std::string(64, 'a'), Failure::IoError).empty());
+
+    fs::create_directories(root);
+    const auto good = read(fixtures / "image-cover.epub");
+    const auto source = root / "book.epub";
+    write(source, std::string(good.size(), 'x'));
+    const auto modified = fs::last_write_time(source);
+    ContentJob::Request request;
+    request.kind = ContentJob::Kind::SleepCover; request.root = root.string(); request.path = source.string();
+    request.cache_name = "covers/content-identity"; request.cache_header = "PPCOVER4\nidentity-test\n";
+    request.layout.width = 684; request.layout.height = 1040;
+    const auto run = [&] {
+        ContentJob job(request); assert(job.start()); job.wait(); return std::move(job.result);
+    };
+    auto invalid = run();
+    assert(invalid.failure_kind == Failure::InvalidFormat && invalid.cache_finished && !invalid.image);
+    const auto cached = read(root / "PicoPage/cache" / request.cache_name);
+    assert(cached.size() == request.cache_header.size() + kCoverFailureBytes);
+    assert(cached_cover_failure(std::string_view(cached).substr(request.cache_header.size()), sha256_file(source.string())) == Failure::InvalidFormat);
+    auto repeated = run();
+    assert(repeated.failure_kind == Failure::InvalidFormat && repeated.cache_finished && !repeated.image);
+    // Identical metadata must not let a previous negative entry hide replacement content.
+    write(source, good); fs::last_write_time(source, modified);
+    auto replaced = run();
+    assert(replaced.failure_kind == Failure::None && replaced.cache_finished && replaced.image);
+
+#ifdef PICO_PAGE_WRAP_MALLOC_TEST
+    const auto custom = root / "CustomRetry";
+    assert(EpubDocument::read_cover((fixtures / "image-cover.epub").string(), bytes, error));
+    write(custom / "LockScreens/test.png", std::string(bytes.begin(), bytes.end()));
+    write(custom / "PicoPage/settings.toml", "schema_version=1\n[power]\nsleep_screen='custom'\nsleep_image='test.png'\n");
+    ReaderApp app(custom.string(), "custom-io-bound", true, true); Driver driver{app};
+    assert(app.initialize()); driver.present();
+    unreadable_cover = (custom / "LockScreens/test.png").string();
+    cover_read_attempts = 0; cover_read_failures = 10;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(16);
+    while (std::chrono::steady_clock::now() < deadline) {
+        app.poll_background();
+        if (app.pending_frame()) driver.present();
+        app.background_step();
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    assert(cover_read_attempts == 3 && !app.background_due());
+    assert(!fs::exists(custom / "PicoPage/cache/lockscreens/current"));
+    unreadable_cover.clear(); cover_read_failures = 0;
+    assert(sleep_frame(app)); driver.present();
+    assert(app.view() == View::Sleeping && app.canvas().pixel(50, 300) == 0);
+    assert(fs::exists(custom / "PicoPage/cache/lockscreens/current"));
+#endif
+}
+
 int main(int argc, char** argv) {
     assert(argc == 3 || argc == 4);
     char temporary[] = "/tmp/pico-app-XXXXXX";
@@ -3897,6 +3978,7 @@ int main(int argc, char** argv) {
         }
     assert(tested_origin);
     if (argc == 4) { fs::remove_all(card); return 0; }
+    content_failure_test(card / "ContentFailure", fixtures);
     update_test(card / "Update");
     lock_screen_test(card / "CustomLocks", fixtures);
     assert(reading_footer::percent(0) == "0.00%");
@@ -4294,7 +4376,7 @@ int main(int argc, char** argv) {
         constexpr std::size_t thumbnail_bytes = 92 * 250;
         const bool has_cover = std::string_view(fixture) != "valid";
         const auto previous = read(cache);
-        const auto header_bytes = previous.size() - (has_cover ? thumbnail_bytes : 0);
+        const auto header_bytes = previous.size() - (has_cover ? thumbnail_bytes : kCoverFailureBytes);
         auto obsolete = previous.substr(0, header_bytes);
         obsolete[7] = '3';
         write(cache, obsolete);
@@ -4315,7 +4397,7 @@ int main(int argc, char** argv) {
         assert(graphics::image_decode_count() == decodes + (has_cover ? 1 : 0));
         const auto recovered = read(cache);
         assert(recovered.find("PPCOVER4\n") == 0);
-        assert(recovered.size() == header_bytes + (has_cover ? thumbnail_bytes : 0));
+        assert(recovered.size() == header_bytes + (has_cover ? thumbnail_bytes : kCoverFailureBytes));
         {
             ReaderApp app(home.string()); Driver driver{app};
             assert(app.initialize()); driver.present();
@@ -4407,6 +4489,31 @@ int main(int argc, char** argv) {
                 assert(graphics::image_decode_count() == decodes + 1);
             }
         }
+#ifdef PICO_PAGE_WRAP_MALLOC_TEST
+        for (const bool recover : {false, true}) {
+            fs::remove_all(root / "PicoPage/cache/covers");
+            ReaderApp io_app(root.string(), "cover-io-retry", true, true); Driver io_driver{io_app};
+            assert(io_app.initialize()); io_driver.present();
+            unreadable_cover = (root / "Books/book.epub").string(); cover_read_attempts = 0; cover_read_failures = recover ? 1 : 3;
+            io_app.poll_background();
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            while (io_app.background_due()) {
+                io_app.poll_background();
+                if (io_app.pending_frame()) io_driver.present();
+                assert(std::chrono::steady_clock::now() < deadline);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            unreadable_cover.clear();
+            if (recover) {
+                assert(cover_read_attempts == 3 && cover_read_failures == 0 && io_app.canvas().pixel(60, 250) == 0);
+            } else {
+                assert(cover_read_attempts == 3 && io_app.status() == "封面暂未生成，可继续阅读");
+                assert(!fs::exists(root / "PicoPage/cache/covers") || fs::is_empty(root / "PicoPage/cache/covers"));
+                io_driver.key(Input::K2); io_driver.present();
+                assert(!io_app.background_due() && cover_read_attempts == 3);
+            }
+        }
+#endif
         fs::remove_all(root / "PicoPage/cache/covers");
         ReaderApp app(root.string(), "cover-retry-cancel", true, true); Driver driver{app};
         assert(app.initialize()); driver.present();
