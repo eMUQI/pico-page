@@ -88,6 +88,24 @@ bool optional_image_uri(std::string_view value) {
 }
 
 bool fail(std::string& error, const std::string& message) { error = message; return false; }
+// Each caller owns its output; no decoder or thread-global error state is shared.
+auto content_failure_reporter(ContentFailureKind* output) {
+    if (output) *output = ContentFailureKind::None;
+    return [output](std::string& error, const std::string& message,
+                    ContentFailureKind kind = ContentFailureKind::InvalidFormat) {
+        if (output) *output = kind;
+        error = message;
+        return false;
+    };
+}
+ContentFailureKind zip_failure_kind(mz_zip_archive& zip) {
+    switch (mz_zip_get_last_error(&zip)) {
+    case MZ_ZIP_ALLOC_FAILED: return ContentFailureKind::OutOfMemory;
+    case MZ_ZIP_FILE_READ_FAILED: case MZ_ZIP_FILE_SEEK_FAILED: return ContentFailureKind::IoError;
+    default: return ContentFailureKind::InvalidFormat;
+    }
+}
+
 bool txt_path(std::string_view path) {
     if (path.size() < 4) return false;
     path.remove_prefix(path.size() - 4);
@@ -355,18 +373,19 @@ struct Xml {
     std::unique_ptr<HtmlReader> html;
     bool suspend_requested = false, suspended = false;
     std::string error;
+    ContentFailureKind failure_kind = ContentFailureKind::InvalidFormat;
     unsigned depth = 0;
     std::size_t nodes = 0, bytes = 0;
     std::size_t pending_bytes = 0, pending_limit = 0, completed_bytes = 0;
     std::uint32_t html_prefix_bytes = 0;
     Xml() {
         parser = XML_ParserCreateNS(nullptr, '|');
-        if (!parser) { error = "XML parser allocation failed"; return; }
+        if (!parser) { failure_kind = ContentFailureKind::OutOfMemory; error = "XML parser allocation failed"; return; }
         unsigned long salt = 0;
 #ifdef ESP_PLATFORM
         esp_fill_random(&salt, sizeof(salt));
 #else
-        if (RAND_bytes(reinterpret_cast<unsigned char*>(&salt), sizeof(salt)) != 1) { error = "XML hash entropy failed"; return; }
+        if (RAND_bytes(reinterpret_cast<unsigned char*>(&salt), sizeof(salt)) != 1) { failure_kind = ContentFailureKind::IoError; error = "XML hash entropy failed"; return; }
 #endif
         XML_SetHashSalt(parser, salt ? salt : 1);
         XML_SetUserData(parser, this);
@@ -444,7 +463,7 @@ struct Xml {
         XML_SetProcessingInstructionHandler(parser, [](void* opaque, const char*, const char*) { auto& x = *static_cast<Xml*>(opaque); if (x.boundary) x.boundary(); x.complete_event(); });
     }
     ~Xml() { if (parser) XML_ParserFree(parser); }
-    void stop(const std::string& message) { if (error.empty()) error = message; if (parser) XML_StopParser(parser, XML_FALSE); }
+    void stop(const std::string& message, ContentFailureKind kind = ContentFailureKind::InvalidFormat) { if (error.empty()) { error = message; failure_kind = kind; } if (parser) XML_StopParser(parser, XML_FALSE); }
     // Expat may deliver additional callbacks after suspension; finish each event in full.
     void complete_event() {
         if (!html || XML_GetCurrentByteIndex(parser) < html_prefix_bytes) {
@@ -462,6 +481,7 @@ struct Xml {
     }
     bool parse_status(XML_Status status) {
         if (status != XML_STATUS_ERROR) return error.empty();
+        if (XML_GetErrorCode(parser) == XML_ERROR_NO_MEMORY) failure_kind = ContentFailureKind::OutOfMemory;
         if (error.empty()) error = std::string("Invalid XML: ") + XML_ErrorString(XML_GetErrorCode(parser)) + " (line " + std::to_string(XML_GetCurrentLineNumber(parser)) + ", column " + std::to_string(XML_GetCurrentColumnNumber(parser)) + ")";
         return false;
     }
@@ -516,7 +536,7 @@ struct Xml {
         bytes += count;
         if (bytes > kMaxXmlBytes) { stop("XML byte limit exceeded"); return false; }
         if (html) {
-            if (!memory_room(512U * 1024)) { stop(kChapterMemoryError); return false; }
+            if (!memory_room(512U * 1024)) { stop(kChapterMemoryError, ContentFailureKind::OutOfMemory); return false; }
             source_utf8 = false; html_final = final;
             return normalized_feed(std::string_view(value, count), final);
         }
@@ -616,7 +636,7 @@ struct ChapterParser {
     }
     bool room(std::size_t bytes) {
         if (memory_room(bytes)) return true;
-        xml.stop(kChapterMemoryError);
+        xml.stop(kChapterMemoryError, ContentFailureKind::OutOfMemory);
         return false;
     }
     /** Appends to the chapter text; growth doubles the buffer while the old one is still held. */
@@ -1089,7 +1109,8 @@ struct EpubDocument::Impl {
     bool load_txt(Chapter& chapter, std::string& error, ChapterLoad detail, std::uint32_t wanted,
                   const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop,
                   const std::function<void(const Chapter&)>& visit);
-    bool parse(const std::string& path, Xml& xml, std::string& error, std::uint32_t max_bytes = kMaxXmlBytes, const std::function<bool()>& stop = {}) {
+    bool parse(const std::string& path, Xml& xml, std::string& error, std::uint32_t max_bytes = kMaxXmlBytes, const std::function<bool()>& stop = {}, ContentFailureKind* failure_kind = nullptr) {
+        const auto fail = content_failure_reporter(failure_kind);
         const StageTimer timer{"xml_read_inflate_parse", 0};
         const auto* entry = find_member(path);
         if (!entry) return fail(error, "Missing EPUB resource: " + path);
@@ -1143,9 +1164,9 @@ struct EpubDocument::Impl {
         timing.checkpoint();
         if (feed.cancelled || (stop && stop())) {
             xml.error = kChapterCancelled;
-            return fail(error, kChapterCancelled);
+            return fail(error, kChapterCancelled, ContentFailureKind::Cancelled);
         }
-        if (!extracted) return fail(error, xml.error.empty() ? "Invalid compressed EPUB resource: " + path : xml.error + ": " + path);
+        if (!extracted) return fail(error, xml.error.empty() ? "Invalid compressed EPUB resource: " + path : xml.error + ": " + path, xml.error.empty() ? zip_failure_kind(zip) : xml.failure_kind);
 #ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
         const auto started = ZipTiming::Clock::now();
 #endif
@@ -1154,7 +1175,7 @@ struct EpubDocument::Impl {
         const auto us = ZipTiming::elapsed(started);
         timing.xml_us += us; timing.xml_max_us = std::max(timing.xml_max_us, us);
 #endif
-        if (!finished) return fail(error, xml.error + ": " + path);
+        if (!finished) return fail(error, xml.error + ": " + path, xml.failure_kind);
         return true;
     }
 };
@@ -1186,10 +1207,11 @@ bool EpubDocument::open_verified(const std::string& path, const DocumentMetadata
     return open_impl(path, error, false, &copy, stop);
 }
 
-bool EpubDocument::open_impl(const std::string& path, std::string& error, bool cover_only, const DocumentMetadata* identity, const std::function<bool()>& stop) {
+bool EpubDocument::open_impl(const std::string& path, std::string& error, bool cover_only, const DocumentMetadata* identity, const std::function<bool()>& stop, ContentFailureKind* failure_kind) {
+    const auto fail = content_failure_reporter(failure_kind);
     if (txt_path(path)) {
         close(); error.clear();
-        if (cover_only) return fail(error, "TXT 没有内嵌封面");
+        if (cover_only) return fail(error, "TXT 没有内嵌封面", ContentFailureKind::MissingResource);
         if (stop && stop()) return fail(error, "TXT 读取已取消");
         std::unique_ptr<Impl> next(new Impl);
         next->file = std::fopen(path.c_str(), "rb");
@@ -1350,15 +1372,16 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
     const StageTimer timer{"epub_open", 0};
     epub_opens.fetch_add(1, std::memory_order_relaxed);
     close(); error.clear();
-    if (stop && stop()) return fail(error, "EPUB open cancelled");
+    if (stop && stop()) return fail(error, "EPUB open cancelled", ContentFailureKind::Cancelled);
     std::unique_ptr<Impl> next(new Impl);
     next->file = std::fopen(path.c_str(), "rb");
-    if (!next->file) return fail(error, "Cannot open EPUB");
-    if (std::fseek(next->file, 0, SEEK_END) != 0) return fail(error, "Cannot seek EPUB");
+    if (!next->file) return fail(error, "Cannot open EPUB", ContentFailureKind::IoError);
+    if (std::fseek(next->file, 0, SEEK_END) != 0) return fail(error, "Cannot seek EPUB", ContentFailureKind::IoError);
     const auto length = std::ftell(next->file);
+    if (length < 0) return fail(error, "Cannot seek EPUB", ContentFailureKind::IoError);
     if (length < 22 || static_cast<std::uint64_t>(length) > kMaxBook) return fail(error, "EPUB file size is invalid or exceeds 256 MiB");
     std::vector<unsigned char> tail(static_cast<std::size_t>(std::min<long>(length, 65557)));
-    if (Impl::read(next.get(), length - tail.size(), tail.data(), tail.size()) != tail.size()) return fail(error, "Cannot read ZIP directory");
+    if (Impl::read(next.get(), length - tail.size(), tail.data(), tail.size()) != tail.size()) return fail(error, "Cannot read ZIP directory", ContentFailureKind::IoError);
     bool directory_ok = false;
     for (std::size_t i = tail.size() - 22;; --i) {
         const auto* p = tail.data() + i;
@@ -1373,16 +1396,16 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
     next->zip.m_pRead = Impl::read; next->zip.m_pIO_opaque = next.get();
     next->zip.m_pAlloc = Impl::allocate; next->zip.m_pFree = Impl::release;
     next->zip.m_pRealloc = Impl::reallocate; next->zip.m_pAlloc_opaque = next.get();
-    if (!mz_zip_reader_init(&next->zip, length, 0)) return fail(error, "Invalid EPUB ZIP or ZIP memory limit exceeded");
+    if (!mz_zip_reader_init(&next->zip, length, 0)) return fail(error, "Invalid EPUB ZIP or ZIP memory limit exceeded", zip_failure_kind(next->zip));
     if (mz_zip_is_zip64(&next->zip) || mz_zip_reader_get_num_files(&next->zip) > 4096) return fail(error, "ZIP64 or oversized ZIP directory is unsupported");
     next->zip_entries = mz_zip_reader_get_num_files(&next->zip);
     next->zip_index.reset(static_cast<Impl::ZipEntry*>(std::calloc(next->zip_entries, sizeof(Impl::ZipEntry))));
-    if (!next->zip_index) return fail(error, "ZIP index allocation failed");
+    if (!next->zip_index) return fail(error, "ZIP index allocation failed", ContentFailureKind::OutOfMemory);
     {
         const StageTimer timer{"zip_index_build", 0};
         std::uint64_t total = 0;
         for (mz_uint i = 0; i < next->zip_entries; ++i) {
-            if (stop && stop()) return fail(error, "EPUB open cancelled");
+            if (stop && stop()) return fail(error, "EPUB open cancelled", ContentFailureKind::Cancelled);
             mz_zip_archive_file_stat stat{};
             if (!mz_zip_reader_file_stat(&next->zip, i, &stat)) return fail(error, "Invalid ZIP entry");
             const auto name_bytes = mz_zip_reader_get_filename(&next->zip, i, nullptr, 0);
@@ -1406,7 +1429,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
         auto* entries = next->zip_index.get();
         std::sort(entries, entries + next->zip_entries, [&](const auto& a, const auto& b) { return compare(a, b) < 0; });
         for (std::size_t i = 1; i < next->zip_entries; ++i) {
-            if (stop && stop()) return fail(error, "EPUB open cancelled");
+            if (stop && stop()) return fail(error, "EPUB open cancelled", ContentFailureKind::Cancelled);
             if (compare(entries[i - 1], entries[i]) == 0) return fail(error, "Unsafe or duplicate ZIP path");
         }
     }
@@ -1415,10 +1438,10 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
     mz_zip_archive_file_stat mime_stat{};
     const int mime_index = mz_zip_reader_locate_file(&next->zip, "mimetype", nullptr, 0);
     if (mime_index < 0) return fail(error, "Missing EPUB mimetype");
-    if (!mz_zip_reader_file_stat(&next->zip, mime_index, &mime_stat)) return fail(error, "Cannot read EPUB mimetype");
+    if (!mz_zip_reader_file_stat(&next->zip, mime_index, &mime_stat)) return fail(error, "Cannot read EPUB mimetype", zip_failure_kind(next->zip));
     if (mime_stat.m_is_directory) return fail(error, "Invalid EPUB mimetype");
     if (mime_stat.m_uncomp_size > sizeof(mime)) return fail(error, "EPUB mimetype exceeds limit");
-    if (!mz_zip_reader_extract_to_mem(&next->zip, mime_index, mime, sizeof(mime), 0)) return fail(error, "Cannot read EPUB mimetype");
+    if (!mz_zip_reader_extract_to_mem(&next->zip, mime_index, mime, sizeof(mime), 0)) return fail(error, "Cannot read EPUB mimetype", zip_failure_kind(next->zip));
     if (trim(std::string(mime, static_cast<std::size_t>(mime_stat.m_uncomp_size))) != "application/epub+zip")
         return fail(error, "Invalid EPUB mimetype");
     if (identity) {
@@ -1430,7 +1453,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
         Hash sha(false), md5(true); std::array<unsigned char, 8192> buffer{};
         if (std::fseek(next->file, 0, SEEK_SET) != 0) return fail(error, "Cannot hash EPUB");
         for (;;) {
-            if (stop && stop()) return fail(error, "EPUB open cancelled");
+            if (stop && stop()) return fail(error, "EPUB open cancelled", ContentFailureKind::Cancelled);
             const auto size = std::fread(buffer.data(), 1, buffer.size(), next->file);
             if (size && !sha.update(buffer.data(), size)) return fail(error, "SHA-256 failed");
             if (size < buffer.size()) { if (std::ferror(next->file)) return fail(error, "Cannot hash EPUB"); break; }
@@ -1450,7 +1473,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
             rootfile_found = true; package = attr(attrs, "full-path");
         }
     };
-    if (!next->parse("META-INF/container.xml", container, error, kMaxXmlBytes, stop)) return false;
+    if (!next->parse("META-INF/container.xml", container, error, kMaxXmlBytes, stop, failure_kind)) return false;
     std::string normalized;
     if (!path_parts(package, normalized) || package != normalized) return fail(error, "Invalid package path");
     PackageBudget budget;
@@ -1462,9 +1485,10 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
         std::vector<std::string> guide_covers, elements;
         std::string cover_id, text, metadata_name;
         unsigned metadata_depth = 0;
+        bool missing_package = false;
         Xml opf;
         opf.start = [&](const std::string& name, const char** attrs) {
-            if (elements.empty() && name != "package") { opf.stop("Missing EPUB package"); return; }
+            if (elements.empty() && name != "package") { missing_package = true; opf.stop("Missing EPUB package"); return; }
             const auto parent = elements.empty() ? std::string{} : elements.back();
             if (parent == "metadata") {
                 if (name == "meta" && attr(attrs, "name") == "cover") budget.replace(opf, cover_id, attr(attrs, "content"));
@@ -1506,12 +1530,12 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
             }
             elements.pop_back();
         };
-        if (!next->parse(package, opf, error, kMaxXmlBytes, stop))
-            return opf.error == "Missing EPUB package" ? fail(error, opf.error) : false;
+        if (!next->parse(package, opf, error, kMaxXmlBytes, stop, failure_kind))
+            return missing_package ? fail(error, opf.error) : false;
         struct Item { std::string path, type, properties; };
         std::map<std::string, Item> manifest;
         for (auto& item : items) {
-            if (stop && stop()) return fail(error, kChapterCancelled);
+            if (stop && stop()) return fail(error, kChapterCancelled, ContentFailureKind::Cancelled);
             std::string resource, fragment;
             if (item.id.empty() || manifest.count(item.id) || !resolve(package, item.href, resource, fragment) || !fragment.empty()) return fail(error, "Invalid manifest resource");
             if (!budget.replace(opf, item.href, std::move(resource))) return fail(error, opf.error);
@@ -1522,13 +1546,13 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
         }
         if (next->cover.empty() && manifest.count(cover_id)) budget.replace(opf, next->cover, manifest.at(cover_id).path);
         for (const auto& href : guide_covers) {
-            if (stop && stop()) return fail(error, kChapterCancelled);
+            if (stop && stop()) return fail(error, kChapterCancelled, ContentFailureKind::Cancelled);
             std::string resource, fragment;
             if (resolve(package, href, resource, fragment)) budget.replace(opf, next->cover_page, std::move(resource));
         }
         const StageTimer spine_timer{"epub_spine_validate", 0};
         for (auto& ref : itemrefs) {
-            if (stop && stop()) return fail(error, kChapterCancelled);
+            if (stop && stop()) return fail(error, kChapterCancelled, ContentFailureKind::Cancelled);
             const auto& id = ref.first; auto item = manifest.find(id);
             if (item == manifest.end() || item->second.type != "application/xhtml+xml") return fail(error, "Unsupported or missing spine resource");
             const auto* entry = next->find_member(item->second.path);
@@ -1622,31 +1646,33 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
     return true;
 }
 
-bool EpubDocument::read_cover(const std::string& path, std::vector<std::uint8_t>& bytes, std::string& error, const std::function<bool()>& stop) {
+bool EpubDocument::read_cover(const std::string& path, std::vector<std::uint8_t>& bytes, std::string& error, const std::function<bool()>& stop, ContentFailureKind* failure_kind) {
+    ContentFailureKind local_failure;
+    if (!failure_kind) failure_kind = &local_failure;
+    const auto fail = content_failure_reporter(failure_kind);
     bytes.clear(); error.clear();
+    if (stop && stop()) return fail(error, kChapterCancelled, ContentFailureKind::Cancelled);
     EpubDocument book;
-    if (!book.open_impl(path, error, true, nullptr, stop)) return false;
-    const auto unavailable = [&error] {
-        return error == "Image allocation unavailable" || error == "Cannot read EPUB image";
-    };
-    if (!book.impl_->cover.empty() && book.read_image(book.impl_->cover, bytes, error, stop)) return true;
+    if (!book.open_impl(path, error, true, nullptr, stop, failure_kind)) return false;
+    const auto unavailable = [failure_kind] { return content_failure_is_retryable(*failure_kind); };
+    if (!book.impl_->cover.empty() && book.read_image(book.impl_->cover, bytes, error, stop, failure_kind)) return true;
     // A transient failure of a declared image must not become a negative result from fallback probing.
     if (unavailable()) return false;
-    if (stop && stop()) return fail(error, kChapterCancelled);
+    if (stop && stop()) return fail(error, kChapterCancelled, ContentFailureKind::Cancelled);
     Chapter unused;
     const auto resource = book.impl_->cover_page.empty() ? book.impl_->spine.front().resource : book.impl_->cover_page;
-    if (!book.impl_->cover_page.empty() && book.read_image(resource, bytes, error, stop)) return true;
+    if (!book.impl_->cover_page.empty() && book.read_image(resource, bytes, error, stop, failure_kind)) return true;
     if (unavailable()) return false;
-    if (stop && stop()) return fail(error, kChapterCancelled);
+    if (stop && stop()) return fail(error, kChapterCancelled, ContentFailureKind::Cancelled);
     error.clear();
     // A cover page is a single image; a page long enough to span parts is not one.
     ChapterParser parser(unused, resource);
-    if (!book.impl_->parse(resource, parser.xml, error, 262144, stop)) return false;
+    if (!book.impl_->parse(resource, parser.xml, error, 262144, stop, failure_kind)) return false;
     parser.finish_block();
     const auto& chapter = parser.chapter;
     if (parser.part != 0 || chapter.images.size() != 1 || chapter.blocks.size() != 1 || chapter.blocks.front().kind != BlockKind::Image)
-        return fail(error, "EPUB has no supported cover");
-    return book.read_image(chapter.images.front().resource, bytes, error, stop);
+        return fail(error, "EPUB has no supported cover", ContentFailureKind::MissingResource);
+    return book.read_image(chapter.images.front().resource, bytes, error, stop, failure_kind);
 }
 
 bool chapter_memory_available(std::size_t bytes) { return memory_room(bytes); }
@@ -2066,16 +2092,17 @@ bool EpubDocument::chapter_index_for(const std::string& resource, std::size_t& i
     return false;
 }
 bool EpubDocument::read_image(const std::string& resource, std::vector<std::uint8_t>& bytes, std::string& error,
-                              const std::function<bool()>& stop) {
+                              const std::function<bool()>& stop, ContentFailureKind* failure_kind) {
+    const auto fail = content_failure_reporter(failure_kind);
     const StageTimer timer{"image_read_inflate", 0};
     bytes.clear(); error.clear();
-    if (stop && stop()) return fail(error, "Image load cancelled");
+    if (stop && stop()) return fail(error, "Image load cancelled", ContentFailureKind::Cancelled);
     std::string canonical;
     if (!impl_->file || resource.empty() || !path_parts(resource, canonical) || canonical != resource) return fail(error, "Invalid internal image path");
     const auto* entry = impl_->find_member(resource);
-    if (!entry) return fail(error, "Missing EPUB image");
+    if (!entry) return fail(error, "Missing EPUB image", ContentFailureKind::MissingResource);
     if (!entry->bytes || entry->bytes > 2 * 1024 * 1024) return fail(error, "EPUB image exceeds 2 MiB limit");
-    if (!platform_memory_room(entry->bytes)) return fail(error, "Image allocation unavailable");
+    if (!platform_memory_room(entry->bytes)) return fail(error, "Image allocation unavailable", ContentFailureKind::OutOfMemory);
     bytes.resize(entry->bytes);
     struct Output { std::vector<std::uint8_t>& bytes; const std::function<bool()>& stop; bool cancelled = false; } output{bytes, stop};
     const bool extracted = mz_zip_reader_extract_to_callback(&impl_->zip, entry->member,
@@ -2088,11 +2115,11 @@ bool EpubDocument::read_image(const std::string& resource, std::vector<std::uint
         }, &output, 0);
     if (!extracted || output.cancelled || (stop && stop())) {
         bytes.clear();
-        if (output.cancelled || (stop && stop())) return fail(error, "Image load cancelled");
+        if (output.cancelled || (stop && stop())) return fail(error, "Image load cancelled", ContentFailureKind::Cancelled);
         const auto zip_error = mz_zip_get_last_error(&impl_->zip);
         if (zip_error == MZ_ZIP_FILE_READ_FAILED || zip_error == MZ_ZIP_FILE_SEEK_FAILED)
-            return fail(error, "Cannot read EPUB image");
-        if (zip_error == MZ_ZIP_ALLOC_FAILED) return fail(error, "Image allocation unavailable");
+            return fail(error, "Cannot read EPUB image", ContentFailureKind::IoError);
+        if (zip_error == MZ_ZIP_ALLOC_FAILED) return fail(error, "Image allocation unavailable", ContentFailureKind::OutOfMemory);
         return fail(error, "Invalid compressed EPUB image");
     }
     const bool png = bytes.size() >= 8 && std::memcmp(bytes.data(), "\x89PNG\r\n\x1a\n", 8) == 0;

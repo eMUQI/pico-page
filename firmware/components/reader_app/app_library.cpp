@@ -264,7 +264,7 @@ void ReaderApp::Impl::draw_library(bool decode, bool keep_cover_attempts) {
     if (async_content) cancel_covers();
     if (!keep_cover_attempts) {
         cover_attempts = 0; cover_retry_after = {};
-        if (message == "封面暂未生成，可继续阅读") message.clear();
+        cover_notice.clear();
     }
     decode = decode || display.busy();
     bool undecoded = false;

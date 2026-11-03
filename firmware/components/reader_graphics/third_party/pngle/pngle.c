@@ -115,6 +115,7 @@ struct _pngle_t {
 
 	// misc
 	const char *error;
+	int memory_error;
 	void *user_data;
 	uint8_t rgba[4];
 
@@ -171,6 +172,7 @@ void pngle_reset(pngle_t *pngle)
 
 	pngle->state = PNGLE_STATE_INITIAL;
 	pngle->error = "No error";
+	pngle->memory_error = 0;
 
 	if (pngle->scanline_ringbuf) free(pngle->scanline_ringbuf);
 	if (pngle->palette) free(pngle->palette);
@@ -216,6 +218,8 @@ void pngle_destroy(pngle_t *pngle)
 		free(pngle);
 	}
 }
+
+int pngle_memory_error(pngle_t *pngle) { return pngle && pngle->memory_error; }
 
 const char *pngle_error(pngle_t *pngle)
 {
@@ -411,7 +415,7 @@ static int set_interlace_pass(pngle_t *pngle, uint_fast8_t pass)
 	pngle->scanline_ringbuf_size = scanline_stride + bytes_per_pixel * 2; // 2 rooms for c/x and a
 
 	if (pngle->scanline_ringbuf) free(pngle->scanline_ringbuf);
-	if ((pngle->scanline_ringbuf = (uint8_t *)PNGLE_CALLOC(pngle->scanline_ringbuf_size, 1, "scanline ringbuf")) == NULL) return PNGLE_ERROR("Insufficient memory");
+	if ((pngle->scanline_ringbuf = (uint8_t *)PNGLE_CALLOC(pngle->scanline_ringbuf_size, 1, "scanline ringbuf")) == NULL) return (pngle->memory_error = 1, PNGLE_ERROR("PNG working buffer unavailable"));
 
 	pngle->drawing_x = interlace_off_x[pngle->interlace_pass];
 	pngle->drawing_y = interlace_off_y[pngle->interlace_pass];
@@ -434,7 +438,7 @@ static int setup_gamma_table(pngle_t *pngle, uint32_t png_gamma)
 	uint16_t maxval = MAXVAL(pngle);
 
 	pngle->gamma_table = (uint8_t *)PNGLE_CALLOC(1, maxval + 1, "gamma table");
-	if (!pngle->gamma_table) return PNGLE_ERROR("Insufficient memory");
+	if (!pngle->gamma_table) return (pngle->memory_error = 1, PNGLE_ERROR("PNG working buffer unavailable"));
 
 	for (int i = 0; i < maxval + 1; i++) {
 		pngle->gamma_table[i] = (uint8_t)floor(pow(i / (double)maxval, 100000.0 / png_gamma / pngle->display_gamma) * 255.0 + 0.5);
@@ -779,7 +783,7 @@ static int pngle_feed_internal(pngle_t *pngle, const uint8_t *buf, size_t len)
 
 			if (pngle->chunk_remain % 3) return PNGLE_ERROR("Invalid PLTE chunk size");
 			if (pngle->chunk_remain / 3 > MIN(256, (1UL << pngle->hdr.depth))) return PNGLE_ERROR("Too many palettes in PLTE");
-			if ((pngle->palette = (uint8_t *)PNGLE_CALLOC(pngle->chunk_remain / 3, 3, "palette")) == NULL) return PNGLE_ERROR("Insufficient memory");
+			if ((pngle->palette = (uint8_t *)PNGLE_CALLOC(pngle->chunk_remain / 3, 3, "palette")) == NULL) return (pngle->memory_error = 1, PNGLE_ERROR("PNG working buffer unavailable"));
 			pngle->n_palettes = 0;
 			break;
 
@@ -808,7 +812,7 @@ static int pngle_feed_internal(pngle_t *pngle, const uint8_t *buf, size_t len)
 			default:
 				return PNGLE_ERROR("tRNS chunk is prohibited on the color type");
 			}
-			if ((pngle->trans_palette = (uint8_t *)PNGLE_CALLOC(pngle->chunk_remain, 1, "trans palette")) == NULL) return PNGLE_ERROR("Insufficient memory");
+			if ((pngle->trans_palette = (uint8_t *)PNGLE_CALLOC(pngle->chunk_remain, 1, "trans palette")) == NULL) return (pngle->memory_error = 1, PNGLE_ERROR("PNG working buffer unavailable"));
 			pngle->n_trans_palettes = 0;
 			break;
 

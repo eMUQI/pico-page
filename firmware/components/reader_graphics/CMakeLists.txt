@@ -34,7 +34,7 @@ else()
     add_library(reader_graphics graphics.cpp ${image_sources} ${ft_sources})
     target_include_directories(reader_graphics PUBLIC include
         PRIVATE "${ft_source}/include" "." "${CMAKE_CURRENT_BINARY_DIR}" ${image_includes})
-    target_link_libraries(reader_graphics PRIVATE reader_document)
+    target_link_libraries(reader_graphics PUBLIC reader_core PRIVATE reader_document)
     set(graphics_target reader_graphics)
     set_source_files_properties(graphics.cpp image.cpp qr.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")
 endif()

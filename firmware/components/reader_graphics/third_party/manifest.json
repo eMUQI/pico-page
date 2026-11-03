@@ -3,15 +3,15 @@
     "path": "pngle/pngle.c",
     "commit": "b1c68193f1d3f8642b3e0e095d457a828038e6fb",
     "upstream_sha256": "cfd047df6464ac299ecd47aeb13fecfb55f1d841da56dc57085248ef43655049",
-    "local_sha256": "0a3543574b1b9c1da4de8f75afda01d1c6c5674c5ca4e81fa6fecac6a3aa0bfe",
+    "local_sha256": "5b14ca1e9c669ce2eaf6bd23aeb98dd4f23f879ccd463404069ab16e5c95e62a",
     "modified": true
   },
   {
     "path": "pngle/pngle.h",
     "commit": "b1c68193f1d3f8642b3e0e095d457a828038e6fb",
     "upstream_sha256": "d8aa264f80cdd884c02ca1e28b696e8bbfbc16074c9c5265fcec4463f563bb17",
-    "local_sha256": "d8aa264f80cdd884c02ca1e28b696e8bbfbc16074c9c5265fcec4463f563bb17",
-    "modified": false
+    "local_sha256": "41d33d37514d4c744b42cdbaf83e21ddaa8802aefdece017f6211341b8a92c20",
+    "modified": true
   },
   {
     "path": "pngle/LICENSE",

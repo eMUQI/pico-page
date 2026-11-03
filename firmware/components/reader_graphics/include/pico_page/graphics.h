@@ -1,4 +1,5 @@
 #pragma once
+#include "pico_page/content_failure.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -198,9 +199,10 @@ inline constexpr char kImageCancelled[] = "Image decode cancelled";
  * false with kImageCancelled and may leave partial pixels after output begins. When stop is
  * provided, use an unpublished destination and discard its contents on cancellation.
  */
+/** Optional failure_kind is reset on entry and set at the failure source; success reports None. */
 bool render_image(Canvas& canvas, const std::vector<std::uint8_t>& encoded,
                   int x, int y, int width, int height, std::string& error, bool crop = false,
-                  const std::function<bool()>& stop = {});
+                  const std::function<bool()>& stop = {}, ContentFailureKind* failure_kind = nullptr);
 
 /** Decode a centered, fitted PNG into interleaved 8-bit gray/alpha pairs. Padding is transparent.
  * On failure, clears layer. has_alpha reports transparency in source pixels, excluding padding.
@@ -208,7 +210,7 @@ bool render_image(Canvas& canvas, const std::vector<std::uint8_t>& encoded,
  */
 bool decode_png_layer(const std::vector<std::uint8_t>& encoded, int width, int height,
                       std::string& layer, bool& has_alpha, std::string& error,
-                      const std::function<bool()>& stop = {});
+                      const std::function<bool()>& stop = {}, ContentFailureKind* failure_kind = nullptr);
 
 /** Streams a fitted PNG without an encoded-file or full-layer allocation.
  * read supplies exact bounded byte ranges. paint receives final, disjoint destination rectangles
@@ -221,7 +223,7 @@ bool decode_png_stream(std::size_t size,
                        int width, int height,
                        const std::function<void(int, int, int, int, std::uint8_t, std::uint8_t)>& paint,
                        ImageBox& painted, bool& has_alpha, std::string& error,
-                       const std::function<bool()>& stop = {});
+                       const std::function<bool()>& stop = {}, ContentFailureKind* failure_kind = nullptr);
 
 /** Blend complete rows of a gray/alpha layer into an unpublished canvas. Returns false for
  * invalid dimensions, payload or row bounds without modifying the canvas. Pixels use 0..15 gray.

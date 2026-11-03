@@ -19,8 +19,11 @@
 #endif
 
 namespace pico_page {
-/** Returns whether a failed cover read or decode confirms an unusable source rather than a temporary failure. */
-bool cover_failure_is_permanent(bool image_read, const std::string& error);
+/** Negative cover payload binds a definitive failure to SHA-256, independent of path timestamps. */
+inline constexpr std::size_t kCoverFailureBytes = 71;
+std::string cover_failure_payload(const std::string& identity, ContentFailureKind kind);
+ContentFailureKind cached_cover_failure(std::string_view payload, const std::string& identity);
+
 inline constexpr char kTxtUtf8Revision[] = "txt-utf8-v1";
 inline constexpr char kTxtGb18030Revision[] = "txt-gb18030-v1";
 inline constexpr char kTxtUtf16LeRevision[] = "txt-utf16le-v1";
@@ -264,8 +267,11 @@ public:
         bool last_book_saved = false;
         /** SleepCover: a valid pixel or negative cache entry was read or successfully committed. */
         bool cache_finished = false;
-        /** LockScreen: cancellation, timeout or resource failure permits an idle retry. */
-        bool retryable_failure = false;
+        /** Cover/image preparation outcome; a usable image may coexist with an optional cache I/O failure.
+         * LibraryCovers reports the last failed item; covers retains each item's availability.
+         */
+        ContentFailureKind failure_kind = ContentFailureKind::None;
+        bool retryable_failure() const { return content_failure_is_retryable(failure_kind); }
         /** LockScreen: Request::lock_screen_shown was committed as the rotation cursor. */
         bool cursor_saved = false;
         std::optional<PageCache> page_cache;

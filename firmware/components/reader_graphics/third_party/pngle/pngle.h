@@ -48,6 +48,8 @@ pngle_t *pngle_new();
 void pngle_destroy(pngle_t *pngle);
 void pngle_reset(pngle_t *pngle); // clear its internal state (not applied to pngle_set_* functions)
 const char *pngle_error(pngle_t *pngle);
+/* Nonzero only when decoding failed to allocate memory; reset by pngle_reset. */
+int pngle_memory_error(pngle_t *pngle);
 int pngle_feed(pngle_t *pngle, const void *buf, size_t len); // returns -1: On error, 0: Need more data, n: n bytes eaten
 
 uint32_t pngle_get_width(pngle_t *pngle);

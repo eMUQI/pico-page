@@ -1,4 +1,5 @@
 #pragma once
+#include "pico_page/content_failure.h"
 
 #include "pico_page/record.h"
 #include <cstddef>
@@ -271,15 +272,16 @@ public:
     bool chapter_index_for(const std::string& resource, std::size_t& index) const;
     /** Read an internal PNG/JPEG or GIF resource (GIF rendering uses its first frame), at most 2 MiB; output is cleared on failure. */
     bool read_image(const std::string& resource, std::vector<std::uint8_t>& bytes, std::string& error,
-                    const std::function<bool()>& stop = {});
+                    const std::function<bool()>& stop = {}, ContentFailureKind* failure_kind = nullptr);
     /** Read a declared cover or single-image cover page without hashing the book or changing a reading session.
      * PNG/JPEG/GIF output is bounded to 2 MiB and cleared on failure.
+     * Optional failure_kind reports the source failure independently of error text; success reports None.
      */
     static bool read_cover(const std::string& path, std::vector<std::uint8_t>& bytes, std::string& error,
-                           const std::function<bool()>& stop = {});
+                           const std::function<bool()>& stop = {}, ContentFailureKind* failure_kind = nullptr);
 private:
     bool open_impl(const std::string& path, std::string& error, bool cover_only,
-                   const DocumentMetadata* identity = nullptr, const std::function<bool()>& stop = {});
+                   const DocumentMetadata* identity = nullptr, const std::function<bool()>& stop = {}, ContentFailureKind* failure_kind = nullptr);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

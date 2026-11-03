@@ -131,7 +131,9 @@ void ReaderApp::Impl::poll_covers() {
             cover_retry_after = std::chrono::steady_clock::now() + std::chrono::seconds(2);
             if (changed || cover_attempts >= kCoverAttempts) {
                 if (std::any_of(job->result.covers.begin(), job->result.covers.end(), [](const auto& pixels) { return !pixels; }) &&
-                    cover_attempts >= kCoverAttempts) message = "封面暂未生成，可继续阅读";
+                    cover_attempts >= kCoverAttempts) {
+                    message.clear(); cover_notice = "封面暂未生成，可继续阅读";
+                }
                 draw_library(false, true); overlay();
             } else pending_covers = std::move(job->request);
         }
@@ -144,7 +146,7 @@ void ReaderApp::Impl::poll_covers() {
         pending_covers = std::move(cover_job->request); cover_job.reset();
         cover_retry_after = std::chrono::steady_clock::now() + std::chrono::seconds(2);
         if (cover_attempts >= kCoverAttempts) {
-            message = "封面暂未生成，可继续阅读";
+            message.clear(); cover_notice = "封面暂未生成，可继续阅读";
             draw_library(false, true); overlay();
         }
     }
@@ -465,7 +467,7 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
         draw_lock_screens(); overlay(); return;
     }
     if (request.kind == ContentJob::Kind::LockScreenPreview) {
-        content_loading = false; custom_prepare_finished = false;
+        content_loading = false; custom_prepare_finished = false; custom_prepare_attempts = 0;
         if (!job->result.image) { draw_power("图片无法预览，请检查图片或稍后重试。"); overlay(); return; }
         canvas = std::move(*job->result.image);
         view = View::LockScreenPreview; hits.clear();
@@ -614,7 +616,7 @@ void ReaderApp::Impl::poll_counting_job() {
         if (!result.error.empty())
             ESP_LOGW("reader_app", "Lock screen result: prepare=%d overlay=%d cached=%d image=%d retryable=%d error=%s",
                 request.lock_screen_prepare, request.sleep_overlay, result.cache_finished,
-                !!result.image, result.retryable_failure, result.error.c_str());
+                !!result.image, result.retryable_failure(), result.error.c_str());
 #endif
         if (result.cursor_saved && request.lock_screen_shown == custom_rotation_shown) custom_rotation_shown.clear();
         if (settings.sleep_screen != "custom" || request.sleep_image != settings.sleep_image || request.sleep_overlay != settings.sleep_overlay) return;
@@ -625,7 +627,7 @@ void ReaderApp::Impl::poll_counting_job() {
             custom_notice = custom_sleep_image ? "" : result.error.empty() ? "休眠图片尚未就绪" : result.error;
         }
         if (request.lock_screen_prepare) {
-            custom_prepare_finished = result.cache_finished || !result.retryable_failure;
+            custom_prepare_finished = result.cache_finished || !result.retryable_failure();
             custom_retry_at = result.cache_finished ? std::chrono::steady_clock::time_point{} :
                 std::chrono::steady_clock::now() + std::chrono::seconds(5);
         }

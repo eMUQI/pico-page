@@ -527,6 +527,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::uint64_t cover_generation = 0;
     static constexpr unsigned kCoverAttempts = 3;
     unsigned cover_attempts = 0;
+    std::string cover_notice;
     std::chrono::steady_clock::time_point cover_retry_after{};
     void cancel_covers() {
         ++cover_generation; pending_covers.reset(); missing_covers.clear();
@@ -1275,10 +1276,13 @@ struct ReaderApp::Impl final : DisplayBackend {
         center(label, x, y + (h - 28) / 2 - 3, w, 28);
         hits.push_back({x, y, w, h, id});
     }
+    const std::string &current_notice() const {
+        return view == View::Library && !cover_notice.empty() ? cover_notice : message;
+    }
     /** The page notice; drawing it marks it for removal by the next input. */
     const std::string &notice() {
-        notice_shown = notice_shown || !message.empty();
-        return message;
+        notice_shown = notice_shown || !current_notice().empty();
+        return current_notice();
     }
     static constexpr int footer_zone = 1120;
     /**
@@ -1666,12 +1670,12 @@ struct ReaderApp::Impl final : DisplayBackend {
                           std::to_string(static_cast<long long>(info.st_mtime)) + "\n",
                 static_cast<std::size_t>((width + 1) / 2) * height};
     }
-    /** Loads cached packed pixels; an entry holding only its header records a book without a usable cover. */
+    /** Loads positive cached pixels. Negative entries are verified against source content outside drawing. */
     bool cached_cover(const CoverEntry &entry, std::vector<std::uint8_t> &pixels) {
         std::string cached;
         if (store.load_cache(entry.name, entry.header.size() + entry.bytes, cached) != StoreStatus::Ok ||
             cached.compare(0, entry.header.size(), entry.header) != 0 ||
-            (cached.size() != entry.header.size() && cached.size() != entry.header.size() + entry.bytes))
+            cached.size() != entry.header.size() + entry.bytes)
             return false;
         pixels.assign(cached.begin() + static_cast<std::ptrdiff_t>(entry.header.size()), cached.end());
         return true;
@@ -1679,15 +1683,19 @@ struct ReaderApp::Impl final : DisplayBackend {
     /** Decodes the cover, caching only usable pixels or confirmed absence; temporary failures return no value. */
     std::optional<std::vector<std::uint8_t>> decode_cover(const std::string &relative, const CoverEntry &entry,
                                            int width, int height, bool crop) {
+        const auto identity = sha256_file(root + "/" + relative);
+        if (identity.empty()) return std::nullopt;
         graphics::Canvas thumbnail(width, height);
         std::vector<std::uint8_t> encoded;
         std::string detail;
-        const bool read = EpubDocument::read_cover(root + "/" + relative, encoded, detail);
+        ContentFailureKind failure_kind;
+        const bool read = EpubDocument::read_cover(root + "/" + relative, encoded, detail, {}, &failure_kind);
         const bool loaded = read &&
-            graphics::render_image(thumbnail, encoded, 0, 0, width, height, detail, crop);
-        if (!loaded && !cover_failure_is_permanent(read, detail)) return std::nullopt;
+            graphics::render_image(thumbnail, encoded, 0, 0, width, height, detail, crop, {}, &failure_kind);
+        if (!loaded && !content_failure_is_permanent(failure_kind)) return std::nullopt;
+        if (!loaded && sha256_file(root + "/" + relative) != identity) return std::nullopt;
         store.save_cache(entry.name, loaded ? entry.header + std::string(thumbnail.pixels().begin(), thumbnail.pixels().end())
-                                           : entry.header);
+                                           : entry.header + cover_failure_payload(identity, failure_kind));
         return loaded ? thumbnail.pixels() : std::vector<std::uint8_t>{};
     }
     /** Packed width x height cover pixels of a book file, or empty when it has no usable cover. */
@@ -2974,6 +2982,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::unique_ptr<std::uint8_t, decltype(&std::free)> sleep_wait_footer{nullptr, &std::free};
     bool sleep_wait_restore_pending = false;
     View sleep_wait_view = View::Library;
+    static constexpr unsigned kCustomPrepareAttempts = 3;
+    unsigned custom_prepare_attempts = 0;
     bool custom_prepare_finished = false, custom_sleep_attempted = false, custom_notice_pending = false;
     std::unique_ptr<graphics::Canvas> custom_sleep_image;
     void list_lock_screens() {
@@ -3062,6 +3072,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     bool custom_prepare_due() const {
         return settings.sleep_screen == "custom" && !custom_prepare_finished &&
+               custom_prepare_attempts < kCustomPrepareAttempts &&
                std::chrono::steady_clock::now() >= custom_retry_at && card_available && !usb_prepared &&
                !portal_live && !portal_requested && usb_action != UsbTransferAction::Start &&
                !sleep_cover_deadline && !power_menu_wait && !active_network && !network_worker_id &&
