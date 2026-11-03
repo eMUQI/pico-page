@@ -23,6 +23,23 @@ Linux `app_test` 使用链接包装注入当前书库目录的 `readdir` 与 `ls
 
 测试 EPUB 均由脚本生成；不提交个人书籍。`app_test` 使用 setup_fonts 下载的完整文楷字体。`tools/check_koreader_mapping.py` 是独立的真实 CREngine 兼容性对照，不是模拟期望值。墨水屏、TF 掉电、网络真实账户与双向接续仍需按 `docs/development/acceptance.md` 验收。
 
+## 大目录 EPUB 工作量对照
+
+Linux `large_epub_work` CTest 运行 `large_epub_probe`，复用构建时生成的原创 300／3,000 章 EPUB（303／3,030 项 NCX），另有带同一 2×2 PNG 的对应封面样本。覆盖直接开书、已开书末章跳转、真实异步 `ContentJob::Open` 恢复 75% 处的已保存锚点、读取／缺失封面、四本书的冷封面任务，以及空闲／受压的实际 `reclaim_caches`。受压场景只在 host 替代内存压力判定，页索引仍小于既有 1 MiB 上限；它不模拟 ESP-IDF 堆扫描耗时。
+
+```sh
+cmake --build build/host --target large_epub_probe --parallel 4
+build/host/large_epub_probe build/host/document-fixtures --measure 3 > /tmp/large-epub.csv 2> /tmp/large-epub.log
+python3 tools/summarize_reader_perf.py /tmp/large-epub.log
+ctest --test-dir build/host -R '^large_epub_work$' --output-on-failure
+```
+
+CSV 保留每个样本及 ZIP 初始化／建索引、OPF、spine、目录阶段的计数和单调微秒耗时。阶段耗时包含嵌套阶段，不应相加；阶段工作量归属最内层命名阶段。计数包括项目 ZIP 文件名 API 调用（含长度查询）、项目 ZIP 索引比较、spine 定位比较、解压回调提供的字节、提供给 XML 的字节、文档 ZIP 读取字节、页索引统计访问和回收访问。miniz 内部排序比较、完整身份摘要的直接文件读取不计入对应计数；其复杂度须结合源码判断。
+
+探针通过 Linux 链接包装和 C++ 分配替换统计普通／对齐 `new`、项目及静态依赖的 malloc/calloc/realloc/posix_memalign；固定指针表不递归分配。峰值为本次捕获中新申请且同时存活的请求字节，不含捕获前驻留对象、分配器开销及动态链接库内部的 C 分配，不能作为设备堆峰值。异步路径从启动计时到 join，包含 host 调度；OS 文件缓存未清，程序层封面缓存按轮清理。测量前后不要并行构建，原始全部样本使用 `min_us=0` 汇总。
+
+不带 `--measure` 时检查语义、取消、ZIP 工作量增长和受压回收访问上界；`--measure` 只关闭复杂度上界，允许在未修复基线上采样，其他断言保留。断言不依赖墙钟时间。当前正文、源锚点和保存记录必须保持，回收保留当前章页索引。host 埋点默认不捕获，在 ESP_PLATFORM 编译中完全移除；不改变固件任务、队列或堆查询。
+
 ## 整页图片缓存性能对照
 
 `image_cache_bench` 是按需构建的 host 探针，不加入默认构建或 CTest。它运行真实异步 `ContentJob::Image`，使用已有合成 EPUB 中的 2×2 RGBA PNG，缩放到 684×1216；每组先执行两轮预热，再采集默认 40 对冷／热样本。冷路径只删除应用的图片缓存，不清空操作系统文件缓存。每次检查成功输出、冷／热像素摘要一致，以及冷路径一次解码、热路径零次解码；失败返回非零。

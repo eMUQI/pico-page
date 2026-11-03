@@ -377,6 +377,9 @@ class ReaderApp {
     bool keyboard_visible() const;
 
   private:
+#ifndef ESP_PLATFORM
+    friend class LargeEpubProbe;
+#endif
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
