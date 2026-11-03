@@ -9,6 +9,7 @@
 #include "font_error_message.h"
 #include "reading_footer.h"
 #include "pico_page/stage_timer.h"
+#include "pico_page/host_work_probe.h"
 #include "pico_page/app.h"
 #include "pico_page/document.h"
 #include "pico_page/provision.h"
@@ -1969,12 +1970,19 @@ struct ReaderApp::Impl final : DisplayBackend {
         pages_complete = std::find(counted.begin(), counted.end(), false) == counted.end();
     }
 
+    /** Owned capacities below one chapter; the outer chapter vector is accounted separately. */
+    static std::size_t chapter_page_bytes(const PageIndices::value_type& parts) {
+        PP_HOST_WORK(host_work::add(host_work::PageIndexVisits);)
+        std::size_t bytes = parts.capacity() * sizeof(std::vector<std::uint32_t>);
+        for (const auto& starts : parts) {
+            PP_HOST_WORK(host_work::add(host_work::PageIndexVisits);)
+            bytes += starts.capacity() * sizeof(std::uint32_t);
+        }
+        return bytes;
+    }
     std::size_t page_index_bytes() const {
         std::size_t bytes = chapter_pages.capacity() * sizeof(decltype(chapter_pages)::value_type);
-        for (const auto& parts : chapter_pages) {
-            bytes += parts.capacity() * sizeof(std::vector<std::uint32_t>);
-            for (const auto& starts : parts) bytes += starts.capacity() * sizeof(std::uint32_t);
-        }
+        for (const auto& parts : chapter_pages) bytes += chapter_page_bytes(parts);
         return bytes;
     }
     bool add_counting_part() {
@@ -2015,7 +2023,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     static constexpr std::size_t cache_target = 4U * 1024 * 1024;
     std::uint64_t cache_evictions = 0;
-    CacheUsage cache_usage() const {
+    CacheUsage cache_usage(std::size_t page_index_size) const {
         CacheUsage usage;
         usage.body_bitmap = body_canvas ? body_canvas->pixels().capacity() : 0;
         if (next_page) usage.next_layout = next_page->glyphs.capacity() * sizeof(graphics::PositionedGlyph) +
@@ -2025,7 +2033,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         usage.next_chapter = prepared_chapter ? prepared_chapter_size_bytes : 0;
         usage.chapter_prefetch_hits = chapter_prefetch_hits;
         usage.chapter_stream = chapter_session ? chapter_stream_bytes : 0;
-        usage.page_index = page_index_bytes();
+        usage.page_index = page_index_size;
         for (const auto& cover : covers) usage.cover_pixels += cover.pixels.capacity();
         if (detail_cover) usage.cover_pixels += detail_cover->pixels().capacity();
         if (custom_sleep_image) usage.cover_pixels += custom_sleep_image->pixels().capacity();
@@ -2044,6 +2052,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             (usage.ui_advances + usage.body_advances + usage.library_advances) * (sizeof(std::uint64_t) + sizeof(int));
         return usage;
     }
+    CacheUsage cache_usage() const { return cache_usage(page_index_bytes()); }
     void reclaim_caches();
     bool background_content_ready() const {
         return !sleep_cover_deadline && !power_menu_wait && !session.needs_save() && view == View::Reading && !image_viewing && has_book() && card_available && !usb_prepared &&

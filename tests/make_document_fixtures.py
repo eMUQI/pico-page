@@ -8,6 +8,31 @@ from pathlib import Path
 from make_epub_fixture import fixture_entries, write_fixture
 
 
+def large_epub_entries(chapters: int) -> dict[str, str | bytes]:
+    """Original 100-chapter volumes; one parent plus 100 child entries per volume."""
+    assert chapters in (300, 3000)
+    large = {name: value for name, value in fixture_entries().items()
+             if name in ("mimetype", "META-INF/container.xml")}
+    manifest = '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
+    spine = ''
+    points = []
+    for volume in range(chapters // 100):
+        points.append(f'<navPoint><navLabel><text>卷 {volume}</text></navLabel>'
+                      f'<content src="chapter{volume * 100}.xhtml"/>')
+        for chapter in range(volume * 100, (volume + 1) * 100):
+            manifest += f'<item id="c{chapter}" href="chapter{chapter}.xhtml" media-type="application/xhtml+xml"/>'
+            spine += f'<itemref idref="c{chapter}"/>'
+            points.append(f'<navPoint><navLabel><text>章 {chapter} &amp; 正文</text></navLabel>'
+                          f'<content src="chapter{chapter}.xhtml#body"/></navPoint>')
+            large[f'EPUB/chapter{chapter}.xhtml'] = (
+                f'<html xmlns="http://www.w3.org/1999/xhtml"><body><p id="body">正文 {chapter}</p></body></html>')
+        points.append('</navPoint>')
+    # The spine precedes the manifest to exercise order-independent OPF collection.
+    large['EPUB/package.opf'] = '<package><spine>' + spine + '</spine><manifest>' + manifest + '</manifest></package>'
+    large['EPUB/toc.ncx'] = '<ncx><navMap>' + ''.join(points) + '</navMap></ncx>'
+    return large
+
+
 def generate(directory: Path) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "sample.txt").write_bytes(("\ufeff" + "甲" * 16384 + "\r\n第二段😀\n" +
@@ -238,28 +263,20 @@ def generate(directory: Path) -> None:
         f'<item id="extra{i}" href="chapter1.xhtml" media-type="application/xhtml+xml" properties="' +
         'x' * 8000 + '"/>' for i in range(140)) + '</manifest>')
     write_fixture(directory / "opf-budget-strings.epub", excessive)
-    large = {name: value for name, value in fixture_entries().items()
-             if name in ("mimetype", "META-INF/container.xml")}
-    manifest = '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
-    spine = ''
-    points = []
-    for volume in range(30):
-        points.append(f'<navPoint><navLabel><text>卷 {volume}</text></navLabel>'
-                      f'<content src="chapter{volume * 100}.xhtml"/>')
-        for chapter in range(volume * 100, (volume + 1) * 100):
-            manifest += f'<item id="c{chapter}" href="chapter{chapter}.xhtml" media-type="application/xhtml+xml"/>'
-            spine += f'<itemref idref="c{chapter}"/>'
-            points.append(f'<navPoint><navLabel><text>章 {chapter} &amp; 正文</text></navLabel>'
-                          f'<content src="chapter{chapter}.xhtml#body"/></navPoint>')
-            large[f'EPUB/chapter{chapter}.xhtml'] = (
-                f'<html xmlns="http://www.w3.org/1999/xhtml"><body><p id="body">正文 {chapter}</p></body></html>')
-        points.append('</navPoint>')
-    # The spine precedes the manifest to exercise order-independent OPF collection.
-    large['EPUB/package.opf'] = '<package><spine>' + spine + '</spine><manifest>' + manifest + '</manifest></package>'
-    large['EPUB/toc.ncx'] = '<ncx><navMap>' + ''.join(points) + '</navMap></ncx>'
+    large = large_epub_entries(3000)
     assert len(large['EPUB/package.opf'].encode()) > 262144
     write_fixture(directory / "large-toc.epub", large)
     write_fixture(directory / "large-toc-reversed.epub", dict(reversed(list(large.items()))))
+    write_fixture(directory / "large-toc-small.epub", large_epub_entries(300))
+    for chapters in (300, 3000):
+        covered = large_epub_entries(chapters)
+        covered['EPUB/package.opf'] = covered['EPUB/package.opf'].replace('</manifest>',
+            '<item id="cover" href="cover.png" media-type="image/png" properties="cover-image"/></manifest>')
+        covered['EPUB/cover.png'] = bytes.fromhex(
+            '89504e470d0a1a0a0000000d494844520000000200000002080600000072b60d24'
+            '00000006624b474400ff00ff00ffa0bda7930000001549444154789c63606060f80f'
+            '020cff19408881010048c906fa001f0d6c0000000049454e44ae426082')
+        write_fixture(directory / f'large-cover-{chapters}.epub', covered)
     indexed = {name: value for name, value in fixture_entries().items()
                if name in ("mimetype", "META-INF/container.xml")}
     paths = ["Chapter.xhtml", "chapter.xhtml", "x" * 480 + "a.xhtml", "x" * 480 + "b.xhtml"]

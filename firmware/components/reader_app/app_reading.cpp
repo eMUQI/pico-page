@@ -135,8 +135,12 @@ void ReaderApp::Impl::footer() {
 void ReaderApp::Impl::reclaim_caches() {
     if (view != View::Reading || display.busy() || content_loading ||
         (counting_job && (counting_job->request.kind == ContentJob::Kind::SleepCover || counting_job->request.kind == ContentJob::Kind::LockScreen))) return;
+    // This owner alone changes page capacities during reclamation. Keep the subtotal local;
+    // pressure still observes every other cache and the same capability-heap queries.
+    auto page_bytes = page_index_bytes();
     const auto pressure = [&] {
-        if (cache_usage().retained > cache_target) return true;
+        if (cache_usage(page_bytes).retained > cache_target) return true;
+        PP_HOST_WORK(if (host_work::memory_pressure) return true;)
 #ifdef ESP_PLATFORM
         return heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 1536U * 1024 ||
                heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 512U * 1024;
@@ -161,7 +165,9 @@ void ReaderApp::Impl::reclaim_caches() {
     if (!covers.empty()) { covers.clear(); ++cache_evictions; }
     bool dropped = false;
     for (std::size_t i = chapter_pages.size(); i-- > 0 && pressure();) {
+        PP_HOST_WORK(host_work::add(host_work::ReclaimVisits);)
         if (i == chapter_index || chapter_pages[i].empty()) continue;
+        page_bytes -= chapter_page_bytes(chapter_pages[i]);
         decltype(chapter_pages)::value_type().swap(chapter_pages[i]);
         counted[i] = !document.spine()[i].linear; counted_live[i] = false;
         dropped = true; ++cache_evictions;

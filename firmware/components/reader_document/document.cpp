@@ -1,4 +1,5 @@
 #include "pico_page/stage_timer.h"
+#include "pico_page/host_work_probe.h"
 #include "pico_page/document.h"
 #include "gb18030.h"
 #include "expat.h"
@@ -1068,10 +1069,12 @@ struct EpubDocument::Impl {
         char name[512];
         const auto* found = std::lower_bound(begin, end, path, [&](const ZipEntry& entry, const std::string& target) {
             mz_zip_reader_get_filename(&zip, entry.member, name, sizeof(name));
+            PP_HOST_WORK(host_work::add(host_work::ZipComparisons);)
             return std::strcmp(name, target.c_str()) < 0;
         });
         if (found == end) return nullptr;
         mz_zip_reader_get_filename(&zip, found->member, name, sizeof(name));
+        PP_HOST_WORK(host_work::add(host_work::ZipComparisons);)
         return path == name ? found : nullptr;
     }
     std::vector<SpineItem> spine;
@@ -1094,6 +1097,7 @@ struct EpubDocument::Impl {
             self->read_timing->read_max_us = std::max(self->read_timing->read_max_us, us);
         }
 #endif
+        PP_HOST_WORK(host_work::add(host_work::SourceBytes, count);)
         self->source_read_bytes += count;
         return count;
     }
@@ -1150,6 +1154,7 @@ struct EpubDocument::Impl {
 #ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
                 const auto started = ZipTiming::Clock::now();
 #endif
+                PP_HOST_WORK(host_work::add(host_work::XmlBytes, size);)
                 feed.owner.xml_feed_bytes += size;
                 const bool parsed = feed.xml.feed(static_cast<const char*>(data) + offset, size, false);
 #ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
@@ -1396,13 +1401,17 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
     next->zip.m_pRead = Impl::read; next->zip.m_pIO_opaque = next.get();
     next->zip.m_pAlloc = Impl::allocate; next->zip.m_pFree = Impl::release;
     next->zip.m_pRealloc = Impl::reallocate; next->zip.m_pAlloc_opaque = next.get();
-    if (!mz_zip_reader_init(&next->zip, length, 0)) return fail(error, "Invalid EPUB ZIP or ZIP memory limit exceeded", zip_failure_kind(next->zip));
+    {
+        PP_HOST_WORK(const host_work::Stage zip_stage{"zip_init"};)
+        if (!mz_zip_reader_init(&next->zip, length, 0)) return fail(error, "Invalid EPUB ZIP or ZIP memory limit exceeded", zip_failure_kind(next->zip));
+    }
     if (mz_zip_is_zip64(&next->zip) || mz_zip_reader_get_num_files(&next->zip) > 4096) return fail(error, "ZIP64 or oversized ZIP directory is unsupported");
     next->zip_entries = mz_zip_reader_get_num_files(&next->zip);
     next->zip_index.reset(static_cast<Impl::ZipEntry*>(std::calloc(next->zip_entries, sizeof(Impl::ZipEntry))));
     if (!next->zip_index) return fail(error, "ZIP index allocation failed", ContentFailureKind::OutOfMemory);
     {
         const StageTimer timer{"zip_index_build", 0};
+        PP_HOST_WORK(const host_work::Stage index_stage{"zip_index_build"};)
         std::uint64_t total = 0;
         for (mz_uint i = 0; i < next->zip_entries; ++i) {
             if (stop && stop()) return fail(error, "EPUB open cancelled", ContentFailureKind::Cancelled);
@@ -1424,6 +1433,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
             char left[512], right[512];
             mz_zip_reader_get_filename(&next->zip, a.member, left, sizeof(left));
             mz_zip_reader_get_filename(&next->zip, b.member, right, sizeof(right));
+            PP_HOST_WORK(host_work::add(host_work::ZipComparisons);)
             return std::strcmp(left, right);
         };
         auto* entries = next->zip_index.get();
@@ -1479,6 +1489,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
     PackageBudget budget;
     std::string navigation, ncx;
     {
+        PP_HOST_WORK(const host_work::Stage opf_stage{"epub_opf"};)
         struct RawItem { std::string id, href, type, properties; };
         std::vector<RawItem> items;
         std::vector<std::pair<std::string, bool>> itemrefs;
@@ -1551,6 +1562,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
             if (resolve(package, href, resource, fragment)) budget.replace(opf, next->cover_page, std::move(resource));
         }
         const StageTimer spine_timer{"epub_spine_validate", 0};
+        PP_HOST_WORK(const host_work::Stage spine_stage{"epub_spine_validate"};)
         for (auto& ref : itemrefs) {
             if (stop && stop()) return fail(error, kChapterCancelled, ContentFailureKind::Cancelled);
             const auto& id = ref.first; auto item = manifest.find(id);
@@ -1573,6 +1585,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
     if (budget.bytes > kMaxPackageStrings || fallback_bytes > kMaxPackageStrings - budget.bytes)
         return fail(error, "Package/navigation text limit exceeded");
     if (cover_only) { impl_ = std::move(next); return true; }
+    PP_HOST_WORK(const host_work::Stage toc_stage{"epub_toc"};)
     for (const auto* source : {&navigation, &ncx}) {
         if (source->empty() || !next->toc.empty()) continue;
         Xml xml;
@@ -2088,7 +2101,10 @@ bool EpubDocument::Impl::load_txt(Chapter& chapter, std::string& error, ChapterL
     return fail(error, "TXT 阅读位置不可用");
 }
 bool EpubDocument::chapter_index_for(const std::string& resource, std::size_t& index) const {
-    for (std::size_t i = 0; i < impl_->spine.size(); ++i) if (impl_->spine[i].resource == resource) { index = i; return true; }
+    for (std::size_t i = 0; i < impl_->spine.size(); ++i) {
+        PP_HOST_WORK(host_work::add(host_work::SpineComparisons);)
+        if (impl_->spine[i].resource == resource) { index = i; return true; }
+    }
     return false;
 }
 bool EpubDocument::read_image(const std::string& resource, std::vector<std::uint8_t>& bytes, std::string& error,
