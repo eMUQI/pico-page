@@ -1218,7 +1218,6 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
         if (!next->file) return fail(error, "无法打开 TXT 文件");
         if (std::fseek(next->file, 0, SEEK_END) != 0) return fail(error, "无法读取 TXT 文件");
         const auto length = std::ftell(next->file);
-    if (length < 0) return fail(error, "Cannot seek EPUB", ContentFailureKind::IoError);
         if (length <= 0 || static_cast<std::uint64_t>(length) > 64ULL * 1024 * 1024)
             return fail(error, "TXT 文件为空或超过 64 MiB");
         next->txt = true;
