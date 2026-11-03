@@ -1,4 +1,5 @@
 #include "pico_page/platform.h"
+#include "display_network_gate.h"
 #include "pico_page/diagnostics.h"
 #include "rtc_clock.h"
 #include "firmware_resume.h"

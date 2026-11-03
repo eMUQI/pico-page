@@ -1,8 +1,11 @@
 #pragma once
 
-#include "platform.h"
+#include "pico_page/platform_input.h"
 
-namespace pico_page::platform {
+namespace pico_page::input {
+
+using platform::Event;
+using platform::EventKind;
 
 /** Retains only power intents while a cancelled sleep restores the application. */
 class SleepInput {
@@ -29,4 +32,4 @@ private:
 };
 static_assert(sizeof(SleepInput) <= 3, "Sleep cancellation retains only power flags");
 
-} // namespace pico_page::platform
+} // namespace pico_page::input

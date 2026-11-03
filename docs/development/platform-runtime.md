@@ -1,15 +1,17 @@
 # Read Pico 运行时适配
 
-平台适配位于 `firmware/components/platform_read_pico/`；应用协调由 `reader_app` 完成。本页维护平台接口、资源交还、锁屏与 OTA 的运行规则；当前验证结果和待验收项统一见[开发状态](../development-status.md)。
+平台适配位于 `firmware/components/platform_read_pico/`；阅读用例由 `reader_app` 完成，ESP-IDF 应用循环与任务交接由 `reader_runtime` 编排。本页维护平台接口、资源交还、锁屏与 OTA 的运行规则；当前验证结果和待验收项统一见[开发状态](../development-status.md)。
 
 ## 接口与所有权
 
-`pico_page/platform.h` 提供单个 Read Pico 实例。`initialize()` 记录显示和输入的调用任务，`present()`、`poll()`、`refresh_card()` 和 `sleep()` 拒绝其他任务调用。显示提交为同步调用；调用方必须在返回前保持输入像素不变。平台层不持有阅读锚点、不保存进度、不解释 K2 的产品动作。网络接口另有独立的单一任务所有者，可由工作任务串行调用，避免阻塞显示和输入任务。
+`platform_contract` 的 `pico_page/platform.h` 聚合按能力拆分的接口；板级构建选择单个 Read Pico 实现。`initialize()` 记录显示和输入的调用任务，`present()`、`poll()`、`refresh_card()` 和 `sleep()` 拒绝其他任务调用。显示提交为同步调用；调用方必须在返回前保持输入像素不变。平台层不持有阅读锚点、不保存进度、不解释 K2 的产品动作。网络接口另有独立的单一任务所有者，可由工作任务串行调用，避免阻塞显示和输入任务。
 
 | 接口 | 当前行为 |
 |---|---|
 | `initialize(error)` | 初始化官方 EPD 板级后端、PMU、工厂 VCOM、触摸和 TF；TF 错误不阻止错误页面显示 |
+| `display_info()` | 无需初始化即可返回 684 × 1216 竖屏尺寸，不访问硬件或分配缓冲；运行入口先核对应用画布再初始化应用／呈现 |
 | `panel_ready()` | 指示显示驱动是否已取得有效工厂 VCOM 并完成缓冲初始化；不代表物理显示已验收 |
+| `card_mount_path()` | 返回配置路径 `/sdcard`，不表示挂载成功或授权访问 |
 | `card_root()` / `card_error()` | 返回当前有效的 `/sdcard` 挂载点或空指针及原因 |
 | `refresh_card(error)` | 调用方关闭所有文件后显式重新挂载；无格式化路径 |
 | `present(packed, size, full_clean, error)` | 接收 684×1216 竖屏 4bpp 帧，执行波形并报告驱动返回值和电源状态 |
@@ -52,6 +54,10 @@ PMU 命令仍由应用任务串行执行。每次尝试最多调用一次 `TIME_
 官方 PMU 文档注明复位后 `time_synced=0`，LSI 约有 ±1–2% 误差；接入 RTC 不构成完全断电保时或长期精度保证。ESP32 浅睡沿用系统时钟，不在每次唤醒重复读取 PMU。PMU 失效时仍能离线阅读；无有效系统时间时页脚显示「—」，网络流程继续按原规则要求可用时间才进行 TLS。
 
 ## 像素、刷新和输入
+
+契约只描述调用语义；当前 Read Pico 的 Gray16 使用默认 GL16 的 37 相，Gray8 使用 30 相的 8 级 GL16，全清理使用 GC16。`hold_unchanged_footer` 的当前布局边界是竖屏 `y >= 1128`，正文更新与方向效果保留该区域相同非白像素，白→白仍按源波形维护；清屏和恢复忽略保持标志。该边界随显示配置适配，不能从当前契约推断其他分辨率已可用。
+
+网络 worker 在持有显示／Flash 锁时成对调用 `guard_flash_io()`，避免 Flash cache 暂停打断触摸、PMU 和卡检测的 I²C 事务。输入采样器在接触附近加快采样、空闲时由中断唤醒；Flash 操作或休眠持有控制器锁时暂停。K1/K2/K3 在平台事件里是逻辑辅助键标识，Read Pico 将下方电容区域映射到它们。`TouchMoves` 只合并当前序列的移动事件，由采样队列锁序列化；应用长按、轻扫和休眠输入规则由 `reader_input` 解释。
 
 输入帧每行 342 字节，偶数 x 位于低半字节，奇数 x 位于高半字节，0 为黑色、15 为白色。平台将竖屏坐标变换为官方 1216×684 原生缓冲：`native_x = y`、`native_y = 683 - x`，对应上游 `EPD_ROT_INVERTED_PORTRAIT`。触摸控制器的显示区坐标直接采用竖屏坐标。
 
@@ -204,6 +210,8 @@ HTTP 只接受 HTTPS GET/PUT/POST，使用 ESP-IDF 系统证书包和主机名�
 本节维护设备升级、分区前提、下载校验、取消与回滚规则；发布和云端流程见[固件托管](firmware-hosting.md)，界面见[固件更新界面](ui-implementation.md#固件更新)。实际完成与未验收项见[开发状态](../development-status.md)，后续范围见[路线图 R11](../planning/roadmap.md#r11--ota-升级)。
 
 ### 分区与前提
+
+当前 `expected_image()` 校验 ESP32-S3 芯片标识、合法镜像／应用描述头、与正在运行的固件一致的 `project_name` 及请求版本；前缀共 288 字节。镜像本身没有独立板卡身份校验，manifest 的 `board` 检查不能防止未来两块同芯片、同项目名设备的镜像被错误配置到同一渠道。支持第二块板前须补镜像身份和兼容迁移设计；本轮保持项目名与 OTA 路径不变。
 
 - 分区布局为 `firmware/partitions.build.csv`：`ota_0`、`ota_1` 两个 4 MiB 应用槽和 `otadata`，与第一台设备出厂时读回的布局条目相同。升级只写入另一个槽，再切换启动槽；联网更新不修改分区表、bootloader、NVS 或工厂 VCOM/PMU 校准。
 - 电脑安装按 D41 使用 release 全量镜像：擦除整片闪存后从 `0x0` 写入本项目 bootloader、分区表和应用，NVS 与 otadata 保持擦除状态，从 `ota_0` 启动。其他固件可能采用不同布局，只写应用不能保证槽位置、容量和回滚前提。安装与恢复仍按 INST01–INST03 逐项验收，历史成功不代表完整验收。

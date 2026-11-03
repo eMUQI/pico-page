@@ -53,7 +53,7 @@ def require_defaults(build):
     _, config = artifacts(build)
     if not config.is_file():
         return
-    defaults = [ROOT / 'firmware/sdkconfig.defaults']
+    defaults = [ROOT / 'boards/read_pico/sdkconfig.defaults']
     mode = build.resolve().name.removeprefix('firmware-')
     if build.resolve().parent == ROOT / 'build' and (ROOT / f'firmware/configs/{mode}.defaults').is_file():
         defaults.append(ROOT / f'firmware/configs/{mode}.defaults')

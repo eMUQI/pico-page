@@ -1,6 +1,6 @@
 #include "../firmware/components/platform_read_pico/ripple.h"
 #include "pico_page/ripple_schedule.h"
-#include "pico_page/platform.h"
+#include "display_geometry.h"
 #include <array>
 #include <cassert>
 #include <cstdlib>

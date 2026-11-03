@@ -8,8 +8,8 @@
 #include "pico_page/store.h"
 #include "pico_page/provision.h"
 #include "pico_page/update.h"
-#include "../firmware/components/platform_read_pico/include/pico_page/released_tap.h"
-#include "../firmware/components/platform_read_pico/include/pico_page/sleep_input.h"
+#include "pico_page/released_tap.h"
+#include "pico_page/sleep_input.h"
 
 #include <algorithm>
 #include <atomic>
@@ -174,6 +174,7 @@ struct Driver {
     }
     void swipe(bool next, int x = 300, int y = 480, bool queued = false) {
         using namespace pico_page::platform;
+        using namespace pico_page::input;
         const Event begin{EventKind::Touch, EventPhase::Begin, ++sequence, x, y, 1000};
         const Event end{EventKind::Touch, EventPhase::End, sequence, x + (next ? -100 : 100), y, 651000};
         const auto gesture = released_gesture(begin, end);
@@ -1397,6 +1398,7 @@ static void library_resume_pagination_test(const fs::path& root, const fs::path&
         const int y = grid ? 466 + (slot / 3) * 320 + 100 : 444 + slot * 126 + 60;
         if (target == 0) {
             using namespace pico_page::platform;
+            using namespace pico_page::input;
             for (const auto& point : {std::pair<int, int>{300, 220}, {x, y}}) {
                 ReleasedTap contact;
                 const Event begin{EventKind::Touch, EventPhase::Begin, ++driver.sequence,
@@ -1709,7 +1711,7 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
 
     if (fixture == "valid.epub") {
         std::vector<std::uint8_t> empty_battery;
-        for (const auto [percent, cells] : {std::pair{0, 0}, {1, 1}, {20, 1}, {21, 2}, {40, 2},
+        for (const auto& [percent, cells] : {std::pair{0, 0}, {1, 1}, {20, 1}, {21, 2}, {40, 2},
                                           {41, 3}, {60, 3}, {61, 4}, {80, 4}, {81, 5}, {100, 5}}) {
             app.set_battery(percent);
             assert(!app.pending_frame());
@@ -2280,7 +2282,7 @@ static void lock_screen_test(const fs::path& root, const fs::path& fixtures) {
         if (open_menu) {
             assert(app.show_power_menu());
             assert(app.power_menu_pending());
-            pico_page::platform::SleepInput suppressed;
+            pico_page::input::SleepInput suppressed;
             suppressed.begin();
             const auto before_menu = app.canvas().pixels();
             for (const auto kind : {pico_page::platform::EventKind::Touch, pico_page::platform::EventKind::K1,
@@ -6512,6 +6514,7 @@ int main(int argc, char** argv) {
     }
     {
         using namespace pico_page::platform;
+        using namespace pico_page::input;
         const auto root = card / "SleepInput";
         fs::create_directories(root / "Books");
         fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
@@ -7363,7 +7366,7 @@ int main(int argc, char** argv) {
         driver.sync_view(); const auto request = driver.check_remote();
         app.stop_wifi(true); driver.present(); app.cancel_sleep();
         assert(app.view() == View::NetworkClosing && request.cancelled->load() && !app.show_power_menu());
-        pico_page::platform::SleepInput deferred;
+        pico_page::input::SleepInput deferred;
         deferred.begin(); deferred.accept({pico_page::platform::EventKind::PowerLong});
         const auto closing_pixels = app.canvas().pixels();
         for (const auto kind : {pico_page::platform::EventKind::Touch, pico_page::platform::EventKind::K1,

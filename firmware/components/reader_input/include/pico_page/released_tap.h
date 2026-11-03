@@ -1,10 +1,14 @@
 #pragma once
 
-#include "platform.h"
+#include "pico_page/platform_input.h"
 #include <cstdlib>
 #include <optional>
 
-namespace pico_page::platform {
+namespace pico_page::input {
+
+using platform::Event;
+using platform::EventKind;
+using platform::EventPhase;
 
 /**
  * Contact time from which a touch is a long press. The value is a starting point for
@@ -21,29 +25,6 @@ inline constexpr int kSwipeAngleRatio = 173;
 inline constexpr int kSwipeAngleScale = 100;
 
 enum class ReleasedGesture { Tap, Previous, Next, Ignore };
-
-/** One queued notification retains the latest move. Callers serialize access with the event queue. */
-class TouchMoves {
-public:
-    bool pending_for(std::uint64_t sequence) const { return latest_ && latest_->sequence == sequence; }
-    bool publish(const Event& event) {
-        if (latest_) {
-            if (latest_->sequence == event.sequence) latest_ = event;
-            return false;
-        }
-        latest_ = event;
-        return true;
-    }
-    void receive(Event& event) {
-        if (event.phase == EventPhase::Move && latest_ && latest_->sequence == event.sequence) {
-            event = *latest_;
-            latest_.reset();
-        }
-    }
-    void clear() { latest_.reset(); }
-private:
-    std::optional<Event> latest_;
-};
 
 /** Classifies a released touch using endpoint displacement, without changing contact ownership. */
 inline ReleasedGesture released_gesture(const Event& begin, const Event& end) {
@@ -105,4 +86,4 @@ private:
     std::uint64_t frame_ = 0;
 };
 
-} // namespace pico_page::platform
+} // namespace pico_page::input

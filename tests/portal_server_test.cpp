@@ -5,7 +5,6 @@
 #include <functional>
 #include <memory>
 
-namespace pico_page::platform { DisplayNetworkGate presentation_gate; }
 namespace {
 struct Server { std::map<std::string, httpd_handler_t> handlers; };
 Server* active = nullptr;

@@ -1,8 +1,10 @@
 # 开发状态
 
-## 当前摘要（2026-11-01）
+## 当前摘要（2026-11-03）
 
 当前正式发布版本为 **0.5.1**（`v0.5.1`，`fed9891`），[发布说明](releases/0.5.1.md)。PR #181 的当前 head CI、Codex review 及讨论核对通过后已合并；正式 Release 已发布并设为 Latest，四附件回下载核对通过。腾讯云与官网部署及独立线上读回已通过，结果见下方发布记录。
+
+架构整理及合并前修正集中在唯一 [PR #183](https://github.com/eMUQI/pico-page/pull/183)：板级构建、平台契约、输入策略和 ESP-IDF 运行入口已隔离；补齐了 Release 有效的启动尺寸检查、provider 输入归属、契约说明及更新槽一致性检查。最新本地 Debug 与 GCC ASan／UBSan／LSan 各 34/34，默认／Release／Diagnostic 固件及来源校验通过。最新 CI、审阅和合并状态见 PR；未发布或刷写，真机回归仍待验证。详情见 11 月 3 日记录。
 
 0.5.0 之后的主线改动包括：TXT 自动目录与当前章节显示、连续回翻位置修复、均衡／快速自动全刷间隔 0–30、五格电量、正文字体错误编号、书库封面暂时失败重试，以及 USB 浅睡串口交接修复。各批原始验证、设备安装和未测项保留在下方记录；合入主线不代表这些专项已全部验收。
 
@@ -12,7 +14,7 @@
 
 ## 待验证与后续工作
 
-设备已重新接入；目标设备响应、动态峰值、慢卡、实体输入和面板效果不能由 host 结果替代。具体场景和数值目标以[验收清单](development/acceptance.md)为准，未完成项不因归档、合并或发布而关闭。
+当前架构整理无法访问设备；目标设备响应、动态峰值、慢卡、实体输入和面板效果不能由 host 结果替代。具体场景和数值目标以[验收清单](development/acceptance.md)为准，未完成项不因归档、合并或发布而关闭。
 
 - **词典**：DICT01–DICT11 的真实触摸、端点拖选、上下方面板遮挡、冷／热查询、深词条重排、慢卡取消、文件句柄、内存峰值及休眠／USB 交还；既有客户端精确拖选对照有工具限制。候选镜像增长超过 128 KiB 目标，需结合目标资源实测评估。
 - **阅读与显示**：章节缓存和整页图片缓存的同条件设备对照；DP08／DP10、IN07／IN08／IN09、CFG09 的非正文保持、翻页页脚、水波纹方向、充电、键盘、轻扫及字体选择；持续阅读和低内存降级。历史单机短时通过不替代完整专项。
@@ -1372,3 +1374,72 @@ Diagnostic 候选 `0.5.0+g5b940a3.dirty`（3,976,992 字节）已刷入串号 `1
 Release 事件的[网站部署运行 `41270907824`](https://github.com/eMUQI/pico-page/actions/runs/41270907824) 成功完成：COS 上传与认证／匿名读回、Cloudflare Pages 部署及生产核对均通过。本机另带官网 Origin 独立匿名下载两个 COS 镜像，与已发布附件逐字节一致，CORS 允许官网；无查询参数的正式域名 `deployment.txt` 为 `fed9891ce986a9022b0955b6d4a8b395f558f435 41270907824 1`，固定更新清单除下载源切换到已确认 COS 外与发布附件一致，安装页使用 0.5.1 全量镜像，更新日志已显示本版说明。对应证据为 `cos-readback.json`、`website-readback.json` 及各读回目录。
 
 本轮原始检查与产物保存在 `.local/release-051-publish/`：`pr-merge.json`、`build.log`、`assets/`、`draft-download/`、`published-download/`、`publication.json` 及设备前置失败日志。后续仅更新发布状态文档，不改固件、标签或已发布附件；完整检查范围与物理未测项沿用本批及上一批记录。
+
+## 2026-11-03 · 架构整理前的 host 编译修正
+
+用户授权新建架构整理分支，从 `2b0e98dee990250ac5fdbe16258c679166b956a6` 创建 `refactor/read-pico-platform-boundaries`，保留既有未跟踪的 `.agents/skills/ub-mode/`。本轮按 ub-mode 的小批次、行为对照方式推进；先修复云环境 GCC 在 `tests/app_test.cpp` 电量格数循环上触发的 `-Werror=range-loop-construct`。结构化绑定改为 `const auto&`，测试数据、断言及产品源码不变，没有降低编译检查。
+
+使用 `/workspace/cloud-tools/activate-host.sh` 提供的现有工具链，执行 `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug -DPICO_PAGE_TEST_BSP_WAVEFORM=ON`、`cmake --build build/host --parallel 4`、`ctest --test-dir build/host -N` 和完整 CTest；修正后 32/32 通过，包含固定 BSP 波形与 Node 条件测试。首次失败和修正后的构建、注册及测试日志保存在 `.local/architecture-baseline/`。本批只修正测试编译，不新增测试，不改运行时或设备验收状态；后续板级构建整理另记。
+
+## 2026-11-03 · Read Pico 板级构建隔离
+
+在同一分支完成渐进式架构整理的第一批。将目标芯片、BSP 校验和补丁副本准备移入 `boards/read_pico/board.cmake`，TinyUSB 同步 MSC 的源文件裁剪改由组件注册后的板级函数执行。七个补丁／辅助头及 `sdkconfig.defaults` 原样迁入板级目录，BSP commit 由 `bsp-revision.txt` 唯一指定，下载脚本和 CMake 共用；补齐 CMake 对全部补丁和版本锁的重新配置依赖。更新模式构建、来源核对、两项既有波形测试的引用路径及当前技术说明，历史记录保留原文。固件仍固定接入 Read Pico，没有增加 S31 驱动、动态平台选择或通用屏幕布局。
+
+构建使用既有 `/workspace/cloud-tools/activate-idf.sh`、ESP-IDF v6.1（`fff9895c82d744c7237be8847347bdd1b07c6643`，本次检出无差异）、CMake 3.31.6、Python 3.12.14 和 Xtensa GCC 15.2.0。首次基线被旧的生成配置拦截：缺少当前主线的 TCP 窗口、邮箱、TLS 分配／证书及 OTA 回滚选项。先备份旧 `firmware/sdkconfig`，再从未改动的 defaults 生成基线；迁移后也移走已备份的生成配置，从新路径重新生成，未绕过来源脚本的有效配置核对。参考乐鑫文档 MCP 的构建系统说明，并对照实际 v6.1 `tools/cmake/project.cmake` 核对 defaults 的优先级和路径解析。
+
+验证：迁移前后 `sh tools/build_firmware.sh` 均通过，标准应用均为 3,941,952 字节，完整镜像逐字节一致，SHA-256 为 `26177a05fb5dd788dbb9d74d181795712b14d3e0f92bc40630790237aac8f0c0`；两次生成的有效 sdkconfig、依赖锁、分区源文件和分区二进制、补丁输入及全部补丁后 BSP 文件也逐字节一致。ESP-IDF 组件集合及解析后的源码路径相同，`compile_commands.json` 仍排除原 TinyUSB 便利存储层。全新 `sh tools/build_firmware.sh release` 通过，板级 defaults 与 Release 覆盖项均实际生效；应用 3,942,240 字节，4 MiB 槽剩余 252,064 字节，分区二进制与基线相同。上述镜像及 provenance 形成于本地提交前的 `0.5.1+g2b0e98d.dirty` 源码快照，不冒充后续提交号或正式发布镜像。
+
+迁移后重新配置、构建 host Debug，包含真实 BSP 波形的完整 CTest 32/32 通过。`sh -n`、747 项交接检查及 `git diff --check` 通过；从仓库外调用 BSP 准备脚本成功，既有 CI 路径选择覆盖新的板级配置，无需修改工作流。没有新增行为测试或重跑 sanitizer；本批自有运行时代码不变，Python 仅更换 defaults 路径，CMake／Shell 不在已安装 ub-mode 分析工具的支持范围内，未将它们接入项目或 CI。
+
+原始命令日志、工具链记录、前后来源快照、镜像及比较结果保存在 `.local/architecture-baseline/`，行动摘要为其中的 `actions.md`。本批未新增任务、缓冲或阻塞路径，保存、显示、存储所有权及电源顺序保持现有实现；未进行刷写、真机性能／功耗、慢卡、USB、休眠或实际 KOReader 往返验证，既有未验收项不关闭。改动仅保存为本地分支提交，不推送、合并或发布。下一批从现有 `DisplayBackend`、平台输入和电池／挂载状态出发整理最小平台契约，固定屏幕几何与 ESP-IDF worker 的进一步解耦分别评估。
+
+## 2026-11-03 · 运行时平台契约与板级装配
+
+用户要求在现有 `refactor/read-pico-platform-boundaries` 分支持续完成结构调整，并只维护一个 PR；允许推送及在该 PR 请求 Codex review。当前无法接触设备，不执行刷写。继续采用已安装的 ub-mode；其配套质量工具不支持本项目 C++，沿用编译器、已有回归、依赖检查和审阅，不将不适用工具接入 CI。
+
+从 `b3215f0` 抽出 `platform_contract` 的显示、输入、存储、电源、系统、网络、更新头文件；没有 SDK/BSP 类型和共享可变状态。原有手势与休眠输入策略移到 `reader_input`，Read Pico 的尺寸常量与显示／网络仲裁状态成为实现私有细节。`reader_runtime` 接管原 `app_main` 的应用循环和网络任务，入口仅调用 `runtime::run()`；运行与诊断组件只编译依赖契约，由板级 CMake 指定实现并注入链接关系。卡路径由平台提供，诊断触摸边界取应用画布；阅读业务、保存格式、显示结果交付、任务参数、锁顺序、取消协议和分配预算未改变。
+
+新增依赖边界检查先在旧结构上得到三个预期失败，再随迁移通过；各契约头在 host 独立编译。显示仲裁现有用例改为调用生产端口，覆盖网络持有、显示延期与优先、撤回和完成；core/app 继续使用原输入行为断言。初次固件编译发现波纹源文件依赖间接的 `<cstdint>`，已补明确包含；初次链接暴露仅选择组件不保证静态库顺序，按本地 IDF 6.1 `idf_component_add_link_dependency` 在板级绑定 runtime/console 到提供方，保留编译依赖隔离。查证了乐鑫构建文档及当前 SDK 的 `project.cmake`、`component.cmake`。
+
+验证环境沿用前批 IDF 6.1、BSP 固定提交和云工具链。`cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug -DPICO_PAGE_TEST_BSP_WAVEFORM=ON`、构建与 CTest 通过 33/33；`sh tools/build_firmware.sh` 通过，应用 3,942,528 字节，较前批默认基线增加 576 字节，4 MiB 槽剩余 251,776 字节。构建快照为 `0.5.1+gb3215f0.dirty`。配置差异仅移除 MINIMAL_BUILD 提示注释，生效键值未变；旧组件无删减，新增 contract/input/runtime 三个组件。交接与 diff 检查通过。证据和逐步操作日志保存在忽略目录 `.local/architecture-baseline/runtime-*.log` 与 `actions.md`。
+
+诊断构建和 sanitizer 正在执行，最终结果在后续收尾记录追加。当前机器无 Clang，因此 sanitizer 使用已有 GCC 14 的 ASan/UBSan/LSan，另启用 trace 和实际 BSP 波形；不替换全局工具链。此批没有目标机动态内存、时延、面板、触摸、电源、USB、OTA 或实际 KOReader 往返证据，不能把 host 通过和镜像大小当作真机无回归。下一步完成板级产品参数归属、最终构建及同一 PR 的审阅闭环。
+
+
+## 2026-11-03 · 板级更新参数与同一 PR 审阅
+
+在同一分支补齐板级参数归属：`boards/read_pico/profile.cmake` 提供 `read_pico`、现有清单 URL 和 4 MiB 目标槽大小，固件和 host 选择同一配置，由契约生成 `build_profile.h`。`reader_sync/update.h` 导出原有名称供调用方使用，解析、版本判断和更新安装算法未改变；实际分区检查仍由 OTA 后端执行。扩展依赖检查先定位共享头中的板名常量，再随提取通过；既有 update 用例通过，host 独立编译生成的公共头。
+
+profile 提取后的默认固件构建通过，来源为 `0.5.1+gf1daa77.dirty`；最终各模式产物与完整检查见收尾记录。读取真实 `compile_commands.json`，九个共享／运行组件均没有 BSP 或 `platform_read_pico` 头路径泄露。初步 ELF 核对中 `.dram0.data=32,008`、`.dram0.bss=50,864`、`.iram0.text=94,515` 字节，与前批 Release 相同；最终同模式比较继续在收尾记录确认，不据静态占用推断动态峰值或时延。
+
+唯一 [PR #183](https://github.com/eMUQI/pico-page/pull/183) 已创建并请求 `@codex review`；第一轮在 `f1daa77` 完成，没有发现问题。profile 提取与最终记录继续提交到该 PR。中间 Diagnostic 虽已编译链接，但构建时发生新提交，来源校验按预期拒绝记录；中间 sanitizer 也因配置尚未生成后续新增头文件而失败，已停止该旧配置并完整重新配置。两者都不计入最终通过结果。机器没有 Clang，sanitizer 使用本机 GCC 14；GitHub CI 仍按原配置使用 Clang。
+
+
+## 2026-11-03 · 架构整理离线收尾
+
+约定的有限结构调整已完成：基线、板级构建与版本来源、平台能力契约、Read Pico 私有实现、ESP-IDF 运行装配、共享输入策略、更新目标参数、依赖约束与配套说明均已落地。没有开发 S31 驱动，没有改阅读解析／排版／会话／同步算法或持久格式，没有新增任务或队列；固定 684 × 1216 UI 与现有 ESP-IDF 条件实现仍是明确的适配范围。源码主体提交为 `40d5ff5677000ef3626c6cd05ded30727fcdce91`；本收尾提交只补强依赖检查与资料，不再改变 C++ 或固件构建定义。
+
+最终验证：
+
+- host Debug 开启真实 BSP 波形：33/33；GCC 14 ASan／UBSan／LSan 开启 trace 与同一波形：33/33。完整命令与输出位于 `.local/architecture-baseline/final-host-*.log`、`final-sanitizer-*.log`；sanitizer 使用 `-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer`，运行参数为 `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1`。缺少 Clang 没有导致本地 sanitizer 跳过，GitHub CI 的 Clang 路径保持原样。
+- 固定源码后顺序执行 `sh tools/build_firmware.sh`、`sh tools/build_firmware.sh release`、`sh tools/build_firmware.sh diagnostic`，三者编译、链接、defaults 检查和来源校验均通过。默认应用 3,942,528 字节，Release 3,942,816 字节，Diagnostic 3,987,840 字节；4 MiB 槽分别剩余 251,776／251,488／206,464 字节。
+- 默认与 Release 均较对应前批基线增加 576 字节。Release 同模式 ELF 比较：`.dram0.data` 32,008、`.dram0.bss` 50,864、`.iram0.text` 94,515 字节，三者及 IRAM 向量／尾部、RTC 静态段均无增长。未测动态峰值、实体输入时延或能耗。
+- 默认生效 sdkconfig 键值、依赖锁、分区二进制与原基线一致；配置文件只有旧 MINIMAL_BUILD 提示注释消失。原组件没有删除，只增加契约、输入和运行三个组件；九个共享／运行组件的实际编译命令均无 BSP/provider 头路径。纯输入策略逐字核对仅修改 include，原平台函数无删除；新增四个函数仅承接呈现准入和配置卡路径。
+- 公共契约头逐个在 host 编译；依赖检查涵盖常见 C/C++ 后缀及 CMake 对 `read_pico`、`read_pico_pmu`、`epdiy` 的直接依赖。补强检查后独立运行通过；交接与 `git diff --check` 通过。测试总数没有靠禁用组件、删除断言或跳过资源减少。
+
+三种固件的来源均为 `0.5.1+g40d5ff5.dirty`，source SHA-256 为 `83f1a22c447a49f26944da82a517ebe2d8adbe6593696b4a53c89aa4bf38d501`。当时已提交的源码没有差异，`.dirty` 来自本地未跟踪的 `.agents/skills/ub-mode/` 安装；该目录未改动或提交。三份 provenance、同模式资源对照、实际编译边界、日志及操作记录均保留于 `.local/architecture-baseline/`，不把本记录提交后的 HEAD 冒充这些镜像的版本。
+
+唯一 [PR #183](https://github.com/eMUQI/pico-page/pull/183) 的 `f1daa77`、`40d5ff5` 两轮 Codex review 均完成且无发现；没有未解决的审阅线程。收尾提交继续使用同一分支和 PR；最新 CI／审阅状态以 PR 页面为准。本轮没有合并、发布、刷写、分区迁移或工厂校准改写。
+
+回家后按[验收矩阵](development/acceptance.md)补本轮候选的最小设备回归：有卡／无卡启动；EPUB／TXT 冷热阅读、连续翻页、保存与重开；K2 全刷、轻扫、长按及刷新失败恢复；休眠准备的电源键取消、唤醒与关机；USB 独占 TF 交还；Wi-Fi 传书与显示并行、真实 KOReader 双向接续。OTA 只能在已核对支持的分区设备验证确认／回滚。历史专项仍保留原未验收状态，编译和 host 证据不替代这些硬件验证。
+
+
+## 2026-11-03 · 合并前审阅修正
+
+按外部审阅完成限定修正：`display_info()` 返回 Read Pico 配置尺寸，正常和诊断启动在应用初始化／呈现前验证实际画布宽高；不匹配时停止，未确认 OTA 沿用拒绝路径。检查不依赖 `assert`；新增 `NDEBUG` 用例覆盖相同字节数但宽高颠倒、单轴不匹配和无效尺寸。`TouchMoves` 原样移回 provider，应用策略迁至 `pico_page::input`，移除 provider 对 `reader_input` 的依赖。契约改写为调用语义，硬件细节移至平台文档；OTA 明确只检查芯片、运行中项目名和版本，本轮没有更改镜像身份或项目名。
+
+架构检查使用显式 UTF-8，并通过 CMake 读取 profile，对照分区表的两个 OTA 槽。依赖检查先捕获反向依赖；尺寸测试先拒绝宽高颠倒的宽松实现；临时将 profile 改为 2 MiB 时槽检查按预期失败，恢复 4 MiB 后通过。采样合并类逐字核对未变；实际编译命令确认 provider 不再引入应用输入策略，共享组件无 BSP 头路径。第二块板的镜像身份迁移、通用 ESP-IDF 拆分、选板和配置分层留作适配前置工作，见架构文档。
+
+验证沿用云工具链：host Debug 34/34，GCC 14 ASan／UBSan／LSan（trace 与真实 BSP 波形）34/34；标准默认、Release、Diagnostic 构建及 provenance 均通过。三种应用分别为 3,941,360／3,941,648／3,988,016 字节，均适配 4 MiB 槽；Release 静态 DRAM／IRAM／RTC 段与上批相同，生效配置和分区不变。资源、完整命令输出及测试证据位于 `.local/architecture-followup/`，操作日志继续记录于 `.local/architecture-baseline/actions.md`；交接和 diff 检查通过。
+
+镜像来自本记录提交前的 `0.5.1+gb8995de.dirty` 工作区修正快照，三种模式的 source SHA-256 均为 `8b4107665c51b9b6bbddf9d6e59e32edc5b00b50940a3432aa1cee763babef35`；它包含本批 C++／构建／测试改动，不是原 `b8995de` 的未修改代码。提交前另核对已验证源码的逐文件摘要，补记录未改变代码。本批仍在同一分支和 PR 完成审阅后合并流程；实际合并结果以 PR 为准。未访问设备、发布固件或修改工厂校准，前条所列真机回归保持待测。

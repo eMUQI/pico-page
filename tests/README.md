@@ -53,6 +53,10 @@ build/host/chapter_stream_probe stream build/host/document-fixtures/stream-event
 
 现有 `document` 回归逐段核对文本、块、源锚点、链接、图片、分段标志和末段判定，覆盖 stored／deflate、UTF-16、实体、跨字符回调及最后一次 XML 输入中的暂停。取消、预算拒绝、随机访问、移动所有权、关闭、截断、坏 XML 和 CRC 失败必须清空输出并释放游标。超过 64 KiB 仍无完整 XML 事件的输入停止续读，验证同一有效正文仍可由原路径读完；这限制未处理输入，不是 XML 或总堆的完整上限。`app` 回归覆盖开书向章节任务移交游标、不重复开包、排队取消、换书和休眠／USB 后会话释放。设备内存、慢 TF、实体输入、睡眠／USB 交接及输入到正文呈现时间另按设备专项验证。
 
+## 平台边界
+
+`architecture` 检查应用组件不导入 Read Pico 实现，契约不导入 SDK/BSP 头。host 构建逐个编译 `platform_contract` 公共头，避免依赖头文件顺序；`display_network_gate` 编译实际端口实现，验证网络接收持有、显示延期、显示优先、撤回及完成释放。`core` 和 `app` 直接使用共享 `reader_input` 验证手势和休眠准备策略。`display_compatibility` 显式定义 `NDEBUG`，使用实际应用画布和 Read Pico 尺寸，验证正常尺寸、宽高颠倒但字节数相同、单轴不匹配及无效尺寸；校验失败不会被 Release 的断言裁剪掉。`architecture` 另检查 provider 不依赖应用输入策略，并通过 CMake 读取 profile，核对两个 OTA 槽大小。实际 ESP-IDF 应用循环仍须固件构建，设备侧刷新、输入和电源交接另做真机验收。
+
 ## 首次引导
 
 `onboarding_test` 覆盖新卡三屏、两处跳过、K2／左右键和轻扫、排队及重复尾部、同屏休眠恢复、重看不写标记及错误返回、无卡与提交失败重启、旧配置／历史／书旁进度与备份、扫描上限和符号链接保守回退。可传输出目录导出四张 PGM（欢迎、练习、工具、说明首页）供视觉检查。既有 app 场景的 Driver 在全新夹具首次呈现后显式跳过引导，继续原场景；字体取消仍比较进入编辑前的完整配置字节，不再假定配置文件必须不存在。

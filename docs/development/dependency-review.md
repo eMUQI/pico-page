@@ -22,7 +22,9 @@
 | SDL2 / OpenSSL / libcurl | 本机现有开发库 | 构建日志记录已解析版本 | zlib / Apache-2.0 / curl license，各自动态链接 | 无 | 仅 host；未复制库源码 |
 | esp_tinyusb / TinyUSB | Espressif Component Registry | 2.4.0 / 0.21.0~1；component hash 见 dependencies.lock | Apache-2.0 / MIT；已读组件 LICENSE；依赖 ESP-IDF | 不修改上游文件；构建排除便利存储层，接入同步 SDMMC 回调 | 仅开启 MSC；分发时保留许可证、版权和适用 NOTICE |
 
-USB 实现对固定 Read Pico BSP 增加了带错误返回的卸载接口：补丁位于 `firmware/patches/read-pico-sd-release.patch`，仅应用到构建目录副本，原始检出保持不变。该适配属于 Apache-2.0 的 Read Pico 组件，不修改 epdiy、校准或波形组件。`esp_tinyusb 2.4.0` 的便利存储层采用延后写入，实际写失败仅记日志；因此本项目保留同步回调。官方 `auto_mount_off` 已可禁止自动回挂，自动回挂并非必须替换便利层的理由。官方示例、固定提交及逐项核对见 [USB 运行记录](usb-storage-runtime.md)。
+USB 实现对固定 Read Pico BSP 增加了带错误返回的卸载接口：补丁位于 `boards/read_pico/patches/read-pico-sd-release.patch`，仅应用到构建目录副本，原始检出保持不变。该适配属于 Apache-2.0 的 Read Pico 组件，不修改 epdiy、校准或波形组件。`esp_tinyusb 2.4.0` 的便利存储层采用延后写入，实际写失败仅记日志；因此本项目保留同步回调。官方 `auto_mount_off` 已可禁止自动回挂，自动回挂并非必须替换便利层的理由。官方示例、固定提交及逐项核对见 [USB 运行记录](usb-storage-runtime.md)。
+
+板级补丁现集中在 `boards/read_pico/patches/`；下方历史记录的 `firmware/patches/` 是原路径，内容和许可未变。
 
 GB18030 解码表的来源与复核（2026-10-07）：`firmware/components/reader_document/gb18030_data.inc` 由 `tools/generate_gb18030_table.py` 生成。脚本逐个解码全部双字节和四字节序列，记录 CPython `gb18030` 编解码器返回的码位，不读取 CPython 的源码或数据文件。用 CPython 3.14.7 重新运行，输出与仓库中的文件逐字节相同，SHA-256 为 `5efc9c505062b83e0a80f04547e80d0c400b8d2ff6397cd86ee02f3993d68bbb`。本机的 Homebrew 构建没有记录源码 commit，只能固定到发布版本号。抽查的码位显示该编解码器采用 GB 18030-2000 的映射：`A8BC` 解码为 U+E7C7，`8135F437` 解码为 U+1E3F，`FE59` 解码为 U+E81E。GB 18030-2005 交换了前两者的映射；2005 和 2022 两次修订的其余调整没有逐项核对，受影响的字符在设备上会显示为私用区码位或不同的字。许可方面：CPython 采用 PSF-2.0。本项目收录的是字符编码与 Unicode 码位的对应数值，不含 CPython 的代码；是否需要随发布附带 PSF 许可声明，与项目总许可证一并由项目所有者确认，本表不作结论。
 

@@ -15,7 +15,7 @@ sh tools/build_firmware.sh
 
 应用产物为 `firmware/build/pico_page.bin`，同目录包含 ELF 和 `provenance.json` 来源记录。脚本每次重新配置并核对镜像版本，只构建，不连接或烧录设备。版本来源是 [`version.txt`](version.txt)，构建模式与发布产物规则见[版本管理](../docs/development/versioning.md)。
 
-Read Pico BSP 固定在 `.local/read_pico_firmware`，提交与组件许可见 [BSP 审查](../docs/development/bsp-review.md)。补丁应用到构建副本，不直接修改下载的上游检出。工具链定位、sdkconfig 与已知环境差异见[环境记录](../docs/development/environment.md)。
+Read Pico BSP 固定在 `.local/read_pico_firmware`，版本由 [`boards/read_pico/bsp-revision.txt`](../boards/read_pico/bsp-revision.txt) 指定，提交与组件许可见 [BSP 审查](../docs/development/bsp-review.md)。板级构建入口、默认配置和补丁集中在 [`boards/read_pico/`](../boards/read_pico/README.md)；补丁应用到构建副本，不直接修改下载的上游检出。工具链定位、sdkconfig 与已知环境差异见[环境记录](../docs/development/environment.md)。
 
 ## 硬件与写入边界
 
@@ -36,7 +36,7 @@ Read Pico BSP 固定在 `.local/read_pico_firmware`，提交与组件许可见 [
 
 ## 开发与验证
 
-应用入口与桌面版共用阅读、文档解析、排版、存储和同步组件；板级实现接入显示、输入、TF 卡、PMU 和网络。职责与所有权见[架构](../docs/development/architecture.md)，资源和生命周期约束见[嵌入式开发规则](../docs/development/embedded-development.md)。
+`main` 仅启动 `reader_runtime` 的 ESP-IDF 应用循环；该组件与诊断组件通过 `platform_contract` 使用平台端口，由板级构建接入 Read Pico 实现。阅读、文档解析、排版、存储和同步组件与桌面版共用，纯输入策略位于 `reader_input`。职责与所有权见[架构](../docs/development/architecture.md)，资源和生命周期约束见[嵌入式开发规则](../docs/development/embedded-development.md)。
 
 修改固件前阅读 [AGENTS.md](../AGENTS.md)，按其中的验证表执行 host 回归、必要的 sanitizer 检查和固件构建。涉及显示、输入、电源或网络的改动另需真机验收。CI 的路径选择和部署规则见[GitHub Actions](../docs/development/environment.md#github-actions)，CI 不构建固件，也不覆盖真机行为。
 

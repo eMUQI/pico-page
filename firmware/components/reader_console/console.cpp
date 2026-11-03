@@ -524,8 +524,8 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
         }
         if (event.touch) {
             if (!token(input, second) || token(input, extra) || !number(first, event.x) ||
-                !number(second, event.y) || event.x < 0 || event.x >= platform::width ||
-                event.y < 0 || event.y >= platform::height) {
+                !number(second, event.y) || event.x < 0 || event.x >= app.canvas().width() ||
+                event.y < 0 || event.y >= app.canvas().height()) {
                 error(id, "invalid_touch");
                 return;
             }
@@ -557,8 +557,8 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
         AppInput event{{0, word == "press" ? Phase::Begin : Phase::End, Input::TouchCenter}, true, 0, 0, false, word == "press"};
         event.continuous = true;
         if (!token(input, first) || !token(input, second) || token(input, extra) || !number(first, event.x) ||
-            !number(second, event.y) || event.x < 0 || event.x >= platform::width ||
-            event.y < 0 || event.y >= platform::height) {
+            !number(second, event.y) || event.x < 0 || event.x >= app.canvas().width() ||
+            event.y < 0 || event.y >= app.canvas().height()) {
             error(id, "invalid_touch");
             return;
         }

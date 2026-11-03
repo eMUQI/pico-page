@@ -1,6 +1,6 @@
 #include "pico_page/changed_pixels_waveform.h"
 #include "pico_page/ripple_schedule.h"
-#include "../firmware/patches/epdiy-unchanged-pixels.h"
+#include "../boards/read_pico/patches/epdiy-unchanged-pixels.h"
 
 #include <algorithm>
 #include <array>

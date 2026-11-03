@@ -1,6 +1,6 @@
 # Pico Page 程序架构 · 当前实现基线
 
-版本：handoff v0.2。首先服从 [当前决定](../planning/decisions.md)。本文件替代历史 v0.1 的冲突决定，保留其职责划分。内容是设计契约，不是已完成代码。
+首先服从 [当前决定](../planning/decisions.md)。本文件同时说明已实现的组件边界和设计契约；职责名称不要求各自对应一个组件或任务。历史 v0.1 的冲突决定以本文为准，实际验收见[开发状态](../development-status.md)。
 
 ## 1. 结构
 
@@ -23,12 +23,50 @@ platform_read_pico：官方 BSP / PMU / 屏幕与输入驱动的受控适配
 
 这是职责图，不表示任意模块可以互相调用。外部 KOSync 是进度服务，不是书籍存储或完整备份服务；Karakeep 是后续来源，不是设备内浏览器。
 
+### 板级构建边界
+
+`firmware/CMakeLists.txt` 负责 ESP-IDF 工程、产品版本和 SDK 版本约束，固定接入 `boards/read_pico/board.cmake`。板级目录负责目标芯片、更新目标参数、默认配置、BSP 固定版本、补丁构建副本及 TinyUSB 组件裁剪；`platform_read_pico` 继续负责运行时驱动适配。`tools/setup_bsp.sh` 与板级 CMake 共用 `boards/read_pico/bsp-revision.txt`，构建命令和产物路径见[环境说明](environment.md)。
+
+### 已实现的运行时边界
+
+```text
+boards/read_pico/board.cmake       选择目标、配置、BSP 和链接实现
+firmware/main/app_main.cpp        仅调用 runtime::run()
+firmware/components/
+├── reader_runtime               ESP-IDF 应用循环、网络工作任务、显示/电源/USB 编排
+├── reader_app                   页面、阅读用例、内容工作任务
+├── reader_core                  Session、Display、帧和值类型
+├── reader_input                 释放手势、长按、休眠准备输入策略
+├── reader_document / reader_graphics / reader_dictionary
+├── reader_store / reader_sync / reader_console
+├── platform_contract            显示、输入、存储、电源、系统、网络和更新端口
+└── platform_read_pico           端口实现及 BSP、面板尺寸、采样器和驱动互斥状态
+```
+
+`boards/read_pico/profile.cmake` 定义设备标识、更新清单地址和构建目标的 OTA 槽大小，固件与 host 入口共同选择它。`platform_contract` 生成只含这些常量的 `pico_page/build_profile.h`，共享更新逻辑不再写死板名；下载后端仍核对实际分区，构建常量不替代设备分区检查。
+
+`reader_runtime` 和 `reader_console` 只编译依赖 `platform_contract`，由板级 CMake 使用 ESP-IDF 的 `idf_component_add_link_dependency` 在链接阶段接入 `platform_read_pico`。仅把实现加入 `COMPONENTS` 不足以保证静态库解析顺序；板级同时负责这两个消费者的链接关系。实现的 BSP 依赖为私有依赖，不经契约传给消费者。`reader_input` 的纯策略位于 `pico_page::input`，只使用平台事件值，现有 core/app 测试直接使用它。采样器的 `TouchMoves` 事件合并工具属于 `platform_read_pico` 私有实现，provider 不依赖应用输入策略。
+
+契约按能力拆为 `pico_page/platform_*.h`，`pico_page/platform.h` 是聚合入口；不包含 ESP-IDF、FreeRTOS 或 BSP 头文件，不持有全局可变状态。现有 `DisplayBackend`、Frame/FrameResult 和 Session 仍负责请求、结果及可见位置。同步 `platform::present()` 借用画布到返回；应用任务以 `try_begin_display()` 非阻塞申请呈现，成功后无论准备或刷新是否成功都调用 `finish_display()`，丢弃尚未获准的帧时调用 `cancel_display()`。实现仍以原有原子门协调网络接收和显示，显示请求优先级不变。
+
+`card_mount_path()` 返回当前平台配置的卡路径，即使挂载失败也用于构造错误界面；它不授予文件访问权限，只有 `card_root()` 非空才表示可用挂载。应用入口不再写死 `/sdcard`。诊断输入按应用画布尺寸验证坐标，不读取面板实现常量。`display_info()` 在平台初始化前即可无副作用地返回竖屏尺寸；正常启动和初始化失败后的诊断入口均在应用初始化、首帧呈现前校验画布宽高。不匹配时记录错误并停止该入口，未确认 OTA 镜像沿用拒绝路径，不尝试用错误尺寸绘制错误页。此检查在 Release 中有效，既有 `present()` 长度校验仍保留。
+
+本次整理不新增任务、队列、画布或持久格式，不改变保存时机、取消交接、波形、锁顺序和资源预算。`reader_runtime` 明确属于 ESP-IDF 运行环境；共享组件中的条件式堆分配、计时和内容 worker 仍保留既有 SDK 实现。当前 684 × 1216 布局、图片缓存几何与产品更新渠道也保持既有约束。这些边界允许独立增加平台实现，但不宣称已有任意分辨率、其他芯片或 S31 的兼容性。
+
+host 构建逐个编译契约公共头文件；`architecture` 测试约束应用组件不能依赖 Read Pico 实现，显示仲裁测试调用生产端口并与真实网络侧状态交错。固件构建验证板级装配、SDK 依赖和静态链接；真机行为继续按[验收清单](acceptance.md)核对。
+
+### 增加第二块板之前的工作
+
+现有 OTA 镜像只校验芯片、运行中固件的项目名和请求版本；manifest 的板名校验不等于镜像含独立板卡身份。增加第二块板之前必须设计镜像板卡标识和已发布固件的升级兼容路径；不能直接改 `project_name`，否则当前固件会拒绝不同项目名的候选镜像。
+
+届时再按实际依赖考虑 `platform_esp_idf` 与板级实现的拆分。当前网络传输依赖显示仲裁，USB MSC 含 SD 引脚和卡所有权交接，不能把整块代码直接视为与硬件无关。选板入口、通用／板级 defaults、分区文件归属和消费者链接方式也随第二个实际实现验证，不在本轮引入未验证的多板选择开关。`architecture` 测试已校验当前 profile 的更新大小限制与已发布分区表的两个 OTA 槽一致；运行时仍检查实际目标槽。
+
 ## 2. 模块与所有权
 
 | 模块 | 拥有/负责 | 禁止 |
 |---|---|---|
 | `app` | 启动、导航、用例编排 | 堆入 EPUB/驱动实现 |
-| `reader_contracts` | 小型公共值类型与端口声明 | 杂项工具和全局可变状态 |
+| `platform_contract` / `reader_core` 值类型 | 平台端口声明与帧、事件等公共值 | BSP 类型、杂项工具和全局可变状态 |
 | `platform_read_pico` | BSP、PMU、原始输入、硬件能力 | 用户排版/同步策略；篡改工厂校准 |
 | `reader_system` | 网络、电源协调、时间可信度、诊断 | 绕过保存/显示直接切断电源 |
 | `reader_display` | 合成、刷新调度、缓冲生命周期、基准帧状态 | 决定阅读位置、直接保存进度 |

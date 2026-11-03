@@ -1,7 +1,8 @@
 #include "pico_page/core.h"
+#include "../firmware/components/platform_read_pico/touch_moves.h"
 #include "../firmware/components/platform_read_pico/usb_block_range.h"
-#include "../firmware/components/platform_read_pico/include/pico_page/released_tap.h"
-#include "../firmware/components/platform_read_pico/include/pico_page/sleep_input.h"
+#include "pico_page/released_tap.h"
+#include "pico_page/sleep_input.h"
 #include <cstdlib>
 #include <iostream>
 #include <vector>
@@ -22,6 +23,7 @@ struct Recorder final : DisplayBackend {
 int main() {
     {
         using namespace pico_page::platform;
+        using namespace pico_page::input;
         SleepInput input;
         input.begin();
         for (const auto kind : {EventKind::Touch, EventKind::K1, EventKind::K2, EventKind::K3, EventKind::InputReset}) {
@@ -129,6 +131,7 @@ int main() {
     CHECK(!usb_block_range(8, 8, 0, 1));
     {
         using namespace pico_page::platform;
+        using namespace pico_page::input;
         ReleasedTap taps;
         CHECK(!taps.accept({EventKind::Touch, EventPhase::Begin, 1, 600, 500}, 1));
         CHECK(!taps.accept({EventKind::Touch, EventPhase::Begin, 1, 300, 500}, 1));
@@ -151,6 +154,7 @@ int main() {
     }
     {
         using namespace pico_page::platform;
+        using namespace pico_page::input;
         // Only a touch held for the threshold is a long press; keys never are.
         CHECK(long_press({EventKind::Touch, EventPhase::Begin, 1, 0, 0, 1000}, {EventKind::Touch, EventPhase::End, 1, 0, 0, 1000 + kLongPressUs}));
         CHECK(!long_press({EventKind::Touch, EventPhase::Begin, 1, 0, 0, 1000}, {EventKind::Touch, EventPhase::End, 1, 0, 0, 999 + kLongPressUs}));
@@ -167,6 +171,7 @@ int main() {
     }
     {
         using namespace pico_page::platform;
+        using namespace pico_page::input;
         const Event begin{EventKind::Touch, EventPhase::Begin, 1, 300, 400, 1000};
         const auto classify = [&](int dx, int dy, int ms) {
             return released_gesture(begin, {EventKind::Touch, EventPhase::End, 1,
@@ -195,6 +200,7 @@ int main() {
     }
     {
         using namespace pico_page::platform;
+        using namespace pico_page::input;
         ReleasedTap taps;
         CHECK(!taps.accept({EventKind::K3, EventPhase::Begin, 1}, 1));
         CHECK(!taps.accept({EventKind::InputReset, EventPhase::Cancel, 9}, 1));
@@ -204,6 +210,7 @@ int main() {
     }
     {
         using namespace pico_page::platform;
+        using namespace pico_page::input;
         // Opening a power menu cancels the old contact; its later release cannot hit the menu.
         ReleasedTap taps;
         CHECK(!taps.accept({EventKind::Touch, EventPhase::Begin, 20, 300, 520}, 10));
@@ -216,6 +223,7 @@ int main() {
     // IN03/IN04: a context change cannot reuse the input that opened it.
     {
         using namespace pico_page::platform;
+        using namespace pico_page::input;
         TouchMoves moves;
         Event notification{EventKind::Touch, EventPhase::Move, 21, 10, 20, 100};
         CHECK(moves.publish(notification));

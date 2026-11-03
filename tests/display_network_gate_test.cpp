@@ -1,25 +1,27 @@
-#include "pico_page/display_network_gate.h"
+#include "display_network_gate.h"
+#include "pico_page/platform_display.h"
 #include <cassert>
 
 int main() {
-    pico_page::platform::DisplayNetworkGate gate;
+    using namespace pico_page::platform;
+    auto& gate = presentation_gate;
     assert(gate.try_network());
-    assert(!gate.try_display());
+    assert(!try_begin_display());
     gate.finish_network();
     assert(!gate.try_network());
-    assert(gate.try_display());
+    assert(try_begin_display());
     assert(!gate.try_network());
-    gate.finish_display();
+    finish_display();
     assert(gate.try_network());
-    assert(!gate.try_display());
-    gate.cancel_display();
+    assert(!try_begin_display());
+    cancel_display();
     assert(!gate.try_network());
     gate.finish_network();
     assert(gate.try_network());
     gate.finish_network();
-    assert(gate.try_display());
+    assert(try_begin_display());
     assert(!gate.try_network());
-    gate.finish_display();
+    finish_display();
     assert(gate.try_network());
     gate.finish_network();
 }

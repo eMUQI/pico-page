@@ -8,7 +8,7 @@
  * uses checked allocation and the existing panel power/recovery transaction.
  */
 #include "ripple.h"
-#include "pico_page/platform.h"
+#include "display_geometry.h"
 #include "pico_page/ripple_schedule.h"
 #include "e0470_epaper_waveform.h"
 #include "esp_attr.h"
@@ -16,6 +16,7 @@
 extern "C" {
 #include "output_common/lut.h"
 }
+#include <cstdint>
 #include <cstring>
 
 namespace pico_page::platform {

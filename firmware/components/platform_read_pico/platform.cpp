@@ -8,7 +8,8 @@
  */
 
 #include "pico_page/platform.h"
-#include "pico_page/released_tap.h"
+#include "display_geometry.h"
+#include "touch_moves.h"
 #include "pico_page/power_key.h"
 #include "pico_page/changed_pixels_waveform.h"
 #include "esp_attr.h"
@@ -44,7 +45,6 @@
 #include "sc7a20h.h"
 
 namespace pico_page::platform {
-DisplayNetworkGate presentation_gate;
 namespace {
 constexpr char tag[] = "pico_platform";
 constexpr int key_area_top = 1300;
@@ -627,7 +627,8 @@ bool set_page_effect_waveform(PageWaveform waveform, std::string& error) {
     return true;
 }
 PresentTiming present_timing() { return timing; }
-const char* card_root() { return mounted ? "/sdcard" : nullptr; }
+const char* card_mount_path() { return "/sdcard"; }
+const char* card_root() { return mounted ? card_mount_path() : nullptr; }
 pico_page::CardIssue card_start_issue() { return card_issue; }
 const std::string& card_error() { return mount_error; }
 Battery battery() { return battery_state; }

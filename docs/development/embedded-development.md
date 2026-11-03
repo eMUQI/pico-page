@@ -4,7 +4,7 @@
 
 ## 1. 先定位执行路径，再选择实现
 
-开工前确认实际调用链、构建条件和状态所有者。当前入口主要在 `firmware/main/app_main.cpp`；共享阅读流程在 `reader_app`，硬件适配在 `platform_read_pico`。具体以当前源码为准。架构中的 session/display/system 是职责，不是必须新建的一组 FreeRTOS 任务。
+开工前确认实际调用链、构建条件和状态所有者。`firmware/main/app_main.cpp` 仅调用运行入口；应用任务和网络任务的编排在 `reader_runtime/runtime.cpp`，共享阅读流程在 `reader_app`，端口在 `platform_contract`，硬件适配在 `platform_read_pico`。具体以当前源码为准。架构中的 session/display/system 是职责，不是必须新建的一组 FreeRTOS 任务。
 
 涉及资源或异步行为的改动，先回答五个问题：在哪里执行，谁拥有数据，最多占多少资源，什么时候可以停止，失败后用户停在哪个可恢复状态。简单变更在交接中写清即可。
 

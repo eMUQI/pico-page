@@ -1,4 +1,5 @@
 #include "pico_page/platform.h"
+#include "display_network_gate.h"
 #include "pico_page/store.h"
 #include "upload_page.h"
 #include "esp_random.h"

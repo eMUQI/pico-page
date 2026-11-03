@@ -1,5 +1,7 @@
 #pragma once
 
+#include "pico_page/build_profile.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -14,10 +16,9 @@
  */
 namespace pico_page::update {
 
-inline constexpr char manifest_url[] = "https://picopage.wulu.zone/firmware/manifest.json";
-inline constexpr char board[] = "read_pico";
-/** Size of one application slot in the measured device partition table. */
-inline constexpr std::uint32_t slot_bytes = 4u * 1024 * 1024;
+using build_profile::manifest_url;
+using build_profile::board;
+inline constexpr std::uint32_t slot_bytes = build_profile::update_slot_bytes;
 /** Release notes beyond this many bytes are not kept or shown. */
 inline constexpr std::size_t notes_limit = 8 * 1024;
 /**

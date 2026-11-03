@@ -16,7 +16,7 @@ eim --log-file .local/eim.log --do-not-track true run "idf.py --version" v6.1
 
 激活后检查 `$IDF_PATH` 对应检出的 commit、已跟踪差异和未跟踪文件，并记录实际 Python、CMake、Ninja 与交叉编译器版本。EIM 日志放到忽略目录 `.local/`。2026-10-06 的 macOS 环境存在 IDF 链接脚本修改和额外 requirements 文件，具体内容见[历史工具链记录](../archive/environment-20261025.md#本机工具链)；使用同一安装时须重新核对，不能将历史成功结果描述为干净官方工具链的本次验证。
 
-BSP 在 `tools/setup_bsp.sh` 与固件 CMake 中按完整 commit 固定，来源、补丁与许可见 [BSP 审查](bsp-review.md)。目标芯片和默认选项由 `firmware/sdkconfig.defaults` 等配置定义；构建后核对实际生成的 sdkconfig，不能用 defaults 的改动代替生效配置验证。
+BSP 的完整 commit 由 `boards/read_pico/bsp-revision.txt` 唯一指定，`tools/setup_bsp.sh` 和板级 CMake 共用；来源、补丁与许可见 [BSP 审查](bsp-review.md)。`boards/read_pico/board.cmake` 通过 `COMPONENTS` 选择 `main` 与 `platform_read_pico`，由 ESP-IDF 展开依赖；它选择 ESP32-S3、准备 BSP 构建副本、绑定运行时端口的链接并配置 TinyUSB 源文件，默认选项位于同目录的 `sdkconfig.defaults`，补丁位于 `patches/`。`profile.cmake` 由固件和 host 入口共同选择，生成契约的 `build_profile.h`，提供更新板名、渠道与槽大小。构建后核对实际生成的 sdkconfig，不能用 defaults 的改动代替生效配置验证。
 
 ## 固件构建入口与证据
 
@@ -30,6 +30,8 @@ sh tools/build_firmware.sh
 ```
 
 首次准备 BSP 需要访问 GitHub；脚本将上游检出定位到固定提交，并检查组件差异，不自动清除组件修改。构建脚本没有刷写、擦除或监视串口动作。应用、ELF 与来源记录位于 `firmware/build/`；其他构建模式使用独立目录，见[版本管理](versioning.md)。每批记录实际日志、镜像大小、摘要与应用槽余量，不在本页维护另一份「最新产物」。
+
+固件入口固定引用 Read Pico 板级配置，目前只有这一种板级实现。无参数构建默认读取 `boards/read_pico/sdkconfig.defaults`；其他模式在其后叠加 `firmware/configs/<mode>.defaults`。生成配置仍位于原有构建位置，分区文件仍为 `firmware/partitions.build.csv`。直接使用 IDF 时，显式的 CMake／环境变量 `SDKCONFIG_DEFAULTS` 仍可覆盖默认文件；标准构建脚本继续按项目 defaults 校验生效配置。旧脚本若显式引用 `firmware/sdkconfig.defaults`，需改用新的板级路径。
 
 历史 macOS 构建曾在组件管理器配置阶段因 `psutil` 的 `sysctl()` 查询受沙箱限制而失败。遇到相同错误时先确认失败阶段及执行权限，不以更换依赖或关闭检查规避；该历史故障不表示当前构建必然失败。
 

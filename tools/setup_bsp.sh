@@ -3,7 +3,7 @@ set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 bsp_source="$repo_root/.local/read_pico_firmware"
-bsp_revision=5f3406deec33304de8801046db583dec7c49e55b
+bsp_revision=$(cat "$repo_root/boards/read_pico/bsp-revision.txt")
 
 if [ ! -d "$bsp_source" ]; then
     mkdir -p "$repo_root/.local"

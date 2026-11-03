@@ -29,4 +29,6 @@ private:
     std::atomic<unsigned> state_{0};
 };
 
+extern DisplayNetworkGate presentation_gate;
+
 } // namespace pico_page::platform

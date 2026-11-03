@@ -1,10 +1,13 @@
 cmake_minimum_required(VERSION 3.20)
 project(pico_page_host LANGUAGES C CXX)
 include(tools/project_version.cmake)
+include(boards/read_pico/profile.cmake)
 
 include(CTest)
-add_executable(display_network_gate_test tests/display_network_gate_test.cpp)
-target_include_directories(display_network_gate_test PRIVATE firmware/components/platform_read_pico/include)
+add_executable(display_network_gate_test tests/display_network_gate_test.cpp
+    firmware/components/platform_read_pico/presentation_gate.cpp)
+target_link_libraries(display_network_gate_test PRIVATE platform_contract)
+target_include_directories(display_network_gate_test PRIVATE firmware/components/platform_read_pico)
 target_compile_features(display_network_gate_test PRIVATE cxx_std_17)
 target_compile_options(display_network_gate_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME display_network_gate COMMAND display_network_gate_test)
@@ -19,8 +22,21 @@ target_compile_features(power_key_test PRIVATE cxx_std_17)
 target_compile_options(power_key_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME power_key COMMAND power_key_test)
 add_subdirectory(firmware/components/reader_core)
+add_subdirectory(firmware/components/platform_contract)
+add_subdirectory(firmware/components/reader_input)
+# Each public port must compile on the host without relying on include order or SDK headers.
+set(contract_headers build_profile platform platform_input platform_display platform_storage
+    platform_power platform_system platform_network platform_update)
+foreach(header IN LISTS contract_headers)
+    set(source "${CMAKE_CURRENT_BINARY_DIR}/contract_${header}.cpp")
+    file(WRITE "${source}" "#include \"pico_page/${header}.h\"\n")
+    list(APPEND contract_sources "${source}")
+endforeach()
+add_library(platform_contract_headers OBJECT ${contract_sources})
+target_link_libraries(platform_contract_headers PRIVATE platform_contract)
+target_compile_options(platform_contract_headers PRIVATE -Wall -Wextra -Werror)
 add_executable(core_test tests/core_test.cpp)
-target_link_libraries(core_test PRIVATE reader_core)
+target_link_libraries(core_test PRIVATE reader_core reader_input)
 target_compile_options(core_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME core COMMAND core_test)
 
@@ -42,6 +58,9 @@ target_compile_options(reader_flow_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME reader_flow COMMAND reader_flow_test)
 
 find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
+add_test(NAME architecture COMMAND ${CMAKE_COMMAND} -E env "PICO_PAGE_CMAKE=${CMAKE_COMMAND}"
+    ${Python3_EXECUTABLE} -m unittest discover
+    -s ${CMAKE_CURRENT_SOURCE_DIR}/tests -p test_architecture.py -v)
 add_test(NAME epub_probe COMMAND ${Python3_EXECUTABLE} -m unittest discover
     -s ${CMAKE_CURRENT_SOURCE_DIR}/tests -p test_epub_probe.py -v)
 set(tool_card ${CMAKE_BINARY_DIR}/setup-network-card)
@@ -64,6 +83,15 @@ add_executable(dictionary_probe EXCLUDE_FROM_ALL tools/dictionary_probe.cpp)
 target_link_libraries(dictionary_probe PRIVATE reader_dictionary)
 target_compile_options(dictionary_probe PRIVATE -Wall -Wextra -Werror)
 add_subdirectory(firmware/components/reader_graphics)
+add_executable(display_compatibility_test tests/display_compatibility_test.cpp
+    firmware/components/reader_runtime/display_compatibility.cpp
+    firmware/components/platform_read_pico/display_geometry.cpp)
+target_include_directories(display_compatibility_test PRIVATE firmware/components/reader_runtime)
+target_link_libraries(display_compatibility_test PRIVATE reader_graphics platform_contract)
+# This startup guard must still execute when release builds remove assert().
+target_compile_definitions(display_compatibility_test PRIVATE NDEBUG)
+target_compile_options(display_compatibility_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME display_compatibility COMMAND display_compatibility_test)
 add_subdirectory(firmware/components/reader_sync)
 add_subdirectory(firmware/components/reader_app)
 target_compile_definitions(reader_app PRIVATE PICO_PAGE_VERSION="${PROJECT_VER}")
@@ -132,7 +160,7 @@ add_test(NAME onboarding COMMAND onboarding_test)
 
 add_executable(app_test tests/app_test.cpp)
 add_dependencies(app_test document_fixtures_target dictionary_fixtures_target)
-target_link_libraries(app_test PRIVATE reader_app)
+target_link_libraries(app_test PRIVATE reader_app reader_input)
 target_compile_options(app_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(app_test PRIVATE "LINKER:--wrap=malloc" "LINKER:--wrap=fopen" "LINKER:--wrap=readdir" "LINKER:--wrap=lstat")
@@ -214,7 +242,7 @@ if(PICO_PAGE_TEST_BSP_WAVEFORM)
 endif()
 
 add_executable(ripple_test tests/ripple_test.cpp firmware/components/platform_read_pico/ripple.cpp)
-target_include_directories(ripple_test PRIVATE tests/ripple_stubs firmware/components/platform_read_pico/include)
+target_include_directories(ripple_test PRIVATE tests/ripple_stubs firmware/components/platform_read_pico firmware/components/platform_read_pico/include)
 target_link_libraries(ripple_test PRIVATE reader_core)
 target_compile_options(ripple_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME ripple COMMAND ripple_test)
@@ -241,9 +269,10 @@ target_compile_options(sleep_usb_console_test PRIVATE -Wall -Wextra -Werror -UND
 add_test(NAME sleep_usb_console COMMAND sleep_usb_console_test)
 
 add_executable(portal_server_test tests/portal_server_test.cpp
+    firmware/components/platform_read_pico/presentation_gate.cpp
     firmware/components/platform_read_pico/portal_server.cpp)
 target_include_directories(portal_server_test PRIVATE tests/portal_stubs
     firmware/components/platform_read_pico/include)
-target_link_libraries(portal_server_test PRIVATE reader_store reader_core)
+target_link_libraries(portal_server_test PRIVATE reader_store platform_contract)
 target_compile_options(portal_server_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME portal_server COMMAND portal_server_test)
