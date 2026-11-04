@@ -68,6 +68,31 @@ int main() {
         assert(near(style(recovery, {"p", "", ""}).font_px, 25));
     }
     {
+        for (const std::string skipped : {
+                 "@media screen{font-size:99px}",
+                 "@unknown url(data:text/x,;}{);",
+                 "@supports (x:fn(';}',[x])){@media screen{font-size:99px}}"}) {
+            StyleSheet recovery;
+            const auto declarations = "font-size:20px;" + skipped + "font-size:30px";
+            assert(recovery.append("p{" + declarations + "}div{font-size:31px}") == Result::Complete);
+            assert(near(style(recovery, {"p", "", ""}).font_px, 30));
+            assert(near(style(recovery, {"div", "", ""}).font_px, 31));
+            assert(near(style(recovery, {"span", "", ""}, nullptr, declarations).font_px, 30));
+            unsigned fonts = 0;
+            assert(recovery.collect_fonts("@font-face{font-family:Example;" + skipped + "src:url(book.ttf)}", {},
+                [&](std::string_view family, std::string_view url) {
+                    assert(family == "example" && url == "book.ttf");
+                    ++fonts;
+                    return true;
+                }) == Result::Complete);
+            assert(fonts == 1);
+        }
+        StyleSheet boundaries;
+        assert(boundaries.append("p{font-size:20px;@unknown x}div{font-size:31px}") == Result::Complete);
+        assert(near(style(boundaries, {"p", "", ""}).font_px, 20));
+        assert(near(style(boundaries, {"div", "", ""}).font_px, 31));
+    }
+    {
         StyleSheet escaped;
         assert(escaped.append("/*{}*/p/**/.\\4e2d {f\\6f nt-size:2em} #\\31 abc{font-weight:bold} p.\\+{font-style:italic}") == Result::Complete);
         assert(near(style(escaped, {"p", "", "中"}).font_px, 32));
@@ -111,6 +136,14 @@ int main() {
         StyleSheet nested;
         std::string deep = "@unknown{" + std::string(33, '{') + "p{font-size:99px}";
         assert(nested.append(deep) == Result::Limit);
+        assert(nested.append("p{" + deep + "}") == Result::Limit);
+        budget = {};
+        assert(nested.compute({"p", "", ""}, nullptr, {}, deep, budget, result) == Result::Limit);
+        assert(nested.collect_fonts("@font-face{" + deep + "}", {},
+            [](std::string_view, std::string_view) { assert(false); return true; }) == Result::Limit);
+        budget = {}; budget.maximum_work = 4;
+        assert(nested.compute({"p", "", ""}, nullptr, {}, "@unknown{}font-size:30px", budget, result) == Result::Limit);
+        assert(budget.work <= budget.maximum_work && near(result.font_px, 16));
     }
     {
         StyleSheet cancel;
@@ -123,6 +156,17 @@ int main() {
         ComputedStyle result;
         assert(cancel.compute({"p", "", ""}, nullptr, {}, {}, budget, result, stop) == Result::Cancelled);
         assert(near(result.font_px, 16));
+        const std::string long_rule = "@unknown{" + std::string(1000, ' ') + "}";
+        calls = 0;
+        assert(cancel.append("p{font-size:99px;" + long_rule + "font-size:30px}", stop) == Result::Cancelled);
+        assert(near(style(cancel, {"p", "", ""}).font_px, 22));
+        calls = 0; budget = {};
+        Checkpoint stop_inline{[](void* value) { return ++*static_cast<unsigned*>(value) >= 4; }, &calls};
+        assert(cancel.compute({"p", "", ""}, nullptr, {}, long_rule + "font-size:30px", budget, result, stop_inline) == Result::Cancelled);
+        assert(near(result.font_px, 16));
+        calls = 0;
+        assert(cancel.collect_fonts("@font-face{font-family:Example;" + long_rule + "src:url(book.ttf)}", stop,
+            [](std::string_view, std::string_view) { assert(false); return true; }) == Result::Cancelled);
         StyleSheet empty;
         assert(empty.append("") == Result::Complete);
         assert(empty.append("p{font-size:20px") == Result::Complete);

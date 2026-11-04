@@ -760,6 +760,24 @@ static void original_epub_test(const fs::path& root, const fs::path& fixtures, c
         assert(cached.from_disk && restored.text == chapter.text && restored.author_styles == chapter.author_styles);
         assert(restored.author_fonts.size() == chapter.author_fonts.size() &&
                restored.author_fonts.front().crc32 == chapter.author_fonts.front().crc32);
+        const std::string current_revision = "content-original-v2", old_revision = "content-original-v1";
+        assert(original_entry.name.find(current_revision) != std::string::npos);
+        auto old_name = original_entry.name;
+        old_name.replace(old_name.find(current_revision), current_revision.size(), old_revision);
+        auto old_payload = original_entry.bytes.substr(0, original_entry.bytes.size() - 32);
+        old_payload.replace(old_payload.find(current_revision), current_revision.size(), old_revision);
+        old_payload += md5_hex(old_payload);
+        assert(store.save_cache(old_name, old_payload) == StoreStatus::Ok);
+        fs::remove(root / "PicoPage/cache" / original_entry.name);
+        assert(!load_content_cache(store, document.metadata().book_id, chapter.resource,
+                                  0, 0, restored, {}, nullptr, nullptr, true));
+        assert(read(root / "PicoPage/cache" / old_name) == old_payload);
+        assert(store.save_cache(original_entry.name, old_payload) == StoreStatus::Ok);
+        assert(!load_content_cache(store, document.metadata().book_id, chapter.resource,
+                                  0, 0, restored, {}, nullptr, nullptr, true));
+        assert(load_content(store, document, 0, restored, error, ChapterLoad::Original, 0, {}, &cached));
+        assert(!cached.from_disk && restored.author_styles == chapter.author_styles);
+        assert(save_content_cache(store, cached));
         assert(!load_content_cache(store, document.metadata().book_id, chapter.resource, 0, 0, restored));
         write(root / "PicoPage/cache" / original_entry.name, "damaged original content");
         assert(load_content(store, document, 0, restored, error, ChapterLoad::Original, 0, {}, &cached));
@@ -837,7 +855,18 @@ static void original_epub_test(const fs::path& root, const fs::path& fixtures, c
                               0, 0, persisted, {}, nullptr, nullptr, true));
     const auto pages = root / "PicoPage/cache/pages-original";
     const auto cache = fs::directory_iterator(pages)->path();
-    assert(read(cache).find(":original-pagination-v1\n") != std::string::npos);
+    auto old_pages = read(cache);
+    const std::string current_revision = ":original-pagination-v2\n";
+    assert(old_pages.find(current_revision) != std::string::npos);
+    old_pages.replace(old_pages.find(current_revision), current_revision.size(), ":original-pagination-v1\n");
+    old_pages.resize(old_pages.size() - 32);
+    old_pages += md5_hex(old_pages);
+    write(cache, old_pages);
+    opened(app, book); driver.present(); driver.complete_content();
+    assert(app.saved_record()->anchor == saved->anchor);
+    count_idle();
+    assert(app.book_pages() && app.book_pages()->total == total);
+    assert(read(cache).find(current_revision) != std::string::npos);
     opened(app, book); driver.present(); driver.complete_content();
     assert(app.saved_record()->anchor == saved->anchor);
     count_idle();

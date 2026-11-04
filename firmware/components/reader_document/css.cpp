@@ -358,6 +358,15 @@ void skip_block(Scanner& scanner) {
         } else if (c == stack[depth - 1]) --depth;
     }
 }
+Token collect_declaration(Scanner& scanner, Token first, TokenList& list) {
+    const bool at_rule = is(first, '@');
+    const auto terminator = collect(scanner, first, list, !at_rule);
+    if (at_rule) {
+        list.clear();
+        if (is(terminator, '{')) skip_block(scanner);
+    }
+    return terminator;
+}
 Token nonspace(Scanner& scanner) {
     Token token;
     do { token = scanner.next(); } while (token.kind == Kind::Space);
@@ -822,7 +831,7 @@ Result StyleSheet::collect_fonts(std::string_view source, Checkpoint checkpoint,
             const auto token = nonspace(scanner);
             if (token.kind == Kind::End || is(token, '}')) { closed = is(token, '}'); break; }
             list.clear();
-            const auto terminator = collect(scanner, token, list, true);
+            const auto terminator = collect_declaration(scanner, token, list);
             const auto count = compact_tokens(list);
             if (list.valid && count >= 3 && is(list.values[1], ':')) {
                 const auto& value = list.values[2];
@@ -899,7 +908,8 @@ Result StyleSheet::append(std::string_view source, Checkpoint checkpoint, const 
                 const auto token = nonspace(scanner);
                 if (token.kind == Kind::End || is(token, '}')) break;
                 list.clear();
-                const auto end = collect(scanner, token, list, true);
+                const auto end = collect_declaration(scanner, token, list);
+                if (is(token, '@')) ++data.report.skipped_at_rules;
                 std::array<Declaration, 4> parsed{};
                 const size_t count = declarations(list, parsed, families);
                 if (!count && list.size) ++data.report.rejected_declarations;
@@ -969,7 +979,7 @@ Result StyleSheet::compute(const Element& element, const ComputedStyle* parent, 
         const auto token = nonspace(scanner);
         if (token.kind == Kind::End) break;
         list.clear();
-        const auto end = collect(scanner, token, list, true);
+        const auto end = collect_declaration(scanner, token, list);
         std::array<Declaration, 4> parsed{};
         const auto count = declarations(list, parsed, families);
         for (size_t i = 0; i < count; ++i) {

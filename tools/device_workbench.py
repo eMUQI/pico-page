@@ -716,7 +716,8 @@ def compare(first, second):
                                                if not any(flag in line for flag in mode_flags))
         return {k: m.get(k) for k in keys}
     comparable = (left.get("result", {}).get("status") == right.get("result", {}).get("status") == "pass"
-                  and bool(left["metadata"].get("workload"))
+                  and all(m.get(k) for m in (left["metadata"], right["metadata"])
+                          for k in keys if k != "source_dirty")
                   and all(m.get("mode") not in ("image-sync", "reading-flow")
                           or (isinstance(m.get("workload"), str) and re.search(r":font_px=[1-9][0-9]*\Z", m["workload"]))
                           for m in (left["metadata"], right["metadata"]))

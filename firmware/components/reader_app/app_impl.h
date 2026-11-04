@@ -1786,7 +1786,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                       spec.left, spec.top, spec.width, spec.height, spec.font_px, spec.line_height,
                       spec.indent_chars, spec.paragraph_gap, spine.size());
         pages_name = name;
-        const auto revision = spec.original_epub ? ":original-pagination-v1\n" : ":pagination-v5\n";
+        const auto revision = spec.original_epub ? ":original-pagination-v2\n" : ":pagination-v5\n";
         pages_header = std::string("PPPAGES3\n") + revision_for(book_path, document.metadata()) + revision + book_path + "\n" + font_file + "\n" + geometry +
             document.metadata().book_id + "\n" + font_identity + "\n";
         if (async_content) { pages_cache_pending = true; return; }

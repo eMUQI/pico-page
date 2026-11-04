@@ -13,7 +13,7 @@ namespace pico_page {
 namespace {
 constexpr std::size_t limit = 2U * 1024 * 1024;
 constexpr char version[] = "content-reading-v4";
-constexpr char original_version[] = "content-original-v1";
+constexpr char original_version[] = "content-original-v2";
 const char* revision(bool original) { return original ? original_version : version; }
 bool room(std::size_t bytes) {
     const bool admitted = bytes <= limit && chapter_memory_available(bytes + 64);

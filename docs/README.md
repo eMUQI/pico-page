@@ -57,6 +57,7 @@
 |---|---|
 | 构建 Read Pico 固件 | [固件开发指南](../firmware/README.md) · [环境记录](development/environment.md) · [BSP 审查](development/bsp-review.md) |
 | 在电脑上运行和测试 | [桌面开发指南](../host/README.md) · [测试说明](../tests/README.md) |
+| Codex 开发工作流 | [pstack 接入与验证](development/agent-workflow.md) |
 | 了解结构和设计取舍 | [架构](development/architecture.md) · [产品决定](planning/decisions.md) · [调研参考](planning/references.md) |
 | 修改固件或共享组件 | [仓库规则](../AGENTS.md) · [嵌入式开发规则](development/embedded-development.md) · [验收清单](development/acceptance.md) |
 | 定位具体实现 | [文档解析](development/document-runtime.md) · [字体与分页](development/graphics-runtime.md) · [图片](development/image-runtime.md) · [存储](development/store-implementation.md) · [界面](development/ui-implementation.md) · [平台](development/platform-runtime.md) |

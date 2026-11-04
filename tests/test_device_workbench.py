@@ -615,7 +615,8 @@ class WorkbenchTest(unittest.TestCase):
         path.write_text(json.dumps(base))
         self.assertFalse(compare(path, path)["comparable"])
         base["metadata"].update(source_commit="base", source_sha256="basehash", provenance_verified=True,
-                                workload="refresh-v1:K2x1", effective_sdkconfig="CONFIG_PM_ENABLE=y")
+                                tf="synthetic-card", books_sha256=["synthetic-book"], cache="warm", network="offline",
+                                mode="refresh", workload="refresh-v1:K2x1", effective_sdkconfig="CONFIG_PM_ENABLE=y")
         base["analysis"].update(gaps=[], composition={"0:2:0": 2})
         base["analysis"]["distributions"] = {"0": {"n": 2, "p95_us": 100}}
         path.write_text(json.dumps(base))
@@ -625,6 +626,23 @@ class WorkbenchTest(unittest.TestCase):
         other.write_text(json.dumps(base))
         self.assertTrue(compare(path, other)["comparable"])
         self.assertFalse(compare(path, other)["same_source"])
+        changed = json.loads(json.dumps(base))
+        changed["metadata"]["effective_sdkconfig"] += "\nCONFIG_PICO_PAGE_TRACE_EVENTS=y"
+        other.write_text(json.dumps(changed))
+        self.assertTrue(compare(path, other)["comparable"])
+        for key, empty in (("hardware", ""), ("tf", ""), ("books_sha256", []), ("cache", ""),
+                           ("network", ""), ("mode", ""), ("effective_sdkconfig", ""), ("source_dirty", None)):
+            for present in (False, True):
+                with self.subTest(condition=key, present=present):
+                    incomplete = json.loads(json.dumps(base))
+                    if present:
+                        incomplete["metadata"][key] = empty
+                    else:
+                        del incomplete["metadata"][key]
+                    other.write_text(json.dumps(incomplete))
+                    self.assertFalse(compare(other, other)["comparable"])
+                    self.assertFalse(compare(path, other)["comparable"])
+                    self.assertFalse(compare(other, path)["comparable"])
         for status in ("fail", "inconclusive"):
             unfinished = self.output / "unfinished.json"
             unfinished.write_text(json.dumps(dict(base, result={"status": status})))

@@ -62,6 +62,8 @@
 
 ## 工作方式与安全边界
 
+Codex 非平凡开发任务使用已安装的 `pstack:poteto-mode`，验证使用 `verify-pico-page`。按[接入说明](docs/development/agent-workflow.md)读取安装包内的 Codex 适配，保留本仓库的产品、验证与授权边界。
+
 先检查已有文件与 Git 差异，保护未提交的改动。实现或修复限于约定范围，包含配套文档、本地构建、测试及本次改动引入的失败修正。审计或讨论请求只交付结论；要求先审阅或暂不提交时，遵守该边界。
 
 构建前通过 ESP-IDF/EIM 安装记录及 `docs/development/environment.md` 定位已有工具链，不自行替换全局工具链。核对实际 IDF/BSP、依赖锁、补丁和生效 sdkconfig；改 defaults 后验证实际采用值。复用第三方代码前逐组件核对源码与许可证，记录 commit、依赖、修改与义务。
