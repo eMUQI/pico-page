@@ -18,6 +18,13 @@ class CssSurveyTest(unittest.TestCase):
         self.assertEqual(len(result), 4)
         self.assertEqual(result[-1], ('\\', '\\'))
 
+    def test_selector_components_exclude_class_and_id_names(self):
+        result = survey.css_usage('p.a.b > .c, #d {margin:1em}')['selectors']
+        self.assertEqual(result['type'], 1)
+        self.assertEqual(result['class'], 3)
+        self.assertEqual(result['id'], 1)
+        self.assertEqual(result['compound'], 1)
+
     def test_associated_styles_only(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

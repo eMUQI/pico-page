@@ -93,6 +93,48 @@ def tokens(source, whitespace=False):
             i += 1
 
 
+def selector_usage(prelude):
+    counts = Counter()
+    nesting, simple_count, previous = 0, 0, None
+    labels = {'.': 'class', '#': 'id', ':': 'pseudo', '[': 'attribute', '*': 'universal'}
+    for index, (kind, _) in enumerate(prelude):
+        if kind in (']', ')'):
+            nesting = max(0, nesting - 1)
+            continue
+        if nesting:
+            if kind in ('[', '('):
+                nesting += 1
+            continue
+        if kind == 'space':
+            if index and index + 1 < len(prelude):
+                before, after = prelude[index - 1][0], prelude[index + 1][0]
+                if before not in (',', '>', '+', '~', 'space') and after not in (',', '>', '+', '~', 'space'):
+                    counts['descendant'] += 1
+            simple_count, previous = 0, None
+            continue
+        if kind in (',', '>', '+', '~'):
+            counts[{',': 'group', '>': 'child', '+': 'adjacent', '~': 'sibling'}[kind]] += 1
+            simple_count, previous = 0, kind
+            continue
+        simple = kind in labels or (kind == 'word' and previous not in ('.', '#', ':', '|'))
+        if kind in labels:
+            # A pseudo-element's second colon is part of the same selector component.
+            if kind != ':' or previous != ':':
+                counts[labels[kind]] += 1
+            else:
+                simple = False
+        elif simple:
+            counts['type'] += 1
+        if simple:
+            simple_count += 1
+            if simple_count == 2:
+                counts['compound'] += 1
+        if kind in ('[', '('):
+            nesting += 1
+        previous = kind
+    return counts
+
+
 def css_usage(source):
     ts = list(tokens(source))
     properties, at_rules, units, selectors, shorthands = [Counter() for _ in range(5)]
@@ -134,16 +176,7 @@ def css_usage(source):
             in_declarations = bool(contexts and contexts[-1] == 'declarations')
             if not at_rule and not in_declarations:
                 rules += 1
-                for index, (k, v) in enumerate(prelude):
-                    selectors[{'.': 'class', '#': 'id', '>': 'child', '[': 'attribute',
-                               ':': 'pseudo', '+': 'adjacent', '~': 'sibling', ',': 'group',
-                               '*': 'universal'}.get(k, 'type' if k == 'word' else 'other')] += k != 'space'
-                    if k == 'space' and index and index + 1 < len(prelude):
-                        before, after = prelude[index - 1][0], prelude[index + 1][0]
-                        if before not in (',', '>', '+', '~', 'space') and after not in (',', '>', '+', '~', 'space'):
-                            selectors['descendant'] += 1
-                    if k in ('.', '#') and index and prelude[index - 1][0] in ('word', ']'):
-                        selectors['compound'] += 1
+                selectors.update(selector_usage(prelude))
             group = at_rule and len(significant) > 1 and significant[1][1].lower() in ('media', 'supports', 'layer', 'container')
             contexts.append('group' if group else 'declarations')
             prelude = []
