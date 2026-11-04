@@ -6,6 +6,7 @@
 
 | 日期与源码 | 记录 | 范围 |
 |---|---|---|
+| 2026-11-04 · `0.5.1/2b0e98d` 与 `main/6429f79` 同代码诊断构建 | [报告](baselines/2026-11-04-v051-main-performance.md) · [结构化结果](baselines/2026-11-04-v051-main-performance.json) | 同机三组开书、普通与跨章翻页对照；记录预取状态差异及两版正文跨章时偶发的数秒等待，测试后恢复原 Release |
 | 2026-10-28–29 · 干净 `8c7d589` | [报告](baselines/2026-10-28-8c7d589.md) · [结构化结果](baselines/2026-10-28-8c7d589.json) | 综合测试、472 次计分翻页、96 步界面及 100 次热查词；保留缓存清理阻塞和冷路径长等待 |
 | 2026-10-27 · 干净 `main 2bda49ad` | [报告](baselines/2026-10-27-2bda49ad.md) · [结构化结果](baselines/2026-10-27-2bda49ad.json) | 修复合并后独立准备／计分、原文件重测及历史对比 |
 | 2026-10-26 · `b6e882b7` 加一处诊断映射修正 | [报告](baselines/2026-10-26-b6e882b7.md) · [结构化结果](baselines/2026-10-26-b6e882b7.json) | 本次完整结果及历史对比 |
@@ -27,6 +28,8 @@
 结构化结果按 `schema_version` 解析：首批为 v1，2026-10-27 批次为 v2。v2 将历史对照、书库、安装和网络／重启记录分别归入 `history`、`library`、`flash`、`network`；`schema_notes.top_level_mapping` 列明旧字段映射，不能假定同名字段在不同版本具有相同结构。`reading` 保留九组计分口径，并增加页索引状态和逐动作匹配结果；后续结构变化必须更新版本或保持兼容。
 
 2026-10-28 批次采用 v3，增加 `dictionary`、`cache` 和 `issues`；`reading` 区分原九组连续操作与独立停留补测，不能将两类的缓存状态或统计直接合并为严格 A/B。日期保留批次起始日，`completed_date` 记录完成日；实际字段与限制见对应报告。
+
+2026-11-04 专项采用 v4，`kind=targeted_version_performance_comparison`；`runs` 保留逐轮采集判定及完整分布，`comparison` 记录共同指标组，`findings`、`conditions`、`restoration` 分别维护异常、比较条件及恢复证据。它不复用 v3 的完整套件字段，不表示其他验收项已执行；仅一侧出现的预取命中组仍保留在该轮分布中。
 
 ## 可重复的测试顺序
 
