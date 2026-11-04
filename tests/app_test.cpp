@@ -741,6 +741,112 @@ static void content_font_test(const fs::path& root, const fs::path& fixtures, co
     }
 }
 
+static void original_epub_test(const fs::path& root, const fs::path& fixtures, const fs::path& font) {
+    fs::create_directories(root / "Books"); fs::create_directories(root / "Fonts");
+    fs::copy_file(fixtures / "font-layout.epub", root / "Books/book.epub");
+    fs::copy_file(font, root / "Fonts/LXGWWenKai-Regular.ttf");
+    FileStore store(root.string());
+    {
+        EpubDocument document;
+        Chapter chapter;
+        std::string error;
+        assert(document.open((root / "Books/book.epub").string(), error));
+        ContentCacheEntry original_entry;
+        assert(load_content(store, document, 0, chapter, error, ChapterLoad::Original, 0, {}, &original_entry));
+        assert(!original_entry.bytes.empty() && save_content_cache(store, original_entry));
+        Chapter restored;
+        ContentCacheEntry cached;
+        assert(load_content(store, document, 0, restored, error, ChapterLoad::Original, 0, {}, &cached));
+        assert(cached.from_disk && restored.text == chapter.text && restored.author_styles == chapter.author_styles);
+        assert(restored.author_fonts.size() == chapter.author_fonts.size() &&
+               restored.author_fonts.front().crc32 == chapter.author_fonts.front().crc32);
+        assert(!load_content_cache(store, document.metadata().book_id, chapter.resource, 0, 0, restored));
+        write(root / "PicoPage/cache" / original_entry.name, "damaged original content");
+        assert(load_content(store, document, 0, restored, error, ChapterLoad::Original, 0, {}, &cached));
+        assert(!cached.from_disk && restored.author_styles == chapter.author_styles);
+        bool stable = false;
+        auto faces = prepare_embedded_fonts(store, document, chapter, stable);
+        assert(stable && faces.faces.size() == 2 && faces.faces.front() && faces.faces.back());
+        graphics::Font body;
+        assert(body.open(font.string()));
+        graphics::LayoutSpec spec;
+        spec.original_epub = true;
+        const auto page = plan_content(body, chapter, 0, spec, true, {}, &faces);
+        assert(page.error.empty() && page.end == plan_content(body, chapter, 0, spec, false, {}, &faces).end);
+        const auto glyph = [&](char32_t scalar) -> const graphics::PositionedGlyph& {
+            const auto found = std::find_if(page.glyphs.begin(), page.glyphs.end(),
+                [&](const auto& item) { return item.scalar == scalar; });
+            assert(found != page.glyphs.end());
+            return *found;
+        };
+        assert(glyph(U'一').font_slot == 1 && glyph(U'内').font_slot == 0 && glyph(U'甲').font_slot == 2);
+        graphics::Canvas canvas;
+        assert(graphics::render_page(canvas, body, page, 1, {}, &faces));
+        assert(page.images.size() == 1);
+        const auto image_key = page_image_cache_key(document.metadata().book_id, page, spec);
+        auto moved_image = page;
+        ++moved_image.images.front().y;
+        assert(!image_key.empty() && image_key != page_image_cache_key(document.metadata().book_id, moved_image, spec));
+        faces.clear();
+        const auto cache = root / "PicoPage/cache/epub-fonts-v1";
+        for (const auto& payload : fs::directory_iterator(cache))
+            if (payload.file_size() == chapter.author_fonts.front().bytes)
+                write(payload.path(), std::string(payload.file_size(), '\0'));
+        faces = prepare_embedded_fonts(store, document, chapter, stable);
+        assert(stable && faces.faces.size() == 2 && faces.faces.front() && faces.faces.front()->contains(U'一'));
+    }
+    ReaderApp app(root.string(), "original-epub", true, true);
+    Driver driver{app};
+    assert(app.initialize()); driver.present();
+    const std::string book = "Books/book.epub";
+    opened(app, book); driver.present(); driver.complete_content();
+    const auto saved = app.saved_record();
+    assert(saved && !store.load_settings(book).settings.original_epub);
+    const auto preview = [&] {
+        driver.tap(342, 500); driver.present();
+        assert(app.view() == View::Tools);
+        driver.tap(205, 1140); driver.present(); driver.complete_content();
+        assert(app.view() == View::Typography);
+        driver.tap(342, 1014); driver.present(); driver.complete_content();
+        assert(app.view() == View::Typography);
+    };
+    preview();
+    driver.tap(628, 628); driver.present();
+    assert(app.saved_record() == saved && !store.load_settings(book).settings.original_epub);
+    preview();
+    driver.tap(500, 1140); driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && store.load_settings(book).settings.original_epub);
+    assert(!store.load_settings().settings.original_epub && app.saved_record()->anchor == saved->anchor);
+    const auto count_idle = [&] {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (app.background_due()) {
+            app.background_step(); app.poll_background();
+            if (app.pending_frame()) driver.present();
+            assert(std::chrono::steady_clock::now() < deadline);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    };
+    count_idle();
+    assert(app.book_pages());
+    const auto total = app.book_pages()->total;
+    EpubDocument verified;
+    std::string cache_error;
+    assert(verified.open((root / book).string(), cache_error));
+    Chapter persisted;
+    assert(load_content_cache(store, verified.metadata().book_id, verified.spine().front().resource,
+                              0, 0, persisted, {}, nullptr, nullptr, true));
+    const auto pages = root / "PicoPage/cache/pages-original";
+    const auto cache = fs::directory_iterator(pages)->path();
+    assert(read(cache).find(":original-pagination-v1\n") != std::string::npos);
+    opened(app, book); driver.present(); driver.complete_content();
+    assert(app.saved_record()->anchor == saved->anchor);
+    count_idle();
+    assert(app.book_pages() && app.book_pages()->total == total);
+    preview();
+    driver.tap(500, 1140); driver.present();
+    assert(!store.load_settings(book).settings.original_epub && app.saved_record()->anchor == saved->anchor);
+}
+
 static void font_picker_test(const fs::path& root, const fs::path& fixtures, const fs::path& font, bool async) {
     fs::create_directories(root / "Books"); fs::create_directories(root / "Fonts");
     fs::copy_file(fixtures / "valid.epub", root / "Books/book.epub");
@@ -3865,6 +3971,7 @@ int main(int argc, char** argv) {
     layout_review_test(card / "LayoutAsync", fixtures, argv[2], true);
     content_font_test(card / "ContentFontSync", fixtures, argv[2], false);
     content_font_test(card / "ContentFontAsync", fixtures, argv[2], true);
+    original_epub_test(card / "OriginalEpub", fixtures, argv[2]);
     font_picker_test(card / "FontPickerSync", fixtures, argv[2], false);
     font_picker_test(card / "FontPickerAsync", fixtures, argv[2], true);
     font_picker_image_test(card / "FontPickerImage", fixtures, argv[2]);

@@ -16,16 +16,18 @@ void ReaderApp::Impl::load_library_font(const std::string& path) {
 
 void ReaderApp::Impl::load_fonts(const ReaderSettings *preview) {
     const auto &selected = preview ? *preview : settings;
-    const auto resolved = weight_font(selected);
-    weight_unavailable = selected.font_weight == "light" && !light_available(selected);
-    const auto tag = selected.font_weight == "bold" ? "-Bold." : selected.font_weight == "medium" ? "-Medium." : selected.font_weight == "light" ? "-Light." : "-Regular.";
+    const bool author_weight = selected.original_epub && !txt_name(book_path);
+    const std::string weight = author_weight ? "regular" : selected.font_weight;
+    const auto resolved = author_weight ? selected.font : weight_font(selected);
+    weight_unavailable = weight == "light" && !light_available(selected);
+    const auto tag = weight == "bold" ? "-Bold." : weight == "medium" ? "-Medium." : weight == "light" ? "-Light." : "-Regular.";
     const bool native_weight = resolved.find(tag) != std::string::npos;
     const bool weighted_base = resolved.find("-Bold.") != std::string::npos || resolved.find("-Medium.") != std::string::npos || resolved.find("-Light.") != std::string::npos;
-    weight_unavailable = weight_unavailable || (selected.font_weight != "regular" && !native_weight && weighted_base);
-    body.set_synthetic_weight(native_weight || weight_unavailable ? 0 : selected.font_weight == "bold" ? 2 : selected.font_weight == "medium" ? 1 : 0);
+    weight_unavailable = weight_unavailable || (weight != "regular" && !native_weight && weighted_base);
+    body.set_synthetic_weight(native_weight || weight_unavailable ? 0 : weight == "bold" ? 2 : weight == "medium" ? 1 : 0);
     if (effective_font == resolved && body.valid() && controlled_storage) {
-        if (effective_weight != selected.font_weight) { clear_body_cache(); clear_prefetch(); }
-        effective_weight = selected.font_weight;
+        if (effective_weight != weight) { clear_body_cache(); clear_prefetch(); }
+        effective_weight = weight;
         if (!library_font_path.empty()) load_library_font(library_font_path);
         return;
     }
@@ -44,7 +46,7 @@ void ReaderApp::Impl::load_fonts(const ReaderSettings *preview) {
         font_fallback = true;
     }
     effective_font = resolved;
-    effective_weight = selected.font_weight;
+    effective_weight = weight;
     if (!library_font_path.empty()) load_library_font(library_font_path);
 }
 
@@ -110,22 +112,82 @@ void ReaderApp::Impl::font_picker_control(int id) {
     overlay();
 }
 
+
+void ReaderApp::Impl::change_epub_layout() {
+    if (txt_name(book_path)) return;
+    draft.original_epub = !draft.original_epub;
+    reset_overrides = false;
+    typography_preview.reset();
+    typography_preview_failed = false;
+    if (draft.original_epub == settings.original_epub) { draw_typography(); return; }
+
+    Anchor anchor;
+    if (!chapter.anchor_at(static_cast<std::uint32_t>(offset), anchor)) {
+        typography_preview_failed = true;
+        draw_typography(false);
+        return;
+    }
+    if (!async_content) {
+        Chapter preview;
+        std::uint32_t position = 0;
+        std::string detail;
+        TypographyPreview prepared;
+        const auto holds = [&](const Chapter& candidate) { return candidate.offset_for(anchor, position); };
+        if (find_content(store, document, chapter_index, preview, detail,
+                         draft.original_epub ? ChapterLoad::Original : ChapterLoad::Reading, holds, {}, &prepared.cache)) {
+            prepared.fonts = prepare_embedded_fonts(store, document, preview, prepared.fonts_stable);
+            prepared.chapter = std::move(preview);
+            typography_preview = std::move(prepared);
+            typography_preview_offset = position;
+        } else typography_preview_failed = true;
+        draw_typography();
+        return;
+    }
+    auto reader = std::move(chapter_session);
+    const auto reader_bytes = chapter_stream_bytes;
+    abandon_content();
+    yield_counting_session();
+    release_counting();
+    chapter_session = reader ? std::move(reader) : std::make_shared<ChapterSession>();
+    chapter_stream_bytes = reader_bytes;
+    ContentJob::Request request;
+    request.kind = ContentJob::Kind::Chapter; request.target = ContentJob::Target::Anchor;
+    request.root = root; request.path = root + "/" + book_path; request.identity = document.metadata();
+    request.book_index = verified_reader_index();
+    request.chapter = chapter_index; request.anchor = std::move(anchor);
+    request.chapter_session = chapter_session;
+    request.layout.original_epub = draft.original_epub; request.preview = true;
+    request.generation = foreground_generation;
+    pending_content = std::move(request);
+    loading("正在准备排版预览…");
+    clear_body_cache();
+    covers.clear();
+    trim_glyph_caches_for_free_memory(2U * 1024 * 1024);
+}
+
 void ReaderApp::Impl::draw_typography(bool prepare_images) {
     view = View::Typography;
     hits.clear();
     canvas.clear();
     load_fonts(&draft);
     const auto spec = layout(draft, 64, typography_preview_bottom());
-    const auto preview = plan_page(offset, spec);
-    if (!prepare_images && !preview.images.empty()) {
+    const bool mode_changed = draft.original_epub != settings.original_epub;
+    const bool preview_ready = !mode_changed || typography_preview.has_value();
+    const Chapter& source = typography_preview && mode_changed ? typography_preview->chapter : chapter;
+    auto start = mode_changed ? typography_preview_offset : offset;
+    if (preview_ready && spec.original_epub) start = restore_readable_offset(source, start);
+    const auto preview = !preview_ready ? graphics::Page{} : plan_page(source, start, spec);
+    if (!preview_ready) {
+        text(typography_preview_failed ? "排版预览无法准备" : "排版预览尚未就绪", 36, 96, 28);
+    } else if (!prepare_images && !preview.images.empty()) {
         text("预览暂不可用", 36, 96, 28);
     } else if (async_content && !image_prepared && preview.error.empty() && !preview.images.empty()) {
-        begin_image(offset, preview, true);
+        begin_image(start, preview, true);
         text("正在准备图片…", 36, 300, 26, 400, 3);
         button(Dismiss, "取消", 262, 368, 160, 64, false, 24);
         loading_cancel = hits.back();
     } else {
-        if (!preview.error.empty() || !draw_page_content(preview, spec))
+        if (!preview.error.empty() || !draw_page_content(preview, spec, false, &fonts_for(source)))
             text("预览暂不可用", 36, 96, 28);
     }
     if (font_picker_open) {
@@ -157,7 +219,12 @@ void ReaderApp::Impl::draw_typography(bool prepare_images) {
         default: return "恢复默认";
         }
     };
+    const auto author_controls = [&](int id) {
+        return spec.original_epub && (id == FontWeight || id == LineHeight || id == Gap || id == Indent);
+    };
+    if (author_controls(parameter)) parameter = FontSize;
     auto value = [&](int id) -> std::string {
+        if (author_controls(id)) return "原书";
         switch (id) {
         case FontChoice: return font_name(draft.font);
         case FontWeight: return weight_name(draft.font_weight);
@@ -178,7 +245,7 @@ void ReaderApp::Impl::draw_typography(bool prepare_images) {
             center(name(ids[i]), x, y + 5, 150, 24);
             center(value(ids[i]), x + 6, y + 37, 138, 24, 1, true);
         }
-        hits.push_back({x, y, 150, 80, ids[i]});
+        if (!author_controls(ids[i])) hits.push_back({x, y, 150, 80, ids[i]});
     }
     auto can_step = [&](int direction) {
         switch (parameter) {
@@ -192,13 +259,17 @@ void ReaderApp::Impl::draw_typography(bool prepare_images) {
     };
     if (can_step(-1)) button(Minus, "−", 24, 976, 150, 88, false, 40);
     else disabled_button("−", 24, 976, 150, 88, 40);
-    center(value(parameter), 186, 999, 312, 32, 1, true);
+    if (txt_name(book_path)) center(value(parameter), 186, 999, 312, 32, 1, true);
+    else button(EpubLayoutMode, spec.original_epub ? "排版 · 原书" : "排版 · 自定义", 186, 976, 312, 88, false, 28);
     if (can_step(1)) button(Plus, "+", 510, 976, 150, 88, false, 40);
     else disabled_button("+", 510, 976, 150, 88, 40);
-    if (!font_fallback && !weight_unavailable) button(Scope, "设为阅读默认", 24, 1088, 312, 96);
+    if (!font_fallback && !weight_unavailable && !spec.original_epub && !mode_changed) button(Scope, "设为阅读默认", 24, 1088, 312, 96);
     else disabled_button("设为阅读默认", 24, 1088, 312, 96);
-    if (!font_fallback && !weight_unavailable && changed) button(Apply, "应用到此书", 348, 1088, 312, 96, true);
-    else disabled_button(font_fallback || weight_unavailable ? "无法应用" : "已应用", 348, 1088, 312, 96);
+    const bool mode_preview_valid = !mode_changed || (preview_ready && preview.error.empty() && preview.end > preview.start);
+    if (!font_fallback && !weight_unavailable && changed && mode_preview_valid) button(Apply, "应用到此书", 348, 1088, 312, 96, true);
+    else disabled_button(font_fallback || weight_unavailable || !mode_preview_valid ? "无法应用" : "已应用", 348, 1088, 312, 96);
+    if (preview_ready && spec.original_epub && source.author_style_fallback)
+        note("原书样式不可用，本段使用基本排版", preview_bottom - 40);
     if (font_fallback || weight_unavailable) {
         canvas.fill_rect(24, preview_bottom - 70, 636, 58, 15);
         note(weight_unavailable && !font_fallback ? kWeightUnavailableNotice : "所选字体不可用，预览使用替代字体。", preview_bottom - 60);
@@ -356,6 +427,7 @@ void ReaderApp::Impl::begin_storage(bool clear_cache) {
     counting_session.reset(); font_scan.reset();
     clear_prefetch();
     if (clear_cache) {
+        release_author_fonts();
         covers.clear(); dictionary_session.reset();
         custom_prepare_finished = false; custom_prepare_attempts = 0; custom_sleep_image.reset();
     }

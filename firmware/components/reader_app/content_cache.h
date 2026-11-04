@@ -8,11 +8,11 @@ struct ContentCacheEntry {
     bool from_disk = false;
 };
 bool content_cache_matches(const ContentCacheEntry& entry, const std::string& book_id,
-                           std::size_t index, std::uint32_t part);
+                           std::size_t index, std::uint32_t part, bool original = false);
 bool load_content_cache(const FileStore& store, const std::string& book_id, const std::string& resource,
                         std::size_t index, std::uint32_t part, Chapter& chapter,
                         const std::function<bool()>& stop = {}, const ContentCacheEntry* retained = nullptr,
-                        ContentCacheEntry* loaded = nullptr);
+                        ContentCacheEntry* loaded = nullptr, bool original = false);
 bool save_content_cache(const FileStore& store, const ContentCacheEntry& entry,
                         const std::function<bool()>& stop = {});
 bool load_content(const FileStore& store, EpubDocument& document, std::size_t index,

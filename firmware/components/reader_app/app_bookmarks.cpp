@@ -90,6 +90,7 @@ void ReaderApp::Impl::draw_toolbar() {
 }
 
 void ReaderApp::Impl::draw_tools() {
+    typography_preview.reset();
     tools_save_pending = session.needs_save();
     view = View::Tools;
     hits.clear();

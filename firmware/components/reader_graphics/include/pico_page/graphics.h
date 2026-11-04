@@ -11,6 +11,7 @@
 #include <list>
 #include <functional>
 #include <optional>
+#include <memory>
 
 namespace pico_page::graphics {
 
@@ -53,6 +54,8 @@ public:
     bool open(const std::string& path);
     /** Replaces the previous face; the caller retains immutable font bytes until this face is closed. */
     bool open_memory(const unsigned char* bytes, std::size_t length);
+    /** Replaces the current face and retains the reader while open. Return true only after filling the requested range. */
+    bool open_stream(std::size_t bytes, std::function<bool(std::size_t, char*, std::size_t)> read);
     bool open_fallback();
     void close();
     /** SHA-256 of the compiled fallback font bytes. */
@@ -84,12 +87,14 @@ public:
     int advance(char32_t scalar);
     FontMetrics metrics() const;
     /** Rasterizes into the existing bounded glyph cache without modifying a canvas. */
-    bool warm(char32_t scalar, bool bold = false);
-    bool draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8_t gray = 1, bool bold = false);
+    bool warm(char32_t scalar, bool bold = false, bool italic = false);
+    bool draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8_t gray = 1, bool bold = false, bool italic = false);
     /** Rows of drawn coverage for scalar at the current size: above_baseline is the first row's
      * distance above the baseline. False when the glyph cannot be rasterized. */
     bool ink_rows(char32_t scalar, int& above_baseline, int& rows);
 private:
+    struct Stream;
+    std::unique_ptr<Stream> stream_;
     void* library_ = nullptr;
     void* face_ = nullptr;
     int pixel_size_ = 0;
@@ -107,12 +112,25 @@ private:
     std::unordered_map<std::uint64_t, Glyph> glyphs_;
     std::size_t glyph_bytes_ = 0;
     const std::size_t glyph_cache_limit_bytes_, advance_cache_limit_;
-    std::uint64_t glyph_key(char32_t scalar, bool bold) const;
-    bool rasterize(char32_t scalar, bool bold, Glyph& glyph);
+    std::uint64_t glyph_key(char32_t scalar, bool bold, bool italic = false) const;
+    bool rasterize(char32_t scalar, bool bold, bool italic, Glyph& glyph);
     bool placeholder(char32_t scalar, Glyph& glyph);
     bool fail(const char* stage, int native_error = 0, std::optional<char32_t> scalar = std::nullopt);
 
 };
+
+struct AuthorFonts {
+    std::vector<std::unique_ptr<Font>> faces;
+    std::function<void()> close_input;
+    void release_io() const { if (close_input) close_input(); }
+    void clear() { faces.clear(); close_input = {}; }
+};
+/** Borrows the font set and releases its input handle on destruction. */
+struct AuthorFontIo {
+    const AuthorFonts* fonts;
+    ~AuthorFontIo() { if (fonts) fonts->release_io(); }
+};
+Font& font_for_slot(Font& body, const AuthorFonts* fonts, std::uint8_t slot);
 
 struct LayoutSpec {
     int left = 36;
@@ -123,6 +141,7 @@ struct LayoutSpec {
     int line_height = 57;
     int indent_chars = 2;
     int paragraph_gap = 0;
+    bool original_epub = false;
 };
 
 struct PositionedGlyph {
@@ -133,6 +152,8 @@ struct PositionedGlyph {
     int font_px;
     bool bold = false;
     int advance = 0;
+    bool italic = false, underline = false;
+    std::uint8_t font_slot = 0;
 };
 
 struct ImageBox {
@@ -172,6 +193,20 @@ std::optional<std::size_t> text_hit(const Page& page, int x, int y, bool nearest
  */
 std::vector<SelectionBox> selection_boxes(const Page& page, std::size_t begin, std::size_t end);
 
+enum class TextAlign { Start, Left, Right, Center, Justify };
+struct GlyphStyle {
+    int font_px, line_height;
+    bool bold = false, italic = false, underline = false, hidden = false, omitted = false;
+    std::uint16_t font_families = 0;
+};
+struct StyledLayout {
+    std::size_t block_start;
+    int indent_px;
+    TextAlign align;
+    /** Receives an absolute Unicode scalar offset in the input text. */
+    std::function<GlyphStyle(std::size_t)> at;
+};
+
 /**
  * Layout only the page at a Unicode scalar offset. [start,end) includes consumed
  * paragraph separators. A nonempty error leaves end equal to start.
@@ -180,10 +215,11 @@ std::vector<SelectionBox> selection_boxes(const Page& page, std::size_t begin, s
  */
 Page layout_page(Font& font, std::u32string_view text, std::size_t start,
                  const LayoutSpec& spec = {}, bool collect = true,
-                 const std::function<bool()>& stop = {});
+                 const std::function<bool()>& stop = {}, const StyledLayout* styles = nullptr,
+                 const AuthorFonts* fonts = nullptr);
 /** Cancellation may leave partial pixels; use an unpublished destination when stop is provided. */
 bool render_page(Canvas& canvas, Font& font, const Page& page, std::uint8_t gray = 1,
-                 const std::function<bool()>& stop = {});
+                 const std::function<bool()>& stop = {}, const AuthorFonts* fonts = nullptr);
 
 /** Number of image decode attempts in this process, including failures. */
 std::uint64_t image_decode_count();

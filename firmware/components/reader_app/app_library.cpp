@@ -473,7 +473,7 @@ void ReaderApp::Impl::manage_book() {
     if (detail_path == book_path) {
         cancel_sync();
         session.open("", "", writer);
-        document.close(); book_path.clear(); release(chapter); page = {};
+        document.close(); book_path.clear(); release_author_fonts(); release(chapter); page = {};
         links.clear(); clear_page_history(); link_return.reset(); confirmed_link_return.reset();
         sync_return = confirmed_sync_return = false;
         last_recorded.clear();

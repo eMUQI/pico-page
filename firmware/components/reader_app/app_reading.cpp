@@ -39,6 +39,7 @@ bool ReaderApp::Impl::finish_open(const std::string& path, ContentJob::Result* l
     confirmed_link_return.reset();
     sync_return = confirmed_sync_return = false;
     book_path = path;
+    author_fonts.clear(); author_fonts_released = false; author_fonts_stable = true;
     last_book = path;
     last_recorded.clear();
     recent_save_failed = false;
@@ -71,11 +72,9 @@ bool ReaderApp::Impl::finish_open(const std::string& path, ContentJob::Result* l
     if (restored.status != StoreStatus::Ok && restored.status != StoreStatus::Missing && restored.status != StoreStatus::Cleared)
         message = "原进度无法读取，未覆盖原记录";
     if (loaded) {
-        if (!loaded->content_cache.bytes.empty()) {
-            chapter_cache_write_needed = !loaded->content_cache.from_disk;
-            chapter_cache = std::make_shared<ContentCacheEntry>(std::move(loaded->content_cache));
-        }
+        adopt_chapter_cache(std::move(loaded->content_cache));
         chapter = std::move(loaded->chapter);
+        author_fonts = std::move(loaded->author_fonts); author_fonts_stable = loaded->author_fonts_stable;
         chapter_index = loaded->chapter_index;
         offset = loaded->offset;
     } else if (restored.record) {
@@ -84,12 +83,13 @@ bool ReaderApp::Impl::finish_open(const std::string& path, ContentJob::Result* l
             return part.offset_for(restored.record->anchor, ignored);
         };
         if (!document.chapter_index_for(restored.record->anchor.resource, chapter_index) ||
-            !find_content(store, document, chapter_index, chapter, detail, ChapterLoad::Reading, holds) ||
+            !find_content(store, document, chapter_index, chapter, detail, reading_detail(), holds) ||
             !chapter.offset_for(restored.record->anchor, restored_offset)) {
             error(memory_error(detail) ? chapter_error(detail) : "保存的位置无法映射，请保留进度文件并检查原书");
             return false;
         }
         offset = restored_offset;
+        author_fonts = prepare_embedded_fonts(store, document, chapter, author_fonts_stable);
     } else {
         std::size_t first = 0;
         while (first + 1 < document.spine().size() && !document.spine()[first].linear)
@@ -143,22 +143,37 @@ void ReaderApp::Impl::reclaim_caches() {
     if (!pressure()) return;
     if (chapter_session) {
         release_chapter_session(); ++cache_evictions;
+        if (!pressure()) return;
     }
-    if (!pressure()) return;
-    if (prepared_chapter) { prepared_chapter.reset(); ++cache_evictions; }
-    if (!pressure()) return;
-    if (recent_chapter_cache) { recent_chapter_cache.reset(); recent_cache_write_needed = false; ++cache_evictions; }
-    if (!pressure()) return;
-    if (chapter_cache) { chapter_cache.reset(); chapter_cache_write_needed = false; ++cache_evictions; }
-    if (!pressure()) return;
+    if (prepared_chapter) {
+        prepared_chapter.reset(); ++cache_evictions;
+        if (!pressure()) return;
+    }
+    if (recent_chapter_cache) {
+        recent_chapter_cache.reset(); recent_cache_write_needed = false; ++cache_evictions;
+        if (!pressure()) return;
+    }
+    if (chapter_cache) {
+        chapter_cache.reset(); chapter_cache_write_needed = false; ++cache_evictions;
+        if (!pressure()) return;
+    }
     if (yield_counting_session()) { defer_counting(); return; }
     const StageTimer timer{"cache_reclaim"};
     if (!covers.empty()) { covers.clear(); ++cache_evictions; }
     bool dropped = false;
-    for (std::size_t i = chapter_pages.size(); i-- > 0 && pressure();) {
+    constexpr std::size_t pressure_check_bytes = 16 * 1024;
+    std::size_t reclaimed_since_check = pressure_check_bytes;
+    for (std::size_t i = chapter_pages.size(); i-- > 0;) {
         PP_HOST_WORK(host_work::add(host_work::ReclaimVisits);)
         if (i == chapter_index || chapter_pages[i].empty()) continue;
-        page_bytes -= chapter_page_bytes(chapter_pages[i]);
+        // ESP-IDF walks the heap to find the largest free block.
+        if (reclaimed_since_check >= pressure_check_bytes) {
+            if (!pressure()) break;
+            reclaimed_since_check = 0;
+        }
+        const auto bytes = chapter_page_bytes(chapter_pages[i]);
+        reclaimed_since_check += bytes;
+        page_bytes -= bytes;
         decltype(chapter_pages)::value_type().swap(chapter_pages[i]);
         counted[i] = !document.spine()[i].linear; counted_live[i] = false;
         dropped = true; ++cache_evictions;
@@ -203,8 +218,7 @@ void ReaderApp::Impl::count_pages(const std::function<bool()>& stop) {
     if (async_content && !font_identity.empty() && !pages_cache_disabled && (pages_cache_pending || pages_dirty)) {
         if (counting_job) return;
 #ifdef ESP_PLATFORM
-        if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2 * kPageIndexBytes + 256U * 1024 ||
-            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < kPageIndexBytes + 64U * 1024) {
+        if (!pages_cache_pending && !chapter_memory_available(2 * page_index_bytes() + 64U * 1024)) {
             if (yield_counting_session()) return;
             pages_cache_disabled = true; pages_cache_pending = pages_dirty = false;
             return;
@@ -214,7 +228,7 @@ void ReaderApp::Impl::count_pages(const std::function<bool()>& stop) {
         request.kind = pages_cache_pending ? ContentJob::Kind::PageCacheRead : ContentJob::Kind::PageCacheWrite;
         request.root = root; request.cache_name = pages_name; request.cache_header = pages_header;
         request.generation = counting_generation;
-        if (pages_cache_pending) request.spine = spine;
+        if (pages_cache_pending) request.page_linear = page_linearity(spine);
         else request.page_cache = PageCache{chapter_pages, counted};
         counting_job = std::make_unique<ContentJob>(std::move(request));
         if (!counting_job->start()) {
@@ -246,6 +260,7 @@ void ReaderApp::Impl::count_pages(const std::function<bool()>& stop) {
         request.root = root; request.path = root + "/" + book_path;
         request.font = body_font_path();
         request.identity = document.metadata(); request.layout = layout(settings);
+        request.book_index = verified_reader_index();
         request.generation = counting_generation; request.chapter = counting_index;
         request.part = counting_part; request.offset = counting_offset;
         if (!counting_session) counting_session = std::make_shared<PaginationSession>();
@@ -266,9 +281,13 @@ void ReaderApp::Impl::count_pages(const std::function<bool()>& stop) {
         }
         std::string detail;
         const StageTimer load_timer{"chapter_counting"};
-        if (load_content(store, document, counting_index, counting_chapter, detail, ChapterLoad::Layout, counting_part, stop))
+        if (load_content(store, document, counting_index, counting_chapter, detail, reading_detail() == ChapterLoad::Original ? ChapterLoad::Original : ChapterLoad::Layout, counting_part, stop)) {
+            bool stable;
+            counting_fonts = prepare_embedded_fonts(store, document, counting_chapter, stable, stop);
+            if (stop && stop()) return;
+            if (!stable) { pages_failed = true; return; }
             counting_loaded = true;
-        else if (detail == kChapterCancelled)
+        } else if (detail == kChapterCancelled)
             return;
         else if (memory_error(detail))
             defer_counting();
@@ -281,10 +300,11 @@ void ReaderApp::Impl::count_pages(const std::function<bool()>& stop) {
     }
     const Chapter &source = in_place ? chapter : counting_chapter;
     const auto spec = layout(settings);
+    if (source.author_style_fallback) { pages_failed = true; return; }
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(15);
     do {
         if (stop && stop()) return;
-        const auto start = pico_page::readable_offset(source, counting_offset);
+        const auto start = pico_page::readable_offset(source, counting_offset, spec.original_epub);
         if (start >= source.text.size()) {
             if (source.last_part) {
                 finish_counting();
@@ -309,7 +329,8 @@ void ReaderApp::Impl::count_pages(const std::function<bool()>& stop) {
     } while (std::chrono::steady_clock::now() < deadline);
 }
 
-bool ReaderApp::Impl::draw_page_content(const graphics::Page& planned, const graphics::LayoutSpec& spec, bool progressive) {
+bool ReaderApp::Impl::draw_page_content(const graphics::Page& planned, const graphics::LayoutSpec& spec, bool progressive,
+                                         const graphics::AuthorFonts* fonts) {
     const StageTimer timer{"page_draw"};
     if (!planned.images.empty()) {
         if (image_prepared) {
@@ -318,7 +339,7 @@ bool ReaderApp::Impl::draw_page_content(const graphics::Page& planned, const gra
                 if (!prepared_image || !prepared_image_error.empty() ||
                     std::find(prepared_image_failures.begin(), prepared_image_failures.end(), box.begin) != prepared_image_failures.end())
                     draw_image_error(box);
-            return graphics::render_page(canvas, body, planned);
+            return graphics::render_page(canvas, body, planned, 1, {}, fonts);
         }
         if (async_content && progressive) {
             body_images_pending = true;
@@ -326,11 +347,11 @@ bool ReaderApp::Impl::draw_page_content(const graphics::Page& planned, const gra
                 outline(box.x, box.y + 12, box.width, box.height - 24, 2);
                 center("正在准备图片…", box.x + 8, box.y + box.height / 2 - 14, box.width - 16, 24, 3);
             }
-            return graphics::render_page(canvas, body, planned);
+            return graphics::render_page(canvas, body, planned, 1, {}, fonts);
         }
-        const bool cacheable = planned.images.size() == 1 && planned.glyphs.empty() &&
-                               planned.images.front().height == spec.height;
-        const auto cache_name = cacheable ? image_cache_key(document.metadata().book_id, planned.images.front().resource, spec) : "";
+        const auto cache_name = spec.original_epub && view == View::Typography ? std::string{} :
+            page_image_cache_key(document.metadata().book_id, planned, spec);
+        const bool cacheable = !cache_name.empty();
         if (cacheable && body_cache_room()) {
             std::string cached;
             if (store.load_cache(cache_name, canvas.pixels().size() + 32, cached) == StoreStatus::Ok &&
@@ -339,7 +360,7 @@ bool ReaderApp::Impl::draw_page_content(const graphics::Page& planned, const gra
                 cached.resize(cached.size() - 32);
                 if (md5_hex(cached) == digest) {
                     std::memcpy(canvas.data(), cached.data(), cached.size());
-                    return true;
+                    return graphics::render_page(canvas, body, planned, 1, {}, fonts);
                 }
             }
         }
@@ -360,7 +381,7 @@ bool ReaderApp::Impl::draw_page_content(const graphics::Page& planned, const gra
                 store.save_cache(cache_name, pixels);
         }
     }
-    return graphics::render_page(canvas, body, planned);
+    return graphics::render_page(canvas, body, planned, 1, {}, fonts);
 }
 
 bool ReaderApp::Impl::render_body(std::size_t start) {
@@ -390,7 +411,7 @@ bool ReaderApp::Impl::render_body(std::size_t start) {
         return false;
     }
     const bool missing = std::any_of(candidate.glyphs.begin(), candidate.glyphs.end(),
-        [this](const auto &glyph) { return body.missing(glyph.scalar); });
+        [this](const auto &glyph) { return !glyph.font_slot && body.missing(glyph.scalar); });
     if (missing) message = kMissingNotice;
     else if (message == kMissingNotice) message.clear();
     canvas.clear();
@@ -399,7 +420,7 @@ bool ReaderApp::Impl::render_body(std::size_t start) {
         canvas = std::move(*bitmap);
         ++bitmap_hits;
     }
-    else if (!draw_page_content(candidate, spec, true)) {
+    else if (!draw_page_content(candidate, spec, true, &author_fonts)) {
 #ifdef ESP_PLATFORM
         ESP_LOGW("reader_app", "Body rendering failed: font=%s size_px=%d weight=%s chapter=%u part=%u start=%u; %s",
                  effective_font.c_str(), body.pixel_size(), settings.font_weight.c_str(),
@@ -410,6 +431,14 @@ bool ReaderApp::Impl::render_body(std::size_t start) {
         return false;
     }
     page = std::move(candidate);
+#if defined(ESP_PLATFORM) && defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
+    if (spec.original_epub) {
+        const auto embedded = std::count_if(page.glyphs.begin(), page.glyphs.end(),
+            [](const auto& glyph) { return glyph.font_slot != 0; });
+        ESP_LOGI("epub_font", "page_glyphs=%u embedded_glyphs=%u stable=%d",
+            static_cast<unsigned>(page.glyphs.size()), static_cast<unsigned>(embedded), author_fonts_stable);
+    }
+#endif
     offset = page.start;
     footer();
     links.clear();
@@ -423,8 +452,7 @@ bool ReaderApp::Impl::render_body(std::size_t start) {
                 if (glyph.baseline == line.baseline && glyph.index >= link.begin &&
                     glyph.index < link.end) {
                     left = std::min(left, glyph.x);
-                    body.set_pixel_size(glyph.font_px);
-                    right = std::max(right, glyph.x + body.advance(glyph.scalar));
+                    right = std::max(right, glyph.x + glyph.advance);
                 }
             if (right > left) {
                 canvas.line(left, line.bottom, right, line.bottom, 3);
@@ -460,6 +488,18 @@ bool ReaderApp::Impl::show_page(std::size_t start, bool reverse_page_effect) {
         const auto& request = pending_content ? *pending_content : foreground_job->request;
         if (request.offset != readable_offset(start) || request.chapter != chapter_index ||
             request.part != chapter.part || !same_layout(request.layout, spec)) abandon_content();
+    }
+    if (settings.original_epub) {
+        if (!author_fonts_stable && !pages_failed) {
+            reset_pages();
+            pages_failed = true;
+            clear_page_history();
+        }
+        if (chapter.author_style_fallback) {
+            if (!pages_failed) { reset_pages(); pages_failed = true; }
+            message = "原书样式不可用，本段使用基本排版";
+        }
+        start = restore_readable_offset(chapter, start);
     }
     if (!render_body(start))
         return false;

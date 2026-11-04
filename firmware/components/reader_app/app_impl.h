@@ -94,6 +94,7 @@ enum Control {
     Gap,
     Indent,
     Defaults,
+    EpubLayoutMode,
     RefreshClear,
     RefreshBalanced,
     RefreshFast,
@@ -292,7 +293,20 @@ struct ReaderApp::Impl final : DisplayBackend {
     Session session{display};
     InputRouter router;
     EpubDocument document;
+    EpubDocument::VerifiedIndex verified_reader_index() const {
+        const auto found = identities.find(book_path);
+        if (!controlled_storage || found == identities.end() ||
+            found->second.identity.book_id != document.metadata().book_id) return {};
+        return document.verified_epub_index();
+    }
     Chapter chapter;
+    graphics::AuthorFonts author_fonts, counting_fonts;
+    bool author_fonts_stable = true, author_fonts_released = false;
+    void release_author_fonts() {
+        author_fonts_released |= !author_fonts.faces.empty();
+        author_fonts.clear();
+        typography_preview.reset();
+    }
     graphics::Page page;
     std::optional<graphics::Canvas> body_canvas;
     bool body_bookmarked = false;
@@ -308,7 +322,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     static bool same_layout(const graphics::LayoutSpec& a, const graphics::LayoutSpec& b) {
         return a.left == b.left && a.top == b.top && a.width == b.width && a.height == b.height &&
                a.font_px == b.font_px && a.line_height == b.line_height &&
-               a.indent_chars == b.indent_chars && a.paragraph_gap == b.paragraph_gap;
+               a.indent_chars == b.indent_chars && a.paragraph_gap == b.paragraph_gap &&
+               a.original_epub == b.original_epub;
     }
     static bool body_cache_room() {
 #ifdef ESP_PLATFORM
@@ -336,6 +351,15 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void prepare_next(const std::function<bool()>& stop);
     ReaderSettings settings, draft;
+    struct TypographyPreview {
+        Chapter chapter;
+        graphics::AuthorFonts fonts;
+        bool fonts_stable = true;
+        ContentCacheEntry cache;
+    };
+    std::optional<TypographyPreview> typography_preview;
+    std::size_t typography_preview_offset = 0;
+    bool typography_preview_failed = false;
     enum class OnboardingStep { Welcome, Practice, Tools };
     enum class OnboardingTask { Next, Previous, OpenTools, CloseTools, Done };
     OnboardingStep onboarding_step = OnboardingStep::Welcome;
@@ -802,6 +826,11 @@ struct ReaderApp::Impl final : DisplayBackend {
     graphics::LayoutSpec dictionary_layout(bool full) const;
     std::shared_ptr<const ContentCacheEntry> chapter_cache, recent_chapter_cache;
     bool chapter_cache_write_needed = false, recent_cache_write_needed = false;
+    void adopt_chapter_cache(ContentCacheEntry entry) {
+        if (entry.bytes.empty()) return;
+        chapter_cache_write_needed = !entry.from_disk;
+        chapter_cache = std::make_shared<ContentCacheEntry>(std::move(entry));
+    }
     std::unique_ptr<ContentJob> prepared_chapter;
     std::shared_ptr<ChapterSession> chapter_session;
     std::size_t chapter_stream_bytes = 0;
@@ -827,14 +856,16 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool inline_image_pending = false, body_images_pending = false;
     std::chrono::steady_clock::time_point inline_image_after = std::chrono::steady_clock::time_point::max();
     std::string prepared_image_error;
-    void abandon_content() {
+    enum class ChapterCacheRetention { Discard, Keep };
+    void abandon_content(ChapterCacheRetention cache_retention = ChapterCacheRetention::Discard) {
         cancel_covers();
         ++foreground_generation;
         if (foreground_job) foreground_job->cancel();
         pending_content.reset();
-        chapter_cache = {};
-        recent_chapter_cache.reset();
-        chapter_cache_write_needed = recent_cache_write_needed = false;
+        if (cache_retention == ChapterCacheRetention::Discard) {
+            chapter_cache.reset(); recent_chapter_cache.reset();
+            chapter_cache_write_needed = recent_cache_write_needed = false;
+        }
         prepared_chapter.reset(); chapter_prefetch_attempted = false;
         release_chapter_session();
         chapter_feedback_after.reset();
@@ -884,17 +915,21 @@ struct ReaderApp::Impl final : DisplayBackend {
                 return &box;
         return nullptr;
     }
-    void make_room_for_cold_image() {
+    void trim_glyph_caches_for_free_memory(std::size_t required_free_bytes) {
 #ifdef ESP_PLATFORM
-        constexpr std::size_t wanted = ContentJob::cold_image_memory_required_bytes + 256U * 1024;
         for (auto* font : {&library_font, &body, &ui}) {
             const auto available = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-            if (available >= wanted) return;
+            if (available >= required_free_bytes) return;
             const auto cached = font->cached_glyph_bytes();
-            font->trim_glyph_cache(cached - std::min(cached, wanted - available), font->cached_glyphs());
+            font->trim_glyph_cache(cached - std::min(cached, required_free_bytes - available), font->cached_glyphs());
             if (font->cached_glyph_bytes() < cached) ++cache_evictions;
         }
+#else
+        static_cast<void>(required_free_bytes);
 #endif
+    }
+    void make_room_for_cold_image() {
+        trim_glyph_caches_for_free_memory(ContentJob::cold_image_memory_required_bytes + 256U * 1024);
     }
     void begin_image_viewer(const graphics::ImageBox& box) {
         if (!body_canvas && !body_cache_room()) {
@@ -943,7 +978,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         pending_content = std::move(request);
         clear_prefetch(); covers.clear();
         loading("正在准备书籍…");
-        if (kind == ContentJob::Kind::Open) { clear_body_cache(); release(chapter); page = {}; }
+        if (kind == ContentJob::Kind::Open) { clear_body_cache(); release_author_fonts(); release(chapter); page = {}; }
         return true;
     }
     bool begin_chapter(std::size_t index, std::uint32_t part, ContentJob::Target target,
@@ -1199,7 +1234,7 @@ struct ReaderApp::Impl final : DisplayBackend {
                     bool bold = false, int max_rows = 2, std::uint8_t gray = 1, bool draw = true);
     bool typography_changed() const {
         const auto &applied = edit_snapshot.config.settings;
-        return reset_overrides || draft.font != applied.font || draft.font_weight != applied.font_weight || draft.font_size_px != applied.font_size_px ||
+        return reset_overrides || draft.original_epub != applied.original_epub || draft.font != applied.font || draft.font_weight != applied.font_weight || draft.font_size_px != applied.font_size_px ||
             draft.line_height != applied.line_height || draft.margin_x_px != applied.margin_x_px ||
             draft.paragraph_gap_lines != applied.paragraph_gap_lines || draft.indent_chars != applied.indent_chars;
     }
@@ -1366,6 +1401,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         spec.width = 684 - 2 * spec.left;
         spec.height = bottom - top;
         spec.font_px = cfg.font_size_px;
+        spec.original_epub = cfg.original_epub && !txt_name(book_path);
         body.set_pixel_size(spec.font_px);
         spec.indent_chars = cfg.indent_chars;
         spec.paragraph_gap = static_cast<int>(
@@ -1612,7 +1648,12 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool recover_body() {
         const auto record = session.visible_record() ? session.visible_record() : session.saved_record();
         std::uint32_t position;
-        if (async_content && record && !chapter.offset_for(record->anchor, position)) return begin_seek(record->anchor);
+        if (async_content && record && (author_fonts_released || !chapter.offset_for(record->anchor, position)))
+            return begin_seek(record->anchor);
+        if (author_fonts_released && !async_content) {
+            author_fonts = prepare_embedded_fonts(store, document, chapter, author_fonts_stable);
+            author_fonts_released = false;
+        }
         return restore_confirmed_position() && show_page(offset);
     }
     std::uint32_t restored_offset = 0;
@@ -1638,14 +1679,19 @@ struct ReaderApp::Impl final : DisplayBackend {
             return false;
         }
         chapter = std::move(candidate);
+        author_fonts = prepare_embedded_fonts(store, document, chapter, author_fonts_stable);
+        author_fonts_released = false;
         chapter_index = index;
         offset = 0;
         return true;
     }
+    ChapterLoad reading_detail() const {
+        return settings.original_epub && !txt_name(book_path) ? ChapterLoad::Original : ChapterLoad::Reading;
+    }
     bool load_chapter(std::size_t index, std::uint32_t part = 0) {
         const StageTimer timer{"chapter_reading"};
         return load_with(index, [&](Chapter &loaded, std::string &detail) {
-            return load_content(store, document, index, loaded, detail, ChapterLoad::Reading, part);
+            return load_content(store, document, index, loaded, detail, reading_detail(), part);
         });
     }
     bool seek(const Anchor &anchor, std::uint32_t &position, const std::string &missing) {
@@ -1661,7 +1707,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             return part.offset_for(anchor, ignored);
         };
         return load_with(index, [&](Chapter &loaded, std::string &detail) {
-            return find_content(store, document, index, loaded, detail, ChapterLoad::Reading, holds);
+            return find_content(store, document, index, loaded, detail, reading_detail(), holds);
         }, missing) && chapter.offset_for(anchor, position);
     }
     bool seek_fragment(std::size_t index, const std::string &fragment, std::uint32_t &position,
@@ -1673,7 +1719,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             return part.fragment_offset(fragment, ignored);
         };
         if (!load_with(index, [&](Chapter &loaded, std::string &detail) {
-                return find_content(store, document, index, loaded, detail, ChapterLoad::Reading, holds);
+                return find_content(store, document, index, loaded, detail, reading_detail(), holds);
             }, missing) || !chapter.fragment_offset(fragment, position))
             return false;
         if (position >= chapter.text.size() && !chapter.last_part) {
@@ -1684,7 +1730,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void footer();
     std::size_t readable_offset(std::size_t start) const {
-        return pico_page::readable_offset(chapter, start);
+        return pico_page::readable_offset(chapter, start, settings.original_epub);
     }
     const DocumentImage* image_at(std::size_t start) const {
         return pico_page::image_at(chapter, start);
@@ -1695,7 +1741,11 @@ struct ReaderApp::Impl final : DisplayBackend {
     graphics::Page plan_page(const Chapter &source, std::size_t start, const graphics::LayoutSpec& spec,
                              bool collect = true, const std::function<bool()>& stop = {}) {
         const StageTimer timer{"page_layout"};
-        return plan_content(body, source, start, spec, collect, stop);
+        return plan_content(body, source, start, spec, collect, stop, &fonts_for(source));
+    }
+    const graphics::AuthorFonts& fonts_for(const Chapter& source) const {
+        if (typography_preview && &source == &typography_preview->chapter) return typography_preview->fonts;
+        return &source == &counting_chapter ? counting_fonts : author_fonts;
     }
 
     void reset_pages(bool keep_prepared_frames = false) {
@@ -1713,6 +1763,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         font_scan_turn = true;
         pages_complete = std::find(counted.begin(), counted.end(), false) == counted.end();
         pages_name.clear();
+        if (reading_detail() == ChapterLoad::Original && !author_fonts_stable) { pages_cache_disabled = true; return; }
         if (builtin_body) font_identity = graphics::Font::fallback_identity();
         if (!async_content && font_identity.empty()) font_identity = sha256_file(body_font_path());
         if (!font_identity.empty()) load_pages_cache();
@@ -1728,14 +1779,15 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         const auto spec = layout(settings);
         char name[32], geometry[160];
-        std::snprintf(name, sizeof(name), "pages/%016llx", path_hash(book_path));
+        std::snprintf(name, sizeof(name), "%s/%016llx", spec.original_epub ? "pages-original" : "pages", path_hash(book_path));
         std::snprintf(geometry, sizeof(geometry), "%lld %lld\n%lld %lld\n%d %d %d %d %d %d %d %d %zu\n",
                       static_cast<long long>(book.st_size), static_cast<long long>(book.st_mtime),
                       static_cast<long long>(font.st_size), static_cast<long long>(font.st_mtime),
                       spec.left, spec.top, spec.width, spec.height, spec.font_px, spec.line_height,
                       spec.indent_chars, spec.paragraph_gap, spine.size());
         pages_name = name;
-        pages_header = std::string("PPPAGES3\n") + revision_for(book_path, document.metadata()) + ":pagination-v5\n" + book_path + "\n" + font_file + "\n" + geometry +
+        const auto revision = spec.original_epub ? ":original-pagination-v1\n" : ":pagination-v5\n";
+        pages_header = std::string("PPPAGES3\n") + revision_for(book_path, document.metadata()) + revision + book_path + "\n" + font_file + "\n" + geometry +
             document.metadata().book_id + "\n" + font_identity + "\n";
         if (async_content) { pages_cache_pending = true; return; }
         if (auto cached = read_page_cache(store, pages_name, pages_header, spine)) adopt_pages(std::move(*cached));
@@ -1831,6 +1883,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         usage.ui_glyph_bytes = ui.cached_glyph_bytes(); usage.body_glyph_bytes = body.cached_glyph_bytes();
         usage.ui_glyphs = ui.cached_glyphs(); usage.body_glyphs = body.cached_glyphs();
         usage.ui_advances = ui.cached_advances(); usage.body_advances = body.cached_advances();
+        for (const auto& face : author_fonts.faces) if (face) {
+            usage.body_glyph_bytes += face->cached_glyph_bytes();
+            usage.body_glyphs += face->cached_glyphs();
+            usage.body_advances += face->cached_advances();
+        }
         usage.library_glyph_bytes = library_font.cached_glyph_bytes();
         usage.library_glyphs = library_font.cached_glyphs(); usage.library_advances = library_font.cached_advances();
         usage.evictions = cache_evictions; usage.target = cache_target;
@@ -1867,8 +1924,11 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void release_counting() {
         if (counting_job) counting_job->cancel();
-        else if (counting_session) { release(counting_session->chapter); counting_session->loaded = false; }
+        else if (counting_session) {
+            release(counting_session->chapter); counting_session->author_fonts.clear(); counting_session->loaded = false;
+        }
         release(counting_chapter);
+        counting_fonts.clear();
         counting_loaded = false;
     }
     static bool counting_memory(std::uint32_t bytes) {
@@ -1895,14 +1955,15 @@ struct ReaderApp::Impl final : DisplayBackend {
         outline(box.x, box.y + 12, box.width, box.height - 24, 2);
         center("图片无法显示", box.x + 8, box.y + box.height / 2 - 14, box.width - 16, 28);
     }
-    bool draw_page_content(const graphics::Page& planned, const graphics::LayoutSpec& spec, bool progressive = false);
+    bool draw_page_content(const graphics::Page& planned, const graphics::LayoutSpec& spec, bool progressive = false,
+                           const graphics::AuthorFonts* fonts = nullptr);
     bool body_reusable(std::size_t start, const graphics::LayoutSpec& spec) const {
         return body_canvas && start == page.start && same_layout(body_spec, spec);
     }
     bool render_body(std::size_t start);
     bool show_page(std::size_t start, bool reverse_page_effect = false);
     void remember_page() {
-        record_boundary(page_history, page.start, page.end);
+        if (author_fonts_stable) record_boundary(page_history, page.start, page.end);
     }
     std::optional<std::size_t> previous_page(std::size_t limit) const {
         for (const auto* entries : {&page_history, &computed_pages})
@@ -2052,6 +2113,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void font_picker_control(int id);
     void draw_typography(bool prepare_images = true);
+    void change_epub_layout();
     static std::string weight_name(const std::string &weight) {
         return weight == "light" ? "细" : weight == "medium" ? "中粗" : weight == "bold" ? "粗" : "常规";
     }

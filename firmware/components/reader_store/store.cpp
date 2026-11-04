@@ -1182,6 +1182,17 @@ bool CacheReader::read_at(std::size_t byte_offset, char* bytes, std::size_t byte
     offset_ = byte_offset;
     return read(bytes, byte_count);
 }
+bool CacheReader::matches_crc32(std::uint32_t expected, const std::function<bool()>& stop) {
+    if (!rewind()) return false;
+    char buffer[4096];
+    std::uint32_t crc = 0;
+    while (offset_ < size_) {
+        const auto bytes = std::min(sizeof(buffer), size_ - offset_);
+        if ((stop && stop()) || !read(buffer, bytes)) return false;
+        crc = resource_crc(crc, buffer, bytes);
+    }
+    return crc == expected;
+}
 
 CacheWriter::~CacheWriter() {
     if (fd_ >= 0) close(fd_);

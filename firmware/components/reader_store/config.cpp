@@ -78,7 +78,7 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
     }
     if (!(book ? allowed_fields(table, {"schema_version", "reader", "display"}, "", diagnostic)
                : allowed_fields(table, {"schema_version", "reader", "display", "library", "power", "network", "dictionary", "onboarding"}, "", diagnostic)) ||
-        !allowed_fields(toml_get(table, "reader"), {"font", "font_weight", "font_size_px", "line_height", "margin_x_px", "paragraph_gap_lines", "indent_chars"}, "reader", diagnostic) ||
+        !allowed_fields(toml_get(table, "reader"), {"font", "font_weight", "font_size_px", "line_height", "margin_x_px", "paragraph_gap_lines", "indent_chars", "original_epub"}, "reader", diagnostic) ||
         !allowed_fields(toml_get(table, "display"), {"refresh_preset", "balanced_full_refresh_pages", "fast_full_refresh_pages"}, "display", diagnostic) ||
         !allowed_fields(toml_get(table, "library"), {"roots", "view", "sort", "folders"}, "library", diagnostic) ||
         !allowed_fields(toml_get(table, "dictionary"), {"enabled"}, "dictionary", diagnostic) ||
@@ -97,6 +97,14 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
         diagnostic.detail = "expected light, regular, medium or bold";
         if (!string_value(value, settings.font_weight) ||
             (settings.font_weight != "light" && settings.font_weight != "regular" && settings.font_weight != "medium" && settings.font_weight != "bold")) return false;
+    }
+
+    value = toml_seek(table, "reader.original_epub");
+    if (value.type != TOML_UNKNOWN) {
+        diagnostic.field = "reader.original_epub";
+        diagnostic.detail = "expected a boolean in a book settings file";
+        if (!book || value.type != TOML_BOOLEAN) return false;
+        settings.original_epub = value.u.boolean;
     }
 
     for (const char* field : {"reader.font_size_px", "reader.margin_x_px", "reader.indent_chars"}) {
@@ -292,6 +300,7 @@ SettingValues setting_values(const ReaderSettings& values, bool global = false) 
             {"display.refresh_preset", quoted(values.refresh_preset)},
             {"display.balanced_full_refresh_pages", std::to_string(values.balanced_full_refresh_pages)},
             {"display.fast_full_refresh_pages", std::to_string(values.fast_full_refresh_pages)}};
+    if (!global) fields.emplace_back("reader.original_epub", values.original_epub ? "true" : "false");
     if (global) {
         std::string enabled = "[";
         for (const auto& path : values.dictionary_enabled) {
@@ -504,7 +513,7 @@ StoreStatus save_settings(const std::string& root, const SettingsSnapshot& snaps
     for (const auto& entry : desired) serialized += entry.first + " = " + entry.second + "\n";
     ReaderSettings checked;
     ConfigDiagnostic diagnostic{};
-    if (!apply_source(serialized, "settings preview", false, checked, diagnostic)) {
+    if (!apply_source(serialized, "settings preview", book_only, checked, diagnostic)) {
         error = diagnostic.field + ": " + diagnostic.detail;
         return diagnostic.status;
     }
@@ -513,8 +522,13 @@ StoreStatus save_settings(const std::string& root, const SettingsSnapshot& snaps
     std::string source = expected.value_or("schema_version = 1\n");
     const auto previous = setting_values(book_only ? effective : global, !book_only);
     const auto inherited = setting_values(global, !book_only);
+    auto expected_values = reset ? inherited : desired;
     bool changed = false;
     for (std::size_t index = 0; index < desired.size(); ++index) {
+        if (reset && desired[index].first == "reader.original_epub") {
+            expected_values[index].second = previous[index].second;
+            continue;
+        }
         if (!reset && desired[index].second == previous[index].second) continue;
         const auto replacement = reset || (book_only && desired[index].second == inherited[index].second)
             ? std::optional<std::string>{} : std::optional<std::string>{desired[index].second};
@@ -530,7 +544,6 @@ StoreStatus save_settings(const std::string& root, const SettingsSnapshot& snaps
         error = path + ": the edited configuration did not validate";
         return StoreStatus::Invalid;
     }
-    const auto expected_values = reset ? inherited : desired;
     if (setting_values(checked, !book_only) != expected_values) {
         error = path + ": the edited configuration differs from the requested values";
         return StoreStatus::Invalid;

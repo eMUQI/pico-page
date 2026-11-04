@@ -32,6 +32,8 @@ void ReaderApp::Impl::poll_save() {
 
 void ReaderApp::Impl::apply_typography() {
     if (!bookmark_io_ready()) return;
+    const bool mode_changed = draft.original_epub != settings.original_epub;
+    if (mode_changed && (!book_scope || !typography_preview)) return;
     std::string detail;
     if (font_fallback || weight_unavailable) {
         error(font_fallback ? "所选字体不可用，排版未保存" : "所选字重不可用，排版未保存");
@@ -45,7 +47,7 @@ void ReaderApp::Impl::apply_typography() {
         return;
     }
     const auto effective = store.load_settings(book_path).settings;
-    const bool layout_changed = effective.font != settings.font ||
+    const bool layout_changed = effective.original_epub != settings.original_epub || effective.font != settings.font ||
         effective.font_weight != settings.font_weight ||
         effective.font_size_px != settings.font_size_px ||
         effective.line_height != settings.line_height ||
@@ -53,6 +55,15 @@ void ReaderApp::Impl::apply_typography() {
         effective.paragraph_gap_lines != settings.paragraph_gap_lines ||
         effective.indent_chars != settings.indent_chars;
     settings = effective;
+    ContentCacheEntry applied_cache;
+    if (mode_changed) {
+        chapter = std::move(typography_preview->chapter);
+        author_fonts = std::move(typography_preview->fonts);
+        author_fonts_stable = typography_preview->fonts_stable; author_fonts_released = false;
+        applied_cache = std::move(typography_preview->cache);
+        offset = typography_preview_offset;
+    }
+    typography_preview.reset();
     if (!book_scope) {
         load_library_font(store.load_settings().settings.font);
         message = layout_changed ? "阅读默认已保存，当前书已应用" : "阅读默认已保存，本书排版未变";
@@ -66,7 +77,11 @@ void ReaderApp::Impl::apply_typography() {
     load_fonts();
     clear_page_history();
     reset_pages();
-    abandon_content();
+    auto reader = mode_changed ? std::move(chapter_session) : nullptr;
+    const auto reader_bytes = chapter_stream_bytes;
+    abandon_content(mode_changed ? ChapterCacheRetention::Discard : ChapterCacheRetention::Keep);
+    adopt_chapter_cache(std::move(applied_cache));
+    if (reader) { chapter_session = std::move(reader); chapter_stream_bytes = reader_bytes; }
     session.change_layout();
     show_page(offset);
 }
@@ -297,6 +312,7 @@ bool ReaderApp::prepare_usb_transfer(std::string* problem) {
     impl_->library_font.close();
     impl_->library_uses_body = false; impl_->library_font_path.clear();
     impl_->document.close();
+    impl_->release_author_fonts();
     impl_->clear_body_cache();
     impl_->clear_prefetch();
     impl_->release_counting();
@@ -584,6 +600,7 @@ bool ReaderApp::prepare_power(PowerRequest request) {
 bool ReaderApp::close_power_files() {
     if (impl_->display.busy() || impl_->view != View::PowerOff) return false;
     impl_->document.close();
+    impl_->release_author_fonts();
     impl_->ui.open_fallback(); impl_->body.open_fallback();
     impl_->library_font.close(); impl_->library_font_path.clear();
     impl_->library_uses_body = false;
@@ -702,6 +719,7 @@ bool ReaderApp::prepare_sleep() {
     impl_->leave_join(Impl::WifiPage::Home);
     std::fill(impl_->account.password.begin(), impl_->account.password.end(), '\0');
     impl_->account.password.clear();
+    impl_->release_author_fonts();
     impl_->draw_sleep(sync_state);
     if (impl_->view != View::Sleeping) return false;
     impl_->overlay(true);
@@ -735,6 +753,7 @@ void ReaderApp::card_unavailable(CardIssue issue) {
     stop_wifi();
     impl_->power_return_canvas.reset(); impl_->power_request = {};
     invalidate_identity_cache();
+    impl_->release_author_fonts();
     impl_->clear_body_cache();
     impl_->clear_prefetch();
     impl_->release_counting();

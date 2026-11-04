@@ -610,6 +610,8 @@ void ReaderApp::Impl::control(int id) {
         if (!begin_settings_edit())
             return;
         draft = edit_snapshot.config.settings;
+        typography_preview.reset();
+        typography_preview_failed = false;
         font_picker_open = false;
         parameter = FontSize;
         reset_overrides = false;
@@ -909,11 +911,18 @@ void ReaderApp::Impl::control(int id) {
         book_scope = false;
         apply_typography();
         return;
-    case Defaults:
+    case EpubLayoutMode:
+        change_epub_layout();
+        if (content_loading) return;
+        break;
+    case Defaults: {
+        const bool original = draft.original_epub;
         draft = edit_snapshot.global_settings;
-        reset_overrides = true;
+        draft.original_epub = original;
+        reset_overrides = original == settings.original_epub;
         draw_typography();
         break;
+    }
     case Minus:
     case Plus: {
         reset_overrides = false;
@@ -1005,7 +1014,10 @@ void ReaderApp::Impl::input(const AppInput &input) {
             if (kind == ContentJob::Kind::LockScreenList || kind == ContentJob::Kind::LockScreenPreview) draw_power();
             else if (mapping) { sync_cancelled(false); draw_sync(); }
             else if (preview && font_picker_open) cancel_font_picker();
-            else if (preview) draw_tools();
+            else if (preview) {
+                typography_preview.reset();
+                draw_tools();
+            }
             else draw_library();
             overlay();
         }

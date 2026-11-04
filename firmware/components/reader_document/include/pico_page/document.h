@@ -1,5 +1,6 @@
 #pragma once
 #include "pico_page/content_failure.h"
+#include "pico_page/document_style.h"
 
 #include "pico_page/record.h"
 #include <cstddef>
@@ -40,12 +41,13 @@ struct SpineItem {
 };
 struct TocEntry { std::string label; std::string resource; std::string fragment; unsigned depth = 0; };
 enum class BlockKind { Paragraph, Heading, ListItem, Preformatted, Image };
-struct TextBlock { std::uint32_t begin = 0; std::uint32_t end = 0; BlockKind kind = BlockKind::Paragraph; };
+struct TextBlock { std::uint32_t begin = 0; std::uint32_t end = 0; BlockKind kind = BlockKind::Paragraph; std::uint16_t style = 0; };
 struct TextRun {
     std::uint32_t begin = 0;
     std::uint32_t end = 0;
     Anchor source;
     bool element_reference = false;  // Media placeholders refer to the source element at offset zero.
+    std::uint16_t style = 0;
 };
 struct SourceTextNode {
     std::string node;
@@ -71,8 +73,9 @@ inline constexpr std::uint32_t kTxtPartBytes = 48 * 1024;
 inline constexpr std::uint32_t kLastChapterPart = 0xffffffffU;
 
 /**
- * How much of a chapter load_chapter keeps. Every level applies the same limits and yields the
- * same text, blocks, images, links, fragments and run boundaries.
+ * How much of a chapter load_chapter keeps. Mapping, Reading and Layout use the same
+ * normalization and part boundaries. Original can use different block boundaries while
+ * retaining the same source element paths and scalar offsets.
  */
 enum class ChapterLoad {
     /** Everything, including the source text of each node and the stylesheets; KOReader position mapping needs these. */
@@ -80,8 +83,16 @@ enum class ChapterLoad {
     /** Keeps run anchors for local position recovery, without source text nodes or stylesheet contents. */
     Reading,
     /** Pagination only: run anchors are empty as well, so anchor_at only reports whether an offset has a source. */
-    Layout
+    Layout,
+    /** Source anchors and the supported author styles for native EPUB layout. */
+    Original
 };
+
+struct EmbeddedFont {
+    std::string resource;
+    std::uint32_t bytes = 0, crc32 = 0;
+};
+inline constexpr std::size_t kMaxEmbeddedFontBytes = 2U * 1024 * 1024;
 
 /**
  * One part of a chapter as normalized Unicode text. Offsets are Unicode scalar indices into
@@ -103,6 +114,11 @@ struct Chapter {
     std::vector<DocumentLink> links;
     std::vector<DocumentImage> images;
     std::vector<std::string> warnings;
+    std::vector<document::css::ComputedStyle> author_styles;
+    std::vector<EmbeddedFont> author_fonts;
+    bool author_style_fallback = false;
+    /** Style indices are one-based; zero denotes the initial style. */
+    const document::css::ComputedStyle& style(std::uint16_t index) const;
     /** Maps a Unicode scalar index in text to a source anchor; inserted separators return false. */
     bool anchor_at(std::uint32_t scalar_offset, Anchor& anchor) const;
     /** Finds the Unicode scalar index in text for a retained text scalar or media start; removed whitespace has no mapping. */
@@ -200,6 +216,8 @@ struct DocumentReadStats {
 /** Bounded, read-only EPUB and UTF-8/GB18030/BOM-marked UTF-16 TXT access. XML source paths are not KOReader XPointer values. */
 class EpubDocument {
 public:
+    struct BookIndex;
+    using VerifiedIndex = std::shared_ptr<const BookIndex>;
     EpubDocument();
     ~EpubDocument();
     EpubDocument(const EpubDocument&) = delete;
@@ -210,12 +228,16 @@ public:
     bool open(const std::string& path, std::string& error, const std::function<bool()>& stop = {});
     /** Reuses a previously verified digest only under exclusive, unchanged storage ownership.
      * The caller must invalidate that trust after import, removal, sleep or external access.
-     * The document structure is still read. File attributes alone do not establish trust.
+     * Pass an index from the same verified EPUB to reuse its parsed structure across readers.
+     * ZIP resources are always checked. File attributes alone do not establish trust.
      */
-    bool open_verified(const std::string& path, const DocumentMetadata& identity, std::string& error, const std::function<bool()>& stop = {});
+    bool open_verified(const std::string& path, const DocumentMetadata& identity, std::string& error,
+                       const std::function<bool()>& stop = {}, VerifiedIndex index = {});
+    /** The parsed catalog of a verified EPUB, or an empty handle for TXT or an unopened reader. */
+    VerifiedIndex verified_epub_index() const;
     void close();
     /** Transfers file, ZIP and parser ownership to a new reader, retaining only an immutable
-     * metadata/spine/TOC snapshot here. The snapshot cannot load content until reopened.
+     * metadata, spine and TOC snapshot here. The original reader must reopen to load content.
      * Returns null without changes for an unopened document, TXT or insufficient memory.
      * Call only after all operations on this document have completed.
      */
@@ -269,6 +291,9 @@ public:
     /** Read an internal PNG/JPEG or GIF resource (GIF rendering uses its first frame), at most 2 MiB; output is cleared on failure. */
     bool read_image(const std::string& resource, std::vector<std::uint8_t>& bytes, std::string& error,
                     const std::function<bool()>& stop = {}, ContentFailureKind* failure_kind = nullptr);
+    /** Streams the matching ZIP member through a bounded sink. Output is provisional until CRC verification succeeds. */
+    bool read_font(const EmbeddedFont& font, const std::function<bool(std::size_t, std::string_view)>& write,
+                   const std::function<bool()>& stop = {});
     /** Read a declared cover or single-image cover page without hashing the book or changing a reading session.
      * PNG/JPEG/GIF output is bounded to 2 MiB and cleared on failure.
      * Optional failure_kind reports the source failure independently of error text; success reports None.
@@ -276,7 +301,8 @@ public:
     static bool read_cover(const std::string& path, std::vector<std::uint8_t>& bytes, std::string& error,
                            const std::function<bool()>& stop = {}, ContentFailureKind* failure_kind = nullptr);
 private:
-    bool open_impl(const std::string& path, std::string& error, bool cover_only,
+    enum class OpenMode { Book, Cover, Resources };
+    bool open_impl(const std::string& path, std::string& error, OpenMode mode,
                    const DocumentMetadata* identity = nullptr, const std::function<bool()>& stop = {}, ContentFailureKind* failure_kind = nullptr);
     struct Impl;
     std::unique_ptr<Impl> impl_;

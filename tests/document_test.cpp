@@ -1,4 +1,5 @@
 #include "pico_page/document.h"
+#include <algorithm>
 #include <fstream>
 #include <cassert>
 #include <iostream>
@@ -520,23 +521,51 @@ int main(int argc, char** argv) {
         std::uint32_t image_restored = 0;
         assert(first.offset_for(element, image_restored) && image_restored == image);
         assert(first.images.size() == 1 && first.images[0].resource == "EPUB/image.png" && first.images[0].source == element);
+        Chapter original;
+        assert(styled.load_chapter(0, original, error, ChapterLoad::Original));
+        assert(original.text == first.text && original.runs.size() == first.runs.size());
+        assert(original.style(original.blocks.front().style).align == document::css::Align::Justify);
+        const auto style_at = [&](std::u32string_view text) -> const document::css::ComputedStyle& {
+            const auto offset = original.text.find(text);
+            const auto run = std::find_if(original.runs.begin(), original.runs.end(),
+                [&](const auto& item) { return item.begin <= offset && offset < item.end; });
+            assert(run != original.runs.end());
+            return original.style(run->style);
+        };
+        const auto& emphasis = style_at(U"内联");
+        assert(emphasis.italic && emphasis.font_px == 24);
+        assert(style_at(U"隐藏").display == document::css::Display::None);
+        const auto& image_style = style_at(U"[图片：示例图片]");
+        assert(image_style.width_px == 40 && image_style.max_width_px == 80);
+        assert(image_style.box_percentages & document::css::ComputedStyle::width_percent);
+        Anchor styled_anchor;
+        assert(original.anchor_at(image, styled_anchor) && styled_anchor == element);
         const std::string styled_path = argv[4];
         const auto entity_path = styled_path.substr(0, styled_path.find_last_of('/') + 1) + "unresolved-entity.epub";
         EpubDocument unresolved;
         assert(unresolved.open(entity_path, error));
         assert(!unresolved.load_chapter(0, first, error) && first.text.empty());
         const auto fixture_dir = styled_path.substr(0, styled_path.find_last_of('/') + 1);
+        EpubDocument font_layout;
+        assert(font_layout.open(fixture_dir + "font-layout.epub", error));
+        assert(font_layout.load_chapter(0, original, error, ChapterLoad::Original));
+        assert(original.author_fonts.size() == 2 && style_at(U"内联").font_families == 1);
+        assert(original.author_fonts.front().resource == "EPUB/Fonts/welcome.ttf");
         EpubDocument images;
         assert(images.open(fixture_dir + "svg-cover.epub", error) && images.load_chapter(0, first, error));
         assert(first.images.size() == 1 && first.images[0].resource == "EPUB/cover.png");
         assert(first.images[0].source.node == "/html[1]/body[1]/svg[1]");
         assert(first.anchor_at(first.images[0].begin, element) && element == first.images[0].source);
         std::vector<std::uint8_t> encoded;
-        assert(images.read_image(first.images[0].resource, encoded, error) && encoded.size() > 32);
-        assert(!images.read_image("../EPUB/cover.png", encoded, error) && encoded.empty());
-        assert(!images.read_image("https://example.invalid/cover.png", encoded, error) && encoded.empty());
-        assert(!images.read_image("EPUB/large.png", encoded, error) && encoded.empty());
-        assert(!images.read_image("EPUB/chapter1.xhtml", encoded, error) && encoded.empty());
+        EpubDocument resources;
+        assert(resources.open_verified(fixture_dir + "svg-cover.epub", images.metadata(), error, {},
+                                       images.verified_epub_index()));
+        assert(resources.read_stats().xml_feed_bytes == 0);
+        assert(resources.read_image(first.images[0].resource, encoded, error) && encoded.size() > 32);
+        assert(!resources.read_image("../EPUB/cover.png", encoded, error) && encoded.empty());
+        assert(!resources.read_image("https://example.invalid/cover.png", encoded, error) && encoded.empty());
+        assert(!resources.read_image("EPUB/large.png", encoded, error) && encoded.empty());
+        assert(!resources.read_image("EPUB/chapter1.xhtml", encoded, error) && encoded.empty());
         assert(images.open(fixture_dir + "calibre-svg-cover.epub", error) && images.load_chapter(0, first, error));
         assert(first.images.size() == 1 && first.images[0].resource == "EPUB/cover.png");
         assert(images.open(fixture_dir + "background-page.epub", error) && images.load_chapter(0, first, error));
@@ -794,8 +823,9 @@ int main(int argc, char** argv) {
         const auto catalog_size = sequential.spine().size();
         set_chapter_memory_probe([](std::size_t) { return false; });
         assert(!sequential.detach_reader() && sequential.read_stats().stream_active);
-        set_chapter_memory_probe(nullptr);
+        set_chapter_memory_probe([](std::size_t bytes) { return bytes <= 2048; });
         auto reader = sequential.detach_reader();
+        set_chapter_memory_probe(nullptr);
         assert(reader && reader->read_stats().stream_active && !sequential.read_stats().stream_active);
         assert(sequential.read_stats().zip_allocated_bytes == 0 && sequential.metadata().book_id == identity);
         assert(sequential.spine().size() == catalog_size && reader->metadata().book_id == identity);
@@ -805,6 +835,11 @@ int main(int argc, char** argv) {
         assert(reader->load_chapter(0, part, error, ChapterLoad::Reading, 2, {}, {}, true));
         assert(part.part == 2 && epub_open_count() == opens);
         assert(reader->load_chapter(0, ordinary, error, ChapterLoad::Reading, 2));
+        same_reading_part(ordinary, part);
+        EpubDocument reopened;
+        assert(reopened.open_verified(path, reader->metadata(), error, {}, reader->verified_epub_index()));
+        assert(reopened.read_stats().xml_feed_bytes == 0 && reopened.spine().size() == catalog_size);
+        assert(reopened.load_chapter(0, ordinary, error, ChapterLoad::Reading, 2));
         same_reading_part(ordinary, part);
         assert(reader->load_chapter(0, part, error, ChapterLoad::Reading, 0, {}, {}, true));
         assert(part.part == 0);

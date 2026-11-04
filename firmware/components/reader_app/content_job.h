@@ -38,13 +38,17 @@ inline const char* txt_content_revision(TxtEncoding encoding) {
 }
 inline constexpr int kLibraryCoverWidth = 184, kLibraryCoverHeight = 250;
 inline constexpr auto kLockScreenPrepareBudget = std::chrono::seconds(20);
-std::size_t readable_offset(const Chapter& source, std::size_t start);
+std::size_t readable_offset(const Chapter& source, std::size_t start, bool author = false);
+std::size_t restore_readable_offset(const Chapter& source, std::size_t start);
 const DocumentImage* image_at(const Chapter& source, std::size_t start);
 graphics::Page plan_content(graphics::Font& font, const Chapter& source, std::size_t start,
                             const graphics::LayoutSpec& spec, bool collect,
-                            const std::function<bool()>& stop = {});
+                            const std::function<bool()>& stop = {}, const graphics::AuthorFonts* fonts = nullptr);
+graphics::AuthorFonts prepare_embedded_fonts(const FileStore& store, EpubDocument& document, const Chapter& chapter,
+    bool& stable, const std::function<bool()>& stop = {});
 
 std::string image_cache_key(const std::string& book_id, const std::string& resource, const graphics::LayoutSpec& spec);
+std::string page_image_cache_key(const std::string& book_id, const graphics::Page& page, const graphics::LayoutSpec& spec);
 
 bool read_body_image_cache(CacheReader& reader, graphics::Canvas& image, const std::function<bool()>& stop);
 bool write_body_image_cache(const FileStore& store, const std::string& name, const graphics::Canvas& image,
@@ -57,6 +61,7 @@ struct PaginationSession {
     EpubDocument document;
     graphics::Font font;
     Chapter chapter;
+    graphics::AuthorFonts author_fonts;
     std::string path, font_path;
     std::size_t chapter_index = 0;
     std::uint32_t part = 0;
@@ -113,6 +118,7 @@ public:
         std::string chapter_resource;
         std::string root, image_resource, cache_name, relative_path, content_revision;
         DocumentMetadata identity;
+        EpubDocument::VerifiedIndex book_index;
         graphics::LayoutSpec layout;
         graphics::Page page;
         std::vector<CoverSource> covers;
@@ -120,7 +126,7 @@ public:
         std::optional<PageCache> page_cache;
         std::shared_ptr<const ContentCacheEntry> content_cache;
         bool content_cache_write_needed = false;
-        std::vector<SpineItem> spine;
+        std::vector<bool> page_linear;
         std::optional<ReadingRecord> record;
         std::shared_ptr<FileDigest> font_scan;
         std::optional<BookmarkList> bookmark_base;
@@ -157,6 +163,8 @@ public:
         std::uint32_t part = 0;
     };
     struct Result {
+        graphics::AuthorFonts author_fonts;
+        bool author_fonts_stable = true;
         StorageUsage storage;
         StoreStatus clear_cache_status = StoreStatus::IoError;
         std::vector<std::uint32_t> starts;

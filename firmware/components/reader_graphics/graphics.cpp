@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
 #include <limits>
 
 #include <ft2build.h>
@@ -18,6 +19,11 @@
 #include "fallback_font.h"
 
 namespace pico_page::graphics {
+
+struct Font::Stream {
+    FT_StreamRec record{};
+    std::function<bool(std::size_t, char*, std::size_t)> read;
+};
 
 #ifdef ESP_PLATFORM
 namespace {
@@ -122,6 +128,7 @@ void Font::close() {
     glyph_bytes_ = 0;
     if (face_) FT_Done_Face(static_cast<FT_Face>(face_));
     face_ = nullptr;
+    stream_.reset();
     pixel_size_ = 0;
 }
 
@@ -173,6 +180,43 @@ bool Font::open_memory(const unsigned char* bytes, std::size_t length) {
     }
     error_.clear();
     return set_pixel_size(28);
+}
+
+bool Font::open_stream(std::size_t bytes, std::function<bool(std::size_t, char*, std::size_t)> read) {
+    close();
+    unsigned char signature[4];
+    if (!library_) return fail("FreeType initialization failed");
+    if (!read || bytes < 12 || bytes > std::numeric_limits<FT_Long>::max() ||
+        !read(0, reinterpret_cast<char*>(signature), sizeof(signature)) ||
+        (std::memcmp(signature, "OTTO", 4) && std::memcmp(signature, "true", 4) &&
+         std::memcmp(signature, "\x00\x01\x00\x00", 4)))
+        return fail("Invalid embedded SFNT font");
+    stream_.reset(new (std::nothrow) Stream{});
+    if (!stream_) return fail("Cannot allocate embedded font stream");
+    stream_->read = std::move(read);
+    auto& record = stream_->record;
+    record.size = bytes;
+    record.descriptor.pointer = stream_.get();
+    record.read = [](FT_Stream stream, unsigned long offset, unsigned char* buffer, unsigned long count) -> unsigned long {
+        if (!count) return offset > stream->size;
+        if (offset > stream->size || count > stream->size - offset) return 0;
+        const auto& source = *static_cast<Stream*>(stream->descriptor.pointer);
+        return source.read(offset, reinterpret_cast<char*>(buffer), count) ? count : 0;
+    };
+    FT_Open_Args args{};
+    args.flags = FT_OPEN_STREAM;
+    args.stream = &record;
+    FT_Face face = nullptr;
+    const auto opened = FT_Open_Face(static_cast<FT_Library>(library_), &args, 0, &face);
+    if (opened) { close(); return fail("Cannot open embedded font stream", opened); }
+    face_ = face;
+    const auto mapped = FT_Select_Charmap(face, FT_ENCODING_UNICODE);
+    if (mapped || !FT_IS_SCALABLE(face)) {
+        close(); return fail("Embedded font must have scalable Unicode glyphs", mapped);
+    }
+    if (set_pixel_size(28)) return true;
+    close();
+    return false;
 }
 
 const char* Font::fallback_identity() { return kFallbackIdentity; }
@@ -258,10 +302,10 @@ FontMetrics Font::metrics() const {
             static_cast<int>((metrics.height + 63) >> 6)};
 }
 
-std::uint64_t Font::glyph_key(char32_t scalar, bool bold) const {
+std::uint64_t Font::glyph_key(char32_t scalar, bool bold, bool italic) const {
     if (!contains(scalar))
         return (std::uint64_t(pixel_size_) << 32) | (invisible_without_glyph(scalar) ? 0xfffffffdU : cjk(scalar) ? 0xffffffffU : 0xfffffffeU);
-    return (std::uint64_t(bold) << 63) | (std::uint64_t(weight_) << 60) | (std::uint64_t(pixel_size_) << 32) | std::uint32_t(scalar);
+    return (std::uint64_t(bold) << 63) | (std::uint64_t(italic) << 59) | (std::uint64_t(weight_) << 60) | (std::uint64_t(pixel_size_) << 32) | std::uint32_t(scalar);
 }
 
 bool Font::placeholder(char32_t scalar, Glyph& glyph) {
@@ -281,7 +325,7 @@ bool Font::placeholder(char32_t scalar, Glyph& glyph) {
     return true;
 }
 
-bool Font::rasterize(char32_t scalar, bool bold, Glyph& glyph) {
+bool Font::rasterize(char32_t scalar, bool bold, bool italic, Glyph& glyph) {
     const auto loaded = FT_Load_Char(static_cast<FT_Face>(face_), scalar, FT_LOAD_DEFAULT | FT_LOAD_TARGET_NORMAL);
     if (loaded) return fail("Font glyph load failed", loaded, scalar);
     const auto slot = static_cast<FT_Face>(face_)->glyph;
@@ -289,6 +333,7 @@ bool Font::rasterize(char32_t scalar, bool bold, Glyph& glyph) {
         const auto adjusted = FT_Outline_Embolden(&slot->outline, static_cast<FT_Pos>(pixel_size_ * weight_));
         if (adjusted) return fail("Font stroke adjustment failed", adjusted, scalar);
     }
+    if (italic) FT_GlyphSlot_Oblique(slot);
     if (bold) FT_GlyphSlot_Embolden(slot);
     const auto rendered = FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL);
     if (rendered) return fail("Font glyph rasterization failed", rendered, scalar);
@@ -309,14 +354,14 @@ bool Font::rasterize(char32_t scalar, bool bold, Glyph& glyph) {
     return true;
 }
 
-bool Font::warm(char32_t scalar, bool bold) {
+bool Font::warm(char32_t scalar, bool bold, bool italic) {
     if (scalar == U'\n' || scalar == U'\r' || scalar == U'\t') return true;
     if (!face_) return fail("Font face unavailable", 0, scalar);
-    const auto key = glyph_key(scalar, bold);
+    const auto key = glyph_key(scalar, bold, italic);
     auto cached = glyphs_.find(key);
     if (cached == glyphs_.end()) {
         Glyph glyph;
-        if (!(contains(scalar) ? rasterize(scalar, bold, glyph) : placeholder(scalar, glyph))) return false;
+        if (!(contains(scalar) ? rasterize(scalar, bold, italic, glyph) : placeholder(scalar, glyph))) return false;
         if (glyph.coverage.size() > glyph_cache_limit_bytes_) {
             return fail("Font glyph exceeds cache budget", 0, scalar);
         }
@@ -335,10 +380,10 @@ bool Font::warm(char32_t scalar, bool bold) {
     return true;
 }
 
-bool Font::draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8_t gray, bool bold) {
-    if (!warm(scalar, bold)) return false;
+bool Font::draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8_t gray, bool bold, bool italic) {
+    if (!warm(scalar, bold, italic)) return false;
     if (scalar == U'\n' || scalar == U'\r' || scalar == U'\t') return true;
-    const auto& glyph = glyphs_.at(glyph_key(scalar, bold));
+    const auto& glyph = glyphs_.at(glyph_key(scalar, bold, italic));
     for (unsigned row = 0; row < glyph.rows; ++row) {
         const auto* bytes = glyph.coverage.data() + static_cast<std::size_t>(row) * glyph.width;
         for (unsigned col = 0; col < glyph.width; ++col) {
@@ -372,7 +417,12 @@ bool break_after(char32_t previous, char32_t next) {
 }
 }
 
-Page layout_page(Font& font, std::u32string_view text, std::size_t start, const LayoutSpec& spec, bool collect, const std::function<bool()>& stop) {
+Font& font_for_slot(Font& body, const AuthorFonts* fonts, std::uint8_t slot) {
+    return fonts && slot && slot <= fonts->faces.size() && fonts->faces[slot - 1] ? *fonts->faces[slot - 1] : body;
+}
+
+Page layout_page(Font& font, std::u32string_view text, std::size_t start, const LayoutSpec& spec, bool collect,
+                 const std::function<bool()>& stop, const StyledLayout* styles, const AuthorFonts* fonts) {
     Page page;
     page.start = page.end = start;
     page.font_px = spec.font_px;
@@ -384,56 +434,105 @@ Page layout_page(Font& font, std::u32string_view text, std::size_t start, const 
         page.error = "Invalid page geometry or font"; return page;
     }
     const auto metrics = font.metrics();
-    if (metrics.ascender + metrics.descender > spec.line_height || spec.line_height > spec.height) {
+    if (!styles && (metrics.ascender + metrics.descender > spec.line_height || spec.line_height > spec.height)) {
         page.error = "Line height cannot contain the complete font line"; return page;
     }
+    const auto select_slot = [&](std::uint16_t families, char32_t scalar) -> std::uint8_t {
+        for (; fonts && families; families >>= 4) {
+            const auto slot = static_cast<std::uint8_t>(families & 15);
+            auto& candidate = font_for_slot(font, fonts, slot);
+            if (&candidate != &font && candidate.contains(scalar)) return slot;
+        }
+        return 0;
+    };
+    struct Line {
+        int width = 0, ascender = 0, descender = 0, height = 0, spaces = 0;
+    };
+    const auto glyph_style = [&](std::size_t index) {
+        return styles ? styles->at(index) : GlyphStyle{spec.font_px, spec.line_height};
+    };
     std::size_t cursor = start;
     int top = spec.top;
-    while (cursor < text.size() && top + spec.line_height <= spec.top + spec.height) {
-        if (stop && stop()) { page.error = "Layout cancelled"; page.lines.clear(); page.glyphs.clear(); return page; }
-        const auto line_start = cursor;
-        const bool paragraph_start = cursor == 0 || text[cursor - 1] == U'\n' || text[cursor - 1] == U'\r';
+    while (cursor < text.size() && top + (styles ? 1 : spec.line_height) <= spec.top + spec.height) {
+        if (stop && stop()) { page.error = "Layout cancelled"; break; }
+        const bool paragraph_start = styles ? cursor == styles->block_start :
+            cursor == 0 || text[cursor - 1] == U'\n' || text[cursor - 1] == U'\r';
         const bool source_indented = text[cursor] == U'\u3000' || text[cursor] == U'\t';
-        const int indent = paragraph_start && !source_indented ? spec.indent_chars * spec.font_px : 0;
-        int used = indent;
-        std::size_t end = cursor;
-        std::size_t last_break = cursor;
+        const int indent = paragraph_start && !source_indented
+            ? (styles ? styles->indent_px : spec.indent_chars * spec.font_px) : 0;
+        Line line{indent, 0, 0, spec.line_height, 0}, saved_break{};
+        std::size_t end = cursor, last_break = cursor;
         bool newline = false;
         while (end < text.size()) {
             if ((end - cursor) % 64 == 0 && stop && stop()) { page.error = "Layout cancelled"; break; }
+            const auto format = glyph_style(end);
+            if (format.omitted) { ++end; continue; }
             if (text[end] == U'\n' || text[end] == U'\r') {
                 ++end;
                 if (text[end - 1] == U'\r' && end < text.size() && text[end] == U'\n') ++end;
                 newline = true;
                 break;
             }
-            const int width = font.advance(text[end]);
-            if (width < 0) { page.error = font.error(); break; }
-            if (used + width > spec.width) {
-                if (last_break > cursor) end = last_break;
+            auto& face = font_for_slot(font, fonts, select_slot(format.font_families, text[end]));
+            if (face.pixel_size() != format.font_px && !face.set_pixel_size(format.font_px)) { page.error = face.error(); break; }
+            const int width = face.advance(text[end]);
+            if (width < 0) { page.error = face.error(); break; }
+            if (line.width + width > spec.width) {
+                if (last_break > cursor) { end = last_break; line = saved_break; }
                 break;
             }
-            used += width;
+            line.width += width;
+            const auto glyph_metrics = face.metrics();
+            line.ascender = std::max(line.ascender, glyph_metrics.ascender + (format.bold ? 2 : 0));
+            line.descender = std::max(line.descender, glyph_metrics.descender + (format.underline ? 2 : 0));
+            line.height = std::max(line.height, format.line_height);
+            line.spaces += text[end] == U' ';
             ++end;
-            if (end < text.size() && break_after(text[end - 1], text[end])) last_break = end;
+            if (end < text.size() && break_after(text[end - 1], text[end])) { last_break = end; saved_break = line; }
             if (end - cursor > 65536) { page.error = "Too many scalars in one text line"; break; }
         }
         if (!page.error.empty() || end == cursor) {
             if (page.error.empty()) page.error = "A glyph does not fit the text column";
-            page.lines.clear(); page.glyphs.clear(); page.end = start; return page;
+            break;
         }
-        const int baseline = top + (spec.line_height - metrics.ascender - metrics.descender) / 2 + metrics.ascender;
+        if (!line.ascender && !line.descender) {
+            line.ascender = metrics.ascender;
+            line.descender = metrics.descender;
+        }
+        const int height = std::max(line.height, line.ascender + line.descender);
+        if (top + height > spec.top + spec.height) break;
+        const int baseline = top + (height - line.ascender - line.descender) / 2 + line.ascender;
+        const int remaining = std::max(0, spec.width - line.width);
+        const auto alignment = styles ? styles->align : TextAlign::Start;
+        const bool justify = alignment == TextAlign::Justify && !newline && end < text.size() && line.spaces;
         int x = spec.left + indent;
+        if (alignment == TextAlign::Center) x += remaining / 2;
+        if (alignment == TextAlign::Right) x += remaining;
+        int spaces = 0;
         for (std::size_t i = cursor; collect && i < end; ++i) {
             if (text[i] == U'\n' || text[i] == U'\r') continue;
-            const int advance = font.advance(text[i]);
-            page.glyphs.push_back({text[i], i, x, baseline, spec.font_px, false, advance});
+            const auto format = glyph_style(i);
+            if (format.omitted) continue;
+            const auto slot = select_slot(format.font_families, text[i]);
+            auto& face = font_for_slot(font, fonts, slot);
+            if (face.pixel_size() != format.font_px && !face.set_pixel_size(format.font_px)) { page.error = face.error(); break; }
+            const int advance = face.advance(text[i]);
+            if (advance < 0) { page.error = face.error(); break; }
+            if (!format.hidden)
+                page.glyphs.push_back({text[i], i, x, baseline, format.font_px, format.bold, advance,
+                                      format.italic, format.underline, slot});
             x += advance;
+            if (justify && text[i] == U' ') {
+                x += remaining * (spaces + 1) / line.spaces - remaining * spaces / line.spaces;
+                ++spaces;
+            }
         }
-        if (collect) page.lines.push_back({line_start, end, top, baseline, top + spec.line_height});
+        if (!page.error.empty()) break;
+        if (collect) page.lines.push_back({cursor, end, top, baseline, top + height});
         cursor = end;
-        top += spec.line_height + (newline ? spec.paragraph_gap : 0);
+        top += height + (newline ? spec.paragraph_gap : 0);
     }
+    if (!page.error.empty()) { page.lines.clear(); page.glyphs.clear(); return page; }
     page.end = cursor;
     page.next_top = top;
     return page;
@@ -487,18 +586,20 @@ std::vector<SelectionBox> selection_boxes(const Page& page, std::size_t begin, s
     return boxes;
 }
 
-bool render_page(Canvas& canvas, Font& font, const Page& page, std::uint8_t gray, const std::function<bool()>& stop) {
+bool render_page(Canvas& canvas, Font& font, const Page& page, std::uint8_t gray, const std::function<bool()>& stop,
+                 const AuthorFonts* fonts) {
+    const AuthorFontIo input{fonts};
     if (!page.error.empty() || !font.set_pixel_size(page.font_px)) return false;
-    int current_size = page.font_px;
     for (const auto& glyph : page.glyphs) {
         if (stop && stop()) return false;
-        if (glyph.font_px != current_size) {
-            if (!font.set_pixel_size(glyph.font_px)) return false;
-            current_size = glyph.font_px;
-        }
-        if (!font.draw(canvas, glyph.scalar, glyph.x, glyph.baseline, gray, glyph.bold)) return false;
+        auto& face = font_for_slot(font, fonts, glyph.font_slot);
+        if ((glyph.font_slot && &face == &font) ||
+            (face.pixel_size() != glyph.font_px && !face.set_pixel_size(glyph.font_px)) ||
+            !face.draw(canvas, glyph.scalar, glyph.x, glyph.baseline, gray, glyph.bold, glyph.italic)) return false;
+        if (glyph.underline && glyph.advance > 0)
+            canvas.fill_rect(glyph.x, glyph.baseline + 2, glyph.advance, 1, gray);
     }
-    return current_size == page.font_px || font.set_pixel_size(page.font_px);
+    return font.pixel_size() == page.font_px || font.set_pixel_size(page.font_px);
 }
 
 std::u32string decode_utf8(std::string_view text) {

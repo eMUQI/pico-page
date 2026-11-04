@@ -24,7 +24,9 @@ void ReaderApp::Impl::prepare_chapter() {
     ContentJob::Request request;
     request.kind = ContentJob::Kind::Chapter; request.target = ContentJob::Target::Start;
     request.chapter_prefetch = true;
+    request.layout.original_epub = reading_detail() == ChapterLoad::Original;
     request.root = root; request.path = root + "/" + book_path; request.identity = document.metadata();
+    request.book_index = verified_reader_index();
     request.chapter = index; request.part = part; request.chapter_resource = document.spine()[index].resource;
     request.generation = foreground_generation;
     if (!chapter_session) chapter_session = std::make_shared<ChapterSession>();
@@ -40,13 +42,14 @@ std::size_t chapter_result_bytes(const ContentJob& job) {
         content.blocks.capacity() * sizeof(TextBlock) + content.runs.capacity() * sizeof(TextRun) +
         content.fragments.capacity() * sizeof(FragmentTarget) + content.links.capacity() * sizeof(DocumentLink) +
         content.images.capacity() * sizeof(DocumentImage) + content.warnings.capacity() * sizeof(std::string) +
-        job.result.content_cache.bytes.capacity();
+        job.result.content_cache.bytes.capacity() + content.author_styles.capacity() * sizeof(document::css::ComputedStyle);
     for (const auto& run : content.runs) bytes += run.source.resource.capacity() + run.source.node.capacity();
     for (const auto& fragment : content.fragments) bytes += fragment.id.capacity();
     for (const auto& link : content.links) bytes += link.resource.capacity() + link.fragment.capacity();
     for (const auto& image : content.images)
         bytes += image.resource.capacity() + image.alt.capacity() + image.source.resource.capacity() + image.source.node.capacity();
     for (const auto& warning : content.warnings) bytes += warning.capacity();
+    for (const auto& font : content.author_fonts) bytes += sizeof(EmbeddedFont) + font.resource.capacity();
     return bytes;
 }
 }
@@ -84,22 +87,22 @@ void ReaderApp::Impl::prepare_next(const std::function<bool()>& stop) {
 #endif
     if (!next_page->images.empty()) { prefetch_done = true; return; }
     if (!body.set_pixel_size(next_page->font_px)) { next_page.reset(); prefetch_done = true; return; }
-    int warm_size = next_page->font_px;
+    const graphics::AuthorFontIo input{&author_fonts};
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(15);
     while (warm_cursor < next_page->glyphs.size()) {
         if ((stop && stop()) || std::chrono::steady_clock::now() >= deadline) return;
         const auto& glyph = next_page->glyphs[warm_cursor];
-        if ((glyph.font_px != warm_size && !body.set_pixel_size(glyph.font_px)) ||
-            !body.warm(glyph.scalar, glyph.bold)) {
+        auto& face = graphics::font_for_slot(body, &author_fonts, glyph.font_slot);
+        if ((face.pixel_size() != glyph.font_px && !face.set_pixel_size(glyph.font_px)) ||
+            !face.warm(glyph.scalar, glyph.bold, glyph.italic)) {
             next_page.reset(); prefetch_done = true; return;
         }
-        warm_size = glyph.font_px;
         ++warm_cursor;
     }
     if (!next_bitmap && body_cache_room()) {
         const StageTimer timer{"next_page_bitmap"};
         auto bitmap = std::make_unique<graphics::Canvas>();
-        if (graphics::render_page(*bitmap, body, *next_page, 1, stop)) next_bitmap = std::move(bitmap);
+        if (graphics::render_page(*bitmap, body, *next_page, 1, stop, &author_fonts)) next_bitmap = std::move(bitmap);
         else if (stop && stop()) return;
     }
     prefetch_done = true;
@@ -209,7 +212,7 @@ void ReaderApp::Impl::draw_image_viewer(bool full) {
 }
 
 bool ReaderApp::Impl::begin_image(std::size_t start, const graphics::Page& planned, bool preview, bool progressive) {
-    abandon_content();
+    abandon_content(ChapterCacheRetention::Keep);
     yield_counting_session();
     release_counting();
     ContentJob::Request request;
@@ -219,17 +222,26 @@ bool ReaderApp::Impl::begin_image(std::size_t start, const graphics::Page& plann
         request.diagnostic_layout = diagnostic_layout;
     )
     request.root = root; request.path = root + "/" + book_path; request.identity = document.metadata();
+    request.book_index = verified_reader_index();
     request.preview = preview;
     request.progressive = progressive;
     request.layout = preview ? layout(draft, 64, typography_preview_bottom()) : layout(settings, link_return ? 144 : 64);
     request.page = planned;
     request.image_resource = planned.images.front().resource;
-    if (planned.images.size() == 1 && planned.glyphs.empty())
-        request.cache_name = image_cache_key(request.identity.book_id, request.image_resource, request.layout);
+    if (!preview || !request.layout.original_epub)
+        request.cache_name = page_image_cache_key(request.identity.book_id, planned, request.layout);
     request.generation = foreground_generation; request.chapter = chapter_index;
     request.part = chapter.part; request.offset = start;
     pending_content = std::move(request);
     clear_prefetch(); covers.clear(); make_room_for_cold_image();
+#ifdef ESP_PLATFORM
+    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < ContentJob::cold_image_memory_required_bytes + 256U * 1024) {
+        recent_chapter_cache.reset(); recent_cache_write_needed = false;
+        if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < ContentJob::cold_image_memory_required_bytes + 256U * 1024) {
+            chapter_cache.reset(); chapter_cache_write_needed = false;
+        }
+    }
+#endif
     if (progressive) { inline_image_pending = true; return true; }
     if (preview) { loading_origin = origin_for(view); content_loading = true; view = View::Loading; return true; }
     loading("正在准备图片…");
@@ -260,11 +272,13 @@ bool ReaderApp::Impl::begin_chapter(std::size_t index, std::uint32_t part, Conte
     chapter_stream_bytes = continuing_bytes;
     request.chapter_session = chapter_session;
     request.root = root; request.path = root + "/" + book_path; request.identity = document.metadata();
+    request.book_index = verified_reader_index();
     request.font = body_font_path(); request.layout = layout(settings, link_return ? 144 : 64);
     request.chapter = index; request.part = part; request.offset = position;
     if (index < document.spine().size()) request.chapter_resource = document.spine()[index].resource;
     for (const auto& candidate : {std::make_pair(current_cache, current_write), std::make_pair(recent_cache, recent_write)})
-        if (candidate.first && content_cache_matches(*candidate.first, request.identity.book_id, index, part)) {
+        if (candidate.first && content_cache_matches(*candidate.first, request.identity.book_id, index, part,
+                                                    request.layout.original_epub)) {
             request.content_cache = candidate.first; request.content_cache_write_needed = candidate.second; break;
         }
     if (current_cache && current_cache != request.content_cache) {
@@ -273,12 +287,13 @@ bool ReaderApp::Impl::begin_chapter(std::size_t index, std::uint32_t part, Conte
         recent_chapter_cache = std::move(recent_cache); recent_cache_write_needed = recent_write;
     }
     request.anchor = anchor; request.fragment = fragment; request.generation = foreground_generation;
-    if (target == ContentJob::Target::End && !link_return && index < counted_live.size() && counted_live[index]) {
+    if (target == ContentJob::Target::End && author_fonts_stable && !link_return &&
+        index < counted_live.size() && counted_live[index]) {
         const auto& parts = chapter_pages[index];
         const auto selected = part == kLastChapterPart && !parts.empty() ? parts.size() - 1 : part;
         if (selected < parts.size() && !parts[selected].empty()) request.known_start = parts[selected].back();
     }
-    if (target == ContentJob::Target::End) {
+    if (target == ContentJob::Target::End && author_fonts_stable) {
         for (auto i = page_history.rbegin(); i != page_history.rend(); ++i)
             if (i->chapter == index && i->return_bar == link_return.has_value() && i->part_end &&
                 (part == kLastChapterPart ? i->last_part : i->part == part)) {
@@ -294,6 +309,7 @@ bool ReaderApp::Impl::begin_chapter(std::size_t index, std::uint32_t part, Conte
         chapter_feedback_after = std::chrono::steady_clock::now() + std::chrono::seconds(1);
     } else loading("正在准备章节…");
     clear_body_cache(); clear_prefetch(); covers.clear(); release(chapter); page = {};
+    author_fonts.clear(); author_fonts_released = false;
     if (prepared) { ++chapter_prefetch_hits; finish_chapter(*prepared); }
     return true;
 }
@@ -410,6 +426,10 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
                 foreground_job->result.error = "Image worker unavailable";
                 complete_inline_image(*foreground_job); foreground_job.reset(); return;
             }
+            if (foreground_job->request.preview && foreground_job->request.kind == ContentJob::Kind::Chapter) {
+                foreground_job.reset(); content_loading = false; typography_preview_failed = true;
+                draw_typography(false); overlay(); return;
+            }
             if (foreground_job->request.preview && font_picker_open) {
                 foreground_job.reset(); content_loading = false;
                 draw_typography(false); overlay(); return;
@@ -518,6 +538,17 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
         return;
     }
     if (request.kind == ContentJob::Kind::Chapter) {
+        if (request.preview) {
+            content_loading = false;
+            if (request.chapter_session == chapter_session) chapter_stream_bytes = job->result.chapter_stream_bytes;
+            typography_preview_failed = !job->result.error.empty();
+            if (!typography_preview_failed) {
+                typography_preview = TypographyPreview{std::move(job->result.chapter), std::move(job->result.author_fonts),
+                                                      job->result.author_fonts_stable, std::move(job->result.content_cache)};
+                typography_preview_offset = job->result.offset;
+            }
+            draw_typography(); overlay(); return;
+        }
         finish_chapter(*job);
         return;
     }
@@ -553,11 +584,10 @@ void ReaderApp::Impl::finish_chapter(ContentJob& job) {
     if (job.result.retained_cache_hit) {
         chapter_cache = job.request.content_cache;
         chapter_cache_write_needed = job.request.content_cache_write_needed;
-    } else if (!job.result.content_cache.bytes.empty()) {
-        chapter_cache_write_needed = !job.result.content_cache.from_disk;
-        chapter_cache = std::make_shared<ContentCacheEntry>(std::move(job.result.content_cache));
-    }
+    } else adopt_chapter_cache(std::move(job.result.content_cache));
     chapter = std::move(job.result.chapter); chapter_index = job.request.chapter;
+    author_fonts = std::move(job.result.author_fonts); author_fonts_stable = job.result.author_fonts_stable;
+    author_fonts_released = false;
     offset = job.result.offset;
     for (const auto& span : job.result.history) record_boundary(computed_pages, span.first, span.second);
     show_page(offset, job.request.target == ContentJob::Target::End || job.request.target == ContentJob::Target::Before);
@@ -572,7 +602,7 @@ void ReaderApp::Impl::poll_counting_job() {
         if (request.generation != foreground_generation || request.identity.book_id != document.metadata().book_id) return;
         if (request.chapter_session == chapter_session) chapter_stream_bytes = result.chapter_stream_bytes;
         if (result.error == kChapterCancelled) chapter_prefetch_attempted = false;
-        if (result.error.empty() && !result.chapter.text.empty()) {
+        if (result.error.empty() && result.author_fonts_stable && !result.chapter.text.empty()) {
             prepared_chapter_size_bytes = chapter_result_bytes(*job);
             prepared_chapter = std::move(job);
             if (cache_usage().retained > cache_target) prepared_chapter.reset();

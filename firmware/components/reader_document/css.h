@@ -1,8 +1,11 @@
 #pragma once
 
+#include "pico_page/document_style.h"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string_view>
 
@@ -32,29 +35,17 @@ struct Element {
     std::string_view tag, id, classes;
     const Element* parent = nullptr;
 };
-enum class Display : uint8_t { Inline, Block, None };
-enum class Align : uint8_t { Start, Left, Right, Center, Justify };
-enum class Break : uint8_t { Auto, Always, Avoid };
-
-struct ComputedStyle {
-    float font_px = 16, line_height_px = 19.2f, line_height_factor = 1.2f, indent_px = 0;
-    std::array<float, 4> margin_px{}, padding_px{};
-    Display display = Display::Inline;
-    Align align = Align::Start;
-    Break break_before = Break::Auto, break_after = Break::Auto, break_inside = Break::Auto;
-    uint8_t margin_auto = 0;
-    bool bold = false, italic = false, underline = false, hidden = false;
-};
-
 struct Context {
     float initial_font_px = 16, root_font_px = 16, containing_width_px = 600;
     float minimum_font_px = 6, maximum_font_px = 192;
+    bool defer_box_percentages = false;
 };
 
 struct WorkBudget {
     uint32_t maximum_work = 1000000, maximum_styles = 4096;
     uint32_t work = 0, styles = 0;
 };
+using FontFamilies = std::array<std::string_view, kEmbeddedFontCount>;
 
 class StyleSheet {
 public:
@@ -62,12 +53,13 @@ public:
     ~StyleSheet();
     StyleSheet(const StyleSheet&) = delete;
     StyleSheet& operator=(const StyleSheet&) = delete;
-
-    Result append(std::string_view source, Checkpoint checkpoint = {});
-
+    Result append(std::string_view source, Checkpoint checkpoint = {}, const FontFamilies* families = nullptr);
+    Result collect_fonts(std::string_view source, Checkpoint checkpoint,
+                        const std::function<bool(std::string_view, std::string_view)>& accept);
     Result compute(const Element& element, const ComputedStyle* parent, const Context& context,
                    std::string_view inline_style, WorkBudget& budget, ComputedStyle& output,
-                   Checkpoint checkpoint = {}) const;
+                   Checkpoint checkpoint = {}, const ComputedStyle* defaults = nullptr,
+                   const FontFamilies* families = nullptr) const;
     Report report() const;
 private:
     struct Impl;

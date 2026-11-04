@@ -87,6 +87,8 @@ UTF-8 TOML 用于常改设置；JSON 用于机器维护的结构化状态。格�
 
 最后一层不持久化。关闭/取消回到已应用状态；应用时当前内容优先重新排版。「设为阅读默认」仅接受已验证有效的参数，作用范围明确；不因字体缺失就偷偷改用户偏好。区分偏好字体与实际回退字体。
 
+单书 `[reader].original_epub` 为可选布尔值，缺省为 `false`。仅 EPUB 阅读使用该字段，全局配置拒绝该字段。切回自定义删除覆盖，清除本书排版参数保留模式。原书模式的派生分页与渲染缓存策略见[接入试验](css-style-prototype.md#原生阅读接入试验)。
+
 示例见 [examples/sdcard/PicoPage/settings.toml](../../examples/sdcard/PicoPage/settings.toml)。示例不包含真实字体文件。
 
 全局 Wi-Fi 开关使用 `[network]` 下的 `wifi_enabled = true`，默认开启，只允许布尔值。该项不允许单书覆盖；界面修改沿用保注释、比较原文和验证提交流程，不改 `network.toml` 或 `sync.toml`。

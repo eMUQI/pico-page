@@ -95,6 +95,7 @@ struct ReaderSettings {
     int margin_x_px = 36;
     double paragraph_gap_lines = 0;
     int indent_chars = 2;
+    bool original_epub = false;  // Single-book EPUB override.
     std::string refresh_preset = "balanced";
     int balanced_full_refresh_pages = 25;
     int fast_full_refresh_pages = 30;
@@ -181,6 +182,8 @@ public:
     bool read_at(std::size_t byte_offset, char* bytes, std::size_t byte_count);
     /** Returns to byte zero on the same open file; refuses a changed length. */
     bool rewind();
+    /** Verifies the published payload against a CRC32 from its source. */
+    bool matches_crc32(std::uint32_t expected, const std::function<bool()>& stop = {});
 private:
     friend class FileStore;
     CacheReader(int fd, std::size_t size) : fd_(fd), size_(size) {}

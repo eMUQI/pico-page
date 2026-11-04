@@ -1,6 +1,7 @@
 #include "pico_page/stage_timer.h"
 #include "pico_page/host_work_probe.h"
 #include "pico_page/document.h"
+#include "css.h"
 #include "gb18030.h"
 #include "expat.h"
 #include "miniz.h"
@@ -19,6 +20,7 @@
 #include <utility>
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 #include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -107,11 +109,15 @@ std::string local_name(const char* name) {
     const char* sep = std::strrchr(name, '|');
     return sep ? sep + 1 : name;
 }
-std::string attr(const char** attrs, const char* name) {
-    for (auto p = attrs; p && *p; p += 2) if (local_name(p[0]) == name) return p[1];
+std::string_view attr_view(const char** attrs, std::string_view name) {
+    for (auto p = attrs; p && *p; p += 2) {
+        const char* separator = std::strrchr(p[0], '|');
+        if (name == (separator ? separator + 1 : p[0])) return p[1];
+    }
     return {};
 }
-bool token(const std::string& list, const std::string& wanted) {
+std::string attr(const char** attrs, const char* name) { return std::string(attr_view(attrs, name)); }
+bool token(std::string_view list, std::string_view wanted) {
     std::size_t pos = 0;
     while (pos < list.size()) {
         auto end = list.find_first_of(" \r\n\t", pos);
@@ -564,6 +570,113 @@ void warn(Chapter& chapter, const std::string& value) {
 
 constexpr std::size_t kKoreaderTextSplitScalars = 8192;
 
+namespace css = document::css;
+constexpr char kAuthorUnavailable[] = "EPUB author styles exceed trial limits";
+constexpr std::size_t kAuthorStyleCount = 256;
+constexpr std::size_t kAuthorSourceBytes = 184 * 1024;
+constexpr std::size_t kAuthorSources = 48;
+
+char* css_source_buffer() {
+    if (!memory_room(kAuthorSourceBytes)) return nullptr;
+#ifdef ESP_PLATFORM
+    return static_cast<char*>(heap_caps_malloc(kAuthorSourceBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+#else
+    return static_cast<char*>(std::malloc(kAuthorSourceBytes));
+#endif
+}
+
+struct AuthorLayoutState {
+#ifdef ESP_PLATFORM
+    static void* operator new(std::size_t bytes, const std::nothrow_t&) noexcept {
+        return heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    static void operator delete(void* value) noexcept { std::free(value); }
+#endif
+    struct Ancestor {
+        css::Element element;
+        css::ComputedStyle style;
+        std::size_t names_begin = 0;
+        bool suppressed = false;
+    };
+    css::StyleSheet sheet;
+    std::array<std::string, css::kEmbeddedFontCount> font_names;
+    css::FontFamilies font_families{};
+    std::vector<EmbeddedFont> fonts;
+    css::Context context;
+    css::WorkBudget work;
+    std::array<Ancestor, 64> ancestors;
+    std::array<char, 32 * 1024> names;
+    std::size_t names_used = 0;
+    const std::function<bool()>& stop;
+#ifdef ESP_PLATFORM
+    TickType_t yielded_at = xTaskGetTickCount();
+#endif
+    css::Checkpoint checkpoint;
+
+    AuthorLayoutState(css::Limits limits, const std::function<bool()>& cancel)
+        : sheet(limits), stop(cancel), checkpoint{[](void* opaque) {
+            auto& owner = *static_cast<AuthorLayoutState*>(opaque);
+#ifdef ESP_PLATFORM
+            if (xTaskGetTickCount() - owner.yielded_at >= pdMS_TO_TICKS(20)) {
+                vTaskDelay(1);
+                owner.yielded_at = xTaskGetTickCount();
+            }
+#endif
+            return owner.stop && owner.stop();
+        }, this} { context.defer_box_percentages = true; }
+
+    bool start(std::size_t depth, std::string_view tag, const char** attrs, bool block, bool heading) {
+        if (depth >= ancestors.size()) return false;
+        if (work.styles >= 64 || work.work >= work.maximum_work / 2) {
+            work = {};
+#ifdef ESP_PLATFORM
+            vTaskDelay(1);
+#endif
+        }
+        auto* parent = depth ? &ancestors[depth - 1] : nullptr;
+        auto& current = ancestors[depth];
+        current.names_begin = names_used;
+        const auto copy = [&](std::string_view value) {
+            auto* destination = names.data() + names_used;
+            if (!value.empty()) std::memcpy(destination, value.data(), value.size());
+            names_used += value.size();
+            return std::string_view(destination, value.size());
+        };
+        const auto id = attr_view(attrs, "id"), classes = attr_view(attrs, "class");
+        if (tag.size() + id.size() + classes.size() > names.size() - names_used) return false;
+        current.element = {copy(tag), copy(id), copy(classes), parent ? &parent->element : nullptr};
+        css::ComputedStyle defaults;
+        if (parent) {
+            const auto& inherited = parent->style;
+            defaults.font_px = inherited.font_px;
+            defaults.font_families = inherited.font_families;
+            defaults.line_height_px = inherited.line_height_px;
+            defaults.line_height_factor = inherited.line_height_factor;
+            defaults.indent_px = inherited.indent_px;
+            defaults.box_percentages = inherited.box_percentages & css::ComputedStyle::indent_percent;
+            defaults.align = inherited.align;
+            defaults.bold = inherited.bold;
+            defaults.italic = inherited.italic;
+            defaults.hidden = inherited.hidden;
+        } else context.root_font_px = context.initial_font_px;
+        defaults.display = block ? css::Display::Block : css::Display::Inline;
+        if (heading || tag == "small") {
+            defaults.font_px = std::clamp(defaults.font_px * (heading ? 1.2f : .8f), context.minimum_font_px, context.maximum_font_px);
+            if (defaults.line_height_factor >= 0) defaults.line_height_px = defaults.font_px * defaults.line_height_factor;
+        }
+        if (heading || tag == "b" || tag == "strong") defaults.bold = true;
+        if (tag == "em" || tag == "i") defaults.italic = true;
+        if (tag == "u") defaults.underline = true;
+        if (sheet.compute(current.element, parent ? &parent->style : nullptr, context, attr_view(attrs, "style"),
+                          work, current.style, checkpoint, &defaults, &font_families) != css::Result::Complete) return false;
+        if (parent && parent->style.underline) current.style.underline = true;
+        current.suppressed = current.style.display == css::Display::None || (parent && parent->suppressed);
+        if (current.suppressed) current.style.display = css::Display::None;
+        if (!parent) context.root_font_px = current.style.font_px;
+        return true;
+    }
+};
+
 struct ChapterParser {
     struct Frame {
         std::string name, path;
@@ -600,6 +713,28 @@ struct ChapterParser {
     std::string last_run_node;
     Anchor pending_anchor;
     BlockKind block_kind = BlockKind::Paragraph;
+    AuthorLayoutState* author = nullptr;
+    css::ComputedStyle block_style, pending_space_style;
+
+    std::uint16_t retain_style(const css::ComputedStyle& style) {
+        auto& styles = chapter.author_styles;
+        const auto found = std::find(styles.begin(), styles.end(), style);
+        if (found != styles.end()) return static_cast<std::uint16_t>(found - styles.begin() + 1);
+        if (styles.size() == kAuthorStyleCount) { xml.stop(kAuthorUnavailable); return 0; }
+        if (!styles.capacity()) {
+            constexpr auto bytes = kAuthorStyleCount * sizeof(css::ComputedStyle);
+            const bool available = memory_room(bytes)
+#ifdef ESP_PLATFORM
+                && heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) >= bytes
+#endif
+                ;
+            if (!available) { xml.stop(kAuthorUnavailable); return 0; }
+            styles.reserve(kAuthorStyleCount);
+        }
+        styles.push_back(style);
+        return static_cast<std::uint16_t>(styles.size());
+    }
+    void set_block_style(const css::ComputedStyle& style) { if (author) block_style = style; }
     ChapterParser(Chapter& value, const std::string& resource) : result(value) {
         chapter.resource = resource;
         xml.body_resource = true;
@@ -704,7 +839,7 @@ struct ChapterParser {
             if (resumable) xml.suspend_requested = true;
         }
         chapter.text.clear(); chapter.blocks.clear(); chapter.runs.clear(); chapter.fragments.clear();
-        chapter.links.clear(); chapter.images.clear();
+        chapter.links.clear(); chapter.images.clear(); chapter.author_styles.clear();
         chapter.source_nodes = std::move(carried);
         chapter.split_node = inside_block;
         retained_metadata_bytes = 0; part_source_nodes = 0;
@@ -722,11 +857,15 @@ struct ChapterParser {
     void finish_block() {
         pending_space = false;
         const auto end = static_cast<std::uint32_t>(chapter.text.size());
-        if (end > block_start) { chapter.blocks.push_back({block_start, end, block_kind}); append_text_scalar(U'\n'); }
+        if (end > block_start) {
+            const std::uint16_t style = author ? retain_style(block_style) : 0;
+            chapter.blocks.push_back({block_start, end, block_kind, style});
+            append_text_scalar(U'\n');
+        }
         block_start = static_cast<std::uint32_t>(chapter.text.size());
         if (soft_full()) split_pending = true;
     }
-    void append(char32_t cp, const Anchor* source) {
+    void append(char32_t cp, const Anchor* source, const css::ComputedStyle* style = nullptr) {
         if ((split_pending || hard_full()) && !next_part()) return;
         const auto begin = static_cast<std::uint32_t>(chapter.text.size());
         if (!append_text_scalar(cp) || !source) return;
@@ -737,27 +876,29 @@ struct ChapterParser {
         }
         retained_metadata_bytes += source->node.size() + source->resource.size();
         if (chapter.runs.size() >= 8192 || retained_metadata_bytes > 512 * 1024) { xml.stop("Chapter source mapping limit exceeded"); return; }
-        if (keep_anchors) chapter.runs.push_back({begin, begin + 1, *source});
+        if (keep_anchors) chapter.runs.push_back({begin, begin + 1, *source, false, style ? retain_style(*style) : std::uint16_t{0}});
         else { chapter.runs.push_back({begin, begin + 1, {{}, {}, source->offset}}); last_run_node = source->node; }
     }
-    bool place_media(const std::string& label, const std::string& path, std::uint32_t& begin) {
+    bool place_media(const std::string& label, const std::string& path, std::uint32_t& begin,
+                     const css::ComputedStyle* style = nullptr) {
         finish_block();
         if (split_pending && !next_part()) return false;
         block_kind = BlockKind::Image;
+        if (style) set_block_style(*style);
         std::u32string scalar; decode(label.data(), label.size(), scalar);
         begin = static_cast<std::uint32_t>(chapter.text.size());
         if (scalar.size() > 256) { scalar.resize(255); scalar.push_back(U'…'); }
         for (auto c : scalar) append(c, nullptr);
         retained_metadata_bytes += path.size() + chapter.resource.size();
         if (chapter.runs.size() >= 8192 || retained_metadata_bytes > 512 * 1024) { xml.stop("Chapter source mapping limit exceeded"); return false; }
-        if (keep_anchors) chapter.runs.push_back({begin, static_cast<std::uint32_t>(chapter.text.size()), {chapter.resource, path, 0}, true});
+        if (keep_anchors) chapter.runs.push_back({begin, static_cast<std::uint32_t>(chapter.text.size()), {chapter.resource, path, 0}, true, style ? retain_style(*style) : std::uint16_t{0}});
         else { chapter.runs.push_back({begin, static_cast<std::uint32_t>(chapter.text.size()), {}, true}); last_run_node = path; }
         return true;
     }
     void start(const std::string& name, const char** attrs) {
         const auto simple_image_style = [](const char** attributes) {
             for (const auto* property : {"transform", "style", "opacity", "filter", "mask", "clip-path"})
-                if (!attr(attributes, property).empty()) return false;
+                if (!attr_view(attributes, property).empty()) return false;
             // calibre writes "none" on its cover page; the image then covers the whole viewBox and
             // is drawn fitted with its own aspect ratio, as for "xMidYMid meet".
             const auto aspect = attr(attributes, "preserveAspectRatio");
@@ -790,8 +931,9 @@ struct ChapterParser {
         }
         if (name == "body") { frame.body = true; seen_body = true; }
         if (name == "head" || name == "script" || name == "style") frame.hidden = true;
-        const auto inline_css = attr(attrs, "style");
-        if (!inline_css.empty()) retain_css("_ {" + inline_css + "}");
+        const auto inline_css = attr_view(attrs, "style");
+        if (author && inline_css.size() > 4096) { xml.stop(kAuthorUnavailable); return; }
+        if (!author && !inline_css.empty()) retain_css("_ {" + std::string(inline_css) + "}");
         if (name == "body") {
             auto at = inline_css.find("background");
             if (at != std::string::npos) at = inline_css.find("url(", at);
@@ -800,26 +942,39 @@ struct ChapterParser {
                 auto url = inline_css.substr(at + 4, close - at - 4);
                 const auto first = url.find_first_not_of(" \t'\""), last = url.find_last_not_of(" \t'\"");
                 std::string fragment;
-                if (first != std::string::npos && (!resolve(chapter.resource, url.substr(first, last - first + 1), frame.background, fragment) || !fragment.empty()))
+                if (first != std::string::npos && (!resolve(chapter.resource, std::string(url.substr(first, last - first + 1)), frame.background, fragment) || !fragment.empty()))
                     frame.background.clear();
             }
         }
-        if (name == "style" && retain_css("")) frame.css = chapter.css_sources.size() - 1;
-        if (name == "link" && token(attr(attrs, "rel"), "stylesheet")) {
+        if (!author && name == "style" && retain_css("")) frame.css = chapter.css_sources.size() - 1;
+        if (!author && name == "link" && token(attr(attrs, "rel"), "stylesheet")) {
             std::string resource, fragment;
             if (css_links.size() < 64 && resolve(chapter.resource, attr(attrs, "href"), resource, fragment) && fragment.empty())
                 css_links.push_back(std::move(resource));
             else { chapter.plain_dom = false; warn(chapter, "External or excessive stylesheet references are not loaded"); }
         }
-        if (!attr(attrs, "style").empty() || name == "style" || (name == "link" && token(attr(attrs, "rel"), "stylesheet"))) warn(chapter, "CSS is rendered with basic document styles");
+        if (!author && (!inline_css.empty() || name == "style" || (name == "link" && token(attr(attrs, "rel"), "stylesheet")))) warn(chapter, "CSS is rendered with basic document styles");
         if (name == "script") warn(chapter, "Scripts are not executed");
         frame.block = name == "p" || name == "div" || name == "section" || name == "article" || name == "aside" || name == "blockquote" || name == "li" || name == "pre" || name == "tr" || name == "table" || name == "dl" || name == "dt" || name == "dd" || (name.size() == 2 && name[0] == 'h' && name[1] >= '1' && name[1] <= '6');
         if (name.size() == 2 && name[0] == 'h' && name[1] >= '1' && name[1] <= '6') frame.kind = BlockKind::Heading;
         else if (name == "li") frame.kind = BlockKind::ListItem;
         else if (name == "pre") { frame.kind = BlockKind::Preformatted; frame.pre = true; }
         if (attr(attrs, "space") == "preserve") frame.pre = true;
+        const css::ComputedStyle* style = nullptr;
+        if (author) {
+            const bool block = frame.block || name == "body";
+            if (!author->start(frames.size(), name, attrs, block, frame.kind == BlockKind::Heading)) {
+                xml.stop(kAuthorUnavailable); return;
+            }
+            style = &author->ancestors[frames.size()].style;
+            if (style->display != css::Display::None) frame.block = style->display == css::Display::Block;
+        }
         if (frame.body && !frame.hidden) {
-            if (frame.block || name == "br") { finish_block(); block_kind = frame.kind; }
+            if (frame.block || name == "br") {
+                finish_block();
+                if (!style || frame.block) block_kind = frame.kind;
+                if (style && frame.block) set_block_style(*style);
+            }
             if (name == "td" || name == "th") { if (!chapter.text.empty() && chapter.text.back() != U'\n') append(U'\t', nullptr); warn(chapter, "Tables are rendered as text rows"); }
             auto id = attr(attrs, "id");
             if (!id.empty()) {
@@ -839,7 +994,7 @@ struct ChapterParser {
             if (name == "img" || name == "image" || name == "svg" || name == "math" || name == "audio" || name == "video" || name == "object") {
                 const std::string label = name == "img" || name == "image" ? "[图片：" + (attr(attrs, "alt").empty() ? "未渲染" : attr(attrs, "alt")) + "]" : "[不支持的媒体：" + name + "]";
                 std::uint32_t begin;
-                if (!place_media(label, frame.path, begin)) return;
+                if (!place_media(label, frame.path, begin, style)) return;
                 if (name == "img" || name == "image" || name == "svg") {
                     if (chapter.images.size() >= 256) { xml.stop("Chapter image reference limit exceeded"); return; }
                     DocumentImage image{begin, static_cast<std::uint32_t>(chapter.text.size()), "", attr(attrs, "alt"), {chapter.resource, frame.path, 0}};
@@ -872,14 +1027,22 @@ struct ChapterParser {
         if (frame.link != std::numeric_limits<std::size_t>::max()) chapter.links[frame.link].end = static_cast<std::uint32_t>(chapter.text.size());
         if (!frame.background.empty() && part == 0 && !captured && chapter.text.empty()) {
             std::uint32_t begin;
-            if (!place_media("[图片：未渲染]", frame.path, begin)) return;
+            if (!place_media("[图片：未渲染]", frame.path, begin, author ? &author->ancestors[frames.size()].style : nullptr)) return;
             chapter.images.push_back({begin, static_cast<std::uint32_t>(chapter.text.size()), frame.background, "", {chapter.resource, frame.path, 0}});
             retained_metadata_bytes += frame.background.size();
             finish_block(); block_kind = BlockKind::Paragraph;
             warn(chapter, "Images and media use explicit placeholders");
         }
         if (frame.body && !frame.hidden && frame.block) finish_block();
-        if (!frames.empty()) { frames.back().in_text = false; block_kind = frames.back().kind; }
+        if (frames.empty()) return;
+        frames.back().in_text = false;
+        if (!author) { block_kind = frames.back().kind; return; }
+        author->names_used = author->ancestors[frames.size()].names_begin;
+        if (frame.block || frame.image != std::numeric_limits<std::size_t>::max()) {
+            const auto parent = std::find_if(frames.rbegin(), frames.rend(), [](const Frame& f) { return f.block; });
+            block_kind = parent == frames.rend() ? BlockKind::Paragraph : parent->kind;
+            if (parent != frames.rend()) set_block_style(author->ancestors[frames.size() - 1 - (parent - frames.rbegin())].style);
+        }
     }
     void characters(const char* bytes, std::size_t size) {
         if (frames.empty() || !require_memory_room(0)) return;
@@ -933,14 +1096,15 @@ struct ChapterParser {
             raw += scalars;
         }
         Anchor source{chapter.resource, frame.node, 0};
+        const auto* style = author ? &author->ancestors[frames.size() - 1].style : nullptr;
         for (auto cp : scalars) {
             source.offset = frame.source_offset++;
             if (!frame.pre && space(cp)) {
-                if (!pending_space && chapter.text.size() > block_start) { pending_space = true; pending_anchor = source; }
+                if (!pending_space && chapter.text.size() > block_start) { pending_space = true; pending_anchor = source; if (style) pending_space_style = *style; }
                 continue;
             }
-            if (pending_space) { append(U' ', &pending_anchor); pending_space = false; }
-            append(cp, &source);
+            if (pending_space) { append(U' ', &pending_anchor, style ? &pending_space_style : nullptr); pending_space = false; }
+            append(cp, &source, style);
             if (!xml.error.empty()) return;
         }
     }
@@ -990,6 +1154,12 @@ struct ChapterStream {
     ~ChapterStream() { if (iterator) mz_zip_reader_extract_iter_free(iterator); }
 };
 
+struct EpubDocument::BookIndex {
+    DocumentMetadata metadata;
+    std::vector<SpineItem> spine;
+    std::vector<TocEntry> toc;
+};
+
 struct EpubDocument::Impl {
     FILE* file = nullptr;
     std::unique_ptr<ChapterStream> chapter_stream;
@@ -1019,7 +1189,11 @@ struct EpubDocument::Impl {
         allocated = allocated - previous_size + bytes; result->size = bytes;
         return result + 1;
     }
-    DocumentMetadata metadata;
+    VerifiedIndex index;
+    const BookIndex& book() const {
+        static const BookIndex empty;
+        return index ? *index : empty;
+    }
     struct ZipEntry { std::uint32_t member, bytes; };
     static_assert(sizeof(ZipEntry) == 8);
     std::unique_ptr<ZipEntry, decltype(&std::free)> zip_index{nullptr, &std::free};
@@ -1040,9 +1214,7 @@ struct EpubDocument::Impl {
         PP_HOST_WORK(host_work::add(host_work::ZipComparisons);)
         return path == name ? found : nullptr;
     }
-    std::vector<SpineItem> spine;
     std::vector<std::uint32_t> html_repair_offsets;
-    std::vector<TocEntry> toc;
     std::string cover, cover_page;
     ~Impl() { chapter_stream.reset(); if (zip.m_pState) mz_zip_reader_end(&zip); if (file) std::fclose(file); }
     ZipTiming* read_timing = nullptr;
@@ -1065,11 +1237,12 @@ struct EpubDocument::Impl {
         return count;
     }
     bool enable_html_repair(std::size_t index, const Xml& xml) {
-        if (index >= spine.size() || xml.in_cdata || !xml.allow_html || !xml.html_declared || xml.html_fallback || !xml.html_syntax_error() || xml.error.rfind("Invalid XML:", 0) != 0) return false;
-        html_repair_offsets.resize(spine.size(), kNoHtmlRepair);
+        if (index >= book().spine.size() || xml.in_cdata || !xml.allow_html || !xml.html_declared || xml.html_fallback || !xml.html_syntax_error() || xml.error.rfind("Invalid XML:", 0) != 0) return false;
+        html_repair_offsets.resize(book().spine.size(), kNoHtmlRepair);
         html_repair_offsets[index] = static_cast<std::uint32_t>(xml.completed_bytes);
         return true;
     }
+    std::unique_ptr<AuthorLayoutState> prepare_author_styles(std::size_t index, const std::function<bool()>& stop);
     bool load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
               std::uint32_t wanted, const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop,
               const std::function<void(const Chapter&)>& visit);
@@ -1153,33 +1326,45 @@ EpubDocument::~EpubDocument() = default;
 EpubDocument::EpubDocument(EpubDocument&&) noexcept = default;
 EpubDocument& EpubDocument::operator=(EpubDocument&&) noexcept = default;
 void EpubDocument::close() { impl_.reset(new Impl); }
-const DocumentMetadata& EpubDocument::metadata() const { return impl_->metadata; }
-const std::vector<SpineItem>& EpubDocument::spine() const { return impl_->spine; }
-const std::vector<TocEntry>& EpubDocument::toc() const { return impl_->toc; }
+const DocumentMetadata& EpubDocument::metadata() const { return impl_->book().metadata; }
+const std::vector<SpineItem>& EpubDocument::spine() const { return impl_->book().spine; }
+const std::vector<TocEntry>& EpubDocument::toc() const { return impl_->book().toc; }
 
 bool EpubDocument::open(const std::string& path, std::string& error, const std::function<bool()>& stop) {
-    return open_impl(path, error, false, nullptr, stop);
+    return open_impl(path, error, OpenMode::Book, nullptr, stop);
 }
 
 std::uint64_t identity_hash_count() { return identity_scans.load(std::memory_order_relaxed); }
 std::uint64_t epub_open_count() { return epub_opens.load(std::memory_order_relaxed); }
 
-bool EpubDocument::open_verified(const std::string& path, const DocumentMetadata& identity, std::string& error, const std::function<bool()>& stop) {
+bool EpubDocument::open_verified(const std::string& path, const DocumentMetadata& identity, std::string& error,
+                                 const std::function<bool()>& stop, VerifiedIndex index) {
     const auto hex = [](const std::string& s, std::size_t size) {
         return s.size() == size && std::all_of(s.begin(), s.end(), [](char c) {
             return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
         });
     };
     if (!hex(identity.book_id, 64) || !hex(identity.partial_md5, 32)) return fail(error, "Invalid verified book identity");
+    if (index && index->metadata.book_id == identity.book_id && index->metadata.partial_md5 == identity.partial_md5 &&
+        !txt_path(path)) {
+        if (!open_impl(path, error, OpenMode::Resources, nullptr, stop)) return false;
+        impl_->index = std::move(index);
+        return true;
+    }
     const auto copy = identity;
-    return open_impl(path, error, false, &copy, stop);
+    return open_impl(path, error, OpenMode::Book, &copy, stop);
 }
 
-bool EpubDocument::open_impl(const std::string& path, std::string& error, bool cover_only, const DocumentMetadata* identity, const std::function<bool()>& stop, ContentFailureKind* failure_kind) {
+EpubDocument::VerifiedIndex EpubDocument::verified_epub_index() const {
+    return impl_->txt ? VerifiedIndex{} : impl_->index;
+}
+
+bool EpubDocument::open_impl(const std::string& path, std::string& error, OpenMode mode, const DocumentMetadata* identity, const std::function<bool()>& stop, ContentFailureKind* failure_kind) {
     const auto fail = content_failure_reporter(failure_kind);
+    auto parsed = std::make_shared<BookIndex>();
     if (txt_path(path)) {
         close(); error.clear();
-        if (cover_only) return fail(error, "TXT 没有内嵌封面", ContentFailureKind::MissingResource);
+        if (mode != OpenMode::Book) return fail(error, "TXT 没有内嵌封面", ContentFailureKind::MissingResource);
         if (stop && stop()) return fail(error, "TXT 读取已取消");
         std::unique_ptr<Impl> next(new Impl);
         next->file = std::fopen(path.c_str(), "rb");
@@ -1191,11 +1376,11 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
         next->txt = true;
         next->txt_bytes = static_cast<std::uint32_t>(length);
         if (identity) {
-            next->metadata.book_id = identity->book_id;
-            next->metadata.partial_md5 = identity->partial_md5;
-            next->metadata.txt_encoding = identity->txt_encoding;
-            next->metadata.txt_offsets = identity->txt_offsets;
-            next->metadata.txt_headings = identity->txt_headings;
+            parsed->metadata.book_id = identity->book_id;
+            parsed->metadata.partial_md5 = identity->partial_md5;
+            parsed->metadata.txt_encoding = identity->txt_encoding;
+            parsed->metadata.txt_offsets = identity->txt_offsets;
+            parsed->metadata.txt_headings = identity->txt_headings;
             if (identity->txt_encoding != TxtEncoding::Utf8 && identity->txt_encoding != TxtEncoding::Gb18030 &&
                 identity->txt_encoding != TxtEncoding::Utf16Le && identity->txt_encoding != TxtEncoding::Utf16Be)
                 return fail(error, "TXT 编码标识无效");
@@ -1239,7 +1424,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
                 if (count && !sha.update(buffer.data(), count)) return fail(error, "TXT SHA-256 failed");
                 if (!position && count >= 2 && ((buffer[0] == 0xff && buffer[1] == 0xfe) || (buffer[0] == 0xfe && buffer[1] == 0xff))) {
                     utf16 = true; utf16_decoder.big_endian = buffer[0] == 0xfe;
-                    next->metadata.txt_encoding = utf16_decoder.big_endian ? TxtEncoding::Utf16Be : TxtEncoding::Utf16Le;
+                    parsed->metadata.txt_encoding = utf16_decoder.big_endian ? TxtEncoding::Utf16Be : TxtEncoding::Utf16Le;
                 }
                 for (std::size_t i = 0; i < count; ++i) {
                     const auto byte = buffer[i];
@@ -1312,28 +1497,29 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
                 return fail(error, utf16 ? "TXT UTF-16 长度无效或没有可阅读的文字" : utf8_valid || gb_valid ? "TXT 没有可阅读的文字" :
                     "TXT 编码不受支持（支持 UTF-8、GB18030、带 BOM 的 UTF-16）");
             if (utf16 || !utf8_valid) {
-                if (!utf16) next->metadata.txt_encoding = TxtEncoding::Gb18030;
+                if (!utf16) parsed->metadata.txt_encoding = TxtEncoding::Gb18030;
                 if (part_offsets.back() != next->txt_bytes) part_offsets.push_back(next->txt_bytes);
-                next->metadata.txt_offsets = std::move(part_offsets);
+                parsed->metadata.txt_offsets = std::move(part_offsets);
             }
             auto& selected_toc = utf16 || utf8_valid ? unicode_toc : gb_toc;
             selected_toc.finish_line();
-            next->metadata.txt_headings = std::move(selected_toc.headings);
-            if (!sha.finish(next->metadata.book_id)) return fail(error, "TXT SHA-256 failed");
+            parsed->metadata.txt_headings = std::move(selected_toc.headings);
+            if (!sha.finish(parsed->metadata.book_id)) return fail(error, "TXT SHA-256 failed");
             for (std::uint64_t offset = 0; offset < static_cast<std::uint64_t>(length); offset = offset == 0 ? 1024 : offset * 4) {
                 const auto size = static_cast<std::size_t>(std::min<std::uint64_t>(1024, length - offset));
                 if (Impl::read(next.get(), offset, buffer.data(), size) != size || !md5.update(buffer.data(), size))
                     return fail(error, "TXT partial MD5 failed");
             }
-            if (!md5.finish(next->metadata.partial_md5)) return fail(error, "TXT partial MD5 failed");
+            if (!md5.finish(parsed->metadata.partial_md5)) return fail(error, "TXT partial MD5 failed");
         }
         const auto slash = path.rfind('/');
-        next->metadata.title = path.substr(slash == std::string::npos ? 0 : slash + 1);
-        next->metadata.title.resize(next->metadata.title.size() - 4);
-        next->spine.push_back({"text", "text", true, static_cast<std::uint32_t>(length)});
-        for (const auto& heading : next->metadata.txt_headings)
-            next->toc.push_back({heading.label, "text", "", 0});
-        if (next->toc.empty()) next->toc.push_back({"正文", "text", "", 0});
+        parsed->metadata.title = path.substr(slash == std::string::npos ? 0 : slash + 1);
+        parsed->metadata.title.resize(parsed->metadata.title.size() - 4);
+        parsed->spine.push_back({"text", "text", true, static_cast<std::uint32_t>(length)});
+        for (const auto& heading : parsed->metadata.txt_headings)
+            parsed->toc.push_back({heading.label, "text", "", 0});
+        if (parsed->toc.empty()) parsed->toc.push_back({"正文", "text", "", 0});
+        next->index = std::move(parsed);
         impl_ = std::move(next);
         return true;
     }
@@ -1417,10 +1603,14 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
     if (!mz_zip_reader_extract_to_mem(&next->zip, mime_index, mime, sizeof(mime), 0)) return fail(error, "Cannot read EPUB mimetype", zip_failure_kind(next->zip));
     if (trim(std::string(mime, static_cast<std::size_t>(mime_stat.m_uncomp_size))) != "application/epub+zip")
         return fail(error, "Invalid EPUB mimetype");
+    if (mode == OpenMode::Resources) {
+        impl_ = std::move(next);
+        return true;
+    }
     if (identity) {
-        next->metadata.book_id = identity->book_id;
-        next->metadata.partial_md5 = identity->partial_md5;
-    } else if (!cover_only) {
+        parsed->metadata.book_id = identity->book_id;
+        parsed->metadata.partial_md5 = identity->partial_md5;
+    } else if (mode == OpenMode::Book) {
         identity_scans.fetch_add(1, std::memory_order_relaxed);
         const StageTimer timer{"identity_read_hash", 0};
         Hash sha(false), md5(true); std::array<unsigned char, 8192> buffer{};
@@ -1436,7 +1626,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
             const auto size = static_cast<std::size_t>(std::min<std::uint64_t>(1024, length - offset));
             if (Impl::read(next.get(), offset, buffer.data(), size) != size || !md5.update(buffer.data(), size)) return fail(error, "Partial MD5 failed");
         }
-        if (!sha.finish(next->metadata.book_id) || !md5.finish(next->metadata.partial_md5)) return fail(error, "EPUB identity hash failed");
+        if (!sha.finish(parsed->metadata.book_id) || !md5.finish(parsed->metadata.partial_md5)) return fail(error, "EPUB identity hash failed");
     }
     Xml container;
     std::string package;
@@ -1495,7 +1685,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
             // Expat may deliver an empty element's end callback after start aborts parsing.
             if (!opf.error.empty()) return;
             if (metadata_depth == opf.depth) {
-                auto& target = metadata_name == "title" ? next->metadata.title : metadata_name == "creator" ? next->metadata.author : next->metadata.language;
+                auto& target = metadata_name == "title" ? parsed->metadata.title : metadata_name == "creator" ? parsed->metadata.author : parsed->metadata.language;
                 auto value = trim(text);
                 budget.bytes -= text.size(); text.clear();
                 if (target.empty()) budget.replace(opf, target, std::move(value));
@@ -1505,6 +1695,12 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
         };
         if (!next->parse(package, opf, error, kMaxXmlBytes, stop, failure_kind))
             return missing_package ? fail(error, opf.error) : false;
+#ifdef ESP_PLATFORM
+        const auto spine_bytes = itemrefs.size() * sizeof(SpineItem);
+        if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) < spine_bytes)
+            return fail(error, kChapterMemoryError, ContentFailureKind::OutOfMemory);
+#endif
+        parsed->spine.reserve(itemrefs.size());
         struct Item { std::string path, type, properties; };
         std::map<std::string, Item> manifest;
         for (auto& item : items) {
@@ -1532,22 +1728,22 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
             const auto* entry = next->find_member(item->second.path);
             if (!entry) return fail(error, "Unsupported or missing spine resource");
             if (!budget.add(opf, item->second.path.size())) return fail(error, opf.error);
-            next->spine.push_back({item->second.path, std::move(ref.first), ref.second, entry->bytes});
+            parsed->spine.push_back({item->second.path, std::move(ref.first), ref.second, entry->bytes});
         }
         if (!opf.error.empty()) return fail(error, opf.error);
     }
-    if (next->spine.empty()) return fail(error, "EPUB spine is empty");
-    if (next->metadata.title.empty()) { auto slash = path.rfind('/'); next->metadata.title = path.substr(slash == std::string::npos ? 0 : slash + 1); }
-    budget.bytes = next->metadata.title.size() + next->metadata.author.size() + next->metadata.language.size() + next->cover.size() + next->cover_page.size() + navigation.size() + ncx.size();
+    if (parsed->spine.empty()) return fail(error, "EPUB spine is empty");
+    if (parsed->metadata.title.empty()) { auto slash = path.rfind('/'); parsed->metadata.title = path.substr(slash == std::string::npos ? 0 : slash + 1); }
+    budget.bytes = parsed->metadata.title.size() + parsed->metadata.author.size() + parsed->metadata.language.size() + next->cover.size() + next->cover_page.size() + navigation.size() + ncx.size();
     std::size_t fallback_bytes = 0;
-    for (const auto& item : next->spine) fallback_bytes += item.id.size() + item.resource.size();
+    for (const auto& item : parsed->spine) fallback_bytes += item.id.size() + item.resource.size();
     budget.bytes += fallback_bytes;
     if (budget.bytes > kMaxPackageStrings || fallback_bytes > kMaxPackageStrings - budget.bytes)
         return fail(error, "Package/navigation text limit exceeded");
-    if (cover_only) { impl_ = std::move(next); return true; }
+    if (mode == OpenMode::Cover) { next->index = std::move(parsed); impl_ = std::move(next); return true; }
     PP_HOST_WORK(const host_work::Stage toc_stage{"epub_toc"};)
     for (const auto* source : {&navigation, &ncx}) {
-        if (source->empty() || !next->toc.empty()) continue;
+        if (source->empty() || !parsed->toc.empty()) continue;
         Xml xml;
         auto toc_budget = budget;
         std::vector<TocEntry> toc;
@@ -1610,10 +1806,11 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
         if (next->parse(*source, xml, toc_error, kMaxXmlBytes, stop)) {
             for (auto& entry : toc) entry.label = trim(entry.label);
             toc.erase(std::remove_if(toc.begin(), toc.end(), [](const TocEntry& entry) { return entry.resource.empty(); }), toc.end());
-            next->toc = std::move(toc);
+            parsed->toc = std::move(toc);
         } else if (toc_error == kChapterCancelled) return fail(error, toc_error);
     }
-    if (next->toc.empty()) for (const auto& item : next->spine) next->toc.push_back({item.id, item.resource, "", 0});
+    if (parsed->toc.empty()) for (const auto& item : parsed->spine) parsed->toc.push_back({item.id, item.resource, "", 0});
+    next->index = std::move(parsed);
     impl_ = std::move(next);
     return true;
 }
@@ -1625,13 +1822,13 @@ bool EpubDocument::read_cover(const std::string& path, std::vector<std::uint8_t>
     bytes.clear(); error.clear();
     if (stop && stop()) return fail(error, kChapterCancelled, ContentFailureKind::Cancelled);
     EpubDocument book;
-    if (!book.open_impl(path, error, true, nullptr, stop, failure_kind)) return false;
+    if (!book.open_impl(path, error, OpenMode::Cover, nullptr, stop, failure_kind)) return false;
     const auto unavailable = [failure_kind] { return content_failure_is_retryable(*failure_kind); };
     if (!book.impl_->cover.empty() && book.read_image(book.impl_->cover, bytes, error, stop, failure_kind)) return true;
     if (unavailable()) return false;
     if (stop && stop()) return fail(error, kChapterCancelled, ContentFailureKind::Cancelled);
     Chapter unused;
-    const auto resource = book.impl_->cover_page.empty() ? book.impl_->spine.front().resource : book.impl_->cover_page;
+    const auto resource = book.impl_->cover_page.empty() ? book.impl_->book().spine.front().resource : book.impl_->cover_page;
     if (!book.impl_->cover_page.empty() && book.read_image(resource, bytes, error, stop, failure_kind)) return true;
     if (unavailable()) return false;
     if (stop && stop()) return fail(error, kChapterCancelled, ContentFailureKind::Cancelled);
@@ -1728,6 +1925,11 @@ std::string Sha256Digest::finish() {
     return impl_->hash.finish(value) ? value : std::string();
 }
 
+const document::css::ComputedStyle& Chapter::style(std::uint16_t index) const {
+    static constexpr document::css::ComputedStyle initial;
+    return index && index <= author_styles.size() ? author_styles[index - 1] : initial;
+}
+
 void release(Chapter& chapter) {
     Chapter empty;
     std::swap(chapter, empty);
@@ -1738,16 +1940,19 @@ DocumentReadStats EpubDocument::read_stats() const {
 }
 std::size_t EpubDocument::retained_bytes() const {
     const auto& owner = *impl_;
-    const auto& metadata = owner.metadata;
     std::size_t bytes = sizeof(Impl) + owner.zip_allocated + owner.zip_entries * sizeof(Impl::ZipEntry) +
-        metadata.title.capacity() + metadata.author.capacity() + metadata.language.capacity() +
-        metadata.book_id.capacity() + metadata.partial_md5.capacity() + metadata.txt_offsets.capacity() * sizeof(std::uint32_t) +
-        metadata.txt_headings.capacity() * sizeof(TxtHeading) +
-        owner.spine.capacity() * sizeof(SpineItem) + owner.toc.capacity() * sizeof(TocEntry) +
         owner.cover.capacity() + owner.cover_page.capacity() + owner.html_repair_offsets.capacity() * sizeof(std::uint32_t);
-    for (const auto& heading : metadata.txt_headings) bytes += heading.label.capacity();
-    for (const auto& item : owner.spine) bytes += item.resource.capacity() + item.id.capacity();
-    for (const auto& item : owner.toc) bytes += item.label.capacity() + item.resource.capacity() + item.fragment.capacity();
+    if (owner.index && owner.index.use_count() == 1) {
+        const auto& index = *owner.index;
+        const auto& metadata = index.metadata;
+        bytes += sizeof(BookIndex) + metadata.title.capacity() + metadata.author.capacity() + metadata.language.capacity() +
+            metadata.book_id.capacity() + metadata.partial_md5.capacity() + metadata.txt_offsets.capacity() * sizeof(std::uint32_t) +
+            metadata.txt_headings.capacity() * sizeof(TxtHeading) +
+            index.spine.capacity() * sizeof(SpineItem) + index.toc.capacity() * sizeof(TocEntry);
+        for (const auto& heading : metadata.txt_headings) bytes += heading.label.capacity();
+        for (const auto& item : index.spine) bytes += item.resource.capacity() + item.id.capacity();
+        for (const auto& item : index.toc) bytes += item.label.capacity() + item.resource.capacity() + item.fragment.capacity();
+    }
     if (!owner.chapter_stream) return bytes;
     const auto& stream = *owner.chapter_stream;
     const auto& parser = stream.parser;
@@ -1772,11 +1977,9 @@ std::size_t EpubDocument::retained_bytes() const {
     return bytes;
 }
 std::unique_ptr<EpubDocument> EpubDocument::detach_reader() {
-    if (!impl_->file || impl_->txt || !memory_room(retained_bytes())) return {};
+    if (!impl_->file || impl_->txt || !memory_room(sizeof(EpubDocument) + sizeof(Impl))) return {};
     auto reader = std::make_unique<EpubDocument>();
-    reader->impl_->metadata = impl_->metadata;
-    reader->impl_->spine = impl_->spine;
-    reader->impl_->toc = impl_->toc;
+    reader->impl_->index = impl_->index;
     impl_.swap(reader->impl_);
     return reader;
 }
@@ -1799,10 +2002,10 @@ bool EpubDocument::read_next_chapter_part(std::size_t index, Chapter& chapter, s
         return false;
     };
     if (stop && stop()) return abort(kChapterCancelled);
-    if (!owner.file || owner.txt || index >= owner.spine.size()) return abort("Invalid EPUB stream chapter");
+    if (!owner.file || owner.txt || index >= owner.book().spine.size()) return abort("Invalid EPUB stream chapter");
     if (owner.chapter_stream && owner.chapter_stream->index != index) owner.chapter_stream.reset();
     if (!owner.chapter_stream) {
-        const auto& resource = owner.spine[index].resource;
+        const auto& resource = owner.book().spine[index].resource;
         const auto* entry = owner.find_member(resource);
         if (!entry || entry->bytes > kMaxXmlBytes) return abort("Missing or oversized EPUB stream resource");
         if (!memory_room(sizeof(ChapterStream) + sizeof(mz_zip_reader_extract_iter_state) + 96U * 1024))
@@ -1901,16 +2104,141 @@ bool EpubDocument::find_chapter_part(std::size_t index, Chapter& chapter, std::s
     }
     return impl_->load(index, chapter, error, detail, 0, &match, stop, visit);
 }
+std::unique_ptr<AuthorLayoutState> EpubDocument::Impl::prepare_author_styles(
+        std::size_t index, const std::function<bool()>& stop) {
+    const StageTimer timer{"author_styles_prepare", 0};
+    struct Source { std::string path; std::size_t begin = 0, size = 0; };
+    std::vector<Source> sources;
+    sources.reserve(kAuthorSources);
+    std::unique_ptr<char, decltype(&std::free)> raw(nullptr, &std::free);
+    std::size_t bytes = 0;
+    bool inline_source = false;
+    const auto& resource = book().spine[index].resource;
+    const auto accepts_media = [](std::string_view media) { return media.empty() || media == "all" || media == "screen"; };
+    Xml head;
+    head.body_resource = true;
+    head.start = [&](const std::string& name, const char** attrs) {
+        if (name == "body") { head.stop(kPartComplete); return; }
+        if (!accepts_media(attr_view(attrs, "media"))) return;
+        if (name == "style") {
+            if (sources.size() == kAuthorSources) { head.stop(kAuthorUnavailable); return; }
+            sources.push_back({{}, bytes, 0});
+            inline_source = true;
+        } else if (name == "link" && token(attr_view(attrs, "rel"), "stylesheet")) {
+            if (token(attr_view(attrs, "rel"), "alternate")) return;
+            if (sources.size() == kAuthorSources) { head.stop(kAuthorUnavailable); return; }
+            const auto href = attr_view(attrs, "href");
+            if (href.empty() || href.size() > 3 * 512) return;
+            std::string path, fragment;
+            if (resolve(resource, std::string(href), path, fragment) && fragment.empty())
+                sources.push_back({std::string(path.data(), path.size())});
+        }
+    };
+    head.end = [&](const std::string& name) { if (name == "style") inline_source = false; };
+    head.text = [&](const char* text, std::size_t count) {
+        if (!inline_source) return;
+        if (count > kAuthorSourceBytes - bytes) { head.stop(kAuthorUnavailable); return; }
+        if (!raw) raw.reset(css_source_buffer());
+        if (!raw) { head.stop(kAuthorUnavailable); return; }
+        std::memcpy(raw.get() + bytes, text, count);
+        bytes += count;
+        sources.back().size += count;
+    };
+    std::string error;
+    if (!parse(resource, head, error, kMaxXmlBytes, stop) && head.error != kPartComplete) return {};
+
+    for (auto& source : sources) {
+        if (source.path.empty()) continue;
+        if (stop && stop()) return {};
+        const auto* member = find_member(source.path);
+        if (!member || member->bytes > kAuthorSourceBytes - bytes) return {};
+        if (!member->bytes) continue;
+        if (!raw) raw.reset(css_source_buffer());
+        if (!raw) return {};
+        struct Read {
+            char* destination;
+            std::size_t size;
+            const std::function<bool()>& stop;
+        } read{raw.get() + bytes, member->bytes, stop};
+        if (!mz_zip_reader_extract_to_callback(&zip, member->member, [](void* opaque, mz_uint64 offset, const void* buffer, std::size_t count) {
+            auto& read = *static_cast<Read*>(opaque);
+            if ((read.stop && read.stop()) || offset > read.size || count > read.size - offset) return std::size_t{0};
+            std::memcpy(read.destination + offset, buffer, count);
+            return count;
+        }, &read, 0)) return {};
+        source.begin = bytes;
+        source.size = member->bytes;
+        bytes += source.size;
+    }
+
+    const css::Limits limits = bytes ? css::Limits{} : css::Limits{0, 0, 0, 0, 0, 0, 0};
+    constexpr std::size_t maximum_pool_bytes = 168 * 1024;
+    constexpr std::size_t retained_style_bytes = 4 * kAuthorStyleCount * sizeof(css::ComputedStyle);
+    constexpr std::size_t source_records = kAuthorSources * (544 + sizeof(Source));
+    constexpr std::size_t font_records = css::kEmbeddedFontCount * (272 + 4 * (544 + sizeof(EmbeddedFont)));
+    static_assert(kAuthorSourceBytes + sizeof(AuthorLayoutState) + maximum_pool_bytes +
+                  source_records + retained_style_bytes + font_records + 8 * 1024 <= 512 * 1024);
+    if (!memory_room(sizeof(AuthorLayoutState) + (bytes ? maximum_pool_bytes : 0))) return {};
+    auto author = std::unique_ptr<AuthorLayoutState>(new(std::nothrow) AuthorLayoutState(limits, stop));
+    if (!author || author->sheet.report().allocated_bytes > maximum_pool_bytes) return {};
+    for (const auto& source : sources) {
+        if (!source.size) continue;
+        const auto& base = source.path.empty() ? resource : source.path;
+        const auto accept = [&](std::string_view family, std::string_view url) {
+            std::string path, fragment;
+            if (!resolve(base, std::string(url), path, fragment) || !fragment.empty() || path.size() <= 4) return false;
+            auto extension = path.substr(path.size() - 4);
+            for (auto& c : extension) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+            if (extension != ".ttf" && extension != ".otf") return false;
+            const auto* member = find_member(path);
+            if (!member || member->bytes < 12 || member->bytes > kMaxEmbeddedFontBytes) return false;
+            mz_zip_archive_file_stat stat{};
+            if (!mz_zip_reader_file_stat(&zip, member->member, &stat) || stat.m_is_directory) return false;
+            auto name = std::find(author->font_names.begin(), author->font_names.end(), family);
+            const auto slot = static_cast<std::size_t>(name - author->font_names.begin());
+            EmbeddedFont font{std::string(path.data(), path.size()), member->bytes, stat.m_crc32};
+            if (name != author->font_names.end()) author->fonts[slot] = std::move(font);
+            else if (author->fonts.size() < css::kEmbeddedFontCount) {
+                author->font_names[author->fonts.size()] = family;
+                author->fonts.push_back(std::move(font));
+            }
+            return true;
+        };
+        if (author->sheet.collect_fonts({raw.get() + source.begin, source.size}, author->checkpoint, accept) != css::Result::Complete)
+            return {};
+    }
+    for (std::size_t i = 0; i < author->fonts.size(); ++i) author->font_families[i] = author->font_names[i];
+    for (const auto& source : sources) {
+        if (source.size && author->sheet.append({raw.get() + source.begin, source.size}, author->checkpoint,
+                                                &author->font_families) != css::Result::Complete)
+            return {};
+    }
+#if defined(ESP_PLATFORM) && defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
+    const auto report = author->sheet.report();
+    ESP_LOGI("author_css", "sources=%u source_bytes=%u rules=%u pool_bytes=%u workspace_bytes=%u psram_free=%u psram_largest=%u stack_free=%u",
+        static_cast<unsigned>(sources.size()), static_cast<unsigned>(bytes), static_cast<unsigned>(report.rules),
+        static_cast<unsigned>(report.allocated_bytes), static_cast<unsigned>(sizeof(AuthorLayoutState)),
+        static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+        static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)),
+        static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+#endif
+    return author;
+}
+
 bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
                               std::uint32_t wanted, const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop,
                               const std::function<void(const Chapter&)>& visit) {
     const StageTimer timer{"chapter_parse", 0};
     pico_page::release(chapter); error.clear();
     if (stop && stop()) return fail(error, kChapterCancelled);
+    const auto& spine = book().spine;
     if (!file || index >= spine.size()) return fail(error, "Invalid chapter index");
     if (txt) return load_txt(chapter, error, detail, wanted, match, stop, visit);
+    auto author = detail == ChapterLoad::Original ? prepare_author_styles(index, stop) : nullptr;
+    if (stop && stop()) return fail(error, kChapterCancelled);
     for (;;) {
         ChapterParser parser(chapter, spine[index].resource);
+        parser.author = author.get();
         if (index < html_repair_offsets.size() && html_repair_offsets[index] != kNoHtmlRepair) {
             parser.xml.html_fallback = true;
             parser.xml.html_prefix_bytes = html_repair_offsets[index];
@@ -1920,13 +2248,18 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
         if (detail == ChapterLoad::Reading) parser.visit = &visit;
         if (detail != ChapterLoad::Mapping) {
             parser.keep_mapping = false;
-            parser.keep_anchors = detail == ChapterLoad::Reading;
+            parser.keep_anchors = detail != ChapterLoad::Layout;
             const auto scalars = std::min<std::size_t>(spine[index].bytes, kMaxText) + 1024;
             if (memory_room(scalars * sizeof(char32_t))) parser.chapter.text.reserve(scalars);
             else if (detail == ChapterLoad::Layout) return fail(error, std::string(kChapterMemoryError) + ": " + spine[index].resource);
         }
         const bool parsed = parse(spine[index].resource, parser.xml, error, kMaxXmlBytes, stop);
         if (!parsed && parser.xml.error != kPartComplete) {
+            if (author && parser.xml.error == kAuthorUnavailable) {
+                author.reset();
+                pico_page::release(chapter);
+                continue;
+            }
             const bool retry = enable_html_repair(index, parser.xml);
             pico_page::release(chapter);
             if (retry) continue;
@@ -1935,6 +2268,11 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
         error.clear();
         if (parsed) {
             parser.finish_block();
+            if (author && parser.xml.error == kAuthorUnavailable) {
+                author.reset();
+                pico_page::release(chapter);
+                continue;
+            }
             if (!parser.seen_body || (parser.part == 0 && !parser.captured && parser.chapter.text.empty())) {
                 pico_page::release(chapter);
                 return fail(error, "Chapter contains no supported body content");
@@ -1962,7 +2300,24 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
             chapter.plain_dom = parser.chapter.plain_dom;
             chapter.long_source_node = parser.chapter.long_source_node;
         }
-        if (detail == ChapterLoad::Reading && chapter.text.capacity() - chapter.text.size() > 4096 &&
+        chapter.author_style_fallback = detail == ChapterLoad::Original && !author;
+        if (author && std::none_of(chapter.runs.begin(), chapter.runs.end(), [&](const TextRun& run) {
+                const auto& style = chapter.style(run.style);
+                return !style.hidden && style.display != css::Display::None;
+            })) {
+            std::vector<css::ComputedStyle>().swap(chapter.author_styles);
+            chapter.author_style_fallback = true;
+        }
+        if (author && !chapter.author_style_fallback) chapter.author_fonts = std::move(author->fonts);
+#if defined(ESP_PLATFORM) && defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
+        if (detail == ChapterLoad::Original)
+            ESP_LOGI("author_css", "part=%u styles=%u fallback=%d psram_min=%u internal_min=%u stack_free=%u",
+                static_cast<unsigned>(chapter.part), static_cast<unsigned>(chapter.author_styles.size()),
+                chapter.author_style_fallback, static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM)),
+                static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+#endif
+        if (detail != ChapterLoad::Layout && detail != ChapterLoad::Mapping && chapter.text.capacity() - chapter.text.size() > 4096 &&
             memory_room(chapter.text.size() * sizeof(char32_t))) {
             std::u32string exact(chapter.text.begin(), chapter.text.end());
             chapter.text.swap(exact);
@@ -1973,6 +2328,7 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
 bool EpubDocument::Impl::load_txt(Chapter& chapter, std::string& error, ChapterLoad detail,
                                   std::uint32_t wanted, const std::function<bool(const Chapter&)>* match,
                                   const std::function<bool()>& stop, const std::function<void(const Chapter&)>& visit) {
+    const auto& metadata = book().metadata;
     const bool gb = metadata.txt_encoding == TxtEncoding::Gb18030;
     const bool utf16 = metadata.txt_encoding == TxtEncoding::Utf16Le || metadata.txt_encoding == TxtEncoding::Utf16Be;
     const bool indexed = gb || utf16;
@@ -2045,11 +2401,32 @@ bool EpubDocument::Impl::load_txt(Chapter& chapter, std::string& error, ChapterL
     return fail(error, "TXT 阅读位置不可用");
 }
 bool EpubDocument::chapter_index_for(const std::string& resource, std::size_t& index) const {
-    for (std::size_t i = 0; i < impl_->spine.size(); ++i) {
+    for (std::size_t i = 0; i < impl_->book().spine.size(); ++i) {
         PP_HOST_WORK(host_work::add(host_work::SpineComparisons);)
-        if (impl_->spine[i].resource == resource) { index = i; return true; }
+        if (impl_->book().spine[i].resource == resource) { index = i; return true; }
     }
     return false;
+}
+bool EpubDocument::read_font(const EmbeddedFont& font,
+                            const std::function<bool(std::size_t, std::string_view)>& write,
+                            const std::function<bool()>& stop) {
+    if (!impl_->file || impl_->txt || font.bytes < 12 || font.bytes > kMaxEmbeddedFontBytes ||
+        !memory_room(128U * 1024) || (stop && stop())) return false;
+    const auto* entry = impl_->find_member(font.resource);
+    mz_zip_archive_file_stat stat{};
+    if (!entry || entry->bytes != font.bytes || !mz_zip_reader_file_stat(&impl_->zip, entry->member, &stat) ||
+        stat.m_is_directory || stat.m_crc32 != font.crc32) return false;
+    struct Output {
+        const EmbeddedFont& font;
+        const std::function<bool(std::size_t, std::string_view)>& write;
+        const std::function<bool()>& stop;
+    } output{font, write, stop};
+    return mz_zip_reader_extract_to_callback(&impl_->zip, entry->member,
+        [](void* opaque, mz_uint64 offset, const void* data, std::size_t count) -> std::size_t {
+            const auto& out = *static_cast<Output*>(opaque);
+            if (offset > out.font.bytes || count > out.font.bytes - offset || (out.stop && out.stop())) return 0;
+            return out.write(static_cast<std::size_t>(offset), {static_cast<const char*>(data), count}) ? count : 0;
+        }, &output, 0) && (!stop || !stop());
 }
 bool EpubDocument::read_image(const std::string& resource, std::vector<std::uint8_t>& bytes, std::string& error,
                               const std::function<bool()>& stop, ContentFailureKind* failure_kind) {

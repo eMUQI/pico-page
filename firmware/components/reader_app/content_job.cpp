@@ -6,6 +6,7 @@
 #include <chrono>
 #include "pico_page/store.h"
 #include <cstring>
+#include <cmath>
 #include <algorithm>
 #include <array>
 #include <utility>
@@ -51,19 +52,145 @@ void ContentJob::delay_starts_for_test(Kind kind, std::chrono::milliseconds dela
     delayed_kind = kind; injected_delay = delay;
 }
 #endif
-std::size_t readable_offset(const Chapter& source, std::size_t start) {
-    Anchor anchor;
-    while (start < source.text.size() && !source.anchor_at(static_cast<std::uint32_t>(start), anchor)) ++start;
-    return start;
+std::size_t readable_offset(const Chapter& source, std::size_t start, bool author) {
+    auto run = std::lower_bound(source.runs.begin(), source.runs.end(), start,
+        [](const TextRun& item, std::size_t offset) { return item.end <= offset; });
+    for (; run != source.runs.end(); ++run) {
+        const auto& style = source.style(run->style);
+        if (!author || (!style.hidden && style.display != document::css::Display::None))
+            return std::max<std::size_t>(start, run->begin);
+    }
+    return source.text.size();
 }
+std::size_t restore_readable_offset(const Chapter& source, std::size_t start) {
+    const auto next = readable_offset(source, start, true);
+    if (next < source.text.size() || start >= source.text.size()) return next;
+    for (auto run = source.runs.rbegin(); run != source.runs.rend(); ++run) {
+        const auto& style = source.style(run->style);
+        if (!style.hidden && style.display != document::css::Display::None) return run->begin;
+    }
+    return next;
+}
+
 const DocumentImage* image_at(const Chapter& source, std::size_t start) {
     for (const auto& image : source.images)
         if (image.begin <= start && start < image.end && image.end <= source.text.size()) return &image;
     return nullptr;
 }
+namespace {
+int css_pixels(float value, float scale, int lower, int upper) {
+    return static_cast<int>(std::lround(std::clamp(value * scale, static_cast<float>(lower), static_cast<float>(upper))));
+}
+
+graphics::Page plan_author_content(graphics::Font& font, const Chapter& source, std::size_t start,
+                                   const graphics::LayoutSpec& spec, bool collect, const std::function<bool()>& stop,
+                                   const graphics::AuthorFonts* fonts) {
+    namespace css = document::css;
+    graphics::Page page;
+    page.start = page.end = start;
+    page.font_px = spec.font_px;
+    const auto bottom = spec.top + spec.height;
+    const float scale = spec.font_px / 16.f;
+    int top = spec.top;
+    auto cursor = start;
+    while (cursor < source.text.size() && top < bottom) {
+        if (stop && stop()) { page.error = "Layout cancelled"; break; }
+        const auto block = std::lower_bound(source.blocks.begin(), source.blocks.end(), cursor,
+            [](const TextBlock& item, std::size_t offset) { return item.end <= offset; });
+        if (block == source.blocks.end()) break;
+        const auto& style = source.style(block->style);
+        const bool page_started = page.end > page.start;
+        const auto block_start = readable_offset(source, block->begin, true);
+        const bool first_line = cursor == block_start;
+        if (first_line && page_started && style.break_before == css::Break::Always) break;
+        const auto length = [&](float value, unsigned bit, int width) {
+            return value * (style.box_percentages & bit ? width / 100.f : scale);
+        };
+        const auto side = [&](std::size_t i, int limit) {
+            return css_pixels(length(style.margin_px[i], css::ComputedStyle::margin_percent << i, spec.width) +
+                              length(style.padding_px[i], css::ComputedStyle::padding_percent << i, spec.width), 1, 0, limit);
+        };
+        const int before = first_line ? side(0, spec.height / 6) : 0;
+        const int after = side(2, spec.height / 6);
+        graphics::LayoutSpec part = spec;
+        const int left = side(3, spec.width / 4), right = side(1, spec.width / 4);
+        part.left += left;
+        part.width -= left + right;
+        part.top = top + before;
+        part.height = bottom - part.top;
+        if (part.height <= 0) break;
+        const auto* image = image_at(source, cursor);
+        if (image) {
+            const bool image_only = source.blocks.size() == 1;
+            const auto minimum_width = std::min(32, part.width);
+            int width = part.width;
+            if (style.width_px >= 0) width = css_pixels(length(style.width_px, css::ComputedStyle::width_percent, part.width), 1, minimum_width, width);
+            if (style.max_width_px >= 0) width = css_pixels(length(style.max_width_px, css::ComputedStyle::max_width_percent, part.width), 1, minimum_width, width);
+            const bool auto_left = style.margin_auto & (1U << 3), auto_right = style.margin_auto & (1U << 1);
+            int x = part.left;
+            if ((auto_left && auto_right) || style.align == css::Align::Center) x += (part.width - width) / 2;
+            else if (auto_left || style.align == css::Align::Right) x += part.width - width;
+            const int full_height = image_only ? std::max(1, spec.height - before - after) : std::min(spec.height / 2, 480);
+            const int height = std::max(32, full_height * width / part.width);
+            if (height > part.height && page_started) break;
+            if (collect) page.images.push_back({image->begin, x, part.top, width,
+                                               std::min(height, part.height), image->resource});
+            page.end = image->end;
+            top = part.top + std::min(height, part.height);
+        } else {
+            const auto maximum_font = std::min(part.width / 2, 128);
+            part.font_px = css_pixels(style.font_px, scale, 8, maximum_font);
+            part.line_height = css_pixels(style.line_height_px, scale, 1, 320);
+            part.paragraph_gap = 0;
+            const auto run_at = [&](std::size_t i) {
+                return std::lower_bound(source.runs.begin(), source.runs.end(), i,
+                    [](const TextRun& item, std::size_t offset) { return item.end <= offset; });
+            };
+            auto run = run_at(cursor);
+            const graphics::StyledLayout format{block_start,
+                css_pixels(length(style.indent_px, css::ComputedStyle::indent_percent, part.width), 1, -left, part.width / 3),
+                static_cast<graphics::TextAlign>(style.align), [&](std::size_t i) {
+                    if (run == source.runs.end() || i >= run->end || i < run->begin) run = run_at(i);
+                    const auto& selected = run != source.runs.end() && run->begin <= i ? source.style(run->style) : style;
+                    return graphics::GlyphStyle{
+                        css_pixels(selected.font_px, scale, 8, maximum_font),
+                        css_pixels(selected.line_height_px, scale, 1, 320),
+                        selected.bold, selected.italic, selected.underline,
+                        selected.hidden, selected.display == css::Display::None, selected.font_families};
+                }};
+            auto section = graphics::layout_page(font, std::u32string_view(source.text).substr(0, block->end),
+                                                 cursor, part, collect, stop, &format, fonts);
+            if (!section.error.empty()) { page.error = std::move(section.error); break; }
+            if (section.end <= cursor) break;
+            const bool complete = section.end == block->end;
+            const bool keep_with_next = block->kind == BlockKind::Heading || style.break_after == css::Break::Avoid;
+            if (page_started && first_line &&
+                ((!complete && (keep_with_next || style.break_inside == css::Break::Avoid)) ||
+                 (complete && keep_with_next && std::next(block) != source.blocks.end() &&
+                  section.next_top + after + spec.line_height > bottom))) break;
+            page.lines.insert(page.lines.end(), section.lines.begin(), section.lines.end());
+            page.glyphs.insert(page.glyphs.end(), section.glyphs.begin(), section.glyphs.end());
+            page.end = section.end;
+            top = section.next_top;
+            if (!complete) break;
+        }
+        top += after;
+        if (style.break_after == css::Break::Always) break;
+        cursor = readable_offset(source, page.end, true);
+    }
+    page.next_top = top;
+    return page;
+}
+}
+
 graphics::Page plan_content(graphics::Font& font, const Chapter& source, std::size_t start,
-                            const graphics::LayoutSpec& spec, bool collect, const std::function<bool()>& stop) {
-    start = readable_offset(source, start);
+                            const graphics::LayoutSpec& spec, bool collect, const std::function<bool()>& stop,
+                            const graphics::AuthorFonts* fonts) {
+    start = readable_offset(source, start, spec.original_epub);
+    if (spec.original_epub && !source.author_styles.empty()) {
+        const graphics::AuthorFontIo input{fonts};
+        return plan_author_content(font, source, start, spec, collect, stop, fonts);
+    }
     const bool styled = !source.images.empty() || std::any_of(source.blocks.begin(), source.blocks.end(),
         [](const TextBlock& block) { return block.kind == BlockKind::Heading; });
     if (!styled) return graphics::layout_page(font, source.text, start, spec, collect, stop);
@@ -128,6 +255,92 @@ graphics::Page plan_content(graphics::Font& font, const Chapter& source, std::si
     page.next_top = top;
     return page;
 }
+graphics::AuthorFonts prepare_embedded_fonts(const FileStore& store, EpubDocument& document, const Chapter& chapter,
+    bool& stable, const std::function<bool()>& stop) {
+    stable = true;
+    if (chapter.author_fonts.empty()) return {};
+    const StageTimer timer{"epub_font_prepare", 0};
+    unsigned used = 0;
+    for (const auto& run : chapter.runs) {
+        const auto& style = chapter.style(run.style);
+        if (style.hidden || style.display == document::css::Display::None || run.element_reference) continue;
+        for (auto families = style.font_families; families; families >>= 4) used |= 1U << (families & 15);
+    }
+    if (!used) return {};
+    if (!chapter_memory_available(128U * 1024)) { stable = false; return {}; }
+    struct Input {
+        FileStore store;
+        std::unique_ptr<CacheReader> reader;
+        std::size_t slot = 0;
+        bool failed = false;
+    };
+    auto source = std::make_shared<Input>(Input{store, {}});
+    graphics::AuthorFonts fonts;
+    fonts.faces.resize(chapter.author_fonts.size());
+    fonts.close_input = [source] { source->reader.reset(); };
+    unsigned loaded = 0, hits = 0, bytes = 0;
+    for (std::size_t i = 0; i < fonts.faces.size(); ++i) {
+        if (!(used & (1U << (i + 1)))) continue;
+        if (stop && stop()) return {};
+        const auto& font = chapter.author_fonts[i];
+        const auto name = "epub-fonts-v1/" + document.metadata().book_id + "-" + md5_hex(font.resource);
+        auto& reader = source->reader;
+        reader.reset();
+        if (store.open_cache(name, font.bytes, reader) == StoreStatus::Ok &&
+            reader->size() == font.bytes && reader->matches_crc32(font.crc32, stop)) {
+            ++hits;
+        } else {
+            reader.reset();
+            std::unique_ptr<CacheWriter> writer;
+            if ((stop && stop()) || store.begin_cache(name, font.bytes, writer) != StoreStatus::Ok ||
+                !document.read_font(font, [&](std::size_t offset, std::string_view data) {
+                    return writer->write(offset, data);
+                }, stop) || !writer->commit(font.bytes) ||
+                store.open_cache(name, font.bytes, reader) != StoreStatus::Ok || reader->size() != font.bytes) {
+                stable = false;
+                continue;
+            }
+        }
+        auto face = std::unique_ptr<graphics::Font>(new (std::nothrow) graphics::Font(64U * 1024, 512));
+        source->slot = i;
+        source->failed = false;
+        if (!face || !face->open_stream(font.bytes, [source, i, name, size = font.bytes](std::size_t offset, char* data, std::size_t count) {
+                auto& stream = source->reader;
+                if (!stream || source->slot != i) {
+                    stream.reset();
+                    if (source->store.open_cache(name, size, stream) != StoreStatus::Ok || stream->size() != size) {
+                        stream.reset();
+                        source->failed = true;
+                        return false;
+                    }
+                    source->slot = i;
+                }
+                const auto read = stream->read_at(offset, data, count);
+                source->failed |= !read;
+                return read;
+            })) {
+            stable &= face && !source->failed && face->error().find("memory") == std::string::npos &&
+                      face->error().find("allocate") == std::string::npos && face->error().find("initialization") == std::string::npos;
+            continue;
+        }
+        fonts.faces[i] = std::move(face);
+        ++loaded;
+        bytes += font.bytes;
+    }
+#if defined(ESP_PLATFORM) && defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
+    ESP_LOGI("epub_font", "used_mask=%u loaded=%u cache_hits=%u bytes=%u stable=%d psram_free=%u psram_largest=%u psram_min=%u internal_min=%u stack_free=%u",
+        used, loaded, hits, bytes, stable, static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+        static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)),
+        static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM)),
+        static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+        static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+#else
+    static_cast<void>(loaded); static_cast<void>(hits); static_cast<void>(bytes);
+#endif
+    fonts.release_io();
+    return fonts;
+}
+
 ContentJob::ContentJob(Request value) : request(std::move(value)) {}
 ContentJob::~ContentJob() { cancel(); wait(); }
 #ifdef ESP_PLATFORM
@@ -280,10 +493,16 @@ void ContentJob::run() {
     }
     if (request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite) {
         FileStore store(request.root);
-        if (request.kind == Kind::PageCacheRead)
-            result.page_cache = read_page_cache(store, request.cache_name, request.cache_header, request.spine, stop);
-        else if (request.page_cache)
-            write_page_cache(store, request.cache_name, request.cache_header, request.page_cache->pages, request.page_cache->counted, stop);
+        if (request.kind == Kind::PageCacheRead) {
+            result.page_cache = read_page_cache(store, request.cache_name, request.cache_header, request.page_linear, stop);
+        } else if (request.page_cache) {
+            result.cache_finished = write_page_cache(store, request.cache_name, request.cache_header,
+                                                     request.page_cache->pages, request.page_cache->counted, stop);
+        }
+#if defined(ESP_PLATFORM) && defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
+        ESP_LOGI("page_index_cache", "read=%d hit=%d write=%d original=%d", request.kind == Kind::PageCacheRead,
+            result.page_cache.has_value(), result.cache_finished, request.cache_name.rfind("pages-original/", 0) == 0);
+#endif
         result.cache_finished = !stop();
         return;
     }
@@ -314,7 +533,7 @@ void ContentJob::run() {
     }
     if (session->font_path != request.font) { session->font_opened = false; session->font_path = request.font; }
     if (!session->opened) {
-        session->opened = document.open_verified(request.path, request.identity, result.error, stop);
+        session->opened = document.open_verified(request.path, request.identity, result.error, stop, request.book_index);
         if (!session->opened) {
             if (stop()) result.error.clear();
             return;
@@ -328,19 +547,24 @@ void ContentJob::run() {
     if (stop()) return;
     if (!session->loaded || session->chapter_index != request.chapter || session->part != request.part) {
         release(source);
+        session->author_fonts.clear();
         session->loaded = false;
-        if (!load_content(FileStore(request.root), document, request.chapter, source, result.error, ChapterLoad::Layout, request.part, stop)) {
+        if (!load_content(FileStore(request.root), document, request.chapter, source, result.error, request.layout.original_epub ? ChapterLoad::Original : ChapterLoad::Layout, request.part, stop)) {
             if (result.error == kChapterCancelled) result.error.clear();
             return;
         }
+        if (source.author_style_fallback) { result.error = "Original layout unavailable for page counting"; return; }
+        session->author_fonts = prepare_embedded_fonts(FileStore(request.root), document, source, result.author_fonts_stable, stop);
+        if (stop()) return;
+        if (!result.author_fonts_stable) { result.error = "Embedded fonts temporarily unavailable for page counting"; return; }
         session->loaded = true; session->chapter_index = request.chapter; session->part = request.part;
     }
     while (!stop()) {
-        const auto start = readable_offset(source, result.offset);
+        const auto start = readable_offset(source, result.offset, request.layout.original_epub);
         if (start >= source.text.size()) {
             result.part_done = true; result.last_part = source.last_part; return;
         }
-        const auto page = plan_content(font, source, start, request.layout, false, stop);
+        const auto page = plan_content(font, source, start, request.layout, false, stop, &session->author_fonts);
         if (page.error == "Layout cancelled") return;
         if (!page.error.empty() || page.end <= page.start) {
             result.error = page.error.empty() ? "Pagination made no progress" : page.error; return;
@@ -357,6 +581,15 @@ void ContentJob::run() {
 std::string image_cache_key(const std::string& book_id, const std::string& resource, const graphics::LayoutSpec& spec) {
     return "images/gray-v1/" + book_id + "/" + md5_hex(resource + ":" + std::to_string(spec.left) + ":" +
         std::to_string(spec.top) + ":" + std::to_string(spec.width) + ":" + std::to_string(spec.height));
+}
+std::string page_image_cache_key(const std::string& book_id, const graphics::Page& page, const graphics::LayoutSpec& spec) {
+    if (page.images.size() != 1 || page.images.front().resource.empty()) return {};
+    const auto& box = page.images.front();
+    if (spec.original_epub) {
+        return "images/author-gray-v1/" + book_id + "/" + md5_hex(box.resource + ":" + std::to_string(box.x) + ":" +
+            std::to_string(box.y) + ":" + std::to_string(box.width) + ":" + std::to_string(box.height));
+    }
+    return page.glyphs.empty() && box.height == spec.height ? image_cache_key(book_id, box.resource, spec) : std::string{};
 }
 bool read_body_image_cache(CacheReader& reader, graphics::Canvas& image, const std::function<bool()>& stop) {
     const auto size = image.pixels().size();
@@ -397,8 +630,7 @@ void ContentJob::render_image() {
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
     if (stop()) return;
     FileStore store(request.root);
-    const bool cacheable = request.page.images.size() == 1 && request.page.glyphs.empty() &&
-                           request.page.images.front().height == request.layout.height && !request.cache_name.empty();
+    const bool cacheable = request.kind == Kind::Image && !request.cache_name.empty();
     constexpr std::size_t size = 684U * 1216U / 2;
     if (cacheable) {
         const StageTimer cache_timer{"image_cache_read", 0};
@@ -411,7 +643,12 @@ void ContentJob::render_image() {
         std::unique_ptr<CacheReader> reader;
         if (store.open_cache(request.cache_name, size + 32, reader) == StoreStatus::Ok && reader->size() == size + 32) {
             result.image = std::make_unique<graphics::Canvas>();
-            if (read_body_image_cache(*reader, *result.image, stop)) return;
+            if (read_body_image_cache(*reader, *result.image, stop)) {
+#if defined(ESP_PLATFORM) && defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
+                ESP_LOGI("page_image_cache", "read=hit original=%d", request.layout.original_epub);
+#endif
+                return;
+            }
             result.image.reset();
         }
     }
@@ -425,7 +662,7 @@ void ContentJob::render_image() {
     result.image = std::make_unique<graphics::Canvas>();
     EpubDocument document;
     std::vector<std::uint8_t> bytes;
-    if (!document.open_verified(request.path, request.identity, result.error, stop) || stop()) return;
+    if (!document.open_verified(request.path, request.identity, result.error, stop, request.book_index) || stop()) return;
     for (const auto& box : request.page.images) {
         std::string detail;
         bytes.clear();
@@ -933,6 +1170,7 @@ void ContentJob::open_book() {
           document.open_verified(request.path, request.identity, result.error, stop)) || stop()) return;
     FileStore store(request.root);
     result.configuration = store.load_settings(request.relative_path);
+    const auto detail = result.configuration.settings.original_epub ? ChapterLoad::Original : ChapterLoad::Reading;
     const auto revision = document.metadata().txt_encoding == TxtEncoding::Utf8 ? request.content_revision :
         txt_content_revision(document.metadata().txt_encoding);
     result.progress = store.load_progress(request.relative_path, document.metadata().book_id, revision);
@@ -948,7 +1186,7 @@ void ContentJob::open_book() {
         std::uint32_t offset = 0;
         const auto match = [&](const Chapter& part) { return part.offset_for(anchor, offset); };
         if (!document.chapter_index_for(anchor.resource, result.chapter_index) ||
-            !find_content(store, document, result.chapter_index, result.chapter, result.error, ChapterLoad::Reading, match, stop, &result.content_cache, !!request.chapter_session) ||
+            !find_content(store, document, result.chapter_index, result.chapter, result.error, detail, match, stop, &result.content_cache, !!request.chapter_session) ||
             !result.chapter.offset_for(anchor, offset)) {
             if (result.error.empty()) result.error = "Saved position cannot be mapped";
             return;
@@ -957,8 +1195,9 @@ void ContentJob::open_book() {
     } else {
         while (result.chapter_index + 1 < document.spine().size() && !document.spine()[result.chapter_index].linear)
             ++result.chapter_index;
-        if (!load_content(store, document, result.chapter_index, result.chapter, result.error, ChapterLoad::Reading, 0, stop, &result.content_cache, false, !!request.chapter_session)) return;
+        if (!load_content(store, document, result.chapter_index, result.chapter, result.error, detail, 0, stop, &result.content_cache, false, !!request.chapter_session)) return;
     }
+    result.author_fonts = prepare_embedded_fonts(store, document, result.chapter, result.author_fonts_stable, stop);
     if (stop()) return;
     if (stat(request.path.c_str(), &after) != 0 || before.st_size != after.st_size ||
         before.st_mtime != after.st_mtime || before.st_ino != after.st_ino) {
@@ -997,18 +1236,21 @@ void ContentJob::load_chapter() {
     if (request.target != Target::Start) document.reset_chapter_stream();
     FileStore store(request.root);
     result.chapter_index = request.chapter;
+    const auto detail = request.layout.original_epub ? ChapterLoad::Original : ChapterLoad::Reading;
     const bool locate = request.target == Target::Anchor || request.target == Target::Fragment;
     bool cached = false;
     if (!locate && !request.chapter_resource.empty()) {
         if (request.content_cache)
             cached = result.retained_cache_hit = load_content_cache(store, request.identity.book_id,
-                request.chapter_resource, request.chapter, request.part, result.chapter, stop, request.content_cache.get());
+                request.chapter_resource, request.chapter, request.part, result.chapter, stop, request.content_cache.get(),
+                nullptr, request.layout.original_epub);
         if (!cached && !stop()) cached = load_content_cache(store, request.identity.book_id,
-            request.chapter_resource, request.chapter, request.part, result.chapter, stop, nullptr, &result.content_cache);
+            request.chapter_resource, request.chapter, request.part, result.chapter, stop, nullptr, &result.content_cache,
+            request.layout.original_epub);
     }
     if (stop()) { result.error = kChapterCancelled; return; }
-    if (!cached && document.metadata().book_id.empty() &&
-        !document.open_verified(request.path, request.identity, result.error, stop)) return;
+    if ((!cached || !result.chapter.author_fonts.empty()) && document.metadata().book_id.empty() &&
+        !document.open_verified(request.path, request.identity, result.error, stop, request.book_index)) return;
     if (stop()) { result.error = kChapterCancelled; return; }
     std::uint32_t position = 0;
     if (request.target == Target::Anchor || request.target == Target::Fragment) {
@@ -1017,22 +1259,25 @@ void ContentJob::load_chapter() {
                 part.fragment_offset(request.fragment, position);
         };
         if (request.target == Target::Fragment && request.fragment.empty()) {
-            if (!load_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading, 0, stop, &result.content_cache)) return;
-        } else if (!find_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading, match, stop, &result.content_cache)) return;
+            if (!load_content(store, document, request.chapter, result.chapter, result.error, detail, 0, stop, &result.content_cache)) return;
+        } else if (!find_content(store, document, request.chapter, result.chapter, result.error, detail, match, stop, &result.content_cache)) return;
         result.offset = position;
         if (request.target == Target::Fragment && result.offset >= result.chapter.text.size() && !result.chapter.last_part) {
             const auto next = result.chapter.part + 1;
-            if (!load_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading, next, stop, &result.content_cache)) return;
+            if (!load_content(store, document, request.chapter, result.chapter, result.error, detail, next, stop, &result.content_cache)) return;
             result.offset = 0;
         }
+        result.author_fonts = prepare_embedded_fonts(store, document, result.chapter, result.author_fonts_stable, stop);
         return;
     }
-    if (!cached && !load_content(store, document, request.chapter, result.chapter, result.error, ChapterLoad::Reading,
+    if (!cached && !load_content(store, document, request.chapter, result.chapter, result.error, detail,
         request.part, stop, &result.content_cache, request.chapter < document.spine().size() &&
         request.chapter_resource == document.spine()[request.chapter].resource,
         request.chapter_session && request.target == Target::Start)) return;
+    result.author_fonts = prepare_embedded_fonts(store, document, result.chapter, result.author_fonts_stable, stop);
+    if (stop()) return;
     if (request.target == Target::Start) return;
-    if (request.known_start && *request.known_start < result.chapter.text.size() &&
+    if (result.author_fonts_stable && request.known_start && *request.known_start < result.chapter.text.size() &&
         (!request.known_end || *request.known_end == result.chapter.text.size())) { result.offset = *request.known_start; return; }
     graphics::Font font;
     if (!(request.font.empty() ? font.open_fallback() : font.open(request.font))) { result.error = font.error(); return; }
@@ -1040,14 +1285,14 @@ void ContentJob::load_chapter() {
     std::size_t start = 0;
     result.offset = 0;
     while (start < limit && !stop()) {
-        const auto page = plan_content(font, result.chapter, start, request.layout, false, stop);
+        const auto page = plan_content(font, result.chapter, start, request.layout, false, stop, &result.author_fonts);
         if (!page.error.empty() || page.end <= start) {
             result.error = page.error.empty() ? "Pagination made no progress" : page.error;
             return;
         }
         if (page.start >= limit) break;
         result.offset = page.start;
-        start = readable_offset(result.chapter, page.end);
+        start = readable_offset(result.chapter, page.end, request.layout.original_epub);
         if (result.history.size() == 64) result.history.erase(result.history.begin());
         result.history.emplace_back(static_cast<std::uint32_t>(page.start), static_cast<std::uint32_t>(start));
     }

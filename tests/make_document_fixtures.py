@@ -302,14 +302,30 @@ def generate(directory: Path) -> None:
     write_fixture(directory / "oversized-chapter.epub", entries)
     entries = fixture_entries()
     entries["EPUB/chapter1.xhtml"] = '''<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd"><html xmlns="http://www.w3.org/1999/xhtml">
-<head><link rel="stylesheet" href="book.css"/><style>p { margin: 0; }</style></head>
-<body><p style="text-align:justify">正文保留 <em>内联</em></p>
-<p><img src="image.png" alt="示例图片"/></p></body></html>'''
+<head><link rel="stylesheet" href="book.css"/><style>p { margin: 0; font-size: 1.5em; }</style></head>
+<body><p style="text-align:justify">正文保留 <em>内联</em><span style="display:none">隐藏</span></p>
+<p><img src="image.png" alt="示例图片" style="width:40%;max-width:80px"/></p></body></html>'''
     entries["EPUB/book.css"] = "p { font-size: 1em; }"
     write_fixture(directory / "styled.epub", entries)
+    font_layout = dict(entries)
+    font_layout["EPUB/chapter1.xhtml"] = entries["EPUB/chapter1.xhtml"].replace(
+        "隐藏</span></p>", '隐藏</span> 开花一页<span style="font-family:Example OpenType">甲</span>。</p>')
+    font_layout["EPUB/Fonts/welcome.ttf"] = (Path(__file__).resolve().parents[1] /
+        "firmware/components/reader_graphics/fonts/PicoPageWelcome.ttf").read_bytes()
+    font_layout["EPUB/Fonts/other.otf"] = (Path(__file__).resolve().parents[1] /
+        "firmware/components/reader_graphics/fonts/PicoPageFallback.otf").read_bytes()
+    font_layout["EPUB/book.css"] = (
+        "p { font-size: 1em; font-family: 'Example Face', serif; }"
+        "@font-face { font-family: Example Face; src: url('missing.ttf'), url(Fonts/welcome.ttf); }"
+        "@font-face { font-family: 'Example OpenType'; src: url('Fonts/other.otf'); }")
+    font_layout["EPUB/package.opf"] = entries["EPUB/package.opf"].replace(
+        "</manifest>", '<item id="embedded-font" href="Fonts/welcome.ttf" media-type="font/ttf"/>'
+        '<item id="other-font" href="Fonts/other.otf" media-type="font/otf"/></manifest>')
+    write_fixture(directory / "font-layout.epub", font_layout)
     mapping = dict(entries)
     mapping["EPUB/chapter1.xhtml"] = mapping["EPUB/chapter1.xhtml"].replace(
-        '<p><img src="image.png" alt="示例图片"/></p>', '<p> \n<em>起点</em> 尾部</p>')
+        '<span style="display:none">隐藏</span>', "").replace(
+        '<p><img src="image.png" alt="示例图片" style="width:40%;max-width:80px"/></p>', '<p> \n<em>起点</em> 尾部</p>')
     write_fixture(directory / "mapping.epub", mapping)
     entries["EPUB/chapter1.xhtml"] = entries["EPUB/chapter1.xhtml"].replace("正文保留", "正文&missing;")
     write_fixture(directory / "unresolved-entity.epub", entries)
