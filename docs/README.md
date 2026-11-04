@@ -14,8 +14,8 @@
 | `docs/development-status.md` | 当前实现、未验收项和批次记录，供维护者与 agent 共用 | 当前摘要只在状态变化时更新；每批记录对应命令、结果和未测项 |
 | `docs/releases/` | 面向用户的版本说明 | 按版本维护，官网和设备更新清单读取同一来源 |
 | `docs/design/` | [设计系统](design/system/README.md)、当前设计说明及原始 PNG／HTML，供设计、开发与 agent 查阅 | 原件不修改；视觉规范以设计系统为准，当前交互以开发目录的 UI 说明为准 |
-| `firmware/`、`host/`、`tests/`、`web/` 的 README | 对应子项目的构建、测试或部署入口 | 操作命令就近维护，跨模块规则用链接 |
-| `examples/`、`docs/images/`、组件 `third_party/` | 配置示例、合成画面、依赖来源与许可 | 示例随格式核对；只保留文档引用的画面；许可随依赖变更 |
+| `firmware/`、`tools/host/`、`tests/`、`web/` 的 README | 对应子项目的构建、测试或部署入口 | 操作命令就近维护，跨模块规则用链接 |
+| `docs/examples/`、`docs/images/`、组件 `third_party/` | 配置示例、合成画面、依赖来源与许可 | 示例随格式核对；只保留文档引用的画面；许可随依赖变更 |
 
 官网使用说明仍在 `web/src/pages/docs.astro`，安装说明在 `web/src/pages/install.astro`；设备内置帮助仍在 `firmware/components/reader_app/help_content.h`。它们和仓库使用指南分别维护，本次目录整理没有合并内容来源；用户操作或限制改变时核对受影响的说明。
 
@@ -45,7 +45,7 @@
 | 安装、恢复与更新 | [官方安装页](https://picopage.wulu.zone/install/) · [固件更新](user/runtime.md#固件更新) · [更新日志](https://picopage.wulu.zone/changelog/) |
 | 按键、阅读、排版、书签和休眠 | [使用指南](user/runtime.md) · [官网使用文档](https://picopage.wulu.zone/docs/) |
 | 放入书籍、字体和锁屏图片 | [Wi-Fi 传书](user/wifi-transfer.md) · [USB 文件传输](development/usb-storage-runtime.md) |
-| 备份、移动书籍与手改配置 | [文件与备份](user/runtime.md#文件与备份) · [存储约定](development/storage.md) · [配置示例](../examples/README.md) |
+| 备份、移动书籍与手改配置 | [文件与备份](user/runtime.md#文件与备份) · [存储约定](development/storage.md) · [配置示例](examples/README.md) |
 | KOReader 接续与兼容范围 | [操作步骤](user/runtime.md#与-koreader-接续位置) · [同步范围与验证](development/sync-runtime.md) |
 | 问题反馈和后续计划 | [Issues](https://github.com/eMUQI/pico-page/issues) · [路线图](planning/roadmap.md) |
 
@@ -56,13 +56,13 @@
 | 任务 | 入口 |
 |---|---|
 | 构建 Read Pico 固件 | [固件开发指南](../firmware/README.md) · [环境记录](development/environment.md) · [BSP 审查](development/bsp-review.md) |
-| 在电脑上运行和测试 | [桌面开发指南](../host/README.md) · [测试说明](../tests/README.md) |
+| 在电脑上运行和测试 | [桌面开发指南](../tools/host/README.md) · [测试说明](../tests/README.md) |
 | Codex 开发工作流 | [pstack 接入与验证](development/agent-workflow.md) |
 | 了解结构和设计取舍 | [架构](development/architecture.md) · [产品决定](planning/decisions.md) · [调研参考](planning/references.md) |
 | 修改固件或共享组件 | [仓库规则](../AGENTS.md) · [嵌入式开发规则](development/embedded-development.md) · [验收清单](development/acceptance.md) |
 | 定位具体实现 | [文档解析](development/document-runtime.md) · [字体与分页](development/graphics-runtime.md) · [图片](development/image-runtime.md) · [存储](development/store-implementation.md) · [界面](development/ui-implementation.md) · [平台](development/platform-runtime.md) |
 | EPUB 原书样式原型 | [支持契约与接入建议](development/css-style-prototype.md) · [调研与测量边界](development/baselines/2026-11-04-css-prototype.md) |
-| 样本与兼容探针 | [公开 EPUB](development/public-books.md) · [EPUB/KOSync 探针](development/epub-kosync-probe.md) |
+| 样本与兼容验证 | [公开 EPUB](development/public-books.md) · [真实引擎对照](development/sync-runtime.md#真实引擎对照与复现) |
 | 设备诊断 | [诊断接口](development/console-runtime.md) · [诊断工作台](development/diagnostic-workbench.md) |
 | 周期性版本测试与历史对比 | [测试基准](development/testing-baselines.md) |
 | 版本、依赖和网站 | [版本管理](development/versioning.md) · [依赖审查](development/dependency-review.md) · [网站开发](../web/README.md) · [固件托管](development/firmware-hosting.md) |
@@ -71,4 +71,4 @@
 
 [开发状态](development-status.md)集中列出当前实现、待验收项与新批次；[测试基准](development/testing-baselines.md)规定公开实测口径；[验收清单](development/acceptance.md)定义应验证的行为。测试通过、构建成功、发布和真机验收是不同状态，不能互相替代。
 
-[里程碑](planning/milestones.md)与[词典计划](planning/dictionary-plan.md)用于阶段规划，[原始设计](design/README.md)用于追溯视觉基线。历史中的路径、分区、命令和授权不能直接作为当前安装或开发步骤。现行需求冲突按 [AGENTS.md](../AGENTS.md) 中的资料优先级处理。仓库与部署迁移见[公开发布检查](development/publication.md)。
+[路线图](planning/roadmap.md)与[词典计划](planning/dictionary-plan.md)用于后续功能规划，[原始设计](design/README.md)用于追溯视觉基线。历史中的路径、分区、命令和授权不能直接作为当前安装或开发步骤。现行需求冲突按 [AGENTS.md](../AGENTS.md) 中的资料优先级处理。仓库与部署迁移见[公开发布检查](development/publication.md)。

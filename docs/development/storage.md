@@ -89,7 +89,7 @@ UTF-8 TOML 用于常改设置；JSON 用于机器维护的结构化状态。格�
 
 单书 `[reader].original_epub` 为可选布尔值，缺省为 `false`。仅 EPUB 阅读使用该字段，全局配置拒绝该字段。切回自定义删除覆盖，清除本书排版参数保留模式。原书模式的派生分页与渲染缓存策略见[接入试验](css-style-prototype.md#原生阅读接入试验)。
 
-示例见 [examples/sdcard/PicoPage/settings.toml](../../examples/sdcard/PicoPage/settings.toml)。示例不包含真实字体文件。
+可复制[全局设置示例](../examples/global-settings.toml)和[单书设置示例](../examples/book-settings.toml)。放置路径见[配置示例](../examples/README.md)。
 
 全局 Wi-Fi 开关使用 `[network]` 下的 `wifi_enabled = true`，默认开启，只允许布尔值。该项不允许单书覆盖；界面修改沿用保注释、比较原文和验证提交流程，不改 `network.toml` 或 `sync.toml`。
 
@@ -111,7 +111,7 @@ UTF-8 TOML 用于常改设置；JSON 用于机器维护的结构化状态。格�
 
 USB MSC 已实现，固件与电脑不能同时各自挂载同一可写 FAT 卷；先提交并关闭文件、移交所有权，电脑安全弹出后在设备退出并重启，再挂载、扫描和加载。局域网修改也经 store，使用文件变更冲突检查。传输只在用户开启的会话运行；未完成文件不加入正式书库，失败保留原文件。Wi-Fi 传书页可写入 `Books/`、`Fonts/` 和 `LockScreens/` 三个目录，只新增文件，不覆盖、不删除。
 
-NVS 仅用于设备身份、凭据、必要硬件绑定等小型例外，不是隐藏配置权威。是否加密需实际配置验证，存 NVS 不自动等于加密。integrations.toml 放非敏感服务信息和 credential_ref，常规备份不含令牌；显式导出另做。不得将 Wi-Fi 密码、令牌、用户 EPUB 或 Flash 备份提交 Git。当前实现把 Wi-Fi 密码和同步账户密钥以明文存在 TF 卡的 `PicoPage/network.toml`、`PicoPage/sync.toml`，便于手工编辑；`FileStore::save_private()` 替换这两个文件时不留 `.bak`，避免旧凭据残留。
+NVS 仅用于设备身份、凭据、必要硬件绑定等小型例外，不是隐藏配置权威。是否加密需实际配置验证，存 NVS 不自动等于加密。不得将 Wi-Fi 密码、令牌、用户 EPUB 或 Flash 备份提交 Git。当前实现把 Wi-Fi 密码和同步账户密钥以明文存在 TF 卡的 `PicoPage/network.toml`、`PicoPage/sync.toml`，便于手工编辑；`FileStore::save_private()` 替换这两个文件时不留 `.bak`，避免旧凭据残留。
 
 ## 8. 同步与备份
 

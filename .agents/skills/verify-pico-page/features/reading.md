@@ -10,7 +10,7 @@ The reader opens a book from the library and uses the same application actions a
 
 ## Driving it with the headless reader
 
-Use the build and dependency commands in `host/README.md`. Prepare a private card directory with a generated EPUB from `build/host/document-fixtures`, the pinned test font, and test settings. Run `build/host/pico_page --card` with that directory plus `--headless --script` with a private script path. Use the documented `open`, `k3`, `k2`, and `capture` commands. Give `capture` an absolute output path. Inspect the captured image and compare persisted position where the task requires it. Run the affected registered CTest entries from `tests/README.md`; use the full matrix for shared core changes.
+Use the build and dependency commands in `tools/host/README.md`. Prepare a private card directory with a generated EPUB from `build/host/document-fixtures`, the pinned test font, and test settings. Run `build/host/pico_page --card` with that directory plus `--headless --script` with a private script path. Use the documented `open`, `k3`, `k2`, and `capture` commands. Give `capture` an absolute output path. Inspect the captured image and compare persisted position where the task requires it. Run the affected registered CTest entries from `tests/README.md`; use the full matrix for shared core changes.
 
 ## Gotchas
 

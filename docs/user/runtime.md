@@ -1,6 +1,6 @@
 # Pico Page 使用指南
 
-本页说明 Read Pico 上的日常操作。安装请使用[官方安装页](https://picopage.wulu.zone/install/)，也可阅读[官网使用文档](https://picopage.wulu.zone/docs/)；设备中的「设置 → 使用说明」无需联网即可查看。源码构建与桌面运行分别见[固件开发指南](../../firmware/README.md)和[桌面开发指南](../../host/README.md)。
+本页说明 Read Pico 上的日常操作。安装请使用[官方安装页](https://picopage.wulu.zone/install/)，也可阅读[官网使用文档](https://picopage.wulu.zone/docs/)；设备中的「设置 → 使用说明」无需联网即可查看。源码构建与桌面运行分别见[固件开发指南](../../firmware/README.md)和[桌面开发指南](../../tools/host/README.md)。
 
 固件仍处于测试阶段，发布内容见[更新日志](https://picopage.wulu.zone/changelog/)。具体版本的真机验证结果和未测项见[开发状态](../development-status.md)，本页操作说明不代表完整验收已经完成。
 
@@ -141,7 +141,7 @@ PicoPage/cache/                  可重建缓存
 
 移动或备份书籍时，一并保留原书旁的 `<完整文件名>.picopage/` 目录，否则进度、书签和单书设置不会跟随。完整备份还应保留 `PicoPage/`、字体和锁屏图片；缓存可以重建，不能替代阅读记录。备份应在设备退出文件使用、电脑安全取得 TF 卡后进行。
 
-`network.toml` 与 `sync.toml` 含凭据，不要放入公开日志、问题附件或普通配置分享。手工修改配置只改需要的字段，不覆盖其他设置；格式见[存储约定](../development/storage.md)和[配置示例](../../examples/README.md)。降级固件前备份数据并核对格式，旧版本可能拒绝读取新字段或记录。
+`network.toml` 与 `sync.toml` 含凭据，不要放入公开日志、问题附件或普通配置分享。手工修改配置只改需要的字段，不覆盖其他设置；格式见[存储约定](../development/storage.md)和[配置示例](../examples/README.md)。降级固件前备份数据并核对格式，旧版本可能拒绝读取新字段或记录。
 
 长按书库条目进入详情，可以清除本地阅读进度或删除原书；缓存在「设置 → 存储」中整体清理：
 

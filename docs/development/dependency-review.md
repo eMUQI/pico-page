@@ -22,9 +22,9 @@
 | SDL2 / OpenSSL / libcurl | 本机现有开发库 | 构建日志记录已解析版本 | zlib / Apache-2.0 / curl license，各自动态链接 | 无 | 仅 host；未复制库源码 |
 | esp_tinyusb / TinyUSB | Espressif Component Registry | 2.4.0 / 0.21.0~1；component hash 见 dependencies.lock | Apache-2.0 / MIT；已读组件 LICENSE；依赖 ESP-IDF | 不修改上游文件；构建排除便利存储层，接入同步 SDMMC 回调 | 仅开启 MSC；分发时保留许可证、版权和适用 NOTICE |
 
-USB 实现对固定 Read Pico BSP 增加了带错误返回的卸载接口：补丁位于 `boards/read_pico/patches/read-pico-sd-release.patch`，仅应用到构建目录副本，原始检出保持不变。该适配属于 Apache-2.0 的 Read Pico 组件，不修改 epdiy、校准或波形组件。`esp_tinyusb 2.4.0` 的便利存储层采用延后写入，实际写失败仅记日志；因此本项目保留同步回调。官方 `auto_mount_off` 已可禁止自动回挂，自动回挂并非必须替换便利层的理由。官方示例、固定提交及逐项核对见 [USB 运行记录](usb-storage-runtime.md)。
+USB 实现对固定 Read Pico BSP 增加了带错误返回的卸载接口：补丁位于 `firmware/board/patches/read-pico-sd-release.patch`，仅应用到构建目录副本，原始检出保持不变。该适配属于 Apache-2.0 的 Read Pico 组件，不修改 epdiy、校准或波形组件。`esp_tinyusb 2.4.0` 的便利存储层采用延后写入，实际写失败仅记日志；因此本项目保留同步回调。官方 `auto_mount_off` 已可禁止自动回挂，自动回挂并非必须替换便利层的理由。官方示例、固定提交及逐项核对见 [USB 运行记录](usb-storage-runtime.md)。
 
-板级补丁现集中在 `boards/read_pico/patches/`；下方历史记录的 `firmware/patches/` 是原路径，内容和许可未变。
+板级补丁现集中在 `firmware/board/patches/`；下方历史记录的 `firmware/patches/` 是原路径，内容和许可未变。
 
 GB18030 解码表的来源与复核（2026-10-07）：`firmware/components/reader_document/gb18030_data.inc` 由 `tools/generate_gb18030_table.py` 生成。脚本逐个解码全部双字节和四字节序列，记录 CPython `gb18030` 编解码器返回的码位，不读取 CPython 的源码或数据文件。用 CPython 3.14.7 重新运行，输出与仓库中的文件逐字节相同，SHA-256 为 `5efc9c505062b83e0a80f04547e80d0c400b8d2ff6397cd86ee02f3993d68bbb`。本机的 Homebrew 构建没有记录源码 commit，只能固定到发布版本号。抽查的码位显示该编解码器采用 GB 18030-2000 的映射：`A8BC` 解码为 U+E7C7，`8135F437` 解码为 U+1E3F，`FE59` 解码为 U+E81E。GB 18030-2005 交换了前两者的映射；2005 和 2022 两次修订的其余调整没有逐项核对，受影响的字符在设备上会显示为私用区码位或不同的字。许可方面：CPython 采用 PSF-2.0。本项目收录的是字符编码与 Unicode 码位的对应数值，不含 CPython 的代码；是否需要随发布附带 PSF 许可声明，与项目总许可证一并由项目所有者确认，本表不作结论。
 
@@ -35,7 +35,6 @@ GB18030 解码表的来源与复核（2026-10-07）：`firmware/components/reade
 - [原生内容依赖](../../firmware/components/reader_document/third_party/README.md)：复制来源、逐文件摘要、独立许可和移植范围。
 - [字体与渲染](graphics-runtime.md)：固定来源、FTL 和 OFL 义务、子集生成。
 - [同步实现与引擎对照](sync-runtime.md)：真实引擎工具的构建和使用边界。
-- [EPUB/KOSync 探针](epub-kosync-probe.md)：CrossPoint、KOReader、base、CREngine 固定版本与使用边界。
 
 本机全新 host 编译会产生 cJSON 上游 `sprintf` 的 macOS 弃用警告；未修改上游源码掩盖警告。ASan/UBSan 检查无运行时错误，不能据此代替上游安全维护或最终分发审核。
 
@@ -47,13 +46,28 @@ GB18030 解码表的来源与复核（2026-10-07）：`firmware/components/reade
 
 项目总许可证已明确为 GPL-3.0-or-later 及 ESP-IDF 二进制库链接许可；下方历史记录中的「项目许可证待定」只描述当时状态。第三方组件继续保留各自许可，不能用项目 GPL 替代。公开前仍需逐组件核对固件对应源码与安装资料、FreeType 附加声明、字体与 Unicode 数据声明，以及设计工具导出资料的适用条款；步骤见[公开发布检查](publication.md)。网站查词图已改用合成正文和合成词典条目，移除授权未确认的真实词典释义截图。未确认事项不写成已完成审核。
 
+## EPUB 与 KOSync 上游调研（2026-10-05）
+
+以下版本用于早期探针的来源对照。探针使用 Python 标准库，部分 MD5 依公开采样规则实现。该批未引入下表所列项目的应用代码。实际纳入工程的 Expat、miniz 以及独立链接 CREngine 的验证工具，以本页依赖表为准。
+
+| 来源 | 固定版本 | 本轮用途与许可证据 |
+|---|---|---|
+| CrossPoint | `50823ffa125b437b4c9fe5882f326458780198da` | 阅读位置映射、章节缓存、EPUB 解析边界；根 [LICENSE](https://github.com/crosspoint-reader/crosspoint-reader/blob/50823ffa125b437b4c9fe5882f326458780198da/LICENSE) 为 MIT |
+| CrossPoint vendored Expat | 随上述 commit；文件头标注 `2.7.3+` | [xmlparse.c 文件头](https://github.com/crosspoint-reader/crosspoint-reader/blob/50823ffa125b437b4c9fe5882f326458780198da/lib/expat/xmlparse.c) 含独立 MIT 授权和版权名单 |
+| CrossPoint vendored miniz | 随上述 commit | [miniz.c 文件头](https://github.com/crosspoint-reader/crosspoint-reader/blob/50823ffa125b437b4c9fe5882f326458780198da/lib/miniz/third_party/miniz.c) 含独立 MIT 授权及 RAD/Valve/Rich Geldreich 等版权信息 |
+| KOReader | `2ce49e115fc1bcc47b473078c549e59b3922105b` | 检查 KOSync/部分 MD5；根 [COPYING](https://github.com/koreader/koreader/blob/2ce49e115fc1bcc47b473078c549e59b3922105b/COPYING) 为 AGPLv3 |
+| KOReader base | `3fea60920966f6ecf990ea0d93d7867cde938670` | 由上述 KOReader gitlink 固定；检查 CREngine Lua 桥接；[ffi/sha2.lua](https://github.com/koreader/koreader-base/blob/3fea60920966f6ecf990ea0d93d7867cde938670/ffi/sha2.lua) 自带 MIT 许可声明 |
+| KOReader CREngine | `f4a8be93255a439db4777d00f0bc53316acabebd` | 由上述 base 的 `thirdparty/kpvcrlib/crengine` gitlink 固定；[README.TXT](https://github.com/koreader/crengine/blob/f4a8be93255a439db4777d00f0bc53316acabebd/README.TXT) 声明第三方目录外源码为 GPLv2，第三方目录需单独审查 |
+
+CrossPoint 的位置转换依赖其 EPUB、分页缓存、字体和 Arduino I/O。其第三方依赖包括 FreeInk SDK（gitlink `aef1a6c89e36f331b2e1aacbbf7ce0debdeb732a`）。当时未核完整套依赖的许可。Pico Page 只单独采用已审查的组件。KOReader 的部分 MD5 采样与 XPointer 位置转换分别核对，真实引擎和客户端的复现见[同步实现](sync-runtime.md#真实引擎对照与复现)。
+
 ## 2026-10-06 · 功能实现前的来源核对
 
 新增能力先核对乐鑫官方示例，再检查 GitHub 已有实现及其适配边界；实际采用前记录版本、源码、依赖和许可证。本轮没有新增第三方依赖或复制上游应用代码。
 
 - 文件操作：核对本机 ESP-IDF `fff9895c82d744c7237be8847347bdd1b07c6643`（v6.1）的 [SDMMC 示例](https://github.com/espressif/esp-idf/blob/v6.1/examples/storage/sd_card/sdmmc/main/sd_card_example_main.c)和 `components/fatfs/vfs/vfs_fat.c`。示例文件头为 Public Domain / CC0；示例通过 `stat`、`unlink`、`rename` 替换文件，VFS 的 `fsync` 调用 `f_sync`。它不提供本项目的进度主记录/备份恢复协议，因此沿用 FileStore 的比较、同步和回读提交机制。
-- 同步：重新查看 [KOReader KOSync 插件](https://github.com/koreader/koreader/blob/master/plugins/kosync.koplugin/main.lua)和 [官方同步服务器](https://github.com/koreader/koreader-sync-server/blob/master/README.md)。本机已有 KOReader 客户端源码，检查了位置接续、设备字段和时间戳判断路径。本轮只核对协议与行为，没有复制或链接其 AGPL 应用代码；此前固定提交与许可证见 [EPUB/KOSync 探针](epub-kosync-probe.md)。本项目仍要求明确选择远端位置或确认上传；API 未提供的时间和设备在线状态不作推断。
-- CrossPoint 的固定源码和耦合审查已见同一探针记录。本轮沿用现有精确 XPointer 映射，不因上游具备类似功能就引入整套 Arduino 阅读器或用百分比代替源位置。
+- 同步：重新查看 [KOReader KOSync 插件](https://github.com/koreader/koreader/blob/master/plugins/kosync.koplugin/main.lua)和 [官方同步服务器](https://github.com/koreader/koreader-sync-server/blob/master/README.md)。本机已有 KOReader 客户端源码，检查了位置接续、设备字段和时间戳判断路径。本轮只核对协议与行为，没有复制或链接其 AGPL 应用代码；此前固定提交与许可证见[上游调研](#epub-与-kosync-上游调研2026-10-05)。本项目仍要求明确选择远端位置或确认上传；API 未提供的时间和设备在线状态不作推断。
+- CrossPoint 的固定版本和耦合范围见同一节上游调研。本轮沿用现有精确 XPointer 映射，不因上游具备类似功能就引入整套 Arduino 阅读器或用百分比代替源位置。
 
 ## 2026-10-06 · 交互耗时修复前的来源核对
 

@@ -1,6 +1,6 @@
 #include "e0470_epaper_waveform.h"
 #include "pico_page/changed_pixels_waveform.h"
-#include "../boards/read_pico/patches/epdiy-unchanged-pixels.h"
+#include "../firmware/board/patches/epdiy-unchanged-pixels.h"
 
 #include <array>
 #include <cassert>

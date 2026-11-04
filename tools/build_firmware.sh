@@ -25,7 +25,7 @@ if command -v idf.py >/dev/null 2>&1; then
     if [ -n "$mode" ]; then
         idf.py -C firmware -B "$repo_root/build/firmware-$mode" \
             -D "SDKCONFIG=$repo_root/build/firmware-$mode/sdkconfig" \
-            -D "SDKCONFIG_DEFAULTS=$repo_root/boards/read_pico/sdkconfig.defaults;$repo_root/firmware/configs/$mode.defaults" reconfigure build
+            -D "SDKCONFIG_DEFAULTS=$repo_root/firmware/board/sdkconfig.defaults;$repo_root/firmware/configs/$mode.defaults" reconfigure build
     else
         idf.py -C firmware reconfigure build
     fi

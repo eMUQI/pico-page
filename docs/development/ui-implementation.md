@@ -355,7 +355,7 @@ EPUB／TXT 当前页文字长按后先显示选区，持续接触可跨行拖动
 
 页面按相关正常、忙碌、失败、空／未知状态核对真实绘制和热区，标明字体、画布、提交与来源；原始 PNG／HTML 只作视觉基线。布局完成、像素准备、面板完成及进度保存分别验证。截图不替代波形、残影、功耗、TF 掉电或实际 KOReader 往返；专项见[验收矩阵](acceptance.md)。
 
-D48 按钮表的实际 host 渲染见[下方面板](../images/dictionary-range-20261028/dictionary-panel.png)、[上方面板](../images/dictionary-range-20261028/dictionary-panel-top.png)、[调整后未收录](../images/dictionary-range-20261028/dictionary-range-shorter.png)与[全屏](../images/dictionary-range-20261028/dictionary-expanded.png)；此前「轻量工具行」的渲染见[面板](../images/dictionary-results-20261027/dictionary-panel.png)；早期词典合成画面见[面板](../images/dictionary-ui-20261024/dictionary-panel.png)、[展开](../images/dictionary-ui-20261024/dictionary-expanded.png)、[圆形端点](../images/dictionary-ui-20261024/dictionary-selection.png)和[来源列表](../images/dictionary-ui-20261024/dictionary-sources.png)；设计约束见[词典优化说明](../design/dictionary-ui-refinement.md)。以上画面使用合成内容；不得据旧画面恢复已删除功能。
+D48 按钮表的实际 host 渲染见[下方面板](../images/dictionary-range-20261028/dictionary-panel.png)、[上方面板](../images/dictionary-range-20261028/dictionary-panel-top.png)、[调整后未收录](../images/dictionary-range-20261028/dictionary-range-shorter.png)与[全屏](../images/dictionary-range-20261028/dictionary-expanded.png)。画面使用合成内容。
 
 
 ## TXT 目录

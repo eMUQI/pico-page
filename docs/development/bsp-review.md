@@ -1,6 +1,6 @@
 # Read Pico BSP 审查与构建锁
 
-当前板级构建入口为 `boards/read_pico/board.cmake`，版本锁为同目录的 `bsp-revision.txt`，补丁和辅助头位于 `boards/read_pico/patches/`。下方历史记录中的 `firmware/patches/` 为迁移前路径；补丁内容、顺序、上游提交及许可证保持原样。
+当前板级构建入口为 `firmware/board/board.cmake`，版本锁为同目录的 `bsp-revision.txt`，补丁和辅助头位于 `firmware/board/patches/`。下方历史记录中的 `firmware/patches/` 为迁移前路径；补丁内容、顺序、上游提交及许可证保持原样。
 
 核查日期：2026-10-05。范围是 G0 的 BSP 编译集成，不是设备验收或发布许可结论。
 

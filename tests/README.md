@@ -23,6 +23,20 @@ Linux `app_test` 使用链接包装注入当前书库目录的 `readdir` 与 `ls
 
 测试 EPUB 均由脚本生成；不提交个人书籍。`app_test` 使用 setup_fonts 下载的完整文楷字体。`tools/check_koreader_mapping.py` 是独立的真实 CREngine 兼容性对照，不是模拟期望值。墨水屏、TF 掉电、网络真实账户与双向接续仍需按 `docs/development/acceptance.md` 验收。
 
+## EPUB 文件探针
+
+在仓库根目录运行。探针使用 Python 3.11+，输出指定章节的正文文本、Unicode 标量位置映射和原书摘要。以下命令使用两章合成样本。
+
+```sh
+python3 -m unittest discover -s tests -p test_epub_probe.py -v
+probe_dir=$(mktemp -d)
+python3 tests/make_epub_fixture.py "$probe_dir/sample.epub"
+python3 tools/epub_probe.py "$probe_dir/sample.epub" --spine 0 > "$probe_dir/chapter-0.json"
+python3 tools/epub_probe.py "$probe_dir/sample.epub" --spine 1 > "$probe_dir/chapter-1.json"
+```
+
+探针的源节点标识仅用于检查 XML 文本映射。核对 KOReader XPointer 时使用[真实引擎对照](../docs/development/sync-runtime.md#真实引擎对照与复现)。
+
 ## 大目录 EPUB 工作量对照
 
 Linux `large_epub_work` CTest 运行 `large_epub_probe`，复用构建时生成的原创 300／3,000 章 EPUB（303／3,030 项 NCX），另有带同一 2×2 PNG 的对应封面样本。覆盖直接开书、已开书末章跳转、真实异步 `ContentJob::Open` 恢复 75% 处的已保存锚点、读取／缺失封面、四本书的冷封面任务，以及空闲／受压的实际 `reclaim_caches`。受压场景只在 host 替代内存压力判定，页索引仍小于既有 1 MiB 上限；它不模拟 ESP-IDF 堆扫描耗时。

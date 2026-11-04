@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(pico_page_host LANGUAGES C CXX)
 include(tools/project_version.cmake)
-include(boards/read_pico/profile.cmake)
+include(firmware/board/profile.cmake)
 
 include(CTest)
 add_executable(display_network_gate_test tests/display_network_gate_test.cpp
@@ -152,7 +152,7 @@ add_test(NAME document COMMAND document_test ${document_fixtures}/valid.epub
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
 find_package(CURL REQUIRED)
-add_executable(pico_page host/main.cpp)
+add_executable(pico_page tools/host/main.cpp)
 target_link_libraries(pico_page PRIVATE reader_app PkgConfig::SDL2 CURL::libcurl)
 target_compile_options(pico_page PRIVATE -Wall -Wextra -Werror)
 

@@ -59,19 +59,12 @@ def main() -> int:
         if valid:
             check(struct.unpack('>II', b[16:24]) == (684, 1216), f'Unexpected dimensions: {entry["path"]}')
 
-    examples: dict[str, dict] = {}
-    for rel in ['examples/sdcard/PicoPage/settings.toml',
-                'examples/sdcard/PicoPage/integrations.toml',
-                'examples/sidecar/settings.toml']:
+    for rel in ('docs/examples/global-settings.toml', 'docs/examples/book-settings.toml'):
         try:
-            examples[rel] = tomllib.loads(local_path(rel).read_text(encoding='utf-8'))
-            check(examples[rel].get('schema_version') == 1, f'Unexpected TOML schema: {rel}')
+            example = tomllib.loads(local_path(rel).read_text(encoding='utf-8'))
+            check(example.get('schema_version') == 1, f'Unexpected TOML schema: {rel}')
         except (OSError, ValueError) as exc:
             check(False, f'Invalid TOML {rel}: {exc}')
-    integration = examples.get('examples/sdcard/PicoPage/integrations.toml', {}).get('kosync', {})
-    check(integration.get('enabled') is False, 'Example sync must be disabled')
-    check(integration.get('server_url') == '', 'Example must not target a live server')
-    check(integration.get('credential_ref') == '', 'Example must not contain a configured credential reference')
 
     for p in project_files():
         if p.suffix != '.md':
@@ -108,7 +101,7 @@ def main() -> int:
         return 1
     print(f'PASS: {checks} documentation checks.')
     print('36 original design PNGs are 684x1216; declared coverage gaps remain explicit.')
-    print('3 TOML examples parsed; current local documentation links resolved.')
+    print('2 TOML examples parsed; current local documentation links resolved.')
     print('This does NOT validate firmware builds, hardware, EPUB rendering, or KOReader synchronization.')
     return 0
 

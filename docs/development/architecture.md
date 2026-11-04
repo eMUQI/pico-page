@@ -25,12 +25,12 @@ platform_read_pico：官方 BSP / PMU / 屏幕与输入驱动的受控适配
 
 ### 板级构建边界
 
-`firmware/CMakeLists.txt` 负责 ESP-IDF 工程、产品版本和 SDK 版本约束，固定接入 `boards/read_pico/board.cmake`。板级目录负责目标芯片、更新目标参数、默认配置、BSP 固定版本、补丁构建副本及 TinyUSB 组件裁剪；`platform_read_pico` 继续负责运行时驱动适配。`tools/setup_bsp.sh` 与板级 CMake 共用 `boards/read_pico/bsp-revision.txt`，构建命令和产物路径见[环境说明](environment.md)。
+`firmware/CMakeLists.txt` 负责 ESP-IDF 工程、产品版本和 SDK 版本约束，固定接入 `firmware/board/board.cmake`。板级目录负责目标芯片、更新目标参数、默认配置、BSP 固定版本、补丁构建副本及 TinyUSB 组件裁剪；`platform_read_pico` 继续负责运行时驱动适配。`tools/setup_bsp.sh` 与板级 CMake 共用 `firmware/board/bsp-revision.txt`，构建命令和产物路径见[环境说明](environment.md)。
 
 ### 已实现的运行时边界
 
 ```text
-boards/read_pico/board.cmake       选择目标、配置、BSP 和链接实现
+firmware/board/board.cmake       选择目标、配置、BSP 和链接实现
 firmware/main/app_main.cpp        仅调用 runtime::run()
 firmware/components/
 ├── reader_runtime               ESP-IDF 应用循环、网络工作任务、显示/电源/USB 编排
@@ -43,7 +43,7 @@ firmware/components/
 └── platform_read_pico           端口实现及 BSP、面板尺寸、采样器和驱动互斥状态
 ```
 
-`boards/read_pico/profile.cmake` 定义设备标识、更新清单地址和构建目标的 OTA 槽大小，固件与 host 入口共同选择它。`platform_contract` 生成只含这些常量的 `pico_page/build_profile.h`，共享更新逻辑不再写死板名；下载后端仍核对实际分区，构建常量不替代设备分区检查。
+`firmware/board/profile.cmake` 定义设备标识、更新清单地址和构建目标的 OTA 槽大小，固件与 host 入口共同选择它。`platform_contract` 生成只含这些常量的 `pico_page/build_profile.h`，共享更新逻辑不再写死板名；下载后端仍核对实际分区，构建常量不替代设备分区检查。
 
 `reader_runtime` 和 `reader_console` 只编译依赖 `platform_contract`，由板级 CMake 使用 ESP-IDF 的 `idf_component_add_link_dependency` 在链接阶段接入 `platform_read_pico`。仅把实现加入 `COMPONENTS` 不足以保证静态库解析顺序；板级同时负责这两个消费者的链接关系。实现的 BSP 依赖为私有依赖，不经契约传给消费者。`reader_input` 的纯策略位于 `pico_page::input`，只使用平台事件值，现有 core/app 测试直接使用它。采样器的 `TouchMoves` 事件合并工具属于 `platform_read_pico` 私有实现，provider 不依赖应用输入策略。
 
@@ -111,7 +111,7 @@ host 构建逐个编译契约公共头文件；`architecture` 测试约束应用
 
 ### DocumentAnchor
 
-与字号/视口无关：阅读顺序中的资源标识 + 稳定源块/节点 + 有明确单位的文本偏移。当前偏移工作默认是 Unicode 标量值；接入现有引擎时必须说明 UTF-8 字节、UTF-16 单元、标量值与空白规范化的转换。格式在 G1 真实位置对照前不宣称冻结。原始 EPUB 结构映射、规范化规则和版本是位置兼容的一部分，不只复制某一个 XPath 函数。UTF-8、GB18030、UTF-16LE／BE TXT 使用固定字节目标、字符边界分段和段内 Unicode 标量偏移保存本地位置；编码分别使用独立的内容修订。当前没有 KOReader TXT 位置适配。
+与字号/视口无关：阅读顺序中的资源标识 + 稳定源块/节点 + 有明确单位的文本偏移。当前偏移工作默认是 Unicode 标量值；接入现有引擎时必须说明 UTF-8 字节、UTF-16 单元、标量值与空白规范化的转换。位置格式的兼容性以真实 KOReader 源位置对照为准。原始 EPUB 结构映射、规范化规则和版本是位置兼容的一部分，不只复制某一个 XPath 函数。UTF-8、GB18030、UTF-16LE／BE TXT 使用固定字节目标、字符边界分段和段内 Unicode 标量偏移保存本地位置；编码分别使用独立的内容修订。当前没有 KOReader TXT 位置适配。
 
 固定页文档以后使用源页索引与视口/裁切信息，不强行借用 EPUB 的段落偏移。页面编号、百分比属于派生显示，允许未知，不承担唯一身份。
 
@@ -153,7 +153,7 @@ ReaderAction::TurnPage
 
 ## 6. 内容路径与组件复用
 
-G1 先验证普通中文 EPUB、换字号恢复和 KOReader 源位置往返。优先研究 CrossPoint/PapyriX 的章节/位置/缓存代码，记录平台耦合与许可，再确定最小路径。原生解析或配套预处理先做一条，不同时做两套完整引擎。保留原书；规范化/转换不得丢失同步需要的源映射。必须预处理才能离线读时，其产物属于必要资源，不是可随意删除的缓存。
+首版验收优先验证普通中文 EPUB、换字号恢复和 KOReader 源位置往返。优先研究 CrossPoint/PapyriX 的章节/位置/缓存代码，记录平台耦合与许可，再确定最小路径。原生解析或配套预处理先做一条，不同时做两套完整引擎。保留原书；规范化/转换不得丢失同步需要的源映射。必须预处理才能离线读时，其产物属于必要资源，不是可随意删除的缓存。
 
 首版范围：正文、标题、基础强调/列表、目录、基础中英混排、字体/字号/行距/边距；插图和脚注在有界资源内提供基础路径或明确降级。复杂样式不承诺完整还原。PDF、Karakeep、词典/批注/脚本等后置，不用「格式已识别」冒充可阅读。
 
@@ -183,11 +183,11 @@ Display 提供意图（翻页/UI/图片/手动清理/恢复）而不是把波形
 
 立即休眠、等待图片及自动休眠共用上述输入规则。板级交接在采样器锁内丢弃触摸队列，并抑制当前触摸直至释放；触摸中断不取消交接，PMU 事件确认和唤醒源检查仍照常执行。取消后的恢复期间仅保留电源键意图，触摸队列溢出的重置事件不能清除长按菜单请求。
 
-休眠协调器冻结非必要请求，等待/取消有界工作，确认必要呈现与保存，保存待办，结束网络并通过 BSP 设置真实唤醒来源。网络失败不能无限阻止休眠。保存失败有独立分支；不能因低电量就声称已保存。深睡按重新构造对象处理。无卡时仍能使用内置错误字体呈现提示；不自动格式化挂载失败介质。未授权不刷写；分区/OTA 空间是 G0 要核对的硬件事实，不预生成虚构 CSV。
+休眠协调器冻结非必要请求，等待/取消有界工作，确认必要呈现与保存，保存待办，结束网络并通过 BSP 设置真实唤醒来源。网络失败不能无限阻止休眠。保存失败有独立分支；不能因低电量就声称已保存。深睡按重新构造对象处理。无卡时仍能使用内置错误字体呈现提示；不自动格式化挂载失败介质。设备刷写须获授权，并核对实际分区和 OTA 槽大小。
 
 ## 10. 预期工程组织与验收
 
-`firmware/main` 组装；`firmware/components` 放当前所需组件；`host` 复用纯逻辑；`tools` 预处理/开发工具；`tests` 合成样本、对照、故障注入与真机步骤。第三方代码锁版本并留许可/修改记录。只有完成可运行实现与对应测试，模块才算交付。阶段见 [milestones.md](../planning/milestones.md)，具体门槛见 [acceptance.md](acceptance.md)。硬件与外部项目线索见 [references.md](../planning/references.md)，旧架构来源见 archive。
+`firmware/main` 组装；`firmware/components` 放当前所需组件；`tools/host` 复用纯逻辑；`tools` 预处理/开发工具；`tests` 合成样本、对照、故障注入与真机步骤。第三方代码锁版本并留许可/修改记录。只有完成可运行实现与对应测试，模块才算交付。首版门槛和具体验收项见[验收矩阵](acceptance.md)。硬件与外部项目线索见 [references.md](../planning/references.md)，旧架构来源见 archive。
 
 后台 EPUB 解压输出按 4,096 字节喂给 XML 解析器；设备分支在块边界检查自上次让步是否已经过 20 ms，达到后阻塞一个调度 tick，再检查取消。后台分页在页边界同样阻塞一个 tick，避免连续 CPU 计算饿死低优先级空闲任务。该检查点不限制单次解压、XML 调用或 TF I/O 的墙钟耗时，保留原看门狗配置与所有权规则。
 

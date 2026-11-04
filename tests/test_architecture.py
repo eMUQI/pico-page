@@ -49,7 +49,7 @@ class PlatformBoundaries(unittest.TestCase):
             directory = Path(temporary)
             script = directory / "profile.cmake"
             script.write_text(
-                f'include("{(ROOT / "boards/read_pico/profile.cmake").as_posix()}")\n'
+                f'include("{(ROOT / "firmware/board/profile.cmake").as_posix()}")\n'
                 'file(WRITE "slot_bytes.txt" "${PICO_PAGE_UPDATE_SLOT_BYTES}")\n', encoding="utf-8")
             subprocess.run([os.environ.get("PICO_PAGE_CMAKE", "cmake"), "-P", str(script)], cwd=directory, check=True, capture_output=True)
             limit = int((directory / "slot_bytes.txt").read_text(encoding="utf-8"))

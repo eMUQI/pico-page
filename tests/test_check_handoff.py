@@ -17,8 +17,9 @@ class DocumentationCheckTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             for relative in ('AGENTS.md', 'docs/design/inventory.json',
-                             'docs/design/original/png', 'examples/sdcard/PicoPage',
-                             'examples/sidecar', 'firmware/components/reader_graphics/fonts',
+                             'docs/design/original/png', 'docs/examples/global-settings.toml',
+                             'docs/examples/book-settings.toml',
+                             'firmware/components/reader_graphics/fonts',
                              'web/public/downloads/LXGWWenKai-v1.520-OFL.txt'):
                 origin, destination = source / relative, root / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)

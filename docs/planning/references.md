@@ -8,7 +8,7 @@
 
 `https://github.com/MindReset/read_pico_firmware`
 
-优先检查 README、components/read_pico、read_pico_pmu、epdiy、e0470_epaper_waveform 和芯片驱动。上一轮 README 提供过 S3、16 MB Flash、8 MB PSRAM、1216×684 16 灰阶与 ESP-IDF v6.1 基线；实际构建仍以选定 commit 为准。不要复用演示程序所有页面，也不要覆盖 PMU 的工厂校准。实际构建锁见 `boards/read_pico/bsp-revision.txt`。
+优先检查 README、components/read_pico、read_pico_pmu、epdiy、e0470_epaper_waveform 和芯片驱动。上一轮 README 提供过 S3、16 MB Flash、8 MB PSRAM、1216×684 16 灰阶与 ESP-IDF v6.1 基线；实际构建仍以选定 commit 为准。不要复用演示程序所有页面，也不要覆盖 PMU 的工厂校准。实际构建锁见 `firmware/board/bsp-revision.txt`。
 
 ### R2 · KOReader 的同步端与内部位置
 

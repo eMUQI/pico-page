@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-include("${CMAKE_CURRENT_LIST_DIR}/../boards/read_pico/board.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/board/board.cmake")
 
 include(../tools/project_version.cmake)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)

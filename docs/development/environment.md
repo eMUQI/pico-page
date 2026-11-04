@@ -4,7 +4,7 @@
 
 ## 工具链与依赖定位
 
-固件使用已有的 ESP-IDF v6.1；`firmware/dependencies.lock` 锁定 IDF 6.1.0。构建脚本优先使用已激活的 `idf.py`，标准构建在未激活 IDF 时可通过 PATH 中的 EIM 调用已有 v6.1；其他构建模式需要先激活 IDF。不安装或升级全局工具链。基础依赖及资源准备见[固件开发指南](../../firmware/README.md)与[桌面开发指南](../../host/README.md)。
+固件使用已有的 ESP-IDF v6.1；`firmware/dependencies.lock` 锁定 IDF 6.1.0。构建脚本优先使用已激活的 `idf.py`，标准构建在未激活 IDF 时可通过 PATH 中的 EIM 调用已有 v6.1；其他构建模式需要先激活 IDF。不安装或升级全局工具链。基础依赖及资源准备见[固件开发指南](../../firmware/README.md)与[桌面开发指南](../../tools/host/README.md)。
 
 构建前从 EIM 安装记录确认实际路径、版本和激活脚本，不照抄历史主机路径。在仓库根目录可使用：
 
@@ -16,7 +16,7 @@ eim --log-file .local/eim.log --do-not-track true run "idf.py --version" v6.1
 
 激活后检查 `$IDF_PATH` 对应检出的 commit、已跟踪差异和未跟踪文件，并记录实际 Python、CMake、Ninja 与交叉编译器版本。EIM 日志放到忽略目录 `.local/`。已有安装可能包含本地修改；构建前须核对，不能将历史成功结果描述为干净官方工具链的本次验证。
 
-BSP 的完整 commit 由 `boards/read_pico/bsp-revision.txt` 唯一指定，`tools/setup_bsp.sh` 和板级 CMake 共用；来源、补丁与许可见 [BSP 审查](bsp-review.md)。`boards/read_pico/board.cmake` 通过 `COMPONENTS` 选择 `main` 与 `platform_read_pico`，由 ESP-IDF 展开依赖；它选择 ESP32-S3、准备 BSP 构建副本、绑定运行时端口的链接并配置 TinyUSB 源文件，默认选项位于同目录的 `sdkconfig.defaults`，补丁位于 `patches/`。`profile.cmake` 由固件和 host 入口共同选择，生成契约的 `build_profile.h`，提供更新板名、渠道与槽大小。构建后核对实际生成的 sdkconfig，不能用 defaults 的改动代替生效配置验证。
+BSP 的完整 commit 由 `firmware/board/bsp-revision.txt` 唯一指定，`tools/setup_bsp.sh` 和板级 CMake 共用；来源、补丁与许可见 [BSP 审查](bsp-review.md)。`firmware/board/board.cmake` 通过 `COMPONENTS` 选择 `main` 与 `platform_read_pico`，由 ESP-IDF 展开依赖；它选择 ESP32-S3、准备 BSP 构建副本、绑定运行时端口的链接并配置 TinyUSB 源文件，默认选项位于同目录的 `sdkconfig.defaults`，补丁位于 `patches/`。`profile.cmake` 由固件和 host 入口共同选择，生成契约的 `build_profile.h`，提供更新板名、渠道与槽大小。构建后核对实际生成的 sdkconfig，不能用 defaults 的改动代替生效配置验证。
 
 ## 固件构建入口与证据
 
@@ -31,7 +31,7 @@ sh tools/build_firmware.sh
 
 首次准备 BSP 需要访问 GitHub；脚本将上游检出定位到固定提交，并检查组件差异，不自动清除组件修改。构建脚本没有刷写、擦除或监视串口动作。应用、ELF 与来源记录位于 `firmware/build/`；其他构建模式使用独立目录，见[版本管理](versioning.md)。每批记录实际日志、镜像大小、摘要与应用槽余量，不在本页维护另一份「最新产物」。
 
-固件入口固定引用 Read Pico 板级配置，目前只有这一种板级实现。无参数构建默认读取 `boards/read_pico/sdkconfig.defaults`；其他模式在其后叠加 `firmware/configs/<mode>.defaults`。生成配置仍位于原有构建位置，分区文件仍为 `firmware/partitions.build.csv`。直接使用 IDF 时，显式的 CMake／环境变量 `SDKCONFIG_DEFAULTS` 仍可覆盖默认文件；标准构建脚本继续按项目 defaults 校验生效配置。旧脚本若显式引用 `firmware/sdkconfig.defaults`，需改用新的板级路径。
+固件入口固定引用 Read Pico 板级配置，目前只有这一种板级实现。无参数构建默认读取 `firmware/board/sdkconfig.defaults`；其他模式在其后叠加 `firmware/configs/<mode>.defaults`。生成配置仍位于原有构建位置，分区文件仍为 `firmware/partitions.build.csv`。直接使用 IDF 时，显式的 CMake／环境变量 `SDKCONFIG_DEFAULTS` 仍可覆盖默认文件；标准构建脚本继续按项目 defaults 校验生效配置。旧脚本若显式引用 `firmware/sdkconfig.defaults`，需改用新的板级路径。
 
 历史 macOS 构建曾在组件管理器配置阶段因 `psutil` 的 `sysctl()` 查询受沙箱限制而失败。遇到相同错误时先确认失败阶段及执行权限，不以更换依赖或关闭检查规避；该历史故障不表示当前构建必然失败。
 
@@ -43,7 +43,7 @@ sh tools/build_firmware.sh
 
 ## host 与交接检查
 
-host 使用本机 C/C++ 编译器与 CMake，不依赖 EIM 的交叉编译器；依赖和测试字体准备见[桌面开发指南](../../host/README.md)与[测试说明](../../tests/README.md)。在仓库根目录执行：
+host 使用本机 C/C++ 编译器与 CMake，不依赖 EIM 的交叉编译器；依赖和测试字体准备见[桌面开发指南](../../tools/host/README.md)与[测试说明](../../tests/README.md)。在仓库根目录执行：
 
 ```sh
 cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug
@@ -71,7 +71,7 @@ CTest 日志位于 `build/host/Testing/Temporary/LastTest.log` 与 `build/saniti
 
 ## 桌面预览与位置映射复核
 
-`sh tools/run_host.sh` 准备字体与演示卡、构建并启动桌面阅读器；参数与无窗口模式见[桌面开发指南](../../host/README.md)。沙箱内 SDL 若报 `The video driver did not add any displays`，可使用无窗口模式验证像素或逻辑，桌面窗口需在能够访问显示设备的环境中验证；两种结果分别记录。
+`sh tools/run_host.sh` 准备字体与演示卡、构建并启动桌面阅读器；参数与无窗口模式见[桌面开发指南](../../tools/host/README.md)。沙箱内 SDL 若报 `The video driver did not add any displays`，可使用无窗口模式验证像素或逻辑，桌面窗口需在能够访问显示设备的环境中验证；两种结果分别记录。
 
 真实 CREngine 映射复核入口：
 

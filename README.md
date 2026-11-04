@@ -83,11 +83,11 @@ sh tools/build_firmware.sh
 | 路径 | 内容 |
 |---|---|
 | `firmware/` | ESP-IDF 工程、共享阅读组件与 Read Pico 适配 |
-| `host/`、`tests/` | 桌面运行入口、回归测试和测试素材 |
-| `tools/`、`examples/` | 构建与诊断脚本、TF 卡配置示例 |
-| `web/`、`docs/` | 官网、使用文档、设计决定和验证记录 |
+| `tools/` | 构建与诊断脚本、桌面运行入口 |
+| `tests/` | 回归测试和测试素材 |
+| `web/`、`docs/` | 官网、使用文档、配置示例、设计决定和验证记录 |
 
-桌面程序可通过 `sh tools/run_host.sh` 启动，用法见[桌面开发指南](host/README.md)。提交改动前阅读 [AGENTS.md](AGENTS.md)，按改动范围执行[测试](tests/README.md)与[验收检查](docs/development/acceptance.md)。桌面运行、自动测试和固件构建均不能代替真机验证。
+桌面程序可通过 `sh tools/run_host.sh` 启动，用法见[桌面开发指南](tools/host/README.md)。提交改动前阅读 [AGENTS.md](AGENTS.md)，按改动范围执行[测试](tests/README.md)与[验收检查](docs/development/acceptance.md)。桌面运行、自动测试和固件构建均不能代替真机验证。
 
 欢迎通过 [Issues](https://github.com/eMUQI/pico-page/issues) 报告问题。请提供固件版本、操作步骤、预期结果和实际结果；排版或同步问题可附不含私人内容的最小样本。不要上传账户凭据、个人 EPUB、完整 Flash 备份或未经检查的日志。功能取舍见[产品决定](docs/planning/decisions.md)。
 
