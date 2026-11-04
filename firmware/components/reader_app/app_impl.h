@@ -1,8 +1,5 @@
 #pragma once
 
-// Private application state and shared inline helpers. Page implementations use the same
-// owner; splitting translation units does not introduce additional tasks or state copies.
-
 #include "content_cache.h"
 #include "content_job.h"
 #include "help_content.h"
@@ -45,11 +42,11 @@ inline constexpr int viewer_left = 24, viewer_top = 104, viewer_width = 636, vie
 inline constexpr int viewer_toolbar_height = 96, viewer_action_left = 456;
 inline constexpr int viewer_contrast_levels = 3;
 inline constexpr auto inline_image_delay = std::chrono::milliseconds(250);
-// After a selection preview, the loading panel appears only for lookups still running at this delay.
-inline constexpr auto dictionary_panel_delay = std::chrono::milliseconds(500);
+inline constexpr auto dictionary_loading_panel_delay = std::chrono::milliseconds(500);
+inline constexpr std::size_t kMaxScannedFonts = 256;
+inline constexpr std::size_t kMaxFontChoices = kMaxScannedFonts + 1;
 inline constexpr const char* kSleepFallbackNotice = "本次使用简洁屏保";
 inline constexpr const char *content_revision = "epub-native-v1";
-/** UI labels may borrow the body face without changing the next reading operation's size. */
 struct FontSizeRestore {
     graphics::Font* font;
     int pixels;
@@ -61,7 +58,6 @@ struct FontSizeRestore {
 struct Entry {
     std::string path, name;
     bool directory;
-    // Status line of the library row; filled when the row is first drawn.
     std::string status = {};
     bool described = false;
     std::size_t recent_rank = 128;
@@ -236,10 +232,6 @@ inline bool book_name(std::string name) {
 inline const char* revision_for(const std::string& path, const DocumentMetadata& metadata) {
     return txt_name(path) ? txt_content_revision(metadata.txt_encoding) : content_revision;
 }
-/**
- * Single-line display text of at most limit scalars: control and line-separator characters
- * become one space, runs of spaces collapse, and surrogates or out-of-range values are dropped.
- */
 inline std::string snippet(std::u32string_view text, std::size_t limit) {
     std::string result;
     std::size_t count = 0;
@@ -265,7 +257,7 @@ inline std::string snippet(std::u32string_view text, std::size_t limit) {
     }
     return result;
 }
-} // namespace app_detail
+}
 using namespace app_detail;
 
 struct ReaderApp::Impl final : DisplayBackend {
@@ -303,7 +295,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     Chapter chapter;
     graphics::Page page;
     std::optional<graphics::Canvas> body_canvas;
-    // Whether body_canvas shows the bookmark ribbon; reuse updates it without replacing body pixels.
     bool body_bookmarked = false;
     std::unique_ptr<graphics::Canvas> viewer_original;
     bool image_viewing = false;
@@ -346,7 +337,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     void prepare_next(const std::function<bool()>& stop);
     ReaderSettings settings, draft;
     enum class OnboardingStep { Welcome, Practice, Tools };
-    // The practice asks for each reading gesture in turn; Done leaves free practice.
     enum class OnboardingTask { Next, Previous, OpenTools, CloseTools, Done };
     OnboardingStep onboarding_step = OnboardingStep::Welcome;
     OnboardingTask onboarding_task = OnboardingTask::Next;
@@ -400,7 +390,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (view == View::Library) draw_library();
         overlay();
     }
-    /** The power-off page mentions the reading position only when a book was open. */
     std::string power_saved_note() const {
         if (!power_reading) return "";
         return power_progress_saved ? "阅读位置已保存。" : "阅读位置没有完整保存。";
@@ -420,7 +409,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     UsbTransferAction usb_action = UsbTransferAction::None;
     std::optional<View> usb_request_view;
     WifiStatus wifi_status;
-    // manual_hold keeps the station up after "connect now"; wifi_hold cancels one scan or join.
     network::Hold manual_hold, sync_hold, wifi_hold, account_hold;
     std::optional<WifiTargets> manual_target, sleep_wifi_target;
     std::optional<WifiOperation> wifi_request;
@@ -428,41 +416,32 @@ struct ReaderApp::Impl final : DisplayBackend {
     WifiOperation::Kind wifi_kind = WifiOperation::Kind::Connect;
     std::vector<provision::SavedWifi> wifi_saved;
     std::vector<provision::NearbyWifi> wifi_nearby;
-    // wifi_target is the pinned network name; empty selects automatic connection.
-    std::string wifi_target, wifi_notice, wifi_choice, pending_wifi_record;
+    std::string pinned_wifi_ssid, wifi_notice, wifi_choice, pending_wifi_record;
     enum class WifiPage { Home, Mode, Saved, Detail, Forget, Add, Joining, JoinFailed, Joined };
-    // wifi_root is the page that was opened from outside; back on it leaves the Wi-Fi pages.
-    WifiPage wifi_page = WifiPage::Home, wifi_root = WifiPage::Home;
+    WifiPage wifi_page = WifiPage::Home, wifi_entry_page = WifiPage::Home;
     bool wifi_from_sync = false, wifi_from_transfer = false, wifi_scanned = false, account_from_sync = false;
     std::size_t wifi_add_page = 0;
-    // Credentials of the network being added or updated. They stay in RAM until the join succeeds.
     provision::WifiCredentials join_draft;
-    // join_open: an open network picked from the scan list, which has no password page.
-    // join_secured: a protected network picked from the list, which cannot take an empty password.
     bool join_manual = false, join_open = false, join_secured = false;
-    // The station link belongs to a join until the radio reports offline; it earns no connection record.
     bool join_link = false;
     WifiPage join_origin = WifiPage::Add;
     LinkFailure join_failure = LinkFailure::None;
     std::string join_error;
-    // The join succeeded but writing network.toml failed.
     bool join_unsaved = false;
-    /** One on-screen keyboard field. Key taps change this model; flush_entry() draws it. */
     struct TextEntry {
         enum class Field { None, WifiPassword, WifiName, Endpoint, Username, Password };
         Field field = Field::None;
         std::string value;
         bool masked = false, shift = false;
-        int layer = 0;  // 0 letters, 1 digits and punctuation, 2 remaining symbols.
+        enum class Layer { Letters, Digits, Symbols };
+        Layer layer = Layer::Letters;
         bool field_dirty = false, keys_dirty = false;
-        bool ready_drawn = true;  // The enter key was last drawn as available.
+        bool enter_key_drawn_enabled = true;
     } entry;
-    /** Unsaved KOSync account fields. The password is kept in RAM only until it is verified. */
     struct AccountDraft {
         std::string endpoint, username, password;
-        bool saved = false;    // sync.toml held a valid account when the page was opened.
-        bool changed = false;  // A field differs from that account.
-        // Outcome of the last check of the saved account in this visit; a saved file alone proves neither.
+        bool had_saved_config = false;
+        bool changed = false;
         enum class Check { None, Accepted, Rejected } check = Check::None;
     } account;
     enum class AccountPage { Form, Verifying, Remove };
@@ -475,27 +454,20 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool portal_live = false, portal_requested = false, portal_open_wifi = false;
     std::uint64_t portal_generation = 0;
     View portal_request_view = View::Import;
-    // The upload session runs over a saved network rather than the device access point.
     bool portal_station = false;
-    // A Waiting state arrived; a session closing before it never offered its page.
-    bool portal_started = false;
+    bool portal_ready_received = false;
     std::optional<Frame> pending;
     std::optional<NetworkOperation> network_request;
     std::shared_ptr<std::atomic_bool> network_cancel;
     std::optional<Anchor> remote_anchor;
-    // Where remote_anchor lies in its chapter; set by the mapping that produced the anchor.
     std::optional<sync::PartPosition> remote_place;
     std::optional<ReadingRecord> upload_record, acknowledged_record, uncertain_record;
     sync::Config acknowledged_config, uncertain_config;
     enum class SyncState { Unchecked, NoRecord, Same, Different, Unmapped, Uploaded, Uncertain,
                            Unauthorized, Failed, LinkFailed, ConfigChanged };
     SyncState sync_state = SyncState::Unchecked;
-    // Progress fraction in [0, 1] and device name from the last answered check; negative when unknown.
-    // Each client estimates progress independently, so the fraction is shown only for an unmapped
-    // position and never compared with a local estimate.
     double remote_fraction = -1;
     std::string remote_device;
-    // Whether the running or failed check may use only the pinned network, and that network's name.
     bool sync_link_pinned = false;
     std::string sync_link_name;
     sync::Config sync_config, badge_config;
@@ -505,7 +477,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         badge_configured = sync::load_config(root, badge_config, detail);
     }
     std::uint64_t network_sequence = 0, active_network = 0;
-    // Keep the dispatch slot until its matching completion, even after UI cancellation.
     std::uint64_t network_worker_id = 0;
     int network_after_cancel = 0;
     bool network_closing_upload = false;
@@ -519,7 +490,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         time_t modified;
         std::vector<std::uint8_t> pixels;
     };
-    // One screen shows six thumbnails; eight hold 184,000 bytes of packed pixels.
     static constexpr std::size_t kCoverSlots = 8;
     std::vector<CoverThumbnail> covers;
     std::unique_ptr<ContentJob> cover_job;
@@ -539,7 +509,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::vector<Hit> hits, links;
     std::optional<Anchor> link_return, confirmed_link_return;
     bool sync_return = false, confirmed_sync_return = false;
-    // Recent page spans are isolated by spine item, part and return-bar geometry.
     struct PageBoundary {
         std::size_t chapter, start, end;
         std::uint32_t part;
@@ -549,7 +518,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     void clear_page_history() { page_history.clear(); computed_pages.clear(); }
     void record_boundary(std::vector<PageBoundary>& entries, std::size_t start, std::size_t end) {
         const auto next = readable_offset(end);
-        // Revisited spans must not evict distinct pages needed for an exact return path.
         for (const auto& entry : entries)
             if (entry.chapter == chapter_index && entry.part == chapter.part &&
                 entry.return_bar == link_return.has_value() && entry.start == start && entry.end == next) return;
@@ -564,12 +532,9 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::string library_sort = "recent";
     bool library_resume_omitted = false, folders_first = true, library_recent = true;
     std::int64_t resume_opened_at = 0;
-    // Bookmarks of the open book, loaded with it. Only Ok and Missing lists are shown.
     BookmarkList bookmarks;
-    // The contents panel lists bookmarks instead of the table of contents until another book opens.
     bool contents_bookmarks = false;
     std::size_t bookmark_page = 0;
-    // Sorted chapter offsets of the bookmarks in the loaded part, rebuilt when either changes.
     mutable std::vector<std::uint32_t> bookmark_offsets;
     mutable std::string bookmark_offsets_resource;
     mutable std::uint32_t bookmark_offsets_part = 0;
@@ -584,7 +549,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         ++bookmark_version;
         bookmark_page = 0;
     }
-    /** True when a usable bookmark maps into [start, end) of the loaded chapter part. */
     bool bookmarked(std::size_t start, std::size_t end) const {
         if (!bookmarks_usable() || bookmarks.bookmarks.empty()) return false;
         if (bookmark_offsets_version != bookmark_version || bookmark_offsets_resource != chapter.resource ||
@@ -602,7 +566,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto first = std::lower_bound(bookmark_offsets.begin(), bookmark_offsets.end(), start);
         return first != bookmark_offsets.end() && *first < end;
     }
-    /** Indices of the bookmarks inside the visible page. */
     std::vector<std::size_t> page_bookmarks() const {
         std::vector<std::size_t> found;
         if (!bookmarks_usable()) return found;
@@ -613,7 +576,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         return found;
     }
-    /** A 24-pixel-wide bookmark ribbon centred on cx with a notched lower edge; outlined unless filled. */
     void bookmark_ribbon(int cx, int top, int height, bool filled) {
         constexpr int half = 12, notch = 12;
         for (int y = 0; y < height; ++y) {
@@ -639,12 +601,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             return "书签文件读取失败，请检查 TF 卡后重新打开本书。阅读进度不受影响。";
         }
     }
-    // One bookmark commit at a time. In asynchronous mode it runs on a content worker, never
-    // concurrently with a progress commit, and completes on this task through poll_bookmark.
     std::unique_ptr<ContentJob> bookmark_job;
     bool bookmark_adding = false;
     void toggle_bookmark();
-    /** Starts a queued commit once no other card writer or worker runs, and adopts a finished one. */
     void poll_bookmark(bool redraw = true) {
         if (!bookmark_job || !async_content) return;
         if (!bookmark_job->started()) {
@@ -659,15 +618,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!bookmark_job->done() || (redraw && display.busy())) return;
         finish_bookmark(redraw);
     }
-    // A commit drained before a card handoff failed: the next persist reports it once, a later successful commit clears it.
     bool bookmark_drain_failed = false;
     std::string bookmark_drain_message;
-    // A failed commit that finished on a page without a notice line; poll_background shows it.
     std::string bookmark_error;
-    /**
-     * Waits for a queued or running commit before card files are released or another card
-     * writer runs on this task. Draws nothing.
-     */
     void drain_bookmark() {
         if (!bookmark_job) return;
         if (!bookmark_job->started()) {
@@ -681,7 +634,6 @@ struct ReaderApp::Impl final : DisplayBackend {
             if (!finish_bookmark(false)) { bookmark_drain_failed = true; bookmark_drain_message = message; }
         }
     }
-    /** Serializes panel file access and reports a drained failure before another operation. */
     bool bookmark_io_ready() {
         drain_bookmark();
         if (!bookmark_drain_failed) return true;
@@ -690,13 +642,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         error(bookmark_drain_message);
         return false;
     }
-    /** Adopts a finished commit; false when the requested change was not stored. */
     bool finish_bookmark(bool redraw);
-    // A single configured root is presented as the library home instead of as a folder entry.
     std::string library_home_root;
-    // The open folder is one of the configured library roots; its parent is the library.
     bool folder_root = false;
-    // Partial and Limited still show entries; the other incomplete states have no listing.
     enum class LibraryScan { Complete, Limited, Partial, Unavailable, Missing, NotDirectory, CreateFailed };
     LibraryScan library_scan = LibraryScan::Complete;
     bool library_create_full = false, library_create_denied = false;
@@ -705,7 +653,6 @@ struct ReaderApp::Impl final : DisplayBackend {
                library_scan != LibraryScan::Partial;
     }
     const char* library_scan_notice() const;
-    /** What happened, the steps that resolve it and the one control that helps, for an unavailable card or library. */
     struct LibraryProblem {
         std::string title, summary;
         std::vector<std::string> steps;
@@ -713,7 +660,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         const char* action_label = "";
     };
     LibraryProblem library_problem() const;
-    /** Draws a library problem in the layout of the empty library, starting at top. */
     void draw_library_problem(int top);
     CardIssue card_issue = CardIssue::Removed;
     reading_footer::Position footer_position = reading_footer::Position::Pages;
@@ -766,23 +712,16 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::string font_entry, font_entry_weight;
     std::function<void()> deferred;
     bool save_failed = false, notice_shown = false;
-    // The most recent accepted input turned a page; see AppInput::queued.
     bool turned = false;
-    // Reading status notices about the body font; the status line shows the position otherwise.
     static constexpr const char *kFallbackFontNotice = "所选字体不可用，已使用替代字体";
     static constexpr const char *kWeightUnavailableNotice = "所选字重不可用，保留字体原有字重";
     static constexpr const char *kBuiltinFontNotice = "未找到正文字体，已使用内置字体";
     static constexpr const char *kMissingNotice = "部分字符无法显示，可在排版中更换字体";
     static constexpr const char *kSaveFailed = "进度未保存，请检查 TF 卡后重试";
-    // Whole-book page counting. chapter_pages[i][p] holds the page starts of part p of spine item
-    // i, laid out from the beginning of the part under the applied typography; counted[i] marks
-    // an item whose parts are all present. Non-linear items are outside the reading order and
-    // count as finished without pages.
     static constexpr std::size_t not_counting = static_cast<std::size_t>(-1);
     static constexpr std::size_t max_pages_bytes = kPageIndexBytes;
     PageIndices chapter_pages;
     std::vector<bool> counted;
-    // Only indices bound to verified content, font and layout identities serve navigation.
     std::vector<bool> counted_live;
     std::string pages_name, pages_header, font_identity;
     std::shared_ptr<FileDigest> font_scan;
@@ -791,17 +730,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         return builtin_body ? "" : root + "/" +
             (font_fallback ? "Fonts/LXGWWenKai-Regular.ttf" : effective_font);
     }
-    // The synchronous fallback releases its extra chapter on input. The worker owns a separate
-    // chapter until it observes cancellation; both paths retain accepted pagination offsets.
     Chapter counting_chapter;
     bool async_content = false;
     std::uint64_t counting_generation = 0;
-    // Kept between pagination jobs while reading. It holds the book and body font open and one
-    // chapter part in memory, so it is dropped whenever other work needs the files or the memory.
     std::shared_ptr<PaginationSession> counting_session;
-    /** Discards results of running counting jobs and the preparation they share. */
     void invalidate_counting() { ++counting_generation; counting_session.reset(); }
-    /** Ends the counting session for foreground work; true when there was one to end. */
     bool yield_counting_session() {
         if (!counting_session) return false;
         if (counting_job && counting_job->request.session) counting_job->cancel();
@@ -815,7 +748,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::optional<ContentJob::Request> pending_content;
     std::shared_ptr<DictionarySession> dictionary_session;
     std::chrono::steady_clock::time_point dictionary_panel_due{}, dictionary_slow_due{};
-    /** The current lookup outlasted kDictionarySlowDelay; the loading text explains first-use preparation. */
     bool dictionary_slow = false;
     std::vector<DictionaryItem> dictionary_items;
     std::vector<DictionaryItem> dictionary_failed_sources;
@@ -858,27 +790,20 @@ struct ReaderApp::Impl final : DisplayBackend {
     void submit_dictionary_selection();
     void flush_dictionary_selection();
     void reset_dictionary_contact();
-    /** Queues one lookup of the current candidates; retry re-prepares remembered failed sources.
-     * defer_panel keeps the presented selection preview until the result or dictionary_panel_delay.
-     */
     void query_dictionary(bool retry = false, bool defer_panel = false);
     void poll_dictionary_panel();
     void page_dictionary(int movement = 0, bool redraw = true);
     void draw_dictionary();
     void finish_dictionary(ContentJob& job);
-    /** by_scalar comes from a long press and moves a range edge by one scalar instead of a word. */
     void dictionary_control(int id, bool by_scalar = false);
     void close_dictionary();
-    /** The selection after one range control step, or nullopt when that edge cannot move or the query would be too long. */
     std::optional<dictionary::Selection> dictionary_range_step(int id, bool by_scalar) const;
-    /** Top and bottom screen rows of the definition panel. */
     std::pair<int, int> dictionary_bounds(bool full) const;
     graphics::LayoutSpec dictionary_layout(bool full) const;
     std::shared_ptr<const ContentCacheEntry> chapter_cache, recent_chapter_cache;
     bool chapter_cache_write_needed = false, recent_cache_write_needed = false;
     std::unique_ptr<ContentJob> prepared_chapter;
     std::shared_ptr<ChapterSession> chapter_session;
-    // Published after a job completes; never inspect its mutable parser from the app task.
     std::size_t chapter_stream_bytes = 0;
     void release_chapter_session() {
         if (chapter_session) {
@@ -919,11 +844,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         prepared_image_failures.clear();
     }
     Hit loading_cancel{};
-    /**
-     * Enters the loading state and presents its status with a cancel control. An open panel or
-     * error page is replaced first, so the status never covers other controls; a full page keeps
-     * its content and shows the status in the footer zone.
-     */
     void loading(const std::string &status) {
         loading_origin = origin_for(view);
         const bool panel = view == View::Tools || view == View::Contents || view == View::Typography ||
@@ -946,7 +866,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         viewer_original.reset();
         image_viewing = false; image_contrast_level = 0;
         view = View::Reading;
-        // A bookmark committed while viewing changes the ribbon of the returned page.
         if (body_canvas && body_bookmarked != bookmarked(page.start, page.end) && render_body(offset)) { overlay(); return; }
         if (body_canvas) canvas = *body_canvas;
         links = body_links;
@@ -965,14 +884,9 @@ struct ReaderApp::Impl final : DisplayBackend {
                 return &box;
         return nullptr;
     }
-    /**
-     * Releases glyph cache bytes until PSRAM has the room a cold image decode requires before its
-     * encoded bytes. The fonts belong to this task, so the worker cannot release them itself; trimmed
-     * glyphs are rasterized again on demand. A disk-cache hit needs less and may be trimmed for nothing.
-     */
-    void make_image_room() {
+    void make_room_for_cold_image() {
 #ifdef ESP_PLATFORM
-        constexpr std::size_t wanted = ContentJob::image_room + 256U * 1024;
+        constexpr std::size_t wanted = ContentJob::cold_image_memory_required_bytes + 256U * 1024;
         for (auto* font : {&library_font, &body, &ui}) {
             const auto available = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
             if (available >= wanted) return;
@@ -988,13 +902,12 @@ struct ReaderApp::Impl final : DisplayBackend {
             footer(); overlay();
             return;
         }
-        // The cached canvas preserves the displayed page and its position while the worker decodes the image.
         body_canvas = canvas;
         body_spec = layout(settings, link_return ? 144 : 64);
         body_links = links;
         body_bookmarked = bookmarked(page.start, page.end);
         abandon_content();
-        release_counting(); clear_prefetch(); make_image_room();
+        release_counting(); clear_prefetch(); make_room_for_cold_image();
         ContentJob::Request request;
         request.kind = ContentJob::Kind::ImageViewer;
         request.root = root; request.path = root + "/" + book_path; request.identity = document.metadata();
@@ -1040,7 +953,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!document.chapter_index_for(anchor.resource, index)) { error("目标位置不在正文中"); return false; }
         return begin_chapter(index, 0, ContentJob::Target::Anchor, 0, anchor);
     }
-    /** Applies only image pixels; text, footer, anchor and reading revision stay owned by the visible page. */
     void complete_inline_image(const ContentJob& job);
     void poll_content(bool allow_inline = true);
 
@@ -1060,11 +972,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         counting_retry = std::chrono::steady_clock::now() + std::chrono::seconds(1);
     }
     bool counting_loaded = false;
-    /** Set while a sleep request waits for its cover worker; holds the time to request cancellation. */
     std::optional<std::chrono::steady_clock::time_point> sleep_cover_deadline;
     bool sleep_waiting_for_cover = false;
     std::unique_ptr<graphics::Canvas> sleep_cover_image;
-    /** Starts the cover worker for a sleep request. The caller has stopped pagination and released prefetch memory. */
     void prepare_sleep_cover() {
         if (counting_job) return;
         sleep_cover_image.reset();
@@ -1124,10 +1034,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (counting_job) counting_job->cancel();
         poll_save();
     }
-    /**
-     * Commits the presented position after draining background commits. false when the position,
-     * or a bookmark change drained here, was not stored; message then names what failed.
-     */
     bool persist() {
         drain_save();
         save_error_pending = false;
@@ -1150,22 +1056,16 @@ struct ReaderApp::Impl final : DisplayBackend {
               std::uint8_t gray = 1, bool bold = false);
     void text(graphics::Font& font, const std::string& value, int x, int top, int size = 28,
               int max_width = 612, std::uint8_t gray = 1, bool bold = false);
-    /** ASCII letters, digits and path punctuation; a run of these is not divided between lines. */
     static bool word_scalar(char32_t c) {
         return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
                c == '.' || c == '_' || c == '-' || c == '/' || c == '%';
     }
-    /** Width of the undivided run that starts at index; 0 inside a run or outside one. */
     static int run_width(graphics::Font& font, const std::u32string &scalars, std::size_t index) {
         if (!word_scalar(scalars[index]) || (index && word_scalar(scalars[index - 1]))) return 0;
         int width = 0;
         for (; index < scalars.size() && word_scalar(scalars[index]); ++index) width += font.advance(scalars[index]);
         return width;
     }
-    /**
-     * Draws a paragraph and returns its height. Closing punctuation never starts a line; it
-     * extends past width by at most one character, which the page margin absorbs.
-     */
     int wrapped(const std::string &value, int x, int top, int width, int size = 26,
                 bool draw = true, std::uint8_t gray = 1) {
         return wrapped(ui, value, x, top, width, size, draw, gray);
@@ -1185,7 +1085,6 @@ struct ReaderApp::Impl final : DisplayBackend {
                 used = 0;
                 ++rows;
             }
-            // A space that falls at the start of a continuation line is dropped.
             if (!used && rows > 1 && scalars[i] == U' ') continue;
             if (draw)
                 font.draw(canvas, scalars[i], x + used, top + (rows - 1) * line + metrics.ascender, gray);
@@ -1202,8 +1101,6 @@ struct ReaderApp::Impl final : DisplayBackend {
             length += font.advance(c);
         return length;
     }
-    /** The text() top that centres a CJK character's drawn rows, or a Latin capital's for faces
-     * without CJK, on middle; labels of one face and size then share a baseline. */
     int top_for_middle(graphics::Font& font, int size, int middle) {
         const FontSizeRestore restore(font, &font == &body);
         if (!font.set_pixel_size(size)) return middle - size / 2;
@@ -1215,10 +1112,6 @@ struct ReaderApp::Impl final : DisplayBackend {
                 std::uint8_t gray = 1, bool bold = false) {
         text(value, x + std::max(0, (w - text_width(value, size)) / 2), top, size, w, gray, bold);
     }
-    /**
-     * One list row: title, optional description and a right-aligned value. A non-zero id makes
-     * the row a control; the chevron marks a control that opens another page.
-     */
     void value_row(int id, const std::string &title, const std::string &description,
                    const std::string &value, int y, int height = 104, bool bold_value = false, bool opens = true) {
         const auto shown = !id || !opens ? value : value.empty() ? "›" : value + " ›";
@@ -1249,10 +1142,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         center(title, x, y + (h - size) / 2 - 3, w, size, selected ? 15 : 1, bold);
         hits.push_back({x, y, w, h, id});
     }
-    /**
-     * Page header: a back cell naming the parent page, when back is non-zero, directly followed
-     * by the title. right_edge leaves room for action cells drawn by the caller.
-     */
     void header(const std::string &title, int back = Back, const std::string &parent = "书库", int right_edge = 660,
                 graphics::Font* title_font = nullptr, graphics::Font* parent_font = nullptr) {
         canvas.fill_rect(0, 0, 684, 104, 15);
@@ -1271,7 +1160,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     void disabled_button(const std::string &label, int x, int y, int w, int h = 88, int size = 28) {
         center(label, x, y + (h - size) / 2 - 3, w, size, 5);
     }
-    /** An action that cannot be undone: solid frame, never the filled recommended style. */
     void danger_button(int id, const std::string &label, int x, int y, int w, int h = 96) {
         outline(x, y, w, h);
         center(label, x, y + (h - 28) / 2 - 3, w, 28);
@@ -1280,18 +1168,11 @@ struct ReaderApp::Impl final : DisplayBackend {
     const std::string &current_notice() const {
         return view == View::Library && !cover_notice.empty() ? cover_notice : message;
     }
-    /** The page notice; drawing it marks it for removal by the next input. */
     const std::string &notice() {
         notice_shown = notice_shown || !current_notice().empty();
         return current_notice();
     }
     static constexpr int footer_zone = 1120;
-    /**
-     * The 96-pixel footer shared by the screen pager and the page notice. With several screens
-     * the notice takes the place of the screen number; a single screen shows the notice alone.
-     * The pager zones match the reading page: previous left of 205, next from 479. A direction
-     * that is unavailable stays blank and has no hit.
-     */
     void footer_bar(const std::string &hint, std::size_t index = 0, std::size_t total = 1) {
         canvas.fill_rect(0, footer_zone, 684, 96, 15);
         if (total <= 1 && hint.empty()) return;
@@ -1312,7 +1193,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (hint.empty()) center(std::to_string(index + 1) + " / " + std::to_string(total), 205, footer_zone + 34, 274, 24, 3);
         else center(hint, 213, footer_zone + 34, 258, 24);
     }
-    /** Measures or draws the same bounded title layout, retaining closing punctuation with its preceding character. */
     int title_lines(const std::string &value, int x, int y, int width, int size, bool bold = false, int max_rows = 2,
                     std::uint8_t gray = 1, bool draw = true);
     int title_lines(graphics::Font& font, const std::string &value, int x, int y, int width, int size,
@@ -1339,18 +1219,12 @@ struct ReaderApp::Impl final : DisplayBackend {
             for (const auto &starts : item) total += starts.size();
         return static_cast<std::uint32_t>(total);
     }
-    /**
-     * 1-based number of the counted page that holds the first visible character; 0 until every
-     * chapter is counted. A page reached from a restored or linked position may span two counted
-     * pages, so consecutive turns can repeat or skip a number.
-     */
     std::uint32_t current_page() const {
         return current_page(page.start);
     }
     std::uint32_t current_page(std::size_t start) const {
         return counted_page(chapter_index, chapter.part, start);
     }
-    /** As current_page, for a scalar offset in any part of any spine item. */
     std::uint32_t counted_page(std::size_t index, std::uint32_t in_part, std::size_t start) const {
         const auto &spine = document.spine();
         if (!pages_complete || index >= spine.size() || !spine[index].linear) return 0;
@@ -1364,29 +1238,21 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto within = std::upper_bound(starts.begin(), starts.end(), static_cast<std::uint32_t>(start)) - starts.begin();
         return static_cast<std::uint32_t>(before + std::max<std::ptrdiff_t>(1, within));
     }
-    /** Position weighted by the uncompressed size of each linear chapter; used until pages are counted. */
     std::pair<std::uint64_t, std::uint64_t> estimated_position(std::size_t end) const {
         return estimated_position(chapter_index, loaded_part(end));
     }
-    /** The loaded chapter part with a scalar offset in it. */
     sync::PartPosition loaded_part(std::size_t offset) const {
         return {chapter.part, static_cast<std::uint32_t>(offset), static_cast<std::uint32_t>(chapter.text.size()),
                 chapter.last_part};
     }
-    /** As estimated_position(end), read up to at.offset in a part of any spine item. */
     std::pair<std::uint64_t, std::uint64_t> estimated_position(std::size_t index, const sync::PartPosition &at) const;
     double estimated_fraction(std::size_t end) const {
         const auto [read, total] = estimated_position(end);
         return total ? static_cast<double>(read) / total : 0;
     }
-    /** Whole-book percentage of a page spanning [start, end) of the loaded chapter. */
     int book_percent_value(std::size_t start, std::size_t end) const {
         return book_percent_value(chapter_index, loaded_part(end), start);
     }
-    /**
-     * Whole-book percentage of a position in any spine item: the counted page that holds start
-     * once every chapter is counted, otherwise the size read up to at.offset.
-     */
     int book_percent_value(std::size_t index, const sync::PartPosition &at, std::size_t start) const {
         if (const auto current = counted_page(index, at.part, start))
             return static_cast<int>(static_cast<std::uint64_t>(current) * 100 / total_pages());
@@ -1399,7 +1265,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::string book_percent() const {
         return book_percent(page.start, page.end);
     }
-    /** Page number, page total and percentage; the percentage alone until every chapter is counted. */
     std::string book_position(std::size_t start, std::size_t end) const {
         if (const auto current = current_page(start))
             return std::to_string(current) + " / " + std::to_string(total_pages()) + " · " + book_percent(start, end);
@@ -1446,20 +1311,10 @@ struct ReaderApp::Impl final : DisplayBackend {
             return "已上传";
         return "待上传";
     }
-    /**
-     * Book header. Over a tool panel the back cell closes the panel, because the panel's parent
-     * is the reading page. The badge appears only for a state the user has to act on.
-     */
     void reading_header(bool panel = false);
-    // Left edge of the bookmark toggle in the tool page header; the reading page marker shares its centre.
     static constexpr int bookmark_cell_left = 584;
     static constexpr int panel_strip = 56;
-    // The typography preview ends above the strip of the panel at 656.
     static constexpr int preview_bottom = 656 - panel_strip;
-    /**
-     * Panel top: a strip that closes the panel, above the four tool tabs. The strip occupies
-     * panel_strip pixels above top.
-     */
     void tabs(int top, int active) {
         const int ids[] = {Contents, Typography, Sync, Refresh};
         const char *names[] = {"目录", "排版", "同步", "刷新模式"};
@@ -1488,17 +1343,12 @@ struct ReaderApp::Impl final : DisplayBackend {
         display.present({{"ui", 0, 0, ++ui_sequence}, visible ? visible->anchor : Anchor{},
                          FramePurpose::ManualRefresh, RefreshIntent::FullClean});
     }
-    /** Submits a whole-screen UI update; Display holds equal nonwhite pixels unless a full clean is required. */
     void overlay(bool full = false) {
         display.present({{"ui", 0, 0, ++ui_sequence},
                          {},
                          FramePurpose::Overlay,
                          full ? RefreshIntent::FullClean : RefreshIntent::Content});
     }
-    /**
-     * Presents a status line on the current page and runs work when that frame has reached the
-     * panel. complete_frame invokes work before returning, so no input is dispatched in between.
-     */
     void defer(const std::string &status, std::function<void()> work) {
         if (display.busy())
             return;
@@ -1527,16 +1377,11 @@ struct ReaderApp::Impl final : DisplayBackend {
     void load_fonts(const ReaderSettings *preview = nullptr);
     void load_library_font(const std::string& path);
     graphics::Font& library_text_font() { return library_uses_body ? body : library_font.valid() ? library_font : ui; }
-    /**
-     * Lists the TTF and OTF files in Fonts/, reading at most 2048 directory entries and keeping
-     * at most 256 fonts; a larger folder yields a partial list. The selected font stays listed
-     * while its file is missing.
-     */
     void scan_fonts() {
         fonts.clear();
         DIR *dir = opendir((root + "/Fonts").c_str());
         if (dir) {
-            for (int visited = 0; visited < 2048 && fonts.size() < 256; ++visited) {
+            for (int visited = 0; visited < 2048 && fonts.size() < kMaxScannedFonts; ++visited) {
                 const auto *item = readdir(dir);
                 if (!item) break;
                 const std::string name = item->d_name;
@@ -1568,7 +1413,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         scan_fonts();
         load_fonts();
         scan_library();
-        // Optional asset directories must not block reading when the card rejects creation.
         if (card_available) {
             for (const auto* directory : {"Fonts", "LockScreens", "Dictionaries"}) {
                 int error_number = 0;
@@ -1604,7 +1448,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     static std::string entry_title(const Entry &entry) {
         return entry.directory ? entry.name : entry.name.substr(0, entry.name.size() - (txt_name(entry.name) ? 4 : 5));
     }
-    /** FNV-1a of a card-relative path; names the cache entries of one book. */
     static unsigned long long path_hash(const std::string &relative) {
         std::uint64_t hash = 1469598103934665603ULL;
         for (const unsigned char c : relative) hash = (hash ^ c) * 1099511628211ULL;
@@ -1624,18 +1467,12 @@ struct ReaderApp::Impl final : DisplayBackend {
         return "PPPOS1\n" + relative + "\n" + std::to_string(info.st_size) + " " +
                std::to_string(static_cast<long long>(info.st_mtime)) + "\n";
     }
-    /**
-     * Writes the visible chapter and percentage to PicoPage/cache for the library. The entry is
-     * display data bound to one file version; the progress record remains the only authority.
-     */
     void remember_position() {
         struct stat info{};
         if (!has_book() || !card_available || !session.visible_record() || page.end <= page.start ||
             stat((root + "/" + book_path).c_str(), &info) != 0) return;
         const auto name = position_name(book_path);
         auto bytes = position_header(book_path, info) + chapter_label() + "\n" + book_percent();
-        // The library must not show a position that reopening cannot restore: an unsaved page is
-        // recorded by poll_save once its commit is acknowledged.
         if (session.needs_save()) {
             pending_position = PendingPosition{name, std::move(bytes), document.metadata().book_id, session.visible_record()->anchor};
             return;
@@ -1643,7 +1480,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         pending_position.reset();
         store.save_cache(name, bytes);
     }
-    /** Chapter and percentage last recorded for a book file; both empty when there is no entry. */
     std::pair<std::string, std::string> recalled_position(const std::string &relative) {
         struct stat info{};
         std::string cached;
@@ -1655,13 +1491,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (split == std::string::npos) return {};
         return {cached.substr(header.size(), split - header.size()), cached.substr(split + 1)};
     }
-    /** Fills the status line of a library entry: books in a folder, or the reading state of a book. */
     void describe(Entry &entry);
     struct CoverEntry {
         std::string name, header;
         std::size_t bytes;
     };
-    /** Names the PicoPage/cache entry for one size of a cover; the header binds it to a file version. */
     static CoverEntry cover_entry(const std::string &relative, const struct stat &info, int width,
                                   int height, bool crop) {
         char name[64];
@@ -1671,7 +1505,6 @@ struct ReaderApp::Impl final : DisplayBackend {
                           std::to_string(static_cast<long long>(info.st_mtime)) + "\n",
                 static_cast<std::size_t>((width + 1) / 2) * height};
     }
-    /** Loads positive cached pixels. Negative entries are verified against source content outside drawing. */
     bool cached_cover(const CoverEntry &entry, std::vector<std::uint8_t> &pixels) {
         std::string cached;
         if (store.load_cache(entry.name, entry.header.size() + entry.bytes, cached) != StoreStatus::Ok ||
@@ -1681,7 +1514,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         pixels.assign(cached.begin() + static_cast<std::ptrdiff_t>(entry.header.size()), cached.end());
         return true;
     }
-    /** Decodes the cover, caching only usable pixels or confirmed absence; temporary failures return no value. */
     std::optional<std::vector<std::uint8_t>> decode_cover(const std::string &relative, const CoverEntry &entry,
                                            int width, int height, bool crop) {
         const auto identity = sha256_file(root + "/" + relative);
@@ -1699,14 +1531,12 @@ struct ReaderApp::Impl final : DisplayBackend {
                                            : entry.header + cover_failure_payload(identity, failure_kind));
         return loaded ? thumbnail.pixels() : std::vector<std::uint8_t>{};
     }
-    /** Packed width x height cover pixels of a book file, or empty when it has no usable cover. */
     std::vector<std::uint8_t> cover_pixels(const std::string &relative, const struct stat &info,
                                            int width, int height, bool crop) {
         const auto entry = cover_entry(relative, info, width, height, crop);
         std::vector<std::uint8_t> pixels;
         return cached_cover(entry, pixels) ? pixels : decode_cover(relative, entry, width, height, crop).value_or(std::vector<std::uint8_t>{});
     }
-    /** Copies packed cover pixels, as returned by cover_pixels, to the canvas. */
     void blit(const std::vector<std::uint8_t> &pixels, int x, int y, int width, int height) {
         const int stride = (width + 1) / 2;
         for (int row = 0; row < height; ++row)
@@ -1715,10 +1545,8 @@ struct ReaderApp::Impl final : DisplayBackend {
                 canvas.pixel(x + column, y + row, column % 2 ? packed >> 4 : packed & 15);
             }
     }
-    // Smaller library covers use the card thumbnail, so these views share one cache entry.
     static constexpr int kRowCoverWidth = 59, kRowCoverHeight = 80;
     static constexpr int kContinueCoverWidth = 96, kContinueCoverHeight = 128;
-    /** Copies packed cover pixels reduced to width x height by averaging the covered source pixels. */
     void blit_reduced(const std::vector<std::uint8_t> &pixels, int source_width, int source_height,
                       int x, int y, int width, int height) {
         const int stride = (source_width + 1) / 2;
@@ -1737,20 +1565,11 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
     }
     enum class Cover { Drawn, None, Undecoded };
-    /**
-     * Draws a library thumbnail at the requested size. Without decode, a cover absent from both
-     * caches is left Undecoded.
-     */
     Cover draw_cover(const Entry &entry, int x, int y, bool decode,
                      int width = kLibraryCoverWidth, int height = kLibraryCoverHeight);
-    /** The scanned directory as it reads after a verb, with the spacing of mixed Chinese and Latin text. */
     std::string library_location() const {
         return library_home_root.empty() ? "已设置的书库目录" : " " + library_home_root + "/";
     }
-    /**
-     * One line for the row that describes copying to the card. A directory too long for the row
-     * keeps its last components, so the instruction after it is never the part that is cut.
-     */
     std::string direct_copy_hint() {
         auto path = library_home_root;
         bool cut = false;
@@ -1761,11 +1580,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         return path.empty() || text_width(line(), 22) > 554 ? "拷到卡上已设置的书库目录，插回后重启设备" : line();
     }
-    /**
-     * Body of the root library without any book or resume card: the ways to add books, the
-     * guide and the limit of the built-in font. The row without an id is a description.
-     */
-    // Space between the last row of a library list and the control that follows it.
     static constexpr int kSectionGap = 56;
     void draw_first_use() {
         text("书库里还没有书", 36, 160, 40, 612, 1, true);
@@ -1774,16 +1588,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         settings_row(UsbStart, "USB 连接电脑", "电脑直接管理 TF 卡，退出时重启", 288, 1);
         settings_row(WifiUpload, "Wi-Fi 传书", "经设备热点，手机扫码上传，不需要路由器", 420, 1);
         settings_row(0, "直接放入 TF 卡", direct_copy_hint(), 552, 1);
-        // The list ends at 684; the button follows after kSectionGap and the note after 40.
         button(Help, "查看使用说明", 24, 684 + kSectionGap, 636, 96, false, 30);
         wrapped(std::string("内置字体只含 3,500 个常用字，生僻字会显示为方框。官网 ") + kProjectHome +
                 " 可下载完整的文楷字体，放入 TF 卡 Fonts/，重启后在「排版」中选择。", 36, 684 + kSectionGap + 96 + 40, 612, 22, true, 3);
     }
-    /**
-     * Draws the library. Covers that still need decoding first appear as titles with a status
-     * line. Native asynchronous mode prepares a visible batch and merges its display update.
-     * Worker completion preserves the attempt budget; a user-requested redraw starts a new budget.
-     */
     void draw_library(bool decode = false, bool keep_cover_attempts = false);
     bool open(std::string path);
     bool finish_open(const std::string& path, ContentJob::Result* loaded = nullptr);
@@ -1814,13 +1622,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     static std::string chapter_error(const std::string &detail) {
         return memory_error(detail) ? "本章内容过大，设备内存不足，无法显示。" : "章节读取失败。" + reason(detail, "无法解析文件内容") + "。";
     }
-    /**
-     * Makes the part that load produces the chapter being read. The visible chapter stays in
-     * memory during the load so that a failure leaves the page intact. When the parser stops for
-     * lack of memory, the visible chapter is released and the load repeated; if it fails again,
-     * the error page reloads the chapter of the last confirmed position. missing is the message
-     * for a part that does not exist.
-     */
     bool load_with(std::size_t index, const std::function<bool(Chapter &, std::string &)> &load,
                    const std::string &missing = "") {
         clear_body_cache();
@@ -1847,7 +1648,6 @@ struct ReaderApp::Impl final : DisplayBackend {
             return load_content(store, document, index, loaded, detail, ChapterLoad::Reading, part);
         });
     }
-    /** Loads the part that holds anchor, unless it is the loaded one, and returns the offset in it. */
     bool seek(const Anchor &anchor, std::uint32_t &position, const std::string &missing) {
         std::size_t index;
         if (!document.chapter_index_for(anchor.resource, index)) {
@@ -1864,10 +1664,6 @@ struct ReaderApp::Impl final : DisplayBackend {
             return find_content(store, document, index, loaded, detail, ChapterLoad::Reading, holds);
         }, missing) && chapter.offset_for(anchor, position);
     }
-    /**
-     * Loads the part of a spine item that holds the fragment, or its first part without one. A
-     * fragment recorded at the end of a part marks text that begins the next part.
-     */
     bool seek_fragment(std::size_t index, const std::string &fragment, std::uint32_t &position,
                        const std::string &missing) {
         position = 0;
@@ -1902,10 +1698,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         return plan_content(body, source, start, spec, collect, stop);
     }
 
-    /**
-     * Restarts page counting for the applied typography and adopts a matching cache entry.
-     * The entry is bound to the book file, the body font file and the page geometry.
-     */
     void reset_pages(bool keep_prepared_frames = false) {
         invalidate_counting();
         if (!keep_prepared_frames) { clear_body_cache(); clear_prefetch(); }
@@ -1955,7 +1747,6 @@ struct ReaderApp::Impl final : DisplayBackend {
             for (const auto& starts : parts) combined += starts.capacity() * sizeof(std::uint32_t);
         }
         if (combined > max_pages_bytes) return;
-        // A late identity check must not replace chapters already counted in this session.
         for (std::size_t i = 0; i < counted.size(); ++i) {
             if (counted[i] || (i == counting_index && !cached.counted[i])) {
                 cached.pages[i] = std::move(chapter_pages[i]);
@@ -1970,7 +1761,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         pages_complete = std::find(counted.begin(), counted.end(), false) == counted.end();
     }
 
-    /** Owned capacities below one chapter; the outer chapter vector is accounted separately. */
     static std::size_t chapter_page_bytes(const PageIndices::value_type& parts) {
         PP_HOST_WORK(host_work::add(host_work::PageIndexVisits);)
         std::size_t bytes = parts.capacity() * sizeof(std::vector<std::uint32_t>);
@@ -2015,7 +1805,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         return true;
     }
-    /** Writes counted chapters to PicoPage/cache so that a later open resumes instead of recounting. */
     void save_pages() {
         if (async_content || !pages_dirty || pages_name.empty() || pages_cache_disabled) return;
         if (!write_page_cache(store, pages_name, pages_header, chapter_pages, counted)) pages_cache_disabled = true;
@@ -2076,20 +1865,12 @@ struct ReaderApp::Impl final : DisplayBackend {
                (!pages_complete || (!pages_cache_disabled && (pages_cache_pending || pages_dirty || (async_content && font_identity.empty())))) && !pages_failed &&
                (counting_blocked != chapter_index || std::chrono::steady_clock::now() >= counting_retry);
     }
-    /** Frees the chapter loaded for counting; its partial count resumes after a reload. */
     void release_counting() {
         if (counting_job) counting_job->cancel();
         else if (counting_session) { release(counting_session->chapter); counting_session->loaded = false; }
         release(counting_chapter);
         counting_loaded = false;
     }
-    /**
-     * True when a layout load of one part of a spine item with this many XHTML bytes fits in
-     * memory with room to spare. The parser stops by itself when memory runs short; this check
-     * avoids starting a parse that would. The text is one reserved block of four bytes per XHTML
-     * byte, at most two part lengths, and the records, retained link and fragment strings and
-     * parser buffers of one part stay below 1.5 MiB. The rest of the 2 MiB allowance is headroom.
-     */
     static bool counting_memory(std::uint32_t bytes) {
 #ifdef ESP_PLATFORM
         const std::size_t text = 4U * (std::min<std::uint32_t>(bytes, 2 * kChapterPartScalars) + 1024);
@@ -2109,11 +1890,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         pages_complete = std::find(counted.begin(), counted.end(), false) == counted.end();
         if (pages_complete && !async_content) save_pages();
     }
-    /** Starts independent counting or advances the synchronous fallback under the same geometry. */
     void count_pages(const std::function<bool()>& stop);
     void draw_image_error(const graphics::ImageBox& box) {
         outline(box.x, box.y + 12, box.width, box.height - 24, 2);
-        // The cause is not recorded per image, so none is claimed.
         center("图片无法显示", box.x + 8, box.y + box.height / 2 - 14, box.width - 16, 28);
     }
     bool draw_page_content(const graphics::Page& planned, const graphics::LayoutSpec& spec, bool progressive = false);
@@ -2122,7 +1901,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     bool render_body(std::size_t start);
     bool show_page(std::size_t start, bool reverse_page_effect = false);
-    /** Records only successfully presented body pages; at most 64 distinct spans are retained. */
     void remember_page() {
         record_boundary(page_history, page.start, page.end);
     }
@@ -2136,12 +1914,10 @@ struct ReaderApp::Impl final : DisplayBackend {
             chapter.part >= chapter_pages[chapter_index].size()) return std::nullopt;
         const auto& starts = chapter_pages[chapter_index][chapter.part];
         const auto i = std::lower_bound(starts.begin(), starts.end(), limit);
-        // A jump into the middle of a standard page is not a standard pagination boundary.
         if (i == starts.begin() || (limit != chapter.text.size() && (i == starts.end() || *i != limit)))
             return std::nullopt;
         return *std::prev(i);
     }
-    /** Finds the preceding page, using matching boundaries before laying out from the part start. */
     bool paginate(std::size_t limit, std::size_t &previous) {
         if (const auto cached = previous_page(limit)) { previous = *cached; return true; }
         const auto spec = layout(settings, link_return ? 144 : 64);
@@ -2167,10 +1943,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         show_page(previous, true);
     }
-    /**
-     * Shows the preceding page. Cache misses over long text ranges are announced before
-     * pagination because the first measurements may read glyph metrics from the card.
-     */
     void turn_back_to(std::size_t limit) {
         if (const auto cached = previous_page(limit)) { show_page(*cached, true); return; }
         if (async_content) { begin_chapter(chapter_index, chapter.part, ContentJob::Target::Before, limit); return; }
@@ -2180,15 +1952,12 @@ struct ReaderApp::Impl final : DisplayBackend {
         else
             show_page_before(limit);
     }
-    // Reaching a later part parses the spine item from its beginning; an item this large is
-    // announced first.
     static constexpr std::uint32_t announced_bytes = 150000;
     void change_part(std::size_t index, std::function<void()> work) {
         if (document.spine()[index].bytes > announced_bytes) defer("正在排版…", std::move(work));
         else work();
     }
     void turn(bool forward);
-    /** Removes the sync return bar from a turn candidate; failure restores the confirmed state. */
     void expire_sync_return() {
         if (!sync_return) return;
         link_return.reset();
@@ -2196,7 +1965,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     static constexpr int kToolbarIds[] = {Contents, Typography, Sync, Refresh, FullRefresh};
     static constexpr const char* kToolbarLabels[] = {"目录", "排版", "同步", "刷新模式", "全刷"};
-    /** Draws the reading toolbar along the bottom edge and adds its five hits. */
     void draw_toolbar();
     void draw_tools();
     std::size_t current_toc() const {
@@ -2224,11 +1992,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto &toc = document.toc();
         return index + 1 < toc.size() && toc[index+1].depth > toc[index].depth;
     }
-    /**
-     * Whole-book percentage at which a contents entry starts, from counted pages or, until then,
-     * from chapter sizes. -1 for an entry inside a chapter, whose offset is unknown until that
-     * chapter is loaded.
-     */
     int toc_percent(std::size_t index) const {
         const auto &toc = document.toc();
         const auto &spine = document.spine();
@@ -2259,7 +2022,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     static constexpr int contents_top = 350, contents_switch_height = 72, bookmark_row = 112;
     static constexpr std::size_t bookmarks_per_screen =
         (footer_zone - contents_top - 100 - contents_switch_height) / bookmark_row;
-    /** Selects the table of contents or the bookmark list below the panel tabs. */
     void contents_switch(int top) {
         canvas.fill_rect(0, top, 684, contents_switch_height, 15);
         const auto count = bookmarks_usable() && !bookmarks.bookmarks.empty()
@@ -2293,7 +2055,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     static std::string weight_name(const std::string &weight) {
         return weight == "light" ? "细" : weight == "medium" ? "中粗" : weight == "bold" ? "粗" : "常规";
     }
-    /** Only explicit sibling weight files are selected; no directory scan occurs during preview. */
     std::string weight_font(const ReaderSettings &values) const {
         if (values.font_weight == "regular") return values.font;
         const auto dot = values.font.find_last_of('.');
@@ -2325,7 +2086,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         std::snprintf(buf, sizeof(buf), "%.2f", value);
         return buf;
     }
-    /** Two decimals without trailing zeros: 1.50 reads 1.5. */
     static std::string compact(double value) {
         auto shown = decimal(value);
         shown.erase(shown.find_last_not_of('0') + 1);
@@ -2346,7 +2106,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         return pages == 0 ? "不自动全刷" : "每 " + std::to_string(pages) + " 页";
     }
 
-    /** A radio row; show_save_state distinguishes saved and pending selections with text. */
     void choice(int id, const std::string &title, const std::string &description, int y, bool selected,
                 bool pending_choice = false, bool show_save_state = true) {
         for (int row = -18; row <= 18; ++row)
@@ -2361,11 +2120,6 @@ struct ReaderApp::Impl final : DisplayBackend {
             center(pending_choice ? "待保存" : "当前", 540, y + 20, 108, 24);
         hits.push_back({24, y, 636, 116, id});
     }
-    /**
-     * One row of a file list: the name on the left in up to two lines, an optional state word
-     * and the selection ring on the right, and a rule below. A description makes the row 116 px
-     * high instead of 90 and keeps the name to one line.
-     */
     void file_choice(int id, const std::string &name, const std::string &description, int y, bool selected,
                      const char *state = nullptr) {
         const int height = description.empty() ? 90 : 116;
@@ -2387,10 +2141,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         canvas.line(36, y + height - 1, 648, y + height - 1, 12, 2);
         hits.push_back({24, y, 636, height, id});
     }
-    /**
-     * Draws the reading page behind a panel that starts at top and clears the panel area. With
-     * live false the header only names the book, for a page that accepts panel controls alone.
-     */
     bool panel_background(int top, bool live = true) {
         hits.clear();
         if (has_book()) {
@@ -2408,7 +2158,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         canvas.fill_rect(0, top, 684, 1216 - top, 15);
         return true;
     }
-    /** The settings page for reading defaults: default typography and the refresh controls. */
     void draw_reading_settings();
     void draw_refresh() {
         if (refresh_from_settings) { draw_reading_settings(); return; }
@@ -2465,10 +2214,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         button(IntervalSave, "保存间隔", 354, 1080, 306, 96, true);
     }
     static constexpr int settings_pitch = 116;
-    /**
-     * A row with a title and a summary, 132 pixels high unless height says otherwise. A zero id
-     * draws a description without a hit.
-     */
     void settings_row(int id, const std::string &title, const std::string &value, int y, std::uint8_t rule = 12,
                       int height = 132) {
         const int lift = (132 - height) / 2;
@@ -2480,8 +2225,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         hits.push_back({24, y, 636, height, id});
     }
     bool wifi_enabled() const {
-        // Preserve the admitted permission during a request; an upload session also owns card writes.
-        if (portal_live || network_worker_id || update_worker) return true;
+        if (portal_live || network_worker_id || update_worker_id) return true;
         if (bookmark_job) return false;
         const auto cfg = store.load_settings();
         return cfg.diagnostics.empty() && cfg.settings.wifi_enabled;
@@ -2491,7 +2235,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         return wifi_status.phase == WifiPhase::Connected || wifi_status.phase == WifiPhase::Clock ||
                wifi_status.phase == WifiPhase::Request;
     }
-    /** Connection state for the Wi-Fi page title and the settings row. */
     std::string wifi_summary() const {
         if (!wifi_enabled()) return "Wi-Fi 已关闭";
         if (portal_live && !portal_station) return portal_closing ? "正在结束…" : "设备热点已开启";
@@ -2506,7 +2249,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         default: return "未连接";
         }
     }
-    /** The current link, or the saved connection mode, for the sync panel. */
     std::string network_label() const {
         if (wifi_online()) return "已连接" + quoted_name(wifi_status.ssid);
         std::optional<provision::SavedWifi> pinned;
@@ -2514,11 +2256,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!provision::load_selected_network(root, pinned, detail)) return "配置无效";
         return pinned ? "指定 " + pinned->ssid : "自动";
     }
-    /**
-     * Networks for one connection under the saved mode: the pinned network alone, or every saved
-     * network for automatic selection. automatic overrides a pinned mode for this call only.
-     * networks is empty, with problem set, when nothing is saved or network.toml is unusable.
-     */
     WifiTargets wifi_targets(std::string& problem, bool automatic = false) const {
         WifiTargets targets;
         std::vector<provision::SavedWifi> saved;
@@ -2539,7 +2276,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         hits.push_back({420, y - 12, 240, 52, WifiSettings});
     }
     void draw_wifi();
-    /** True when no radio work is running or kept; otherwise wifi_notice names what to end first. */
     bool wifi_free(bool allow_link = false) {
         if (wifi_worker || portal_live || active_network) wifi_notice = "请先结束当前任务。";
         else if (!wifi_enabled()) wifi_notice = "请先打开 Wi-Fi。";
@@ -2575,7 +2311,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         draw_wifi(); overlay();
     }
-    /** Verifies join_draft on the radio; the network is saved only after the join succeeds. */
     void join_wifi() {
         entry.field = TextEntry::Field::None;
         join_unsaved = false;
@@ -2592,7 +2327,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         draw_wifi(); overlay();
     }
-    /** Ends the add-network flow and drops its password draft. */
     void leave_join(WifiPage page) {
         std::fill(join_draft.password.begin(), join_draft.password.end(), '\0');
         join_draft = {};
@@ -2618,7 +2352,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         wifi_page = WifiPage::Joined;
     }
 
-    // --- On-screen keyboard ---------------------------------------------------------------
     static constexpr int keyboard_top = 796;
     static constexpr RefreshRegion entry_field_region{0, 104, 684, 320}, entry_keys_region{0, keyboard_top, 684, 1216 - keyboard_top};
     enum class KeyKind { Character, Shift, Backspace, Letters, Digits, Symbols, Enter };
@@ -2634,15 +2367,11 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::size_t entry_limit() const {
         switch (entry.field) {
         case TextEntry::Field::WifiName: return 32;
-        case TextEntry::Field::WifiPassword: return 64;  // 63 characters, or 64 hexadecimal digits.
+        case TextEntry::Field::WifiPassword: return 64;
         case TextEntry::Field::Endpoint: return 1024;
         default: return 256;
         }
     }
-    /**
-     * A Wi-Fi password is complete as a valid passphrase or key. Empty, for an open network, is
-     * accepted only when the network type is unknown: a typed name or a saved network.
-     */
     bool entry_ready() const {
         if (entry.field == TextEntry::Field::WifiPassword)
             return entry.value.empty() ? !join_secured
@@ -2650,7 +2379,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (entry.field == TextEntry::Field::WifiName) return !entry.value.empty();
         return true;
     }
-    /** Keys of the current layer. Together the three layers hold every printable ASCII character. */
     std::vector<Key> keyboard() const;
     void draw_entry();
     void open_entry(TextEntry::Field field, const std::string& value) {
@@ -2659,26 +2387,16 @@ struct ReaderApp::Impl final : DisplayBackend {
         entry.value = value;
         draw_entry(); overlay();
     }
-    /**
-     * Applies a key to the entry model without touching the canvas, so taps are accepted while a
-     * frame is in flight, also when they began before the previous frame finished. Returns false
-     * when the touch is not on a key.
-     */
     bool key_input(const AppInput& input);
-    /** Batches key taps into one regional Overlay; Display holds equal field and key pixels. */
     void flush_entry() {
         if (view != View::TextEntry || display.busy() || (!entry.field_dirty && !entry.keys_dirty)) return;
-        // The enter key follows the text length, so a text change can also repaint the keys.
-        const bool field = entry.field_dirty, keys = entry.keys_dirty || entry.ready_drawn != entry_ready();
+        const bool field = entry.field_dirty, keys = entry.keys_dirty || entry.enter_key_drawn_enabled != entry_ready();
         draw_entry();
         display.present({{"ui", 0, 0, ++ui_sequence}, {}, FramePurpose::Overlay, RefreshIntent::Content,
                          field && keys ? RefreshRegion{0, 104, 684, 1112} : field ? entry_field_region : entry_keys_region});
     }
     void entry_done();
-    // Firmware update: the page under settings, its requests to the network worker and the
-    // report of an installation on the next start.
     enum class UpdatePage { Home, Checking, Notes, Schema, Downloading, Failed, Ready, Result };
-    /** One laid-out line of release notes. block_rows is the line count of its block on the block's first line, otherwise 0. */
     struct NoteLine {
         std::u32string text;
         std::vector<bool> bold;
@@ -2690,17 +2408,11 @@ struct ReaderApp::Impl final : DisplayBackend {
     UpdatePage update_page = UpdatePage::Home, notes_return = UpdatePage::Home;
     std::optional<UpdateOperation> update_request;
     network::Hold update_hold;
-    // update_active is the request the page waits for; update_worker is the one the worker holds.
-    std::uint64_t update_sequence = 0, update_active = 0, update_worker = 0;
+    std::uint64_t update_sequence = 0, update_request_id = 0, update_worker_id = 0;
     bool update_cancelling = false, update_ready = false, update_rolled_back = false, battery_charging = false;
-    // The manifest came from the update server since this start. A cached one is shown, but its
-    // address and digest are read from the card and are not used for a download.
     bool update_fresh = false;
-    // An installation was requested on a cached manifest; the check in flight continues into it
-    // when the server still names the same image.
     bool update_confirming = false;
     UpdateFailure update_failure = UpdateFailure::None;
-    // Step at which the last check of this start stopped; None after a check that read a manifest.
     enum class CheckStage : std::uint8_t { None, Wifi, Internet, Server };
     struct CheckResult {
         CheckStage stage = CheckStage::None;
@@ -2713,10 +2425,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::vector<NoteLine> note_lines;
     std::vector<std::size_t> note_starts;
     std::size_t note_page = 0;
-    // Text area of a notes screen: later screens start at notes_top, every screen ends at notes_bottom.
     static constexpr int notes_top = 132, notes_first_top = 184, notes_bottom = 984;
-    // The state is kept in the rebuildable cache: clearing the cache also forgets a skipped
-    // version and an installation result that has not been shown yet.
     void load_update_state() {
         std::string cached;
         update_state = {};
@@ -2735,14 +2444,12 @@ struct ReaderApp::Impl final : DisplayBackend {
     static bool update_installable(update::Offer offer) {
         return offer == update::Offer::Newer || offer == update::Offer::NewerSchema || offer == update::Offer::Development;
     }
-    bool update_waiting() const { return update_request || update_worker; }
-    /** Why the battery forbids installation; empty at 20% or above, or while charging. */
+    bool update_waiting() const { return update_request || update_worker_id; }
     std::string update_battery_block() const {
         if (battery_charging || (battery_percent && *battery_percent >= 20)) return {};
         return battery_percent ? "电量 " + std::to_string(*battery_percent) + "%。充电或电量到 20% 以上再安装。"
                                : "电量未知。请确认设备正在充电后再安装。";
     }
-    /** Why an installation cannot start now; empty when it can. */
     std::string update_block() const {
         if (const auto battery = update_battery_block(); !battery.empty()) return battery;
         if (active_network || portal_live || wifi_worker || content_loading || foreground_job || save_job || bookmark_job)
@@ -2750,9 +2457,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         return {};
     }
     static int note_line_height(int size) { return size * 31 / 20; }
-    /** Wraps and paginates release notes for screens whose first text area starts at first_top. */
     void layout_notes(const std::string& markdown, bool truncated, int first_top);
-    /** Draws the lines of screen from top; with bottom set, stops there and marks omitted lines. */
     void draw_note_lines(std::size_t screen, int top, int bottom = 0) {
         const auto begin = note_starts[screen];
         const auto end = screen + 1 < note_starts.size() ? note_starts[screen + 1] : note_lines.size();
@@ -2790,7 +2495,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         text(version, 36, 176, version.size() > 18 ? 32 : 44, 612, 1, true);
         if (!detail.empty()) text(detail, 36, 244, 24, 612, 3);
     }
-    /** The three installation steps; steps before active are marked done. */
     void update_steps(int active) {
         static constexpr const char* names[] = {"1 下载", "2 校验", "3 重启"};
         outline(36, 452, 612, 72);
@@ -2802,7 +2506,6 @@ struct ReaderApp::Impl final : DisplayBackend {
                    i == active ? 1 : 3, i == active);
         }
     }
-    /** A bottom panel over the page already on the canvas; returns the top of its body. Only the panel's controls stay active. */
     int update_sheet(int top, const std::string& title) {
         hits.clear();
         canvas.fill_rect(0, top, 684, 1216 - top, 15);
@@ -2818,7 +2521,6 @@ struct ReaderApp::Impl final : DisplayBackend {
             button(UpdateStart, label, 24, y, 636, 96, offer != update::Offer::Development);
         else {
             disabled_button(label, 24, y, 636, 96);
-            // Battery and activity change without a redraw; a tap evaluates them again.
             if (update_installable(offer)) {
                 outline(24, y, 636, 96);
                 hits.push_back({24, y, 636, 96, UpdateStart});
@@ -2826,7 +2528,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
     }
     enum class CellState : std::uint8_t { Done, Active, Failed, Waiting };
-    /** One of the three solid-frame check-status cells; Waiting uses gray and Failed adds an exclamation mark. */
     void check_cell(int x, int y, const char* label, CellState state, const std::string& value, const std::string& note = "") {
         static constexpr int w = 196, h = 176;
         const std::uint8_t ink = state == CellState::Waiting ? 5 : 1;
@@ -2839,7 +2540,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         text(value, x + 20, y + 68, 28, w - 40, ink, true);
         if (!note.empty()) text(note, x + 20, y + 126, 24, w - 40, ink);
     }
-    /** The three cells from y: steps before failed are done, the failed one is framed in 3 px, later ones did not run. */
     void check_cells(int y, CheckStage failed, const std::string& ssid, const std::string& note) {
         const bool wifi = failed == CheckStage::Wifi, internet = failed == CheckStage::Internet;
         check_cell(36, y, "Wi-Fi", wifi ? CellState::Failed : CellState::Done, wifi ? "未连接" : "已连接", wifi ? note : ssid);
@@ -2848,31 +2548,26 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (failed != CheckStage::Server) check_cell(452, y, "更新服务器", CellState::Waiting, "未进行");
         else check_cell(452, y, "更新服务器", CellState::Failed, "异常", note);
     }
-    /** Day and time of the cached check, such as "今天 10:24"; empty when the time is unknown. */
     std::string update_checked_at() const {
         const auto checked = update_checked();
         return checked.rfind("上次检查 ", 0) == 0 ? checked.substr(std::string("上次检查 ").size()) : "";
     }
-    /** preview_bottom limits the release-note excerpt; a panel drawn over the page passes its own top. */
     void draw_update_home(update::Offer offer, int preview_bottom = 700);
     void draw_update();
-    /** Queues a check or a download for the network worker, or shows why it cannot start. */
     void update_begin(UpdateOperation::Kind kind);
-    /** Ends a request the worker has not taken; otherwise asks the worker to stop and waits for its completion. */
     void update_cancel() {
         network::release(update_hold);
         update_confirming = false;
         if (update_request) {
             update_request.reset();
-            update_active = 0;
+            update_request_id = 0;
             update_page = UpdatePage::Home;
-        } else if (update_worker) update_cancelling = true;
+        } else if (update_worker_id) update_cancelling = true;
     }
     void update_progress(std::uint64_t id, std::uint32_t bytes) {
-        if (!id || id != update_worker || id != update_active || update_cancelling || display.busy() ||
+        if (!id || id != update_worker_id || id != update_request_id || update_cancelling || display.busy() ||
             view != View::Update || update_page != UpdatePage::Downloading || !update_state.manifest) return;
         const auto total = update_state.manifest->size;
-        // Twenty 5% steps while downloading; the last value marks the verification that follows.
         const int step = bytes >= total ? 21 : static_cast<int>(20ull * bytes / total);
         if (step == update_step) return;
         update_step = step;
@@ -2883,7 +2578,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void update_complete(std::uint64_t id, UpdateFailure failure, int status, const std::string& body, const std::string& detail,
                          LinkFailure link, const std::string& ssid);
-    /** Shows the outcome of an installation that restarted the device; the library is already drawn. */
     void update_boot() {
         load_update_state();
         if (update_state.pending_to.empty()) return;
@@ -2894,23 +2588,18 @@ struct ReaderApp::Impl final : DisplayBackend {
         note_lines.clear(); note_page = 0;
         draw_update();
     }
-    /** Opens the update page from settings with the cached state, or returns to work in progress. */
     void update_open() {
         if (view != View::Settings || !bookmark_io_ready()) return;
         message.clear(); update_notice.clear();
-        // Pages that offer an installation show a failed check only through the notice.
         if (update_check.stage != CheckStage::None) update_notice = update_check.body;
         if (!update_waiting()) {
-            // A manifest fetched since this start stays; the card is read only for one that is not.
             if (!update_ready && !update_fresh) load_update_state();
             update_page = UpdatePage::Home;
             note_lines.clear(); note_page = 0;
         }
         draw_update(); overlay();
     }
-    /** Handles a control of the update page; false leaves id to the common controls. */
     bool update_control(int id);
-    /** The single frame shown while the device restarts into verified firmware; ends input like the power-off page. */
     void draw_installing() {
         view = View::PowerOff;
         hits.clear(); canvas.clear();
@@ -2984,7 +2673,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::vector<std::string> lock_screens;
     std::size_t lock_screen_page = 0;
     std::string lock_screen_error, custom_notice;
-    // Rotation image of the prepared sleep frame, and the presented one a later LockScreen job records.
     std::string custom_rotation_name, custom_rotation_shown;
     std::chrono::steady_clock::time_point custom_retry_at{};
     std::optional<std::chrono::steady_clock::time_point> custom_sleep_deadline;
@@ -3026,7 +2714,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     void draw_lock_screens() {
         view = View::LockScreens;
         hits.clear(); canvas.clear(); header("自定义休眠图片", Back, "休眠");
-        // Rotation and the images form one selection; only the selected row names its save state.
         const bool pending = draft.sleep_image != edit_snapshot.config.settings.sleep_image ||
                              draft.sleep_screen != edit_snapshot.config.settings.sleep_screen;
         const char* state = pending ? "待保存" : "当前";
@@ -3045,7 +2732,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         button(Back, "完成", 340, 980, 308, 88, true);
         footer_bar("返回后保存设置", lock_screen_page, pages);
     }
-    /** Requests cancellation and reports whether a custom image worker still owns storage. */
     bool cancel_custom_preparation() {
         if (!counting_job || counting_job->request.kind != ContentJob::Kind::LockScreen || counting_job->done()) return false;
         counting_job->cancel();
@@ -3124,19 +2810,17 @@ struct ReaderApp::Impl final : DisplayBackend {
         value_row(LibraryFolders, "书库文件夹", "最近阅读排序时生效", values.library_folders == "first" ? "置顶" : "跟随最近", 208, 104, false, false);
         footer_bar(notice());
     }
-    /** Loads the saved account into the draft; called when the page is opened from another page. */
     void open_account() {
         sync::Config saved;
         std::string detail;
         std::fill(account.password.begin(), account.password.end(), '\0');
         account = {};
-        account.saved = sync::load_config(root, saved, detail);
-        account.endpoint = account.saved ? saved.endpoint : provision::default_endpoint;
+        account.had_saved_config = sync::load_config(root, saved, detail);
+        account.endpoint = account.had_saved_config ? saved.endpoint : provision::default_endpoint;
         account.username = saved.username;
         account_page = AccountPage::Form;
         account_notice.clear();
     }
-    /** The draft as a configuration; false when a field is missing or malformed. */
     bool account_config(sync::Config& next) const {
         sync::Config saved;
         std::string detail;
@@ -3144,19 +2828,16 @@ struct ReaderApp::Impl final : DisplayBackend {
         next = had ? saved : sync::Config{};
         next.endpoint = account.endpoint;
         next.username = account.username;
-        // An unchanged password keeps the stored key; the plain password is never stored.
         if (!account.password.empty()) next.userkey = md5_hex(account.password);
         else if (!had || saved.username != account.username) next.userkey.clear();
         if (next.device_id.empty()) next.device_id = writer;
         return sync::valid_config(next);
     }
     void draw_sync_settings();
-    /** What an unverified check leaves behind: a saved account is never removed by it. */
     const char* account_kept() const {
-        return !account.saved ? "账户没有保存。" : account.changed ? "修改没有保存，原来的账户保留。" : "原来的账户保留。";
+        return !account.had_saved_config ? "账户没有保存。" : account.changed ? "修改没有保存，原来的账户保留。" : "原来的账户保留。";
     }
     void verify_account();
-    /** Stops an account check; a late completion is discarded by its request ID. */
     void cancel_account() {
         if (!account_check) return;
         network::release(account_hold);
@@ -3166,7 +2847,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         account_check.reset();
         account_page = AccountPage::Form;
     }
-    /** Saves the checked account only after the server accepted it. */
     void account_complete(int status, const std::string& failure, LinkFailure link) {
         const auto checked = *std::exchange(account_check, std::nullopt);
         network::release(account_hold);
@@ -3176,7 +2856,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (!failure.empty()) account_notice = (link != LinkFailure::None ? failure : "没有连上同步服务器。") + std::string(account_kept());
         else if (status == 401 || status == 403) {
             account.check = AccountDraft::Check::Rejected;
-            account_notice = account.saved && !account.changed ? "服务器拒绝了已保存的账户，账户或密码不正确。"
+            account_notice = account.had_saved_config && !account.changed ? "服务器拒绝了已保存的账户，账户或密码不正确。"
                                                                : "账户或密码不正确。" + std::string(account_kept());
         }
         else if (status != 200) account_notice = "同步服务返回 HTTP " + std::to_string(status) + "，无法确认账户。" + account_kept();
@@ -3200,11 +2880,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void inspect_book(const std::string &path, bool keep_message = false);
     void draw_details();
-    /**
-     * Confirmation page: the header names the origin, followed by the question, the affected
-     * object when there is one, and the consequence. The caller adds the two buttons at 1080;
-     * the filled one is the recommended choice.
-     */
     void confirm_page(const std::string &origin, const std::string &question, const std::string &object,
                       const std::string &path, const std::string &consequence) {
         hits.clear(); canvas.clear(); header(origin, 0);
@@ -3255,7 +2930,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         graphics::render_page(canvas, body, title_page);
     }
     void draw_sleep(const std::string &sync_state);
-    /** A network row with a label, optional description and a value followed by a chevron. */
     void entry_row(int id, const std::string &title, const std::string &subtitle, const std::string &value,
                    int y, int height) {
         const auto shown = value.empty() ? std::string("›") : value + " ›";
@@ -3272,7 +2946,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         hits.push_back({24, y, 636, height, id});
     }
     void draw_import();
-    /** Saved-file summary of an upload session: the count and the latest file name. */
     void upload_summary(int y, int title_size) {
         const bool any = portal.saved_books > 0;
         text(portal_closing ? "正在结束…" : portal.phase == PortalPhase::Receiving ? "正在接收 / 保存…" : any ? "已保存 " + std::to_string(portal.saved_books) + " 个文件" : "等待手机上传",
@@ -3285,14 +2958,12 @@ struct ReaderApp::Impl final : DisplayBackend {
                 wrapped("逐个结果见浏览器。结束后书库和字体列表会更新。", 36, y + title_size + 22, 612, 24, true, 3);
         }
     }
-    // Row of the rule above the upload summary on the page that shows the codes.
     int portal_summary_line = 0;
     void draw_portal();
     void draw_usb() {
         view = View::UsbTransfer;
         hits.clear();
         canvas.clear();
-        // TF ownership may already belong to the host; this page uses no card resources.
         if (usb_confirm) {
             confirm_page("USB 文件传输中", "退出 USB 传输？", "", "",
                          "请先在电脑上安全弹出设备。确认后设备会重启，并回到书库。");
@@ -3300,7 +2971,6 @@ struct ReaderApp::Impl final : DisplayBackend {
             button(UsbExitConfirm, "退出并重启", 354, 1080, 306, 96, true);
         } else {
             header("USB 文件传输", 0);
-            // An open USB service only offers the card; it cannot tell whether a computer uses it.
             text(usb_active ? "USB 文件传输已开启" : "USB 文件传输未开启", 36, 160, 40, 612, 1, true);
             const int height = wrapped(usb_active ? "用数据线连接电脑后，TF 卡会显示为可移动磁盘。传输期间设备暂停阅读和同步。完成后先在电脑上安全弹出，再退出并重启。"
                                                   : "传输期间设备暂停阅读和同步。完成后先在电脑上安全弹出，再退出并重启。", 36, 244, 612, 28);
@@ -3341,23 +3011,16 @@ struct ReaderApp::Impl final : DisplayBackend {
         return std::to_string(static_cast<int>(std::lround(std::clamp(fraction, 0., 1.) * 100))) + "%";
     }
     std::string local_position() const { return chapter_label() + " · " + book_percent(); }
-    /**
-     * Spine index of the mapped remote position; false until a mapping supplied its place. Also
-     * false when the remote or the loaded item is non-linear: such an item is outside the
-     * reading order, so it has neither a book percentage nor an order against another position.
-     */
     bool remote_chapter(std::size_t& index) const {
         const auto& spine = document.spine();
         return remote_anchor && remote_place && document.chapter_index_for(remote_anchor->resource, index) &&
                spine[index].linear && chapter_index < spine.size() && spine[chapter_index].linear;
     }
-    /** Percentage of the mapped remote position, computed as book_percent() is; empty when unmapped. */
     std::string remote_book_percent() const {
         std::size_t index;
         if (!remote_chapter(index)) return {};
         return std::to_string(book_percent_value(index, *remote_place, remote_place->offset)) + "%";
     }
-    /** The remote position: its chapter once mapped, otherwise only the percentage the server reported. */
     std::string remote_position() const {
         if (remote_anchor) {
             const auto percent = remote_book_percent();
@@ -3365,11 +3028,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         return remote_fraction >= 0 ? "约 " + percent_text(remote_fraction) : "位置未知";
     }
-    /**
-     * 1 when the mapped remote position lies after the visible page, -1 when it lies before the
-     * page, 0 when it is on the page or was not mapped. Spine item, chapter part and offset are
-     * compared; percentages are not.
-     */
     int further() const {
         std::size_t index;
         if (!remote_chapter(index)) return 0;
@@ -3377,7 +3035,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (remote_place->part != chapter.part) return remote_place->part > chapter.part ? 1 : -1;
         return remote_place->offset >= page.end ? 1 : remote_place->offset < page.start ? -1 : 0;
     }
-    /** Returns the sync panel to its unchecked state after a cancelled request. */
     void sync_cancelled(bool sent) {
         cancel_sync();
         sync_status = sent ? "已取消。已发出的上传仍可能生效，请重新检查远端。" : "已取消。本机位置没有改动。";
@@ -3399,9 +3056,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         sync_cancelled(uploading);
         draw_network_closing(); overlay();
     }
-    // Sync panel slots below the two columns: status text, the network row and two button rows.
-    // The upper row holds checks and other actions that change nothing; uploads sit in the lower
-    // row, so a second tap on "check" never lands on an upload.
     static constexpr int sync_status_top = 816, sync_network_top = 884, sync_upper = 952, sync_lower = 1052;
     void sync_columns(const std::string& remote_value, const std::string& remote_detail) {
         canvas.line(342, 610, 342, 795, 1, 2);
@@ -3417,7 +3071,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         value_row(WifiModeOpen, "网络", "", network_label(), sync_network_top, 60);
     }
     void draw_sync();
-    /** Starts one check. automatic lets this check alone use any saved network instead of the pinned one. */
     void check_sync(bool automatic = false);
     void confirm_upload() {
         const bool replaces = sync_state == SyncState::Different || sync_state == SyncState::Unmapped;
@@ -3432,7 +3085,6 @@ struct ReaderApp::Impl final : DisplayBackend {
             text("本机　" + local, 36, 852, 26, 612);
             text("远端　" + remote + (remote_device.empty() ? "" : "（" + remote_device + "）"), 36, 896, 26, 612);
             wrapped("替换后，" + device + "下次同步会回到 " + book_percent() + "。", 36, 952, 612, 24, true, 3);
-            // Cancel is the filled default; replacing stays an ordinary, available button.
             button(Back, "取消", 24, 1080, 306, 96, true);
             button(SyncConfirm, "替换", 354, 1080, 306, 96);
         } else {
@@ -3450,7 +3102,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         if (kind == ContentJob::Kind::MapUpload) request.record = session.saved_record();
         request.generation = foreground_generation;
         pending_content = std::move(request); content_loading = true;
-        // The panel itself shows the work and its cancel control.
 #ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
         ESP_LOGI("reader_sync", "mapping kind=%s", kind == ContentJob::Kind::MapDownload ? "download" : "upload");
 #endif
@@ -3479,20 +3130,14 @@ struct ReaderApp::Impl final : DisplayBackend {
                 sync_status = "远端位置所在的章节含有表格等暂不支持的内容，无法换算成本机位置，没有跳转。";
         }
     }
-    /** True when the content at a position, not a transient condition, keeps it from being mapped. */
     static bool outside_mapping(const std::string& detail) {
         return detail == sync::kUnsupportedStructure || detail == sync::kUnresolvedVisibility || detail == sync::kLongSourceNode;
     }
-    /**
-     * Records why a position could not be mapped. The texts are fixed and name at most a
-     * resource inside the EPUB; they hold no reading text, position or account data.
-     */
     static void log_mapping_failure([[maybe_unused]] const char* direction, [[maybe_unused]] const std::string& detail) {
 #ifdef ESP_PLATFORM
         ESP_LOGW("reader_sync", "%s mapping failed: %s", direction, detail.c_str());
 #endif
     }
-    /** Reports a saved position that could not be turned into a KOReader position; nothing was sent. */
     void upload_mapping_failed(const std::string& detail) {
         log_mapping_failure("Upload", detail);
         sync_status = memory_error(detail) ? "设备内存不足，暂时无法计算上传位置。" :
@@ -3504,12 +3149,6 @@ struct ReaderApp::Impl final : DisplayBackend {
     void send_upload(const ReadingRecord& record, const std::string& xpointer, double progress_fraction);
     void network_complete(std::uint64_t id, int status, const std::string &bytes,
                           const std::string &failure, LinkFailure link);
-    /**
-     * Chinese wording for a failure detail produced by the document, store or sync layers. Their
-     * details are English diagnostic text for the log; text that is already Chinese passes through.
-     * A colon-separated detail may also include a non-ASCII resource path. The layers report no
-     * error codes; an unknown diagnostic uses the caller's fallback or a generic failure message.
-     */
     static std::string reason(const std::string &detail, const char *fallback = "操作失败") {
         if (auto message = font_error_message(detail); !message.empty()) {
 #ifdef ESP_PLATFORM
@@ -3539,19 +3178,13 @@ struct ReaderApp::Impl final : DisplayBackend {
         return fallback;
     }
     std::string retry_path;
-    /**
-     * Shows a failure. The text up to the first full stop, comma or colon is the specific title;
-     * the rest explains it. retry names a book whose opening failed; repeatable offers to open it again.
-     */
     void error(const std::string &text_in, const std::string &retry = "", bool repeatable = true);
-    /** Shows why a book did not open; only causes that may pass, such as a read failure, offer a retry. */
     void open_failed(const std::string& detail, const std::string& path) {
         const auto cause = reason(detail, "无法解析文件内容");
         const bool transient = cause == "设备内存不足" || cause == "文件在读取过程中发生了变化" ||
                                cause == "文件无法读取，请检查 TF 卡" || cause == "EPUB 格式标识读取失败";
         error(cause + "。原书没有被修改。", path, transient);
     }
-    /** Names the first configuration problem by cause: unreadable, newer schema or invalid content. */
     static std::string settings_file_problem(const std::vector<ConfigDiagnostic>& diagnostics) {
         for (const auto& diagnostic : diagnostics)
             if (diagnostic.status == StoreStatus::IoError) return "设置文件无法读取";
@@ -3570,7 +3203,6 @@ struct ReaderApp::Impl final : DisplayBackend {
         edit_snapshot = std::move(snapshot);
         return true;
     }
-    /** Controls of the Wi-Fi pages, the keyboard page, the account page and the sync panel's network actions. */
     void wifi_control(int id);
     void control(int id);
     void apply_typography();
@@ -3602,5 +3234,4 @@ struct ReaderApp::Impl final : DisplayBackend {
     void input(const AppInput &input);
 };
 
-
-} // namespace pico_page
+}

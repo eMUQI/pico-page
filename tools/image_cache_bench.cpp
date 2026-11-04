@@ -27,7 +27,6 @@ struct TemporaryCard {
 };
 }
 
-// Counts requested C++ allocations of at least one canvas, not C allocations or live heap peaks.
 void* operator new(std::size_t size) {
     void* value = std::malloc(size ? size : 1);
     if (!value) throw std::bad_alloc();

@@ -1,4 +1,3 @@
-"""Keep board implementation dependencies out of application consumers."""
 from pathlib import Path
 import csv
 import os

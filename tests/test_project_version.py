@@ -1,4 +1,3 @@
-"""Version identity checks use an isolated repository and never alter project tags."""
 from pathlib import Path
 import subprocess
 import sys

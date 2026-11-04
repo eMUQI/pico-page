@@ -11,4 +11,4 @@ constexpr int ripple_phase(int tick, int row, int rows, bool reverse = false) {
     const int phase = tick - source_row * ripple_bands / rows;
     return phase >= 0 && phase < ripple_phases ? phase : -1;
 }
-} // namespace pico_page::platform
+}

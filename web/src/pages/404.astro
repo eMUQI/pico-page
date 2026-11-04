@@ -1,6 +1,5 @@
 ---
-// Unknown paths answer 404 with this page. The device's update check relies on that status to
-// tell "no firmware published" from a manifest it cannot read.
+// Cloudflare Pages requires a top-level 404.html to avoid serving the home page for an absent update manifest.
 import Site from "../layouts/Site.astro";
 ---
 <Site title="找不到这一页 · Pico Page" noindex>

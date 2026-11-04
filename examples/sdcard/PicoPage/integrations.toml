@@ -1,4 +1,3 @@
-# Non-secret integration settings. Credential material is NOT stored in this file.
 schema_version = 1
 
 [kosync]

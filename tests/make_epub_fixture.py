@@ -6,7 +6,6 @@ import zipfile
 
 
 def fixture_entries(variant: str = "甲") -> dict[str, str]:
-    """Return UTF-8 files; variant changes book content without changing its name."""
     return {
         "mimetype": "application/epub+zip",
         "META-INF/container.xml": '''<?xml version="1.0" encoding="UTF-8"?>
@@ -43,7 +42,6 @@ def fixture_entries(variant: str = "甲") -> dict[str, str]:
 
 
 def write_fixture(path: Path, entries: dict[str, str | bytes] | None = None) -> None:
-    """Write fixed ZIP timestamps and ordering so file digests are reproducible."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(path, "w") as archive:
         for name, text in (entries if entries is not None else fixture_entries()).items():

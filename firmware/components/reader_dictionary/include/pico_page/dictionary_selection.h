@@ -41,4 +41,4 @@ enum class SelectionEdge { Begin, End };
 Result adjust_selection(std::u32string_view text, Selection visible, SelectionEdge edge,
                         int direction, bool by_scalar, Selection& selection);
 
-}  // namespace pico_page::dictionary
+}

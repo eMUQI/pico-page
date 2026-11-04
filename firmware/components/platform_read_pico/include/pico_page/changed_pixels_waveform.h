@@ -19,4 +19,4 @@ bool build_changed_pixels_waveform(const std::uint8_t* source, std::size_t sourc
                               std::size_t phases,
                               std::uint8_t* destination, std::size_t destination_bytes);
 
-} // namespace pico_page::platform
+}

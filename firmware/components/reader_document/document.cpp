@@ -30,7 +30,6 @@
 
 namespace pico_page {
 char32_t named_html_entity(std::string_view name) {
-    // U+00A0 through U+00FF in order.
     static const char* const latin1[] = {
         "nbsp", "iexcl", "cent", "pound", "curren", "yen", "brvbar", "sect", "uml", "copy", "ordf", "laquo", "not", "shy", "reg", "macr",
         "deg", "plusmn", "sup2", "sup3", "acute", "micro", "para", "middot", "cedil", "sup1", "ordm", "raquo", "frac14", "frac12", "frac34", "iquest",
@@ -54,22 +53,14 @@ char32_t named_html_entity(std::string_view name) {
 namespace {
 std::atomic<std::uint64_t> identity_scans{0}, epub_opens{0};
 constexpr std::uint64_t kMaxBook = 256ULL * 1024 * 1024;
-// XHTML is parsed as a stream and kept one part at a time, so these two bound parsing time
-// rather than memory.
 constexpr std::uint32_t kMaxXmlBytes = 16 * 1024 * 1024;
 constexpr std::uint32_t kNoHtmlRepair = std::numeric_limits<std::uint32_t>::max();
 constexpr std::uint32_t kMaxText = 2 * kChapterPartScalars;
-// A part is closed at the first block boundary past the first set of thresholds and inside a
-// block past the second; the record limits further below are therefore never reached by text.
 constexpr std::size_t kPartRecords = 4096, kPartMetadata = 256 * 1024;
 constexpr std::size_t kPartRecordsHard = 6000, kPartMetadataHard = 448 * 1024;
 constexpr char kPartComplete[] = "Chapter part complete";
 bool platform_memory_room(std::size_t bytes) {
 #ifdef ESP_PLATFORM
-    // Free PSRAM kept while a chapter is parsed. An allocation failure aborts the firmware, so
-    // the parser stops first. Allocations between two checks are smaller than this reserve: one
-    // decoded XML chunk, record vectors growing within their limits, and strings below the
-    // checked sizes.
     constexpr std::size_t reserve = 768 * 1024;
     return heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= bytes + reserve &&
            (bytes < 64 * 1024 || heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >= bytes);
@@ -89,7 +80,6 @@ bool optional_image_uri(std::string_view value) {
 }
 
 bool fail(std::string& error, const std::string& message) { error = message; return false; }
-// Each caller owns its output; no decoder or thread-global error state is shared.
 auto content_failure_reporter(ContentFailureKind* output) {
     if (output) *output = ContentFailureKind::None;
     return [output](std::string& error, const std::string& message,
@@ -190,7 +180,6 @@ bool decode_utf16(std::string_view bytes, bool big_endian, std::u32string& text)
     }
     return !decoder.pending();
 }
-// TXT recognition is deliberately limited to short, explicit chapter labels.
 class TxtTocBuilder {
 public:
     std::vector<TxtHeading> headings;
@@ -451,7 +440,6 @@ struct Xml {
             auto& x = *static_cast<Xml*>(opaque);
             const char32_t scalar = parameter ? 0 : named_html_entity(name);
             if (!scalar) { x.stop(std::string("Unsupported XML entity: ") + name); return; }
-            // Every listed scalar lies in U+00A0 through U+FFFF: two or three UTF-8 bytes.
             const char utf8[] = {static_cast<char>(0xe0 | scalar >> 12), static_cast<char>(scalar < 0x800 ? 0xc0 | scalar >> 6 : 0x80 | (scalar >> 6 & 0x3f)),
                                  static_cast<char>(0x80 | (scalar & 0x3f))};
             if (x.text) scalar < 0x800 ? x.text(utf8 + 1, 2) : x.text(utf8, 3);
@@ -518,7 +506,6 @@ struct Xml {
             const auto end = source.find('>');
             std::string declaration(source.substr(0, end == std::string_view::npos ? 0 : end));
             for (auto& c : declaration) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
-            // XHTML PUBLIC/SYSTEM declarations retain Expat's source tree and strict entities.
             html_declared = trim(declaration) == "<!doctype html";
             if (html_declared && html_fallback) html = std::make_unique<HtmlReader>(html_prefix_bytes);
         }
@@ -550,7 +537,6 @@ constexpr std::size_t kMaxTocEntries = 8192;
 constexpr std::size_t kMaxPackageStrings = 1024 * 1024;
 constexpr std::size_t kMaxNavigationLabel = 32768;
 
-// Counts live string payloads, not allocator capacity or record overhead.
 struct PackageBudget {
     std::size_t bytes = 0;
     bool add(Xml& xml, std::size_t count) {
@@ -590,19 +576,18 @@ struct ChapterParser {
         BlockKind kind = BlockKind::Paragraph;
         std::size_t link = std::numeric_limits<std::size_t>::max();
         std::size_t source_node = std::numeric_limits<std::size_t>::max();
-        std::string node;  // Path of the current text node when the chapter keeps no source_nodes paths.
+        std::string node;
         std::size_t image = std::numeric_limits<std::size_t>::max();
         bool simple_svg = true;
         unsigned svg_images = 0, svg_width = 0, svg_height = 0;
-        std::string background;  // body only: image resource named by its inline style.
+        std::string background;
     };
-    // chapter is the part being collected; the wanted part is moved to result when it closes.
     Chapter chapter;
     Chapter& result;
-    std::uint32_t wanted = 0;  // Part number, or kLastChapterPart.
-    const std::function<bool(const Chapter&)>* match = nullptr;  // Replaces wanted when set.
+    std::uint32_t requested_part = 0;
+    const std::function<bool(const Chapter&)>* match_part = nullptr;
     std::uint32_t part = 0;
-    std::size_t part_nodes = 0;
+    std::size_t part_source_nodes = 0;
     bool split_pending = false, captured = false, resumable = false;
     Xml xml;
     std::vector<Frame> frames;
@@ -611,11 +596,8 @@ struct ChapterParser {
     std::size_t css_bytes = 0;
     std::vector<std::string> css_links;
     bool pending_space = false, seen_body = false;
-    // Every ChapterLoad level applies the same limits and run boundaries; the flags only select
-    // what is stored. keep_mapping: source node paths and text, stylesheets. keep_anchors: the
-    // resource and node of each run.
     bool keep_mapping = true, keep_anchors = true;
-    std::string last_run_node;  // Node of the last run when runs keep no anchors.
+    std::string last_run_node;
     Anchor pending_anchor;
     BlockKind block_kind = BlockKind::Paragraph;
     ChapterParser(Chapter& value, const std::string& resource) : result(value) {
@@ -635,15 +617,14 @@ struct ChapterParser {
         };
         xml.complex_markup = [this]() { if (!frames.empty() && frames.back().body) chapter.plain_dom = false; };
     }
-    bool room(std::size_t bytes) {
+    bool require_memory_room(std::size_t bytes) {
         if (memory_room(bytes)) return true;
         xml.stop(kChapterMemoryError, ContentFailureKind::OutOfMemory);
         return false;
     }
-    /** Appends to the chapter text; growth doubles the buffer while the old one is still held. */
-    bool push(char32_t cp) {
+    bool append_text_scalar(char32_t cp) {
         if (chapter.text.size() == chapter.text.capacity() &&
-            !room(2 * sizeof(char32_t) * std::max<std::size_t>(chapter.text.capacity(), 16))) return false;
+            !require_memory_room(2 * sizeof(char32_t) * std::max<std::size_t>(chapter.text.capacity(), 16))) return false;
         chapter.text.push_back(cp);
         return true;
     }
@@ -659,11 +640,11 @@ struct ChapterParser {
     }
     bool soft_full() const {
         return chapter.text.size() >= kChapterPartScalars || chapter.runs.size() >= kPartRecords ||
-               part_nodes >= kPartRecords || retained_metadata_bytes >= kPartMetadata;
+               part_source_nodes >= kPartRecords || retained_metadata_bytes >= kPartMetadata;
     }
     bool hard_full() const {
         return chapter.text.size() >= kMaxText || chapter.runs.size() >= kPartRecordsHard ||
-               part_nodes >= kPartRecordsHard || retained_metadata_bytes >= kPartMetadataHard;
+               part_source_nodes >= kPartRecordsHard || retained_metadata_bytes >= kPartMetadataHard;
     }
     const std::function<void(const Chapter&)>* visit = nullptr;
     void visit_part(bool last) {
@@ -675,9 +656,8 @@ struct ChapterParser {
         if (separator) chapter.text.push_back(U'\n');
     }
     bool selected() const {
-        return match ? (*match)(chapter) : wanted != kLastChapterPart && part == wanted;
+        return match_part ? (*match_part)(chapter) : requested_part != kLastChapterPart && part == requested_part;
     }
-    /** Hands the collected part to the caller; the stylesheet state stays with the parser. */
     void capture(bool last) {
         auto css = std::move(chapter.css_sources);
         auto warnings = std::move(chapter.warnings);
@@ -695,10 +675,6 @@ struct ChapterParser {
         chapter.long_source_node = long_source;
         captured = true;
     }
-    /**
-     * Closes the collected part because more text follows. Returns false when parsing stops
-     * here: the wanted part is complete and nothing later in the document is needed.
-     */
     bool next_part() {
         const bool inside_block = !split_pending;
         const auto none = std::numeric_limits<std::size_t>::max();
@@ -706,8 +682,6 @@ struct ChapterParser {
         split_pending = false;
         for (const auto& frame : frames)
             if (frame.link < chapter.links.size()) chapter.links[frame.link].end = static_cast<std::uint32_t>(chapter.text.size());
-        // The text node being read continues in the new part. At a block boundary none of its
-        // text belongs to the closed part, so its entry moves; inside a block both parts keep one.
         std::vector<std::pair<Frame*, SourceTextNode>> open;
         for (auto& frame : frames) {
             if (!frame.in_text || frame.source_node == none) continue;
@@ -726,7 +700,6 @@ struct ChapterParser {
         visit_part(false);
         if (!captured && selected()) {
             capture(false);
-            // Position mapping reads the stylesheets and structure of the whole document.
             if (!keep_mapping && !resumable) { xml.stop(kPartComplete); return false; }
             if (resumable) xml.suspend_requested = true;
         }
@@ -734,13 +707,11 @@ struct ChapterParser {
         chapter.links.clear(); chapter.images.clear();
         chapter.source_nodes = std::move(carried);
         chapter.split_node = inside_block;
-        // Carried entries are not counted: the limits must divide a document identically at
-        // every ChapterLoad level, and only a Mapping load has them.
-        retained_metadata_bytes = 0; part_nodes = 0;
+        retained_metadata_bytes = 0; part_source_nodes = 0;
         block_start = 0; source_count = 0; pending_space = false; last_run_node.clear();
         for (auto& frame : frames) frame.source_node = frame.link = frame.image = none;
         for (auto& [frame, node] : open) {
-            ++part_nodes;
+            ++part_source_nodes;
             retained_metadata_bytes += frame->node.size();
             frame->source_node = chapter.source_nodes.size();
             if (keep_mapping) { node.first_child = false; chapter.source_nodes.push_back(std::move(node)); }
@@ -751,15 +722,14 @@ struct ChapterParser {
     void finish_block() {
         pending_space = false;
         const auto end = static_cast<std::uint32_t>(chapter.text.size());
-        if (end > block_start) { chapter.blocks.push_back({block_start, end, block_kind}); push(U'\n'); }
+        if (end > block_start) { chapter.blocks.push_back({block_start, end, block_kind}); append_text_scalar(U'\n'); }
         block_start = static_cast<std::uint32_t>(chapter.text.size());
         if (soft_full()) split_pending = true;
     }
     void append(char32_t cp, const Anchor* source) {
-        // A part is closed only when text follows it, so the last part is never empty.
         if ((split_pending || hard_full()) && !next_part()) return;
         const auto begin = static_cast<std::uint32_t>(chapter.text.size());
-        if (!push(cp) || !source) return;
+        if (!append_text_scalar(cp) || !source) return;
         if (!chapter.runs.empty()) {
             auto& last = chapter.runs.back();
             const auto& node = keep_anchors ? last.source.node : last_run_node;
@@ -770,11 +740,8 @@ struct ChapterParser {
         if (keep_anchors) chapter.runs.push_back({begin, begin + 1, *source});
         else { chapter.runs.push_back({begin, begin + 1, {{}, {}, source->offset}}); last_run_node = source->node; }
     }
-    /** Appends a media placeholder as a block of its own, mapped to the node at path. Returns false after stopping the parser. */
     bool place_media(const std::string& label, const std::string& path, std::uint32_t& begin) {
         finish_block();
-        // A split left pending by the block before takes effect here, so that the placeholder,
-        // its run and the image entry all use offsets of the part that holds them.
         if (split_pending && !next_part()) return false;
         block_kind = BlockKind::Image;
         std::u32string scalar; decode(label.data(), label.size(), scalar);
@@ -796,7 +763,7 @@ struct ChapterParser {
             const auto aspect = attr(attributes, "preserveAspectRatio");
             return aspect.empty() || aspect == "xMidYMid meet" || aspect == "none";
         };
-        if (!room(0)) return;
+        if (!require_memory_room(0)) return;
         if (xml.html) { chapter.plain_dom = false; warn(chapter, "HTML body uses repaired local source anchors"); }
         static const std::set<std::string> plain_elements = {"html", "head", "title", "meta", "link", "style", "body", "h1", "h2", "h3", "h4", "h5", "h6", "p", "div", "section", "article", "aside", "header", "footer", "nav", "blockquote", "span", "em", "strong", "b", "i", "u", "s", "a", "ul", "ol", "li", "br", "code", "small", "sub", "sup", "mark", "abbr", "cite", "q", "del", "ins", "img", "hr"};
         if (!plain_elements.count(name) || xml.foreign_namespace || !attr(attrs, "space").empty()) chapter.plain_dom = false;
@@ -826,7 +793,6 @@ struct ChapterParser {
         const auto inline_css = attr(attrs, "style");
         if (!inline_css.empty()) retain_css("_ {" + inline_css + "}");
         if (name == "body") {
-            // Only the inline style is read; a background set by a stylesheet rule is not found.
             auto at = inline_css.find("background");
             if (at != std::string::npos) at = inline_css.find("url(", at);
             const auto close = at == std::string::npos ? at : inline_css.find(')', at);
@@ -904,7 +870,6 @@ struct ChapterParser {
         auto frame = std::move(frames.back()); frames.pop_back();
         if (frame.name == "svg" && frame.image < chapter.images.size() && (!frame.simple_svg || frame.svg_images != 1)) chapter.images[frame.image].resource.clear();
         if (frame.link != std::numeric_limits<std::size_t>::max()) chapter.links[frame.link].end = static_cast<std::uint32_t>(chapter.text.size());
-        // A page whose only content is the body background, such as a title page, shows that image.
         if (!frame.background.empty() && part == 0 && !captured && chapter.text.empty()) {
             std::uint32_t begin;
             if (!place_media("[图片：未渲染]", frame.path, begin)) return;
@@ -917,7 +882,7 @@ struct ChapterParser {
         if (!frames.empty()) { frames.back().in_text = false; block_kind = frames.back().kind; }
     }
     void characters(const char* bytes, std::size_t size) {
-        if (frames.empty() || !room(0)) return;
+        if (frames.empty() || !require_memory_room(0)) return;
         auto& frame = frames.back();
         if (frame.css != std::numeric_limits<std::size_t>::max()) {
             if (size <= kMaxCssBytes - css_bytes) {
@@ -953,22 +918,20 @@ struct ChapterParser {
             frame.source_offset += static_cast<std::uint32_t>(scalars.size());
             return;
         }
-        // A node that continues after a part was closed inside it is entered again in the new part.
         if (new_node || frame.source_node == std::numeric_limits<std::size_t>::max()) {
             if (new_node) frame.node = frame.path + "/text()[" + std::to_string(frame.text_index) + ']';
             retained_metadata_bytes += frame.node.size();
-            if (part_nodes >= 8192 || retained_metadata_bytes > 512 * 1024) { xml.stop("Chapter source node limit exceeded"); return; }
-            ++part_nodes;
+            if (part_source_nodes >= 8192 || retained_metadata_bytes > 512 * 1024) { xml.stop("Chapter source node limit exceeded"); return; }
+            ++part_source_nodes;
             frame.source_node = chapter.source_nodes.size();
             if (keep_mapping) chapter.source_nodes.push_back({frame.node, {}, new_node && first_child});
         }
         if (keep_mapping) {
             auto& raw = chapter.source_nodes[frame.source_node].text;
             const auto size = raw.size() + scalars.size();
-            if (size > raw.capacity() && !room(sizeof(char32_t) * std::max(2 * raw.capacity(), size))) return;
+            if (size > raw.capacity() && !require_memory_room(sizeof(char32_t) * std::max(2 * raw.capacity(), size))) return;
             raw += scalars;
         }
-        // The loop below may close the part, which invalidates references into the chapter.
         Anchor source{chapter.resource, frame.node, 0};
         for (auto cp : scalars) {
             source.offset = frame.source_offset++;
@@ -982,7 +945,7 @@ struct ChapterParser {
         }
     }
 };
-}  // namespace
+}
 
 namespace {
 struct ZipTiming {
@@ -1021,7 +984,7 @@ struct ChapterStream {
     bool input_finished = false;
     ChapterStream(std::size_t value, const std::string& resource) : index(value), parser(ready, resource) {
         parser.keep_mapping = false; parser.keep_anchors = true; parser.resumable = true;
-        // Large incomplete tokens retain Expat input buffers across pauses; use the original path instead.
+    // Expat retains incomplete token bytes while a parser remains open between calls.
         parser.xml.pending_limit = 64U * 1024;
     }
     ~ChapterStream() { if (iterator) mz_zip_reader_extract_iter_free(iterator); }
@@ -1520,7 +1483,6 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
                 itemrefs.emplace_back(std::move(id), attr(attrs, "linear") != "no");
             }
             if (name == "reference" && parent == "guide" && token(attr(attrs, "type"), "cover")) {
-                // Empty references also consume vector storage and require a record bound.
                 if (guide_covers.size() >= kMaxPackageEntries) { opf.stop("Package/navigation node limit exceeded"); return; }
                 auto href = attr(attrs, "href");
                 if (!budget.add(opf, href.size())) return;
@@ -1576,12 +1538,10 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
     }
     if (next->spine.empty()) return fail(error, "EPUB spine is empty");
     if (next->metadata.title.empty()) { auto slash = path.rfind('/'); next->metadata.title = path.substr(slash == std::string::npos ? 0 : slash + 1); }
-    // Raw OPF records are no longer live; navigation shares the remaining payload budget.
     budget.bytes = next->metadata.title.size() + next->metadata.author.size() + next->metadata.language.size() + next->cover.size() + next->cover_page.size() + navigation.size() + ncx.size();
     std::size_t fallback_bytes = 0;
     for (const auto& item : next->spine) fallback_bytes += item.id.size() + item.resource.size();
     budget.bytes += fallback_bytes;
-    // The mandatory spine-derived table must also fit if every optional source fails.
     if (budget.bytes > kMaxPackageStrings || fallback_bytes > kMaxPackageStrings - budget.bytes)
         return fail(error, "Package/navigation text limit exceeded");
     if (cover_only) { impl_ = std::move(next); return true; }
@@ -1652,7 +1612,6 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, bool c
             toc.erase(std::remove_if(toc.begin(), toc.end(), [](const TocEntry& entry) { return entry.resource.empty(); }), toc.end());
             next->toc = std::move(toc);
         } else if (toc_error == kChapterCancelled) return fail(error, toc_error);
-        // Optional navigation failures fall through to NCX or the spine-derived table.
     }
     if (next->toc.empty()) for (const auto& item : next->spine) next->toc.push_back({item.id, item.resource, "", 0});
     impl_ = std::move(next);
@@ -1669,7 +1628,6 @@ bool EpubDocument::read_cover(const std::string& path, std::vector<std::uint8_t>
     if (!book.open_impl(path, error, true, nullptr, stop, failure_kind)) return false;
     const auto unavailable = [failure_kind] { return content_failure_is_retryable(*failure_kind); };
     if (!book.impl_->cover.empty() && book.read_image(book.impl_->cover, bytes, error, stop, failure_kind)) return true;
-    // A transient failure of a declared image must not become a negative result from fallback probing.
     if (unavailable()) return false;
     if (stop && stop()) return fail(error, kChapterCancelled, ContentFailureKind::Cancelled);
     Chapter unused;
@@ -1678,7 +1636,6 @@ bool EpubDocument::read_cover(const std::string& path, std::vector<std::uint8_t>
     if (unavailable()) return false;
     if (stop && stop()) return fail(error, kChapterCancelled, ContentFailureKind::Cancelled);
     error.clear();
-    // A cover page is a single image; a page long enough to span parts is not one.
     ChapterParser parser(unused, resource);
     if (!book.impl_->parse(resource, parser.xml, error, 262144, stop, failure_kind)) return false;
     parser.finish_block();
@@ -1772,8 +1729,6 @@ std::string Sha256Digest::finish() {
 }
 
 void release(Chapter& chapter) {
-    // Assigning an empty value may keep the capacity of the strings; swapping hands the buffers
-    // to a temporary that frees them.
     Chapter empty;
     std::swap(chapter, empty);
 }
@@ -1802,7 +1757,6 @@ std::size_t EpubDocument::retained_bytes() const {
         bytes += frame.name.capacity() + frame.path.capacity() + frame.node.capacity() + frame.background.capacity();
         for (const auto& child : frame.children) bytes += sizeof(child) + child.first.capacity();
     }
-    // Reading streams never retain Mapping source nodes or stylesheets.
     for (const auto* part : {&parser.chapter, &stream.ready}) {
         bytes += part->resource.capacity() + part->text.capacity() * sizeof(char32_t) +
             part->blocks.capacity() * sizeof(TextBlock) + part->runs.capacity() * sizeof(TextRun) +
@@ -1851,7 +1805,6 @@ bool EpubDocument::read_next_chapter_part(std::size_t index, Chapter& chapter, s
         const auto& resource = owner.spine[index].resource;
         const auto* entry = owner.find_member(resource);
         if (!entry || entry->bytes > kMaxXmlBytes) return abort("Missing or oversized EPUB stream resource");
-        // Iterator input is at most 64 KiB, its DEFLATE window is 32 KiB; no task stack grows.
         if (!memory_room(sizeof(ChapterStream) + sizeof(mz_zip_reader_extract_iter_state) + 96U * 1024))
             return abort(kChapterMemoryError);
         auto stream = std::make_unique<ChapterStream>(index, resource);
@@ -1867,7 +1820,7 @@ bool EpubDocument::read_next_chapter_part(std::size_t index, Chapter& chapter, s
     }
     auto& stream = *owner.chapter_stream;
     auto& parser = stream.parser;
-    parser.captured = false; parser.wanted = parser.part;
+    parser.captured = false; parser.requested_part = parser.part;
 #ifdef ESP_PLATFORM
     auto yielded_at = xTaskGetTickCount();
 #endif
@@ -1900,10 +1853,9 @@ bool EpubDocument::read_next_chapter_part(std::size_t index, Chapter& chapter, s
             if (!parsed) return abort(parser.xml.error);
             continue;
         }
-        // CRC and expanded length must be confirmed before the final part is published.
+        // miniz checks the final expanded length and CRC in mz_zip_reader_extract_iter_free.
         const bool valid = mz_zip_reader_extract_iter_free(std::exchange(stream.iterator, nullptr));
         if (!valid) return abort("Invalid EPUB stream length or CRC");
-        // Deferred tokenization can suspend even the final feed; resume before closing the last part.
         stream.input_finished = true;
         if (!parser.xml.feed("", 0, true)) return abort(parser.xml.error);
     }
@@ -1912,7 +1864,6 @@ bool EpubDocument::read_next_chapter_part(std::size_t index, Chapter& chapter, s
     if (chapter.text.capacity() - chapter.text.size() > 4096 && memory_room(chapter.text.size() * sizeof(char32_t))) {
         std::u32string exact(chapter.text.begin(), chapter.text.end()); chapter.text.swap(exact);
     }
-    // Completion releases parser state immediately; subsequent reading starts a new stream.
     if (chapter.last_part) owner.chapter_stream.reset();
     return true;
 }
@@ -1929,7 +1880,6 @@ bool EpubDocument::load_chapter(std::size_t index, Chapter& chapter, std::string
             if (chapter.last_part) break;
         }
         if (error == kChapterCancelled) return false;
-        // Sequential-only limits must not reject a part the ordinary loader can read.
         release(chapter); error.clear();
     }
     reset_chapter_stream();
@@ -1965,14 +1915,12 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
             parser.xml.html_fallback = true;
             parser.xml.html_prefix_bytes = html_repair_offsets[index];
         }
-        parser.wanted = wanted;
-        parser.match = match;
+        parser.requested_part = wanted;
+        parser.match_part = match;
         if (detail == ChapterLoad::Reading) parser.visit = &visit;
         if (detail != ChapterLoad::Mapping) {
             parser.keep_mapping = false;
             parser.keep_anchors = detail == ChapterLoad::Reading;
-            // Reserve from the source-size and part bounds when memory permits, with room for separators.
-            // Reading can still grow incrementally if this reservation is not admitted.
             const auto scalars = std::min<std::size_t>(spine[index].bytes, kMaxText) + 1024;
             if (memory_room(scalars * sizeof(char32_t))) parser.chapter.text.reserve(scalars);
             else if (detail == ChapterLoad::Layout) return fail(error, std::string(kChapterMemoryError) + ": " + spine[index].resource);
@@ -2009,13 +1957,11 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
                 if (stop && stop()) { pico_page::release(chapter); return fail(error, kChapterCancelled); }
                 parser.retain_css(css);
             }
-            // Stylesheets and structure are properties of the whole document, known only now.
             chapter.css_sources = std::move(parser.chapter.css_sources);
             chapter.warnings = std::move(parser.chapter.warnings);
             chapter.plain_dom = parser.chapter.plain_dom;
             chapter.long_source_node = parser.chapter.long_source_node;
         }
-        // Release substantial excess capacity only when the temporary copy fits the memory budget.
         if (detail == ChapterLoad::Reading && chapter.text.capacity() - chapter.text.size() > 4096 &&
             memory_room(chapter.text.size() * sizeof(char32_t))) {
             std::u32string exact(chapter.text.begin(), chapter.text.end());
@@ -2046,8 +1992,6 @@ bool EpubDocument::Impl::load_txt(Chapter& chapter, std::string& error, ChapterL
         }
         return true;
     };
-    // A character or line ending that crosses the final boundary moves the aligned start of the
-    // last part to the end of the file; the preceding part then holds the rest of the text.
     if (!indexed && last > 0) {
         std::uint32_t start = 0;
         if (!aligned(last * kTxtPartBytes, start)) return fail(error, "无法读取 TXT 文件");
@@ -2165,4 +2109,4 @@ bool Chapter::fragment_offset(const std::string& id, std::uint32_t& scalar_offse
     for (const auto& target : fragments) if (target.id == id) { scalar_offset = target.offset; return true; }
     return false;
 }
-}  // namespace pico_page
+}

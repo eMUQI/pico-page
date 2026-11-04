@@ -42,7 +42,7 @@ thread_local ContentJob::StartFailure injected_failure = ContentJob::StartFailur
 thread_local ContentJob::Kind delayed_kind = ContentJob::Kind::LockScreen;
 thread_local std::chrono::milliseconds injected_delay{};
 #endif
-} // namespace
+}
 #ifndef ESP_PLATFORM
 void ContentJob::fail_starts_for_test(Kind kind, unsigned count, StartFailure failure) {
     failed_kind = kind; failed_starts = count; injected_failure = failure;
@@ -52,7 +52,6 @@ void ContentJob::delay_starts_for_test(Kind kind, std::chrono::milliseconds dela
 }
 #endif
 std::size_t readable_offset(const Chapter& source, std::size_t start) {
-    // Inserted block separators have no source anchor for a saved page start.
     Anchor anchor;
     while (start < source.text.size() && !source.anchor_at(static_cast<std::uint32_t>(start), anchor)) ++start;
     return start;
@@ -142,7 +141,6 @@ ContentJob::StartFailure ContentJob::prepare_worker() {
             ContentJob* job = nullptr;
             if (xQueueReceive(requests, &job, portMAX_DELAY) != pdTRUE) continue;
             job->run();
-            // Publishing completion relinquishes the job; its owner may immediately destroy it.
             job->done_.store(true, std::memory_order_release);
         }
     }, "content_worker", content_stack_bytes, queue, 1, nullptr);
@@ -170,7 +168,6 @@ bool ContentJob::start() {
     )
     start_failure_ = StartFailure::None;
 #ifdef ESP_PLATFORM
-    // Optional work retains the same headroom after accounting for the already reserved stack.
     const auto required_internal = 32U * 1024 + (content_requests ? 0 : content_stack_bytes);
     if ((request.kind == Kind::Pagination || request.kind == Kind::FontIdentity || request.kind == Kind::LibraryCovers ||
          request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite || request.kind == Kind::ContentCacheWrite ||
@@ -230,7 +227,6 @@ void ContentJob::execute() {
 #else
 void ContentJob::run() {
 #endif
-    // The session may already own files when a queued job is cancelled before dispatch.
     struct FinishChapterSession {
         ContentJob& job;
         ~FinishChapterSession() {
@@ -267,7 +263,6 @@ void ContentJob::run() {
         return;
     }
     if (request.kind == Kind::SaveBookmarks) {
-        // Not cancellable: a started commit runs to its result so the owner learns what the card holds.
         const StageTimer timer{"bookmark_commit"};
         FileStore store(request.root);
         if (!request.bookmark_base) { result.bookmark_status = StoreStatus::Invalid; return; }
@@ -321,7 +316,6 @@ void ContentJob::run() {
     if (!session->opened) {
         session->opened = document.open_verified(request.path, request.identity, result.error, stop);
         if (!session->opened) {
-            // A cancelled open reports an error text; the next counting job repeats it, so it is not a failure.
             if (stop()) result.error.clear();
             return;
         }
@@ -353,10 +347,8 @@ void ContentJob::run() {
         }
         result.starts.push_back(static_cast<std::uint32_t>(page.start));
         result.offset = page.end;
-        // Yield between small batches so font verification can also advance while reading.
         if (result.starts.size() >= 8) return;
 #ifdef ESP_PLATFORM
-        // A ready worker must block to give the lower-priority idle task CPU time.
         vTaskDelay(1);
 #endif
         if (checkpoint()) return;
@@ -411,7 +403,6 @@ void ContentJob::render_image() {
     if (cacheable) {
         const StageTimer cache_timer{"image_cache_read", 0};
 #ifdef ESP_PLATFORM
-        // Cache reads retain only the result canvas; cold decoding has a separate, larger budget.
         if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < size + 256U * 1024 ||
             heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < size) {
             result.error = "Image preparation memory unavailable"; return;
@@ -426,7 +417,7 @@ void ContentJob::render_image() {
     }
     if (stop()) return;
 #ifdef ESP_PLATFORM
-    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < image_room ||
+    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < cold_image_memory_required_bytes ||
         heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < size) {
         result.error = "Image preparation memory unavailable"; return;
     }
@@ -499,7 +490,6 @@ bool read_lock_screen_cache(CacheReader& reader, const std::string& header, grap
 }
 
 namespace {
-// Only the temporary cache holds full gray/alpha coverage. Adam7 revisits rows, never final pixels.
 bool stream_lock_png(FileStore& store, std::unique_ptr<CacheReader>& source, const std::string& header,
                      graphics::Canvas* image, bool& alpha, bool& cached, std::string& error, ContentFailureKind& failure_kind,
                      const std::function<bool()>& stop, const std::function<ContentFailureKind()>& source_failure) {
@@ -548,14 +538,12 @@ bool stream_lock_png(FileStore& store, std::unique_ptr<CacheReader>& source, con
         }, bounds, alpha, error, stop, &failure_kind);
     if (!decoded) return false;
     flush();
-    // The card permits eight open files. Release the decoder's handle before reopening for SHA-256.
     source.reset();
     if (stop()) { failure_kind = ContentFailureKind::Cancelled; error = "休眠图片准备已取消或超时"; return false; }
     failure_kind = source_failure();
     if (failure_kind != ContentFailureKind::None) {
         error = "图片已改变或无法校验，请重试"; return false;
     }
-    // Opaque sources retain white fitted margins even when overlay is enabled.
     if (image && !alpha) {
         image->fill_rect(0, 0, 684, bounds.y, 15);
         image->fill_rect(0, bounds.y + bounds.height, 684, 1216 - bounds.y - bounds.height, 15);
@@ -566,7 +554,6 @@ bool stream_lock_png(FileStore& store, std::unique_ptr<CacheReader>& source, con
     constexpr std::size_t gray_stride = 342;
     const bool use_canvas = !alpha && image;
     if (use_canvas) {
-        // The completed opaque canvas already has the cache's exact 4-bit representation.
         const auto size = image->pixels().size();
         for (std::size_t offset = 0; writer && offset < size; offset += 16U * 1024) {
             if (stop()) { failure_kind = ContentFailureKind::Cancelled; error = "休眠图片准备已取消或超时"; return false; }
@@ -575,7 +562,6 @@ bool stream_lock_png(FileStore& store, std::unique_ptr<CacheReader>& source, con
             if (!digest.update(bytes) || !writer->write(base + offset, bytes)) writer.reset();
         }
     }
-    // Batch the readback to avoid one seek/read/write sequence per row on FAT.
     constexpr std::size_t batch_rows = 8;
     std::unique_ptr<char[]> batch;
     if (writer && !use_canvas) {
@@ -599,7 +585,6 @@ bool stream_lock_png(FileStore& store, std::unique_ptr<CacheReader>& source, con
         }
         if (!writer) break;
         if (!alpha) {
-            // Compact forward in place; output bytes always precede unread gray/alpha pairs.
             for (std::size_t x = 0; x < 684 * rows; x += 2) {
                 const auto quantize = [&](std::size_t col) {
                     const unsigned g = static_cast<unsigned char>(batch[col * 2]);
@@ -625,7 +610,7 @@ bool stream_lock_png(FileStore& store, std::unique_ptr<CacheReader>& source, con
     error = cached ? "" : "休眠图片缓存未保存，下次将重新准备";
     return true;
 }
-} // namespace
+}
 
 void ContentJob::prepare_lock_screen() {
     const StageTimer timer{"lock_screen_prepare"};
@@ -660,7 +645,6 @@ void ContentJob::prepare_lock_screen() {
         if (it == result.lock_screens.end()) { result.failure_kind = ContentFailureKind::MissingResource; result.error = "指定图片已不存在"; return; }
         index = static_cast<std::size_t>(it - result.lock_screens.begin());
     } else {
-        // The presented image advances this rotation even when its cursor commit failed.
         const auto last = request.lock_screen_shown.empty() ? store.last_lock_screen() : request.lock_screen_shown;
         const auto it = std::upper_bound(result.lock_screens.begin(), result.lock_screens.end(), last);
         if (it != result.lock_screens.end()) index = static_cast<std::size_t>(it - result.lock_screens.begin());
@@ -731,7 +715,6 @@ void ContentJob::prepare_lock_screen() {
 #ifndef ESP_PLATFORM
             if (request.lock_cache_validated_for_test) request.lock_cache_validated_for_test();
 #endif
-            // Validate before moving the background; the second pass also verifies every consumed byte.
             if (!prepare_canvas()) return;
             if (!read_lock_screen_cache(*reader, header, result.image.get(), alpha, stop)) {
                 result.image.reset(); result.cache_finished = false; result.failure_kind = ContentFailureKind::IoError;
@@ -753,10 +736,8 @@ void ContentJob::prepare_lock_screen() {
                 result.failure_kind = ContentFailureKind::IoError; result.error = "图片读取失败或已改变"; return;
             }
             if (!std::memcmp(signature.data(), "\x89PNG\r\n\x1a\n", 8)) {
-                // A damaged PNG can fail after painting; rotation needs an unchanged base for its next candidate.
                 const bool preserve_background = attempts > 1 && request.sleep_overlay && request.lock_background;
 #ifdef ESP_PLATFORM
-                // Stream input, decoder state, source-coordinate maps and cache rows retain a fixed reserve.
                 const auto output_bytes = request.lock_screen_prepare ||
                     (request.sleep_overlay && request.lock_background && !preserve_background) ? 0U : count;
                 if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < output_bytes + 768U * 1024 ||
@@ -909,8 +890,7 @@ void ContentJob::prepare_cover() {
     }
     if (stop()) return;
 #ifdef ESP_PLATFORM
-    // The document reader admits encoded bytes by their actual size; reserve the output and decoder here.
-    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < image_room ||
+    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < cold_image_memory_required_bytes ||
         heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < count) {
         result.failure_kind = ContentFailureKind::OutOfMemory;
         if (request.kind == Kind::SleepCover) result.error = "Cover preparation memory unavailable";
@@ -932,7 +912,6 @@ void ContentJob::prepare_cover() {
         std::string bytes = request.cache_header;
         bytes.append(reinterpret_cast<const char*>(image->data()), image->pixels().size());
         result.cache_finished = store.save_cache(request.cache_name, bytes) == StoreStatus::Ok;
-        // The image was complete before the optional commit; the app discards it if the sleep request ended.
         result.image = std::move(image);
     } else if (content_failure_is_permanent(result.failure_kind)) {
         const auto current_identity = sha256_file(request.path, stop);
@@ -1085,7 +1064,6 @@ void ContentJob::library_covers() {
         result.covers.emplace_back();
 #ifdef ESP_PLATFORM
         constexpr std::size_t thumbnail_bytes = kLibraryCoverWidth * kLibraryCoverHeight / 2;
-        // Reserve both output copies and parser/decoder headroom; encoded bytes have a separate admission check.
         if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2 * thumbnail_bytes + 768U * 1024 ||
             heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < thumbnail_bytes) {
             result.failure_kind = ContentFailureKind::OutOfMemory; continue;
@@ -1131,4 +1109,4 @@ void ContentJob::library_covers() {
     }
 }
 
-} // namespace pico_page
+}

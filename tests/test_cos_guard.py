@@ -1,4 +1,3 @@
-"""Exercise the firmware bucket cost guard without cloud credentials or SDKs."""
 import copy
 import importlib.util
 import json

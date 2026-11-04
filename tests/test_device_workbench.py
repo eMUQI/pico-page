@@ -51,7 +51,6 @@ def trace(seq, op=1, begin=1, result=0):
 
 
 class Reader:
-    """Scripted stand-in for the diagnostic console: views, page state and queued trace entries."""
     def __init__(self, **faults):
         self.state = dict(view="reading", pending=0, content_busy=0, save_busy=0, save_due=0, saved=1, revision=10,
                           anchor="00000004", font_px=38,
@@ -61,7 +60,6 @@ class Reader:
         self.opens, self.decode, self.clock = 0, None, 1000
 
     def decoding(self, result=None):
-        """Starts the image decode of the page just shown, or ends the running one with result."""
         if not self.faults.get("image"):
             return
         self.clock += 10
@@ -83,21 +81,20 @@ class Reader:
         self.taps.append(point)
         if (view, point) == ("reading", READING_BODY):
             s["view"] = "tools"
-            self.decoding(2)  # leaving the page abandons its decode
+            self.decoding(2)
         elif (view, point) == ("tools", TOOL_TYPOGRAPHY): s["view"], self.draft = "typography", self.font
         elif (view, point) == ("tools", TOOL_SYNC): s["view"] = "sync"
         elif (view, point) == ("tools", HEADER_BACK): s["view"] = "library"
         elif (view, point) == ("typography", PLUS): self.draft = min(self.draft + 1, self.faults.get("largest", 9))
         elif (view, point) == ("typography", MINUS): self.draft = max(self.draft - 1, self.faults.get("smallest", -9))
         elif (view, point) == ("typography", PANEL_CLOSE): s["view"] = "reading"
-        elif (view, point) == ("typography", APPLY) and self.draft == self.font: pass  # nothing to apply
+        elif (view, point) == ("typography", APPLY) and self.draft == self.font: pass
         elif (view, point) == ("typography", APPLY):
             self.font = self.draft
             s.update(view="reading", pages=20 - 4 * self.font, page=4 - self.font + self.faults.get("drift", 0) * (self.font == 0))
-            if not (self.faults.get("sticky") and self.font == 0):  # sticky: the reverse step is shown but not applied
+            if not (self.faults.get("sticky") and self.font == 0):
                 s["font_px"] = 38 + 2 * self.font
         elif (view, point) == ("sync", SYNC_CHECK) and SYNC_CHECK not in self.taps[:-1]:
-            # First check: completes, then maps the remote position; the answer shows differing positions.
             self.emit(20, 2, 1, 10, request=7); self.emit(21, 5, 1, 11, request=7, detail=3)
             self.emit(21, 5, 0, 20, request=7, detail=3)
             self.emit(20, 2, 0, 21, result=self.faults.get("offline", 0), request=7)
@@ -116,10 +113,9 @@ class Reader:
                 self.emit(2, 2, 0, 120, result=1, request=8)
         elif (view, point) == ("sync", SYNC_CANCEL): s["view"] = "network_closing"
         elif (view, point) == ("network_closing", CONTINUE_OFFLINE) and self.faults.get("frame_fails"):
-            s.update(view="error", frame_ok=0)  # the body frame failed and the application shows its error page
+            s.update(view="error", frame_ok=0)
         elif (view, point) == ("network_closing", CONTINUE_OFFLINE):
-            s.update(view="reading", frame=21, revision=s["revision"] + self.faults.get("moved", 0))  # 22 once this tap is counted
-            # The image decodes while the cancelled request is still inside its HTTPS phase.
+            s.update(view="reading", frame=21, revision=s["revision"] + self.faults.get("moved", 0))
             self.emit(4, 3, 1, 200, request=4, detail=2); self.emit(3, 5, 0, 260, result=2, request=8, detail=3)
             self.emit(2, 2, 0, 270, result=0 if self.faults.get("late_cancel") else 2, request=8)
             self.emit(4, 3, 0, 300, request=4, detail=2)
@@ -146,7 +142,7 @@ class Reader:
             step = 1 if verb == "key K3" else -1
             s.update(page=s["page"] + step * (1 + self.faults.pop("skip", 0)), frame=s["frame"] + 1,
                      revision=s["revision"] + (0 if self.faults.get("unsaved") else 1))
-            if not self.faults.get("stale_anchor"):  # stale_anchor: the revision advances over the old record
+            if not self.faults.get("stale_anchor"):
                 s["anchor"] = "%08x" % s["page"]
         elif verb.startswith("tap "):
             self.tap(tuple(map(int, verb.split()[1:])))
@@ -156,7 +152,7 @@ class Reader:
             self.decoding()
             if self.faults.get("fast_decode"): self.decoding(0)
             if self.faults.get("anchor_drift") and self.opens > 1:
-                s["anchor"] = "0000ffff"  # reopening restores the same page number at a different source position
+                s["anchor"] = "0000ffff"
             s.update(view="reading", frame=s["frame"] + 1, internal=s["internal"] - self.faults.get("leak", 0))
         else:
             raise AssertionError(verb)
@@ -166,7 +162,7 @@ class Reader:
 class WorkbenchTest(unittest.TestCase):
     def test_reading_flow_checks_turns_typography_reopen_and_memory(self):
         reader = Reader()
-        reader.busy = 1  # the first input is refused once and retried through the same route
+        reader.busy = 1
         result = reading_flow(self.start(Serial(reader)), "Books/t.epub", 2, 3)
         self.assertEqual((result["status"], result["rounds"], len(result["memory"]), result["internal_drop"]), ("pass", 2, 2, 0))
         self.assertEqual(reader.state["page"], 4)
@@ -184,7 +180,6 @@ class WorkbenchTest(unittest.TestCase):
                 with self.assertRaisesRegex(AssertionError, message):
                     reading_flow(self.start(Serial(Reader(**fault))), "Books/t.epub", 2, 2)
                 self.finish()
-        # At the largest size the scenario steps down and back up; a size that cannot change at all is a failure.
         self.output = Path(self.temp.name) / "largest"
         reader = Reader(largest=0)
         self.assertEqual(reading_flow(self.start(Serial(reader)), "Books/t.epub", 1, 1)["status"], "pass")
@@ -194,19 +189,16 @@ class WorkbenchTest(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "neither font-size step"):
             reading_flow(self.start(Serial(Reader(largest=0, smallest=0))), "Books/t.epub", 1, 1)
         self.finish()
-        # A page number that repeats or skips once marks a start that is not aligned with a counted page.
         self.output = Path(self.temp.name) / "unaligned"
         result = reading_flow(self.start(Serial(Reader(skip=1))), "Books/t.epub", 1, 1)
         self.assertEqual(result["status"], "inconclusive")
         self.assertIn("not aligned with a counted page", result["reason"])
         self.finish()
-        # Firmware that does not report the anchor and font size cannot support the position assertions.
         self.output = Path(self.temp.name) / "old-firmware"
         reader = Reader()
         del reader.state["anchor"]
         self.assertEqual(reading_flow(self.start(Serial(reader)), "Books/t.epub", 1, 1)["status"], "inconclusive")
         self.finish()
-        # The scenario opens the named book itself, wherever the device was; too close to the end is a skip.
         self.output = Path(self.temp.name) / "library"
         reader = Reader()
         reader.state["view"] = "library"
@@ -250,8 +242,6 @@ class WorkbenchTest(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "error page while waiting for view reading"):
             image_sync(self.start(Serial(Reader(image=1, frame_fails=1))), "Books/t.epub")
         self.finish()
-        # HTTP success with an answer the application rejected, a failed request, a decode that ended before
-        # the second reopen, and a request that never reached HTTPS all leave the run undecided.
         for fault, reason in ((dict(answer="failed"), "valid answer: failed"), (dict(offline=1), "did not succeed"),
                               (dict(fast_decode=1), "finished before the second reopen"), (dict(no_https=1), "before its HTTPS phase"),
                               (dict(late_cancel=1), "ended as success, not cancelled")):
@@ -263,8 +253,6 @@ class WorkbenchTest(unittest.TestCase):
                 self.assertIn(reason, result["reason"])
                 self.assertEqual(reader.state["view"], "reading")
                 self.finish()
-        # A failed request is an unmet prerequisite: its recorded failure does not turn the run into a failure,
-        # but any other failure in the same capture still does.
         self.output = Path(self.temp.name) / "prerequisite"
         reader = Reader(image=1, offline=1)
         session = self.start(Serial(reader))
@@ -276,7 +264,6 @@ class WorkbenchTest(unittest.TestCase):
         self.finish()
         self.assertEqual(finalize(self.output, dict(mode="image-sync"), result)["result"]["status"], "inconclusive")
         self.assertEqual(finalize(self.output, dict(mode="image-sync"), dict(result, excused=[]))["result"]["status"], "fail")
-        # An answer without a choice page is left through the header control.
         self.output = Path(self.temp.name) / "same"
         reader = Reader(image=1, answer="same")
         session = self.start(Serial(reader))
@@ -312,12 +299,11 @@ class WorkbenchTest(unittest.TestCase):
     def image_trace(self, *, overlap=True, content_result=0, patch_result=0, frame_result=0,
                     decoded=1, generation=4, frame_request=9, network_result=0, stage=None):
         session = self.start()
-        # Arrival order follows device monotonic time, including the independent network worker.
         events = [(1, 3, 1, 100, 0, 0, 4, 2), (2, 2, 1, 150 if overlap else 210, 0, 0, 8, 0),
                   (1, 3, 0, 200, content_result, 0, 4, 2), (2, 2, 0, 300, network_result, 0, 8, 0),
                   (3, 4, 1, 310, 0, 9, generation, decoded), (3, 4, 0, 320, patch_result, 9, generation, decoded),
                   (4, 0, 1, 330, 0, 22, frame_request, 1), (4, 0, 0, 400, frame_result, 22, frame_request, 1)]
-        if stage:  # (begin_us, end_us, request): one NetworkStage operation of the station phase
+        if stage:
             events += [(5, 5, 1, stage[0], 0, 0, stage[2], 1), (5, 5, 0, stage[1], network_result, 0, stage[2], 1)]
         for seq, (op, kind, begin, timestamp, result, frame, request, detail) in enumerate(sorted(events, key=lambda e: e[3]), 1):
             session._line(f"PP 1 ENTRY seq={seq} time_us={timestamp} op={op} duration_us=10 task=7 "
@@ -343,7 +329,6 @@ class WorkbenchTest(unittest.TestCase):
                 self.assertNotEqual(run["result"]["status"], "pass")
 
     def test_cancelled_network_overlaps_only_with_a_recorded_phase(self):
-        # result 2 = cancelled. Without a phase the request may have stopped at its entry guard.
         cases = ((None, "inconclusive", []), ((160, 190, 8), "pass", ["5"]),
                  ((160, 190, 9), "inconclusive", ["5"]), ((205, 290, 8), "inconclusive", []))
         for stage, expected, stages in cases:
@@ -360,7 +345,6 @@ class WorkbenchTest(unittest.TestCase):
         run = finalize(self.output, dict(mode="image-network"), observation)
         self.assertEqual(run["result"]["status"], "fail")
         self.assertEqual(run["result"]["assertion"], observation)
-        # Missing run conditions or evidence gaps still leave the run undecided; a skipped precondition is not a failure.
         self.assertEqual(finalize(self.output, dict(mode="image-network", missing=["device_build_verified"]),
                                   observation)["result"]["status"], "inconclusive")
         self.output = Path(self.temp.name) / "gap"
@@ -410,7 +394,7 @@ class WorkbenchTest(unittest.TestCase):
             self.assertEqual(image_observation(session)["status"], "inconclusive")
 
     def setUp(self):
-        waits = patch("device_workbench.LONG_WAIT", .3)
+        waits = patch("device_workbench.LONG_WAIT_SECONDS", .3)
         waits.start()
         self.addCleanup(waits.stop)
         self.temp = tempfile.TemporaryDirectory()
@@ -469,7 +453,6 @@ class WorkbenchTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "invalid_key"):
             session.request("key K9")
         counts = self.finish()["counts"]
-        # A refused input while a frame is pending is the device's guard, reported apart from command faults.
         self.assertEqual((counts["busy"], counts["command_failure"]), (1, 1))
 
     def test_disconnect_wakes_request(self):
@@ -566,7 +549,6 @@ class WorkbenchTest(unittest.TestCase):
             self.assertEqual(refresh_scenario(session)["status"], "pass")
             capture.assert_called_once()
         self.finish()
-        # Fake transport and no trace evidence cannot be promoted to hardware acceptance.
         self.assertEqual(finalize(self.output, {}, {"status": "pass"})["result"]["status"], "inconclusive")
 
     def test_prior_drops_baseline_and_new_loss(self):
@@ -631,7 +613,6 @@ class WorkbenchTest(unittest.TestCase):
         self.assertFalse(compare(path, path)["comparable"])
         base["metadata"].update(missing=[], hardware="Read Pico", source_dirty=False)
         path.write_text(json.dumps(base))
-        # Empty sample runs are not a latency comparison.
         self.assertFalse(compare(path, path)["comparable"])
         base["metadata"].update(source_commit="base", source_sha256="basehash", provenance_verified=True,
                                 workload="refresh-v1:K2x1", effective_sdkconfig="CONFIG_PM_ENABLE=y")

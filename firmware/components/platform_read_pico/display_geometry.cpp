@@ -3,4 +3,4 @@
 
 namespace pico_page::platform {
 DisplayInfo display_info() { return {width, height}; }
-} // namespace pico_page::platform
+}

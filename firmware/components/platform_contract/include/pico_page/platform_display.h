@@ -8,7 +8,6 @@
 
 namespace pico_page::platform {
 
-/** Portrait pixel geometry required by present(); constant for the selected platform. */
 struct DisplayInfo { int width = 0, height = 0; };
 /** Available before initialize(), without powering the display or allocating buffers. */
 DisplayInfo display_info();
@@ -25,8 +24,8 @@ DisplayInfo display_info();
  * hold_unchanged_footer holds equal nonwhite pixels in the display profile's reading-footer region during
  * body updates, including directional effects; white-to-white retains the source
  * waveform maintenance drive. Clearing and recovery ignore it.
- * Provider recovery may clear and redraw the whole frame; details belong to the display profile.
- * false means that the physical display state is no longer a valid baseline.
+ * Recovery may clear and redraw the whole frame. Early argument or owner rejection
+ * preserves the previous baseline. A failure after validation invalidates it.
  */
 bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
              std::string& error, std::optional<RefreshRegion> region = std::nullopt,
@@ -45,12 +44,11 @@ void cancel_display();
 
 /** Content-update profiles; full-clean frames always use the provider's clearing profile. */
 enum class PageWaveform {
-    Gray16,     // Default 16-level grayscale update.
-    Gray8,      // 8-level update with reduced tonal resolution.
-    Ripple,     // Directional page-turn effect.
+    Gray16,
+    Gray8,
+    Ripple,
 };
 
-/** Selects the waveform for subsequent non-clearing present() calls. */
 void set_page_waveform(PageWaveform waveform, bool reverse_page_effect = false);
 
 /**
@@ -62,12 +60,11 @@ bool set_page_effect_waveform(PageWaveform waveform, std::string& error);
 /** Application-task query; Gray16 means use the configured refresh profile. */
 PageWaveform page_effect_waveform();
 
-/** Durations of the most recent present(), in microseconds. */
 struct PresentTiming {
-    std::int64_t copy_us = 0;   // Pixel conversion into the display representation.
-    std::int64_t power_us = 0;  // Display power preparation.
+    std::int64_t copy_us = 0;
+    std::int64_t power_us = 0;
     std::int64_t draw_us = 0;   // Physical update, including any clearing.
 };
 PresentTiming present_timing();
 
-} // namespace pico_page::platform
+}

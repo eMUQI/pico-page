@@ -1,5 +1,4 @@
 -- Host-only instrumentation loaded through KOReader's documented user-patch entry point.
--- The reader, document engine, KOSync plugin, HTTP client and event handlers are unmodified.
 local UIManager = require("ui/uimanager")
 local ReaderUI = require("apps/reader/readerui")
 local json = require("json")

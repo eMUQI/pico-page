@@ -54,7 +54,6 @@ public:
     /** Replaces the previous face; the caller retains immutable font bytes until this face is closed. */
     bool open_memory(const unsigned char* bytes, std::size_t length);
     bool open_fallback();
-    /** Releases the font file and all cached glyphs and widths. The object can be opened again. */
     void close();
     /** SHA-256 of the compiled fallback font bytes. */
     static const char* fallback_identity();
@@ -102,7 +101,7 @@ private:
     struct Glyph {
         int left = 0, top = 0;
         unsigned width = 0, rows = 0;
-        std::vector<std::uint8_t> coverage;  // Row-major, one byte per pixel.
+        std::vector<std::uint8_t> coverage;
         std::list<std::uint64_t>::iterator age;
     };
     std::unordered_map<std::uint64_t, Glyph> glyphs_;
@@ -133,7 +132,7 @@ struct PositionedGlyph {
     int baseline;
     int font_px;
     bool bold = false;
-    int advance = 0;  // Measured during layout; hit testing never accesses the font face.
+    int advance = 0;
 };
 
 struct ImageBox {
@@ -245,4 +244,4 @@ bool draw_qr(Canvas& canvas, std::string_view text, int x, int y, int size);
 /** Invalid UTF-8 sequences become U+FFFD; valid non-BMP characters remain one scalar. */
 std::u32string decode_utf8(std::string_view text);
 
-}  // namespace pico_page::graphics
+}

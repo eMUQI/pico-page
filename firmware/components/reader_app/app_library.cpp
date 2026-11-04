@@ -11,7 +11,6 @@ const char* ReaderApp::Impl::library_scan_notice() const {
 }
 
 ReaderApp::Impl::LibraryProblem ReaderApp::Impl::library_problem() const {
-    // A card cannot be mounted again without a restart, so every card state offers the power menu.
     if (!card_available) {
         switch (card_issue) {
         case CardIssue::NotInserted:
@@ -48,7 +47,6 @@ ReaderApp::Impl::LibraryProblem ReaderApp::Impl::library_problem() const {
 
 void ReaderApp::Impl::draw_library_problem(int top) {
     const auto problem = library_problem();
-    // Same rhythm as the empty library: title, grey summary, a rule and rows; only a sequence is numbered.
     const int title_top = top == 104 ? 160 : top + 40;
     text(problem.title, 36, title_top, 40, 612, 1, true);
     int y = title_top + 62 + wrapped(problem.summary, 36, title_top + 62, 612, 26, true, 3) + 30;
@@ -83,16 +81,12 @@ void ReaderApp::Impl::scan_library() {
     folder_root = std::find(roots.begin(), roots.end(), folder) != roots.end();
     const auto listing = folder.empty() ? library_home_root : folder;
     if (folder.empty()) {
-        // A new card has no default directory yet. Custom roots are never created, because a
-        // missing one more likely means a typing error or a different card.
         const auto default_root = std::find(roots.begin(), roots.end(), ReaderSettings{}.library_roots.front());
         if (default_root != roots.end()) {
             int error_number = 0;
             const auto created = store.create_top_level_directory(*default_root, error_number);
-            // With several roots the others stay listed; the missing one is skipped as before.
             if (created == StoreStatus::IoError && error_number && listing == *default_root) {
                 library_scan = LibraryScan::CreateFailed;
-                // FatFs reports both a full card and write protection as EACCES.
                 std::uint64_t total = 0, available = 1;
                 library_create_full = error_number == ENOSPC ||
                     (store.card_space(total, available) && available == 0);
@@ -142,7 +136,6 @@ void ReaderApp::Impl::scan_library() {
 #endif
             const int stat_error = errno;
             if (result != 0) {
-                // A name may disappear between directory enumeration and metadata lookup.
                 if (stat_error != ENOENT) library_scan = LibraryScan::Partial;
                 continue;
             }
@@ -188,7 +181,6 @@ void ReaderApp::Impl::scan_library() {
     if (library_scan != LibraryScan::Complete) message = library_scan_notice();
 }
 
-
 void ReaderApp::Impl::describe(Entry &entry) {
     if (entry.described) return;
     entry.described = true;
@@ -198,8 +190,6 @@ void ReaderApp::Impl::describe(Entry &entry) {
     }
     entry.status = recalled_position(entry.path).second;
     if (!entry.status.empty()) return;
-    // Without a cache entry only the existence of a position is known. A cleared record is
-    // a small file that names its state.
     char record[512] = {};
     std::size_t length = 0;
     bool unreadable = false;
@@ -214,7 +204,6 @@ void ReaderApp::Impl::describe(Entry &entry) {
     entry.status = unreadable ? "位置未知" : length && !std::strstr(record, "\"cleared\"") ? "在读" :
                    entry.recent_rank < 128 ? "已打开" : "未读";
 }
-
 
 ReaderApp::Impl::Cover ReaderApp::Impl::draw_cover(const Entry &entry, int x, int y, bool decode,
                  int width, int height) {
@@ -249,7 +238,6 @@ ReaderApp::Impl::Cover ReaderApp::Impl::draw_cover(const Entry &entry, int x, in
         covers.push_back({entry.path, info.st_size, info.st_mtime, std::move(pixels)});
         found = covers.end() - 1;
     }
-    // An entirely white thumbnail identifies nothing; the title is drawn in its place.
     if (std::all_of(found->pixels.begin(), found->pixels.end(), [](std::uint8_t packed) { return packed == 0xff; }))
         return Cover::None;
     if (width == kLibraryCoverWidth && height == kLibraryCoverHeight)
@@ -257,7 +245,6 @@ ReaderApp::Impl::Cover ReaderApp::Impl::draw_cover(const Entry &entry, int x, in
     else blit_reduced(found->pixels, kLibraryCoverWidth, kLibraryCoverHeight, x, y, width, height);
     return Cover::Drawn;
 }
-
 
 void ReaderApp::Impl::draw_library(bool decode, bool keep_cover_attempts) {
     release_chapter_session();
@@ -281,7 +268,6 @@ void ReaderApp::Impl::draw_library(bool decode, bool keep_cover_attempts) {
                parent_is_library ? nullptr : &font);
         hits.back() = {0, 0, 396, 104, Back};
     }
-    // Importing needs a mounted card; without one the cell is left out entirely.
     if (card_available) {
         canvas.line(396, 0, 396, 102, 1, 2);
         center("导入", 396, 32, 144, 26);
@@ -290,7 +276,6 @@ void ReaderApp::Impl::draw_library(bool decode, bool keep_cover_attempts) {
     canvas.line(540, 0, 540, 102, 1, 2);
     center("设置", 540, 32, 144, 26);
     hits.push_back({540, 0, 144, 104, Settings});
-    // The card appears where reading normally starts and only when there is a book to resume.
     int top = 104;
     if (card_available && library_resume()) {
         std::string position;
@@ -348,7 +333,6 @@ void ReaderApp::Impl::draw_library(bool decode, bool keep_cover_attempts) {
     button(LibrarySort, library_sort == "recent" ? (library_recent ? "最近阅读 ⇅" : "书名（回退）") : library_sort == "name_desc" ? "书名 ↓" : "书名 ↑", 300, top + 14, 164, 60, false, 22);
     button(LibraryList, "列表", 476, top + 14, 92, 60, !library_grid, 22);
     button(LibraryGrid, "卡片", 568, top + 14, 92, 60, library_grid, 22);
-    // Compact controls retain the full toolbar height as their touch target.
     for (auto i = controls_begin; i < hits.size(); ++i) {
         hits[i].y = top;
         hits[i].h = 88;
@@ -366,7 +350,6 @@ void ReaderApp::Impl::draw_library(bool decode, bool keep_cover_attempts) {
             const int x = 36 + static_cast<int>((i - begin) % 3) * 214;
             const int y = top + 112 + static_cast<int>((i - begin) / 3) * 320;
             if (entry.directory) {
-                // A tabbed frame distinguishes a folder from a book without a cover.
                 canvas.fill_rect(x, y, 84, 2, 1);
                 canvas.fill_rect(x, y, 2, 22, 1);
                 canvas.fill_rect(x + 82, y, 2, 22, 1);
@@ -392,7 +375,6 @@ void ReaderApp::Impl::draw_library(bool decode, bool keep_cover_attempts) {
                 group_gap = 32;
             }
             const int y = top + 90 + static_cast<int>(i - begin) * 126 + group_gap;
-            // A book without a cover leaves no empty slot; its title starts at the margin.
             const auto cover = entry.directory ? Cover::None : draw_cover(entry, 37, y + 22, decode,
                                                                             kRowCoverWidth, kRowCoverHeight);
             undecoded = undecoded || cover == Cover::Undecoded;
@@ -425,7 +407,6 @@ void ReaderApp::Impl::draw_library(bool decode, bool keep_cover_attempts) {
         };
 }
 
-
 void ReaderApp::Impl::inspect_book(const std::string &path, bool keep_message) {
     if (!keep_message) message.clear();
     detail_path = path; detail_metadata = {}; detail_progress = {}; detail_cover.reset();
@@ -454,7 +435,6 @@ void ReaderApp::Impl::inspect_book(const std::string &path, bool keep_message) {
     }
     draw_details();
 }
-
 
 void ReaderApp::Impl::draw_details() {
     view = View::BookDetails;
@@ -488,7 +468,6 @@ void ReaderApp::Impl::draw_details() {
     footer_bar(notice());
 }
 
-
 void ReaderApp::Impl::manage_book() {
     if (!bookmark_io_ready()) return;
     if (detail_path == book_path) {
@@ -517,7 +496,6 @@ void ReaderApp::Impl::manage_book() {
         message = "原书已删除，阅读记录保留";
         scan_library(); draw_library();
     } else {
-        // The recorded percentage belongs to the cleared position.
         store.save_cache(position_name(detail_path), "");
         message = "本地进度已清除，远端记录未修改";
         inspect_book(detail_path, true);
@@ -525,5 +503,4 @@ void ReaderApp::Impl::manage_book() {
     overlay();
 }
 
-
-} // namespace pico_page
+}

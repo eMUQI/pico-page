@@ -1,4 +1,3 @@
-"""Check public documentation without private handoff records."""
 import contextlib
 import io
 from pathlib import Path

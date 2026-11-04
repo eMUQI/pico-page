@@ -5,7 +5,6 @@
 
 namespace pico_page::platform {
 
-/** One transport retry for a read-only request, within its original monotonic deadline. */
 class HttpRequestRecovery {
 public:
     static constexpr std::int64_t total_us = 25'000'000;
@@ -28,4 +27,4 @@ private:
     bool read_only_, retried_ = false;
 };
 
-} // namespace pico_page::platform
+}

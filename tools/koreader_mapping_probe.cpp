@@ -28,7 +28,6 @@ void require_image(ldomNode* node, const pico_page::Chapter& chapter, const pico
 }
 }
 
-// This host-only verifier links the unmodified external CREngine, never the firmware.
 int main(int argc, char** argv) {
     if (argc < 3 || argc > 4) { std::cerr << "Usage: koreader_mapping_probe original.epub body-font.ttf [sample-step]\n"; return 2; }
     const std::size_t step = argc == 4 ? std::strtoul(argv[3], nullptr, 10) : 1;
@@ -72,7 +71,6 @@ int main(int argc, char** argv) {
                         const bool image = image_anchor(source);
                         require(!reference.isNull(), "Reference cannot resolve " + pointer);
                         if (image) {
-                            // Every scalar of the placeholder shares the element; its first one counts the image.
                             require_image(reference.getNode(), chapter, source, pointer);
                             pico_page::Anchor before;
                             if (!pos || !chapter.anchor_at(pos - 1, before) || !(before == source)) ++images;

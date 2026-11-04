@@ -42,4 +42,4 @@ void SleepUsbConsole::resume() {
     pending_ = false;
 }
 
-} // namespace pico_page::platform
+}

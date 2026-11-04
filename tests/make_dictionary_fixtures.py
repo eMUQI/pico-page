@@ -1,4 +1,3 @@
-"""Small synthetic StarDict fixtures; no third-party dictionary content."""
 import gzip
 import pathlib
 import struct

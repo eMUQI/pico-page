@@ -42,4 +42,4 @@ bool power_off(std::string& error);
  * May block for driver command retries; failures are logged without changing system time. */
 void persist_clock();
 
-} // namespace pico_page::platform
+}

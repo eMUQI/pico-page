@@ -6,7 +6,6 @@ void ReaderApp::Impl::draw_wifi() {
     if (!portal_live && !bookmark_io_ready()) return;
     view = View::WifiSettings;
     hits.clear(); canvas.clear();
-    // A running upload session owns card writes. This page uses only admitted state and snapshots.
     if (portal_live) {
         header("Wi-Fi", Back, "传输");
         text(wifi_summary(), 36, 132, 34, 612, 1, true);
@@ -18,7 +17,7 @@ void ReaderApp::Impl::draw_wifi() {
     std::optional<provision::SavedWifi> pinned;
     const bool readable = provision::load_networks(root, wifi_saved, detail) &&
         provision::load_selected_network(root, pinned, detail);
-    wifi_target = pinned ? pinned->ssid : "";
+    pinned_wifi_ssid = pinned ? pinned->ssid : "";
     const bool full = wifi_saved.size() >= provision::saved_limit;
     const auto known = [&](const std::string& ssid) {
         return std::any_of(wifi_saved.begin(), wifi_saved.end(), [&](const auto& wifi) { return wifi.ssid == ssid; });
@@ -32,15 +31,13 @@ void ReaderApp::Impl::draw_wifi() {
         const bool enabled = wifi_enabled(), online = wifi_online();
         text(wifi_summary(), 36, 132, 34, 612, 1, true);
         text(!enabled ? "同步和经已保存网络传书不会联网"
-             : !wifi_target.empty() ? "指定" + quoted_name(wifi_target) + "，不改用其他网络"
+             : !pinned_wifi_ssid.empty() ? "指定" + quoted_name(pinned_wifi_ssid) + "，不改用其他网络"
              : online ? "自动 · 信号最强" : "自动连接信号最强的已保存网络", 36, 186, 22, 612, 3);
         value_row(WifiToggle, "Wi-Fi", "", enabled ? "开" : "关", 236, 104, true, false);
         if (enabled) {
-            value_row(WifiModeOpen, "连接方式", "", wifi_target.empty() ? "自动" : "指定", 340);
+            value_row(WifiModeOpen, "连接方式", "", pinned_wifi_ssid.empty() ? "自动" : "指定", 340);
             value_row(WifiManage, "已保存网络", "", saved_count + " 个", 444);
             value_row(WifiAdd, "添加网络", "", "", 548);
-            // One action for the current state: a link or an attempt can be ended. A kept
-            // connection that an access point session suspended is offline and can be resumed.
             if (online || wifi_status.phase == WifiPhase::Connecting ||
                 (wifi_worker && wifi_kind == WifiOperation::Kind::Connect))
                 button(WifiDisconnect, "断开", 24, 700, 636, 96);
@@ -67,14 +64,13 @@ void ReaderApp::Impl::draw_wifi() {
         break;
     }
     case WifiPage::Mode:
-        header("连接方式", Back, wifi_root == WifiPage::Mode ? "同步" : "Wi-Fi");
-        // A tap applies the mode at once, so the radio mark alone shows the current one.
-        choice(WifiModeAuto, "自动", "信号最强的已保存网络，连不上时试下一个", 130, wifi_target.empty(), false, false);
+        header("连接方式", Back, wifi_entry_page == WifiPage::Mode ? "同步" : "Wi-Fi");
+        choice(WifiModeAuto, "自动", "信号最强的已保存网络，连不上时试下一个", 130, pinned_wifi_ssid.empty(), false, false);
         text("指定", 36, 272, 22, 612, 3);
         if (wifi_saved.empty()) note("还没有已保存的网络。", 316);
         for (std::size_t i = 0; i < wifi_saved.size(); ++i)
             choice(WifiModeBase + static_cast<int>(i), wifi_saved[i].ssid, "只连这个网络",
-                   312 + static_cast<int>(i) * 124, wifi_saved[i].ssid == wifi_target, false, false);
+                   312 + static_cast<int>(i) * 124, wifi_saved[i].ssid == pinned_wifi_ssid, false, false);
         wrapped("指定后只连这个网络。它被忘记后回到自动。", 36,
                 336 + static_cast<int>(std::max<std::size_t>(wifi_saved.size(), 1)) * 124, 612, 24, true, 3);
         wrapped(notice_text, 36, 1060, 612, 24);
@@ -84,14 +80,14 @@ void ReaderApp::Impl::draw_wifi() {
         note("已保存 " + saved_count + " 个，最多 " + std::to_string(provision::saved_limit) + " 个", 130);
         for (std::size_t i = 0; i < wifi_saved.size(); ++i)
             entry_row(WifiSavedBase + static_cast<int>(i), wifi_saved[i].ssid, "",
-                      wifi_saved[i].ssid == wifi_target ? "指定" : "", 180 + static_cast<int>(i) * 112, 112);
+                      wifi_saved[i].ssid == pinned_wifi_ssid ? "指定" : "", 180 + static_cast<int>(i) * 112, 112);
         if (!full) button(WifiAdd, "添加网络", 24, 212 + static_cast<int>(wifi_saved.size()) * 112, 636, 96);
         wrapped(notice_text, 36, 1060, 612, 24);
         break;
     case WifiPage::Detail:
         header("网络", Back, "已保存网络");
         title_lines(wifi_choice, 36, 132, 612, 34, true, 1);
-        text(wifi_choice == wifi_target ? "指定网络" : "已保存", 36, 186, 22, 612, 3);
+        text(wifi_choice == pinned_wifi_ssid ? "指定网络" : "已保存", 36, 186, 22, 612, 3);
         button(WifiUpdatePassword, "更新密码", 24, 260, 636, 96);
         button(WifiForget, "忘记网络", 24, 380, 636, 96);
         wrapped(notice_text, 36, 1060, 612, 24);
@@ -99,7 +95,7 @@ void ReaderApp::Impl::draw_wifi() {
     case WifiPage::Forget:
         header("忘记网络", 0);
         title_lines("忘记" + quoted_name(wifi_choice) + "？", 36, 160, 612, 34, true, 2);
-        wrapped(wifi_choice == wifi_target ? "已保存的密码会删除。连接方式将改回自动连接。" : "已保存的密码会删除。",
+        wrapped(wifi_choice == pinned_wifi_ssid ? "已保存的密码会删除。连接方式将改回自动连接。" : "已保存的密码会删除。",
                 36, 280, 612, 28);
         button(Back, "取消", 24, 1080, 306, 96, true);
         button(WifiForgetConfirm, "忘记网络", 354, 1080, 306, 96);
@@ -117,7 +113,6 @@ void ReaderApp::Impl::draw_wifi() {
         for (std::size_t i = first; i < std::min(wifi_nearby.size(), first + per_screen); ++i) {
             const auto& found = wifi_nearby[i];
             const bool saved = known(found.ssid);
-            // A full list still accepts a new password for a network that it already holds.
             value_row(saved || !full ? WifiNearbyBase + static_cast<int>(i) : 0, found.ssid, "",
                       saved ? "已保存" : found.open ? "开放网络" : "需要密码", 176 + static_cast<int>(i - first) * 92, 92);
         }
@@ -159,7 +154,6 @@ void ReaderApp::Impl::draw_wifi() {
     }
 }
 
-
 std::vector<ReaderApp::Impl::Key> ReaderApp::Impl::keyboard() const {
     static constexpr const char* rows[3][3] = {{"qwertyuiop", "asdfghjkl", "zxcvbnm"},
                                                {"1234567890", "-/:;()$&@\"", ".,?!'_%"},
@@ -168,20 +162,20 @@ std::vector<ReaderApp::Impl::Key> ReaderApp::Impl::keyboard() const {
     std::vector<Key> keys;
     const auto characters = [&](const char* values, int x, int y) {
         for (; *values; ++values, x += pitch) {
-            const char value = entry.shift && entry.layer == 0 ? static_cast<char>(*values - 32) : *values;
+            const char value = entry.shift && entry.layer == TextEntry::Layer::Letters ? static_cast<char>(*values - 32) : *values;
             keys.push_back({std::string(1, value), std::string(1, value), KeyKind::Character, x, y, width, height});
         }
     };
-    const auto row = rows[entry.layer];
+    const auto row = rows[static_cast<std::size_t>(entry.layer)];
     characters(row[0], left, first);
     characters(row[1], left + (10 - static_cast<int>(std::strlen(row[1]))) * pitch / 2, first + 100);
     const int third = first + 200, fourth = first + 300;
-    if (entry.layer == 0) keys.push_back({entry.shift ? "小写" : "大写", "", KeyKind::Shift, left, third, 94, height});
-    else keys.push_back({entry.layer == 1 ? "#+=" : "123", "", entry.layer == 1 ? KeyKind::Symbols : KeyKind::Digits, left, third, 94, height});
+    if (entry.layer == TextEntry::Layer::Letters) keys.push_back({entry.shift ? "小写" : "大写", "", KeyKind::Shift, left, third, 94, height});
+    else keys.push_back({entry.layer == TextEntry::Layer::Digits ? "#+=" : "123", "", entry.layer == TextEntry::Layer::Digits ? KeyKind::Symbols : KeyKind::Digits, left, third, 94, height});
     characters(row[2], left + 100, third);
     keys.push_back({"退格", "", KeyKind::Backspace, 580, third, 94, height});
-    keys.push_back({entry.layer == 0 ? "123" : "abc", "", entry.layer == 0 ? KeyKind::Digits : KeyKind::Letters, left, fourth, 128, height});
-    if (entry_url() && entry.layer == 0) {
+    keys.push_back({entry.layer == TextEntry::Layer::Letters ? "123" : "abc", "", entry.layer == TextEntry::Layer::Letters ? KeyKind::Digits : KeyKind::Letters, left, fourth, 128, height});
+    if (entry_url() && entry.layer == TextEntry::Layer::Letters) {
         keys.push_back({"https://", "https://", KeyKind::Character, 144, fourth, 130, height});
         int x = 280;
         for (const char* value : {".", "/", ":"}) {
@@ -193,7 +187,6 @@ std::vector<ReaderApp::Impl::Key> ReaderApp::Impl::keyboard() const {
                     "", KeyKind::Enter, 484, fourth, 190, height});
     return keys;
 }
-
 
 void ReaderApp::Impl::draw_entry() {
     view = View::TextEntry;
@@ -220,7 +213,6 @@ void ReaderApp::Impl::draw_entry() {
     header(title, Back, wifi ? "网络" : "同步");
     text(prompt, 36, 132, 24, 612, 3);
     outline(24, 176, 636, 88);
-    // The end of the text and the cursor stay visible; earlier characters scroll out to the left.
     ui.set_pixel_size(34);
     const auto scalars = decode_utf8(entry.value);
     const std::u32string shown = entry.masked ? std::u32string(scalars.size(), U'•') : scalars;
@@ -240,7 +232,6 @@ void ReaderApp::Impl::draw_entry() {
     text(hint, 36, 372, 24, 612, 3);
     canvas.fill_rect(0, keyboard_top, 684, 3, 1);
     const auto keys = keyboard();
-    // Keys carry no controls; key_input() matches touches against the entry model.
     for (const auto& key : keys) {
         const bool enter = key.kind == KeyKind::Enter;
         const int size = key.kind == KeyKind::Character && key.text.size() == 1 && key.text != " " ? 34 : 24;
@@ -253,22 +244,17 @@ void ReaderApp::Impl::draw_entry() {
         center(key.label, key.x, key.y + (key.h - size) / 2 - 3, key.w, size, enter ? 15 : 1);
     }
     entry.field_dirty = entry.keys_dirty = false;
-    entry.ready_drawn = entry_ready();
+    entry.enter_key_drawn_enabled = entry_ready();
 }
-
 
 bool ReaderApp::Impl::key_input(const AppInput& input) {
     if (!input.touch) return false;
-    // Keys are matched against the entry model rather than the drawn controls: a tap that
-    // follows an undrawn change, such as the enter key after the last required character,
-    // meets the keys as they are now. Each key also owns half of the gap around it.
     const auto keys = keyboard();
     const auto inside = [](const Key& key, int x, int y) {
         return x >= key.x - 3 && x < key.x + key.w + 3 && y >= key.y - 4 && y < key.y + key.h + 4;
     };
     const auto found = std::find_if(keys.begin(), keys.end(), [&](const Key& key) { return inside(key, input.x, input.y); });
     if (found == keys.end()) return false;
-    // A contact that left the key it started on enters nothing.
     if (input.touch_bounds && (!inside(*found, input.touch_bounds->min_x, input.touch_bounds->min_y) ||
                                !inside(*found, input.touch_bounds->max_x, input.touch_bounds->max_y))) return true;
     const auto& key = *found;
@@ -277,30 +263,25 @@ bool ReaderApp::Impl::key_input(const AppInput& input) {
         if (entry.value.size() + key.text.size() > entry_limit()) { entry.field_dirty = true; break; }
         entry.value += key.text;
         entry.field_dirty = true;
-        // Shift applies to one letter.
         if (entry.shift) { entry.shift = false; entry.keys_dirty = true; }
         break;
     case KeyKind::Backspace:
         if (entry.value.empty()) break;
-        // A saved account name may hold multi-byte characters; remove the whole last one.
         while (entry.value.size() > 1 && (static_cast<unsigned char>(entry.value.back()) & 0xC0) == 0x80) entry.value.pop_back();
         entry.value.pop_back();
         entry.field_dirty = true;
         break;
     case KeyKind::Shift: entry.shift = !entry.shift; entry.keys_dirty = true; break;
-    case KeyKind::Letters: entry.layer = 0; entry.keys_dirty = true; break;
-    case KeyKind::Digits: entry.layer = 1; entry.shift = false; entry.keys_dirty = true; break;
-    case KeyKind::Symbols: entry.layer = 2; entry.keys_dirty = true; break;
+    case KeyKind::Letters: entry.layer = TextEntry::Layer::Letters; entry.keys_dirty = true; break;
+    case KeyKind::Digits: entry.layer = TextEntry::Layer::Digits; entry.shift = false; entry.keys_dirty = true; break;
+    case KeyKind::Symbols: entry.layer = TextEntry::Layer::Symbols; entry.keys_dirty = true; break;
     case KeyKind::Enter:
-        // Ending the entry draws another page, which needs an idle display.
         if (!display.busy()) entry_done();
         return true;
     }
-    // A changed layer has other keys under the same positions; redraw before the next tap is read.
     if (entry.keys_dirty && !display.busy()) flush_entry();
     return true;
 }
-
 
 void ReaderApp::Impl::entry_done() {
     const auto field = entry.field;
@@ -334,5 +315,4 @@ void ReaderApp::Impl::entry_done() {
     draw_sync_settings(); overlay();
 }
 
-
-} // namespace pico_page
+}

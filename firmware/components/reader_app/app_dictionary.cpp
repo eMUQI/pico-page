@@ -3,22 +3,13 @@
 
 namespace pico_page {
 namespace {
-// Minimum panel height. The lower panel covers the reading footer. When neither side of the selection
-// has this height, fixed panels leave a 96-pixel band that exceeds the largest configured body line
-// (56 px x 1.65), so one side still leaves a single selected line visible.
 constexpr int kDictionaryPanelHeight = 560;
 constexpr int kDictionaryLowerTop = 1216 - kDictionaryPanelHeight;
-// Handles extend 12 px beyond the selection and keep a 22-pixel hit radius.
 constexpr int kDictionarySelectionClearance = 36;
-// Lookups still running after this delay are likely preparing a dictionary on first use.
 constexpr auto kDictionarySlowDelay = std::chrono::seconds(3);
-// Panel rows: 72-pixel header, status line, definition, then a range, source and page row.
-// In the lower and full-screen panels the 88-pixel page row coincides with the reading footer,
-// so the sleep notice, which saves and redraws y >= footer_top, replaces exactly that row.
 constexpr int kDictionaryHeaderHeight = 72, kDictionaryDefinitionTop = 108;
 constexpr int kDictionaryRowHeight = 72, kDictionaryTableHeight = 2 * kDictionaryRowHeight + 88;
 constexpr std::size_t kDictionarySourcesPerPage = 5;
-// Marks an enabled dictionary that the latest scan no longer found.
 constexpr const char* kMissingDictionary = "Missing dictionary";
 std::string dictionary_error(const dictionary::Result& status) {
     switch (status.status) {
@@ -32,7 +23,7 @@ std::string dictionary_error(const dictionary::Result& status) {
     }
     return "词典暂不可用。";
 }
-}  // namespace
+}
 
 void ReaderApp::Impl::queue_dictionary(ContentJob::Request request) {
     abandon_content(); clear_prefetch(); invalidate_counting();
@@ -86,7 +77,6 @@ void ReaderApp::Impl::draw_dictionary_settings() {
         }
         canvas.line(36, y + 176, 648, y + 176, 12, 2);
     }
-    // A failed scan reports its cause below instead of claiming that no dictionary exists.
     if (dictionary_items.empty() && !content_loading)
         wrapped(dictionary_notice.empty() ? "没有找到词典。请复制含 .ifo、.idx 和 .dict 或 .dict.dz 的词典文件夹，再重新扫描。"
                                           : "无法读取词典目录，请重新扫描。", 36, 220, 612, 26);
@@ -110,8 +100,6 @@ std::pair<int, int> ReaderApp::Impl::dictionary_bounds(bool full) const {
         upper_overlap += std::max(0, std::min(line.bottom, kDictionaryPanelHeight) - std::max(line.top, 0));
         lower_overlap += std::max(0, std::min(line.bottom, kDictionaryLowerTop + kDictionaryPanelHeight) - std::max(line.top, kDictionaryLowerTop));
     }
-    // Prefer the larger side that leaves every selected line and both handle hit areas visible.
-    // An edge that would cut a body line moves past it so the line stays whole.
     int upper_bottom = selection_top - kDictionarySelectionClearance;
     int lower_top = selection_bottom + kDictionarySelectionClearance;
     for (const auto& line : page.lines) {
@@ -163,7 +151,6 @@ bool ReaderApp::Impl::dictionary_contact_input(const AppInput& input, bool accep
             const auto boxes = graphics::selection_boxes(page, dictionary_selection.begin, dictionary_selection.end);
             if (boxes.empty()) return true;
             const auto& box = hit->id == DictionaryStart ? boxes.front() : boxes.back();
-            // Preserve the pointer-to-text offset when grabbing a handle outside the glyphs.
             dictionary_drag_dx = (hit->id == DictionaryStart ? box.x : box.x + box.width - 1) - input.x;
             dictionary_drag_dy = box.y + box.height - 1 - input.y;
             const auto anchor = hit->id == DictionaryStart ? dictionary_selection.end - 1 : dictionary_selection.begin;
@@ -193,7 +180,6 @@ bool ReaderApp::Impl::dictionary_contact_input(const AppInput& input, bool accep
     } else if (input.event.phase == Phase::Cancel) {
         dictionary_contact = 0; dictionary_close_pending = true;
     }
-    // System cancellation defers drawing until the power/card transition has taken ownership.
     if (!input.queued) flush_dictionary_selection();
     return true;
 }
@@ -214,7 +200,6 @@ void ReaderApp::Impl::submit_dictionary_selection() {
         dictionary_selecting = true; draw_dictionary(); overlay(); return;
     }
     const bool previewed = std::exchange(dictionary_selecting, false);
-    // Exact forms precede inflections; longer Chinese candidates precede shorter ones.
     std::stable_sort(dictionary_candidates.begin(), dictionary_candidates.end(), [](const auto& a, const auto& b) {
         if (a.inflection != b.inflection) return !a.inflection;
         return a.selection.end - a.selection.begin > b.selection.end - b.selection.begin;
@@ -267,7 +252,7 @@ void ReaderApp::Impl::query_dictionary(bool retry, bool defer_panel) {
     request.dictionary_candidates = dictionary_candidates; request.dictionary_retry = retry;
     if (request.dictionary_candidates.empty()) { dictionary_notice = "未找到词条。"; draw_dictionary(); overlay(); return; }
     queue_dictionary(std::move(request));
-    if (defer_panel) dictionary_panel_due = std::chrono::steady_clock::now() + dictionary_panel_delay;
+    if (defer_panel) dictionary_panel_due = std::chrono::steady_clock::now() + dictionary_loading_panel_delay;
     else { draw_dictionary(); overlay(); }
 }
 
@@ -383,7 +368,6 @@ void ReaderApp::Impl::draw_dictionary() {
         }
     } else wrapped(dictionary_notice.empty() ? "暂无可显示释义。" : dictionary_notice, 36, area.top + 8, 612, 24);
 
-    // Connected cells share their rules; an unavailable cell keeps its place with a disabled label and no hit area.
     const int range_top = bottom - kDictionaryTableHeight, source_top = range_top + kDictionaryRowHeight;
     const int page_top = source_top + kDictionaryRowHeight;
     canvas.line(0, range_top, 683, range_top, 1, 2);
@@ -407,9 +391,6 @@ void ReaderApp::Impl::draw_dictionary() {
         const auto& id = settings.dictionary_enabled[index];
         const auto found = std::find_if(dictionary_items.begin(), dictionary_items.end(), [&](const auto& item) { return item.id == id; });
         const auto name = !dictionary_name.empty() ? dictionary_name : found != dictionary_items.end() && !found->info.name.empty() ? found->info.name : basename(id);
-        // Numbering skips sources whose lookup proved an invalid or unsupported format, as source
-        // navigation does; the current source keeps its place so a failing choice still shows where
-        // it is. Scan results are not used: they can be incomplete or report recoverable errors.
         const auto unusable = [&](const std::string& source) {
             return std::any_of(dictionary_failed_sources.begin(), dictionary_failed_sources.end(),
                                [&](const auto& item) { return item.id == source; });
@@ -430,7 +411,6 @@ void ReaderApp::Impl::draw_dictionary() {
         const int name_width = std::min(text_width(body, name, 26), 342 - 40 - 16 - order_width);
         const int left = 171 + (342 - name_width - 16 - order_width) / 2;
         text(body, name, left, top_for_middle(body, 26, middle), 26, name_width, gray, false);
-        // The order shares the name's face, size and top so both sit on one baseline.
         text(body, order, left + name_width + 16, top_for_middle(body, 26, middle), 26, order_width, gray, false);
         if (!content_loading) hits.push_back({172, source_top + 1, 341, kDictionaryRowHeight - 1, DictionarySources});
     }
@@ -599,10 +579,8 @@ void ReaderApp::Impl::finish_dictionary(ContentJob& job) {
             dictionary_pages.assign(1, {}); dictionary_page_number = 0; dictionary_layout_anchor = 0; page_dictionary(0, false); return;
         } else if (job.request.kind == ContentJob::Kind::DictionaryLookup && !job.request.dictionary_entry_lookup &&
                    result.dictionary_status.status != dictionary::Status::Cancelled) {
-            // A real miss and a failed source cannot establish absence across the full query.
             if (result.dictionary_partial && result.dictionary_status.status == dictionary::Status::NotFound)
                 dictionary_notice = "没有查到可用释义，可重试或检查词典设置。";
-            // Every enabled source was read and lacks the selection, so source navigation cannot find it either.
             else if (!job.request.dictionary_navigation && dictionary_search_all &&
                      result.dictionary_status.status == dictionary::Status::NotFound)
                 dictionary_previous_exhausted = dictionary_next_exhausted = true;
@@ -616,7 +594,6 @@ void ReaderApp::Impl::finish_dictionary(ContentJob& job) {
         });
         draw_dictionary_settings();
     } else draw_dictionary();
-    // A successful lookup returns earlier and keeps the deadline while its first page is laid out.
     dictionary_panel_due = {};
     overlay();
 }
@@ -638,7 +615,6 @@ std::optional<dictionary::Selection> ReaderApp::Impl::dictionary_range_step(int 
         return dictionary::adjust_selection(chapter.text, {page.start, page.end}, edge, direction, scalar, selection);
     };
     auto status = step(by_scalar);
-    // Shrinking a single word falls back to one scalar; expansion requires another lookup unit.
     const bool shrinking = id == DictionaryStartNext || id == DictionaryEndPrevious;
     if (!by_scalar && shrinking && status.status == dictionary::Status::NotFound) status = step(true);
     if (!status) return std::nullopt;
@@ -711,7 +687,6 @@ void ReaderApp::Impl::dictionary_control(int id, bool by_scalar) {
         if (id == DictionaryRetry && !dictionary_contact) submit_dictionary_selection();
         return;
     }
-    // A range step replaces any lookup in flight; the full-screen view returns to the panel to show the selection.
     if (id >= DictionaryStartPrevious && id <= DictionaryEndNext) {
         if (settings.dictionary_enabled.empty()) return;
         const auto selection = dictionary_range_step(id, by_scalar);
@@ -765,4 +740,4 @@ void ReaderApp::Impl::dictionary_control(int id, bool by_scalar) {
         queue_dictionary(std::move(request)); draw_dictionary(); overlay();
     }
 }
-}  // namespace pico_page
+}

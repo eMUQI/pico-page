@@ -99,21 +99,19 @@ int main() {
     assert(first->starts == 1 && first->ends == 1);
     cancelled.store(false);
 
-    // A restart must finish the old server before changing any borrowed session state.
     SessionState second;
     auto next = session; next.code = "two"; next.context = &second;
     stop_failures = 2;
     stop_probe = [&] {
         assert(token("/one") == old_token);
-        rejected_upload(old_token); // Stopping rejects even authenticated new requests.
+        rejected_upload(old_token);
         assert(first->starts == 1 && second.starts == 0);
-        // Model an already-entered handler's late completion callback.
         if (stop_attempts == 2) session.activity(session.context, false);
     };
     assert(start_upload_server(next, error));
     assert(stop_attempts == 3 && waits == 2 && first->ends == 2);
     stop_probe = {};
-    first.reset(); // No server now borrows this context.
+    first.reset();
     const auto new_token = token("/two");
     assert(new_token != old_token);
     rejected_upload(old_token);
@@ -126,7 +124,6 @@ int main() {
     stop_portal_server();
     assert(stop_attempts == 5);
 
-    // Registration failure must also finish cleanup before returning the borrowed context.
     fail_registration = true; stop_failures = 2;
     assert(!start_upload_server(next, error) && !error.empty());
     assert(!active && stop_attempts == 8 && waits == 5);
@@ -138,7 +135,6 @@ int main() {
     stop_portal_server();
     assert(!active && stop_attempts == 9);
 
-    // A prolonged outage must not surrender ownership or admit a replacement server.
     assert(start_upload_server(next, error));
     const auto retained_token = token("/two");
     const auto starts_before = second.starts, ends_before = second.ends;

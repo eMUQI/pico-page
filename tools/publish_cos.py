@@ -22,7 +22,6 @@ ROLE_ARN = 'qcs::cam::uin/100009571345:roleName/PicoPageCosPublisher'
 
 
 def publish(cos, directory):
-    """Upload immutable images with inherited ACLs and verify every byte before site deployment."""
     version = ota_manifest.check_directory(directory, ORIGIN)
     if not version:
         raise ValueError('Firmware manifest is required')
@@ -36,13 +35,12 @@ def publish(cos, directory):
                 raise
             print('Uploading COS firmware ' + path.name, flush=True)
             try:
-                # A file body is sent in chunks instead of one image-sized socket write.
                 with path.open('rb') as body:
                     cos.put_object(Bucket=BUCKET, Key=path.name, Body=body, EnableMD5=True,
                                    ContentType='application/octet-stream',
                                    Metadata={'x-cos-forbid-overwrite': 'true'})
             except Exception as error:
-                # A concurrent publisher may create the same immutable object after the missing-object check.
+                # COS rejects the conditional PUT if another publisher created the object after the GET.
                 if getattr(error, 'get_error_code', lambda: None)() != 'FileAlreadyExists':
                     raise
             response = cos.get_object(Bucket=BUCKET, Key=path.name)
@@ -57,7 +55,6 @@ def publish(cos, directory):
 
 
 def verify_public(directory):
-    """Verify public COS bytes; permit HTTP 403 only when all deployed firmware stays identical."""
     def compare(base, path):
         request = urllib.request.Request(base + path.name, headers={
             'User-Agent': 'PicoPage deployment verification/1.0'})
@@ -74,7 +71,6 @@ def verify_public(directory):
         if error.code != 403:
             raise
         error.close()
-        # A closed download origin must not prevent page updates that preserve published firmware.
         manifest = json.loads((directory / 'manifest.json').read_text(encoding='utf-8'))
         if not (directory / ota_manifest.full_name(manifest['version'])).is_file():
             raise ValueError('Unchanged firmware verification requires the full-flash image')
@@ -88,7 +84,6 @@ def verify_public(directory):
 
 
 def github_credentials():
-    """Exchange a GitHub job identity for a 15-minute role session without storing cloud keys."""
     from tencentcloud.common.common_client import CommonClient
     from tencentcloud.common.profile.client_profile import ClientProfile
 
@@ -118,7 +113,6 @@ def github_credentials():
 def main():
     from qcloud_cos import CosConfig, CosS3Client
 
-    # SDK ERROR records retain transport causes; signed request headers are logged only at DEBUG.
     logger = logging.getLogger('qcloud_cos.cos_client')
     logger.setLevel(logging.ERROR)
     logger.addHandler(logging.StreamHandler())
@@ -126,7 +120,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('directory', type=Path)
     args = parser.parse_args()
-    # Reject invalid release inputs before requesting any cloud credentials.
     if not ota_manifest.check_directory(args.directory, ORIGIN):
         raise ValueError('Firmware manifest is required')
     print('Requesting COS publisher credentials', flush=True)

@@ -118,7 +118,6 @@ void selection_checks() {
     const std::u32string invalid(1, static_cast<char32_t>(0xd800));
     assert(!selection_candidates(invalid, {0, 1}, {0, 1}, 0, true, candidates) && candidates.empty());
 
-    // Range steps: Latin words with the separators between them, Han one character at a time.
     const auto step = [](std::u32string_view text, Selection visible, Selection from, SelectionEdge edge, int direction,
                          bool by_scalar = false) {
         const auto status = adjust_selection(text, visible, edge, direction, by_scalar, from);
@@ -158,7 +157,6 @@ void selection_checks() {
     assert(is(step(sentence, all, {4, 5}, SelectionEdge::End, -1, true), Status::NotFound, 4, 5));
     assert(is(step(sentence, all, {0, 3}, SelectionEdge::Begin, -1), Status::NotFound, 0, 3));
     assert(is(step(sentence, all, {22, 28}, SelectionEdge::End, 1), Status::NotFound, 22, 28));
-    // A partial word grows to the word boundary in a word step.
     assert(is(step(sentence, all, {6, 10}, SelectionEdge::Begin, -1), Status::Ok, 4, 10));
     assert(is(step(sentence, all, {6, 10}, SelectionEdge::End, 1), Status::Ok, 6, 14));
     const std::u32string han = U"他把书合上，听见";
@@ -178,7 +176,7 @@ void selection_checks() {
     assert(is(step(sentence, all, {4, 14}, SelectionEdge::End, 0), Status::InvalidFormat, 4, 14));
     assert(is(step(sentence, {5, 14}, {4, 14}, SelectionEdge::End, 1), Status::InvalidFormat, 4, 14));
 }
-}  // namespace
+}
 int main(int argc, char** argv) {
     text_checks();
     selection_checks();
@@ -215,12 +213,10 @@ int main(int argc, char** argv) {
     assert(entries[0].synonym && entries[1].headword == "apple");
     found("别名"); read(entries[0].ordinal); assert(fields[0].text == "词条释义");
     found("omega"); read(entries[0].ordinal); assert(fields[0].text.size() == 4205);
-    // Scans that reach either end of the index bound later lookups without hiding boundary words.
     assert(dictionary.lookup("龥", entries, more).status == Status::NotFound);
     assert(dictionary.lookup("龥", entries, more).status == Status::NotFound);
     assert(dictionary.lookup("0", entries, more).status == Status::NotFound);
     found("中文"); found("APPLE"); found("别名");
-    // extensible reports whether any longer headword (or synonym) begins with the word.
     bool extensible = false;
     assert(dictionary.lookup("dupl", entries, more, 0, {}, &extensible).status == Status::NotFound && extensible);
     assert(dictionary.lookup("duplicates", entries, more, 0, {}, &extensible).status == Status::NotFound && !extensible);
@@ -275,8 +271,6 @@ int main(int argc, char** argv) {
     found("alias"); read(entries[0].ordinal); assert(fields[0].text == "upper");
     verified.clear(); assert(prepared("compressed.ifo") && dictionary.reused_index());
     {
-        // Unchanged sizes and times reuse the recorded digest, as sdcv trusts its offset cache;
-        // a same-size edit with a restored time needs a full check, and a new time triggers one.
         const auto copy = fs::path(card) / "identity"; fs::create_directories(copy);
         for (const auto* suffix : {".ifo", ".idx", ".dict.dz", ".syn.dz"})
             fs::copy_file(root + "/compressed" + suffix, copy / (std::string("main") + suffix));
@@ -286,7 +280,6 @@ int main(int argc, char** argv) {
         { std::fstream f(index, std::ios::in | std::ios::out | std::ios::binary); assert(f); f.put('B'); }
         fs::last_write_time(index, written);
         verified.clear(); assert(dictionary.open_prepared(main, store, verified) && dictionary.reused_index());
-        // A full check ignores the stale result already held for this mount.
         assert(dictionary.open_prepared(main, store, verified, {}, true).status == Status::InvalidFormat);
         fs::last_write_time(index, written + std::chrono::seconds(10));
         verified.clear(); assert(dictionary.open_prepared(main, store, verified).status == Status::InvalidFormat);
@@ -331,7 +324,6 @@ int main(int argc, char** argv) {
         [&] { return ++callbacks > 8; }).status == Status::Cancelled);
     assert(prepared("packed.ifo.gz"));
     dictionary.close(); verified.clear();
-    // A replacement that keeps its size but has a new modification time invalidates the previous mount's cache.
     const auto replace_path = fs::path(root) / "plain.idx";
     const auto replaced = [&](char first, int seconds) {
         const auto written = fs::last_write_time(replace_path);

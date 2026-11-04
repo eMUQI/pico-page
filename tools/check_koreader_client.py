@@ -143,7 +143,6 @@ def check(client, bridge, book, font_size):
                 recovered = json.loads(run(str(bridge), str(book), "receive", input=json.dumps(uploaded), capture_output=True, text=True).stdout)
                 if recovered["pointer"] != uploaded["progress"]:
                     raise ValueError("Native peer changed the official client position")
-                # This transport adapter is loopback HTTP only; production endpoints remain HTTPS-only.
                 request = urllib.request.Request(endpoint + "/syncs/progress", data=offer["body"].encode(), headers=offer["headers"], method=offer["method"])
                 with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=5) as response:
                     if response.status != 200:
@@ -174,7 +173,6 @@ def check(client, bridge, book, font_size):
     finally:
         server.shutdown()
         server.server_close()
-        # Disposable account material is not needed in retained evidence.
         (state / "fixture.json").unlink(missing_ok=True)
 
 

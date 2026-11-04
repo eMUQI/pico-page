@@ -36,7 +36,7 @@ int main() {
         StyleSheet selectors;
         assert(selectors.append("section > .b .x, #selected{font-size:30px} p, :unsupported{font-size:40px}") == Result::Complete);
         Element root{"section", "", ""}, b1{"div", "", "b", &root}, other{"div", "", "", &b1}, b2{"div", "", "b", &other}, leaf{"p", "", "x", &b2};
-        assert(near(style(selectors, leaf).font_px, 30)); // Descendant matching must backtrack past b2.
+        assert(near(style(selectors, leaf).font_px, 30));
         assert(near(style(selectors, {"p", "", ""}).font_px, 16));
         assert(near(style(selectors, {"div", "selected", ""}).font_px, 30));
         assert(selectors.report().rejected_rules == 1);
@@ -64,7 +64,6 @@ int main() {
         assert(near(p.font_px, 23) && near(p.margin_px[0], 0) && near(p.padding_px[0], 2) && p.align == Align::Center);
         assert(recovery.report().skipped_at_rules == 3);
         assert(recovery.report().rejected_declarations == 4);
-        // Imports are never opened, so cycles and arbitrarily deep import chains consume no loader resources.
         assert(recovery.append("@import url('b.css');@import url('a.css');p{font-size:25px}") == Result::Complete);
         assert(near(style(recovery, {"p", "", ""}).font_px, 25));
     }

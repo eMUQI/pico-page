@@ -32,4 +32,4 @@ struct TextChunk {
 Result text_chunk(const std::vector<Field>& fields, TextCursor& cursor,
                   std::size_t limit, TextChunk& chunk, const Stop& stop = {});
 
-}  // namespace pico_page::dictionary
+}

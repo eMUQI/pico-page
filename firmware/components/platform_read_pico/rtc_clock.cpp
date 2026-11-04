@@ -26,7 +26,6 @@ bool read() {
 }
 
 void restore() {
-    // Preserve an already running system clock; PMU time is only a boot fallback.
     if (::time(nullptr) >= provision::clock_floor) return;
     if (!read()) {
         ESP_LOGW(tag, "RTC unavailable or unset; waiting for network time");

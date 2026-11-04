@@ -28,14 +28,13 @@ bool number(const std::string& text, std::uint32_t& out) {
 struct Record { std::string word; std::uint32_t offset = 0, length = 0; };
 class Cursor {
 public:
-    /** read_bytes bounds each refill; a smaller value suits reading a single record. */
-    Cursor(File& file, std::uint32_t position, const Stop& stop, std::size_t read_bytes = 4096)
-        : file_(file), position_(position), stop_(stop), read_bytes_(std::min(read_bytes, buffer_.size())) {}
+    Cursor(File& file, std::uint32_t position, const Stop& stop, std::size_t refill_bytes = 4096)
+        : file_(file), position_(position), stop_(stop), refill_bytes_(std::min(refill_bytes, buffer_.size())) {}
     std::uint32_t position() const { return position_; }
     Result byte(unsigned char& out) {
         if (position_ >= file_.size()) return failure(Status::InvalidFormat, "Truncated dictionary index record");
         if (available_ == used_) {
-            available_ = std::min<std::uint32_t>(read_bytes_, file_.size() - position_);
+            available_ = std::min<std::uint32_t>(refill_bytes_, file_.size() - position_);
             auto result = file_.read(position_, buffer_.data(), available_, stop_);
             if (!result) return result;
             used_ = 0;
@@ -71,7 +70,7 @@ private:
     std::uint32_t position_;
     const Stop& stop_;
     std::array<unsigned char, 4096> buffer_{};
-    std::size_t read_bytes_, used_ = 0, available_ = 0;
+    std::size_t refill_bytes_, used_ = 0, available_ = 0;
 };
 
 struct Index {
@@ -79,12 +78,8 @@ struct Index {
     std::unique_ptr<std::uint32_t[]> checkpoints;
     std::uint32_t count = 0, checkpoint_count = 0;
     bool synonym = false;
-    // First headwords of probed checkpoints. Lookups through one open reader share the upper
-    // binary-search levels, so the memo avoids repeating those random card reads.
-    static constexpr std::size_t kMaxProbes = 128;
-    std::vector<std::pair<std::uint32_t, std::string>> probes;
-    // The first and last headwords once a scan has read them. A word outside this range has no
-    // entry, which lets other-script candidates skip the index without reading the card.
+    static constexpr std::size_t kMaxCachedCheckpointHeadwords = 128;
+    std::vector<std::pair<std::uint32_t, std::string>> checkpoint_headwords;
     std::string first_word, last_word;
     bool first_known = false, last_known = false;
     bool outside(const std::string& word) const {
@@ -119,24 +114,22 @@ struct Index {
         }
         return {};
     }
-    Result start(const std::string& word, std::uint32_t& offset, std::uint32_t& ordinal, const Stop& stop) {
+    Result find_lookup_start(const std::string& word, std::uint32_t& offset, std::uint32_t& ordinal, const Stop& stop) {
         std::uint32_t low = 0, high = checkpoint_count;
         Record record;
         while (low < high) {
             const auto middle = low + (high - low) / 2;
-            const auto memo = std::find_if(probes.begin(), probes.end(), [&](const auto& probe) { return probe.first == middle; });
-            const std::string* head = memo == probes.end() ? nullptr : &memo->second;
+            const auto memo = std::find_if(checkpoint_headwords.begin(), checkpoint_headwords.end(), [&](const auto& probe) { return probe.first == middle; });
+            const std::string* head = memo == checkpoint_headwords.end() ? nullptr : &memo->second;
             if (!head) {
-                // One short read holds a typical record; longer headwords refill the cursor.
                 Cursor cursor(file, checkpoints[middle], stop, 512);
                 auto result = cursor.record(record, synonym); if (!result) return result;
-                if (probes.size() < kMaxProbes) probes.emplace_back(middle, record.word);
+                if (checkpoint_headwords.size() < kMaxCachedCheckpointHeadwords) checkpoint_headwords.emplace_back(middle, record.word);
                 head = &record.word;
             }
             if (compare(*head, word) < 0) low = middle + 1;
             else high = middle;
         }
-        // Start before the first equal checkpoint so duplicate heads cannot be skipped.
         const auto checkpoint = low ? low - 1 : 0;
         offset = checkpoint_count ? checkpoints[checkpoint] : 0;
         ordinal = checkpoint * kStride;
@@ -152,7 +145,6 @@ std::uint32_t take32(const std::string& bytes, std::size_t& at) {
     for (unsigned shift : {0U, 8U, 16U, 24U}) value |= std::uint32_t(static_cast<unsigned char>(bytes[at++])) << shift;
     return value;
 }
-// One "size mtime" line per present source file; empty when any file cannot be inspected.
 std::string source_identity(std::initializer_list<std::string> paths) {
     std::string identity;
     for (const auto& path : paths) {
@@ -164,7 +156,6 @@ std::string source_identity(std::initializer_list<std::string> paths) {
     }
     return identity;
 }
-// PPDID01, the 64-hex source fingerprint, the identity lines, then a SHA-256 of all preceding bytes.
 std::string recorded_fingerprint(const FileStore& store, const std::string& name, const std::string& identity) {
     std::string bytes;
     if (store.load_cache(name, 4096, bytes) != StoreStatus::Ok || bytes.size() != 8 + 64 + identity.size() + 64 ||
@@ -354,7 +345,6 @@ Result Dictionary::open_impl(const std::string& ifo_path, FileStore* store, Veri
             }
             fingerprint = combined.finish();
             if (fingerprint.empty()) return failure(Status::IoError, "Dictionary source digest failed");
-            // A failed record only costs the next mount another full check.
             if (!identity.empty()) record_fingerprint(*store, cache + "identity.bin", identity, fingerprint);
         }
     }
@@ -440,7 +430,6 @@ Result Dictionary::lookup(const std::string& word, std::vector<Entry>& entries, 
     if (!memory_room(64 * 1024)) return failure(Status::ResourceLimit, "Insufficient memory for dictionary lookup");
     auto& state = *impl_;
     state.data.discard_decoded();
-    // Headwords that fold-extend word sort directly after it, so the first greater record decides.
     const auto extends = [&](const std::string& head) {
         if (head.size() < word.size()) return false;
         for (std::size_t i = 0; i < word.size(); ++i)
@@ -450,12 +439,11 @@ Result Dictionary::lookup(const std::string& word, std::vector<Entry>& entries, 
     for (auto* source : {&state.index, &state.synonyms}) {
         if (!source->count) continue;
         if (source->outside(word)) {
-            // Below the first headword the following records are unknown; keep longer words possible.
             if (extensible && source->first_known && compare(word, source->first_word) < 0) *extensible = true;
             continue;
         }
         std::uint32_t offset = 0, ordinal = 0;
-        auto result = source->start(word, offset, ordinal, stop); if (!result) { entries.clear(); return result; }
+        auto result = source->find_lookup_start(word, offset, ordinal, stop); if (!result) { entries.clear(); return result; }
         Cursor cursor(source->file, offset, stop);
         Record record;
         for (; ordinal < source->count; ++ordinal) {
@@ -530,4 +518,4 @@ Result Dictionary::read(std::uint32_t ordinal, std::vector<Field>& fields, const
     fields = std::move(decoded);
     return {Status::Ok, {}, omitted_fields};
 }
-}  // namespace pico_page::dictionary
+}

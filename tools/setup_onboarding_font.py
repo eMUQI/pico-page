@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Subset the checksum-pinned WenKai source for the offline welcome subtitle (OFL)."""
 from pathlib import Path
 from fontTools import subset
 from fontTools.ttLib import TTFont

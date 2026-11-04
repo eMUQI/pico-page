@@ -13,7 +13,7 @@ struct Range { std::uint32_t first, last, scalar; };
 // docs/development/dependency-review.md.
 #include "gb18030_data.inc"
 
-}  // namespace
+}
 
 Decoder::Result Decoder::feed(std::uint8_t byte, char32_t& scalar) {
     if (count_ == 0) {
@@ -63,4 +63,4 @@ bool decode(std::string_view bytes, std::u32string& text) {
     return !decoder.pending();
 }
 
-}  // namespace pico_page::gb18030
+}

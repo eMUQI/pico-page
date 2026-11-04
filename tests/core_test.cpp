@@ -138,7 +138,6 @@ int main() {
         const auto first_tap = taps.accept({EventKind::Touch, EventPhase::End, 1, 300, 500}, 1);
         CHECK(first_tap && first_tap->x == 600 && first_tap->phase == EventPhase::Begin);
         CHECK(!taps.accept({EventKind::Touch, EventPhase::End, 1}, 1));
-        // UI work starts with no held contact, so the next tap has independent ownership.
         CHECK(!taps.accept({EventKind::K3, EventPhase::Begin, 2}, 1));
         CHECK(!taps.accept({EventKind::K3, EventPhase::End, 1}, 1));
         CHECK(taps.accept({EventKind::K3, EventPhase::End, 2}, 1));
@@ -155,7 +154,6 @@ int main() {
     {
         using namespace pico_page::platform;
         using namespace pico_page::input;
-        // Only a touch held for the threshold is a long press; keys never are.
         CHECK(long_press({EventKind::Touch, EventPhase::Begin, 1, 0, 0, 1000}, {EventKind::Touch, EventPhase::End, 1, 0, 0, 1000 + kLongPressUs}));
         CHECK(!long_press({EventKind::Touch, EventPhase::Begin, 1, 0, 0, 1000}, {EventKind::Touch, EventPhase::End, 1, 0, 0, 999 + kLongPressUs}));
         CHECK(!long_press({EventKind::K2, EventPhase::Begin, 1, 0, 0, 0}, {EventKind::K2, EventPhase::End, 1, 0, 0, 2 * kLongPressUs}));
@@ -211,7 +209,6 @@ int main() {
     {
         using namespace pico_page::platform;
         using namespace pico_page::input;
-        // Opening a power menu cancels the old contact; its later release cannot hit the menu.
         ReleasedTap taps;
         CHECK(!taps.accept({EventKind::Touch, EventPhase::Begin, 20, 300, 520}, 10));
         CHECK(!taps.accept({EventKind::InputReset}, 10));
@@ -220,7 +217,6 @@ int main() {
         CHECK(taps.accept({EventKind::Touch, EventPhase::End, 21, 300, 520}, 11));
         CHECK(!taps.accept({EventKind::Touch, EventPhase::End, 21, 300, 520}, 11));
     }
-    // IN03/IN04: a context change cannot reuse the input that opened it.
     {
         using namespace pico_page::platform;
         using namespace pico_page::input;
@@ -293,7 +289,6 @@ int main() {
     CHECK(session.saved(*save, true));
     CHECK(!session.needs_save());
 
-    // IN01/IN02: unchanged content still submits a full-clean transaction exactly once.
     CHECK(map_input(Context::Reading, Input::K2) == Action::ForceRefresh);
     CHECK(session.force_refresh());
     const auto refresh = backend.frames.back();
@@ -306,7 +301,6 @@ int main() {
     CHECK(session.visible_record()->local_revision == 1 && !session.needs_save());
     CHECK(session.visible_record()->anchor == first);
 
-    // EV01/DP02: failed presentation retains the last confirmed position and loses baseline validity.
     token = session.request_page(second);
     CHECK(session.layout_ready(token));
     auto wrong = token;
@@ -324,7 +318,6 @@ int main() {
     CHECK(!session.presented(*result));
     CHECK(session.visible_record()->local_revision == 2 && session.needs_save());
 
-    // A delayed save acknowledges only the record originally submitted.
     save = session.request_save();
     token = session.request_page(first, RefreshIntent::Content, true);
     CHECK(session.layout_ready(token));
@@ -340,7 +333,6 @@ int main() {
     CHECK(save);
     CHECK(session.saved(*save, true));
 
-    // EV02: old requests, layouts and frames cannot cross a layout or book boundary.
     auto old_layout = session.request_page(second);
     session.change_layout();
     CHECK(!session.layout_ready(old_layout));

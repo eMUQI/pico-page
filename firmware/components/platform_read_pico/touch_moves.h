@@ -5,7 +5,6 @@
 
 namespace pico_page::platform {
 
-/** One queued notification retains the latest move. Callers serialize access with the event queue. */
 class TouchMoves {
 public:
     bool pending_for(std::uint64_t sequence) const { return latest_ && latest_->sequence == sequence; }
@@ -28,4 +27,4 @@ private:
     std::optional<Event> latest_;
 };
 
-} // namespace pico_page::platform
+}

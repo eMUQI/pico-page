@@ -15,7 +15,6 @@ int main() {
     std::string error;
     CHECK(pico_page::runtime::validate_display_geometry(canvas, display, error));
     CHECK(error.empty());
-    // Swapped axes have the same byte count: buffer-length validation cannot detect this.
     CHECK(!pico_page::runtime::validate_display_geometry(canvas, {display.height, display.width}, error));
     CHECK(!error.empty());
     CHECK(!pico_page::runtime::validate_display_geometry(canvas, {display.width - 1, display.height}, error));

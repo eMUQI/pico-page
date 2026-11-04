@@ -3,7 +3,6 @@
 namespace pico_page {
 
 void ReaderApp::Impl::load_library_font(const std::string& path) {
-    // Sharing a face avoids duplicating FreeType tables; labels retain their own sizes and emphasis.
     if (controlled_storage && body.valid() && !font_fallback && effective_font == path && effective_weight == "regular") {
         library_font.close();
         library_font_path = path; library_uses_body = true; library_font_reload = false;
@@ -12,10 +11,8 @@ void ReaderApp::Impl::load_library_font(const std::string& path) {
     if (library_font_path == path && controlled_storage && !library_font_reload && !library_uses_body) return;
     library_uses_body = false; library_font_reload = false;
     library_font_path = path;
-    // A failed face remains invalid; each complete label then uses the UI face.
     if (!library_font.open(root + "/" + path)) library_font.close();
 }
-
 
 void ReaderApp::Impl::load_fonts(const ReaderSettings *preview) {
     const auto &selected = preview ? *preview : settings;
@@ -51,7 +48,6 @@ void ReaderApp::Impl::load_fonts(const ReaderSettings *preview) {
     if (!library_font_path.empty()) load_library_font(library_font_path);
 }
 
-
 void ReaderApp::Impl::draw_font_picker() {
     const bool unavailable = font_fallback || weight_unavailable;
     canvas.fill_rect(0, 500, 684, 716, 15);
@@ -73,7 +69,6 @@ void ReaderApp::Impl::draw_font_picker() {
         const auto& path = fonts[index];
         const bool current = path == edit_snapshot.config.settings.font;
         auto name = font_name(path);
-        // Keep weight files distinguishable even when their family has a friendly name.
         if (name != basename(path)) {
             if (path.find("-Light.") != std::string::npos) name += " · 细";
             else if (path.find("-Medium.") != std::string::npos) name += " · 中粗";
@@ -91,7 +86,6 @@ void ReaderApp::Impl::draw_font_picker() {
     else disabled_button("选用此字体", 348, 1104, 312, 96);
 }
 
-
 void ReaderApp::Impl::font_picker_control(int id) {
     if (id == FontCancel || id == Back) cancel_font_picker();
     else if (id == FontAccept) {
@@ -103,7 +97,6 @@ void ReaderApp::Impl::font_picker_control(int id) {
         if (id == Prev && font_picker_page) --font_picker_page;
         else if (id == Next && font_picker_page + 1 < pages) ++font_picker_page;
         else return;
-        // Browsing leaves the completed preview intact, including any prepared image.
         hits.clear();
         draw_font_picker();
     } else if (id >= FontEntryBase && id < FontAccept) {
@@ -117,7 +110,6 @@ void ReaderApp::Impl::font_picker_control(int id) {
     overlay();
 }
 
-
 void ReaderApp::Impl::draw_typography(bool prepare_images) {
     view = View::Typography;
     hits.clear();
@@ -128,7 +120,6 @@ void ReaderApp::Impl::draw_typography(bool prepare_images) {
     if (!prepare_images && !preview.images.empty()) {
         text("预览暂不可用", 36, 96, 28);
     } else if (async_content && !image_prepared && preview.error.empty() && !preview.images.empty()) {
-        // The worker prepares the image; the panel stays visible and only cancelling is accepted.
         begin_image(offset, preview, true);
         text("正在准备图片…", 36, 300, 26, 400, 3);
         button(Dismiss, "取消", 262, 368, 160, 64, false, 24);
@@ -214,7 +205,6 @@ void ReaderApp::Impl::draw_typography(bool prepare_images) {
     }
 }
 
-
 void ReaderApp::Impl::draw_reading_settings() {
     view = View::Refresh;
     hits.clear(); canvas.clear(); header("阅读", Back, "设置");
@@ -224,7 +214,6 @@ void ReaderApp::Impl::draw_reading_settings() {
     canvas.line(36, 234, 647, 234, 12, 2);
     text("默认排版", 36, 250, 28, 440);
     text(typography_summary(values), 36, 294, 24, 440, 3);
-    // The typography page previews and edits through the open book.
     if (has_book()) {
         text("›", 636, 268, 28, 24);
         hits.push_back({24, 234, 636, 108, Typography});
@@ -260,7 +249,6 @@ void ReaderApp::Impl::draw_reading_settings() {
     button(FullRefresh, "立即全刷", 24, 1080, 636, 96);
 }
 
-
 void ReaderApp::Impl::draw_settings() {
     if (!bookmark_io_ready()) return;
     view = View::Settings;
@@ -289,7 +277,6 @@ void ReaderApp::Impl::draw_settings() {
     row(PowerSettings, "电源与休眠", "休眠" + sleep + " · " +
         (values.auto_sleep_minutes ? std::to_string(values.auto_sleep_minutes) + " 分钟后休眠" : "不自动休眠"));
     row(StorageSettings, "存储", measured ? "可用 " + file_size(card_free) : "可用空间未知");
-    // Secondary entries: regular weight, 40 px below the groups.
     const auto minor = [&](int id, const std::string& title, const std::string& value, bool bold, int top) {
         text(title, 36, top + 21, 28, 400);
         if (!value.empty()) text(value, 628 - text_width(value, 24), top + 24, 24, 260, bold ? 1 : 3, bold);
@@ -307,12 +294,10 @@ void ReaderApp::Impl::draw_settings() {
     minor(Help, "使用说明", "", false, y + 122);
     minor(About, "关于", "", false, y + 204);
     if (session.needs_save()) {
-        // Unsaved progress outranks other notices; the whole footer retries the save.
         footer_bar("进度尚未保存 · 点此重试");
         hits.push_back({0, footer_zone, 684, 96, SaveRetry});
     } else footer_bar(cfg.diagnostics.empty() ? notice() : settings_file_problem(cfg.diagnostics) + "，请检查后重新打开。");
 }
-
 
 void ReaderApp::Impl::draw_help_demo() {
     const bool full = help_page == 3;
@@ -365,7 +350,6 @@ void ReaderApp::Impl::draw_help_demo() {
     footer_bar("", help_page, kHelpPages.size());
 }
 
-
 void ReaderApp::Impl::begin_storage(bool clear_cache) {
     abandon_content();
     if (counting_job) counting_job->cancel();
@@ -406,5 +390,4 @@ void ReaderApp::Impl::draw_storage() {
     button(ClearCache, "清理全部缓存", 24, 1080, 636, 96);
 }
 
-
-} // namespace pico_page
+}

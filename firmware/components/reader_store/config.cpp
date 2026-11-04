@@ -32,7 +32,7 @@ void configure_toml() {
     }();
     (void)configured;
 }
-} // namespace store_internal
+}
 namespace {
 constexpr std::size_t config_limit = 32768;
 
@@ -226,7 +226,6 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
         for (int index = 0; index < value.u.arr.size; ++index) {
             std::string path;
             if (!string_value(value.u.arr.elem[index], path)) return false;
-            // A leading slash in user TOML denotes the card root, never the host root.
             if (path.front() == '/') path.erase(0, 1);
             if (!store_internal::relative_path(path)) return false;
             roots.push_back(std::move(path));
@@ -282,7 +281,6 @@ std::string number(double value) {
 }
 
 using SettingValues = std::vector<std::pair<std::string, std::string>>;
-/** Fields of one layer in a fixed order; the global layer adds library, power and network values. */
 SettingValues setting_values(const ReaderSettings& values, bool global = false) {
     SettingValues fields = {{"reader.font", quoted(values.font)},
             {"reader.font_weight", quoted(values.font_weight)},
@@ -539,7 +537,7 @@ StoreStatus save_settings(const std::string& root, const SettingsSnapshot& snaps
     }
     return store_internal::commit_file(root, path, expected, source, config_limit, error);
 }
-}  // namespace
+}
 
 ConfigResult FileStore::load_settings(const std::string& book_path) const {
     return settings_snapshot(book_path).config;
@@ -568,4 +566,4 @@ StoreStatus FileStore::apply_settings(const SettingsSnapshot& snapshot, const Re
 StoreStatus FileStore::clear_book_settings(const SettingsSnapshot& snapshot, std::string& error) const {
     return save_settings(root_, snapshot, snapshot.global_settings, true, true, error);
 }
-}  // namespace pico_page
+}

@@ -24,7 +24,6 @@ void string(cJSON* output, const char* key, const std::string& value) {
 }
 }
 
-// This host-only adapter executes production mapping and protocol code for the external client test.
 int main(int argc, char** argv) {
     require(argc == 3, "Usage: koreader_sync_bridge book.epub offer|receive");
     pico_page::EpubDocument document;
@@ -38,7 +37,6 @@ int main(int argc, char** argv) {
         bool found = false;
         for (std::size_t index = 0; index < document.spine().size() && !found; ++index) {
             require(document.load_chapter(index, chapter, error), error);
-            // Select a mid-chapter test passage; remote percentages are never used to resolve a location.
             for (std::uint32_t pos = chapter.text.size() * 2 / 3; pos + 24 < chapter.text.size(); ++pos) {
                 pico_page::Anchor end;
                 std::string end_pointer;

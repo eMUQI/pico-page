@@ -10,7 +10,6 @@ WEB_FILES = {'.github/workflows/web.yml', 'tools/ota_manifest.py', 'tools/deploy
 
 
 def checks_for_paths(paths):
-    # Unclassified paths require host checks so new source directories are covered by default.
     host = any(not (path.startswith(('docs/', 'artifacts/', 'web/'))
                     or path.endswith('.md') or path == '.github/workflows/web.yml')
                for path in paths)
@@ -26,7 +25,6 @@ def main():
     args = parser.parse_args()
     checks = {'host': True, 'web': True}
     if args.base or args.compare:
-        # Deployment freshness compares trees; PR selection uses the merge base.
         revisions = [f'{args.base}...HEAD'] if args.base else ['HEAD', args.compare]
         # NUL separators and disabled rename detection preserve unusual names and both rename paths.
         changed = subprocess.check_output([

@@ -6,10 +6,6 @@
 
 namespace pico_page::dictionary {
 
-/** Read-only byte ranges in a plain file or a single-member dictzip stream.
- * Decodes one block at a time, retaining only the last block. Partial range
- * validation does not assert the gzip member's whole-stream CRC.
- */
 class File {
 public:
     File() = default;
@@ -34,7 +30,6 @@ private:
     std::uint32_t decoded_block_ = UINT32_MAX;
 };
 
-/** Decode one gzip member with full CRC/length validation and bounded output. */
 Result gunzip(const std::string& path, std::size_t limit,
               const std::function<bool(std::string_view)>& emit, const Stop& stop);
 Result expand_index(const std::string& path, FileStore& store, const std::string& cache,
@@ -46,4 +41,4 @@ bool valid_utf8(const std::string& text);
 Result failure(Status status, const char* message);
 inline Result cancelled() { return failure(Status::Cancelled, "Dictionary operation cancelled"); }
 
-}  // namespace pico_page::dictionary
+}

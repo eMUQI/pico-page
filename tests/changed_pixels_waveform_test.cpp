@@ -31,7 +31,6 @@ void exercise(std::size_t phases) {
     std::vector<std::uint8_t> source(phases * 64);
     for (unsigned to = 0; to < 16; ++to) {
         for (unsigned from = 0; from < 16; ++from) {
-            // Includes all-hold, full-length, internal holds, erase-only and action 3 sequences.
             const unsigned pattern = to == 15 && from == 15 ? 1 : (to * 16 + from) % 5;
             for (std::size_t f = 0; f < phases; ++f) {
                 unsigned value = 0;
@@ -56,7 +55,6 @@ void exercise(std::size_t phases) {
 }
 }
 int main() {
-    // Exhaust all grayscale pairs in every output bit lane and at the footer boundary.
     constexpr int native_width = 1216, footer_column = 1128;
     std::array<std::uint8_t, native_width> difference{};
     std::array<std::uint8_t, native_width / 4 + 1> drive{};
@@ -73,7 +71,6 @@ int main() {
             assert(drive.back() == 0xFF);
         }
     }
-    // Mixed equal and changed neighbors retain their original phase drive actions.
     for (int x = 0; x < native_width; ++x) difference[x] = x % 2 ? 0x77 : 0x37;
     drive.fill(0xE4);
     hold_suffix(difference.data(), drive.data(), footer_column, native_width);
@@ -87,7 +84,6 @@ int main() {
         hold_suffix(difference.data(), drive.data(), footer_column, invalid_width);
         assert(drive == unchanged_drive);
     }
-    // One immutable mask applies to every phase, independently of its drive actions.
     std::array<std::uint8_t, 32 + 1> mask;
     mask.fill(0xA5);
     assert(epd_build_unchanged_suffix_mask(difference.data(), mask.data(), footer_column, native_width) == 32);
@@ -112,7 +108,6 @@ int main() {
         }
         assert(expected == 37);
     }
-    // Mirroring changes only band order, including uneven band sizes.
     for (int rows : {1, 7, 16, 17, 684}) {
         for (int row = 0; row < rows; ++row) {
             int expected = 0;

@@ -7,7 +7,6 @@ namespace pico_page::input {
 using platform::Event;
 using platform::EventKind;
 
-/** Retains only power intents while a cancelled sleep restores the application. */
 class SleepInput {
 public:
     void begin() { *this = {}; active_ = true; }
@@ -15,7 +14,6 @@ public:
     /** Restoration and radio teardown must both finish before a retained power intent runs. */
     bool ready(bool page_ready, bool network_idle) const { return active_ && page_ready && network_idle; }
     void clear() { *this = {}; }
-    /** Contacts and queue resets cannot cancel sleep or replay into the restored page. */
     static bool ignores(EventKind kind) {
         return kind == EventKind::Touch || kind == EventKind::K1 ||
                kind == EventKind::K2 || kind == EventKind::K3 || kind == EventKind::InputReset;
@@ -32,4 +30,4 @@ private:
 };
 static_assert(sizeof(SleepInput) <= 3, "Sleep cancellation retains only power flags");
 
-} // namespace pico_page::input
+}

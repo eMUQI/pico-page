@@ -12,7 +12,7 @@ dictionary::Result path_error(StoreStatus status) {
             status == StoreStatus::Missing ? "Dictionary source is missing" :
             status == StoreStatus::UnsafePath ? "Dictionary source path is unsafe" : "Dictionary source cannot be read"};
 }
-}  // namespace
+}
 
 void ContentJob::read_dictionary() {
     const StageTimer timer{"dictionary_job"};
@@ -42,9 +42,9 @@ void ContentJob::read_dictionary() {
         for (std::uint32_t index = 0; index <= last_page; ++index) {
             const auto start = cursor;
             dictionary::TextChunk chunk;
-            const auto limit = cursor.scalars < request.dictionary_layout_anchor ?
+            const auto chunk_scalar_limit = cursor.scalars < request.dictionary_layout_anchor ?
                 std::min<std::size_t>(4096, request.dictionary_layout_anchor - cursor.scalars) : 4096;
-            auto status = dictionary::text_chunk(*request.dictionary_definition, cursor, limit, chunk, stop);
+            auto status = dictionary::text_chunk(*request.dictionary_definition, cursor, chunk_scalar_limit, chunk, stop);
             if (!status) { finish(std::move(status)); return; }
             if (chunk.text.empty()) {
                 if ((request.dictionary_reflow && cursor.scalars < request.dictionary_layout_anchor) ||
@@ -117,9 +117,6 @@ void ContentJob::read_dictionary() {
 
 dictionary::Result ContentJob::open_dictionary(FileStore& store, const std::string& relative_path,
                                                dictionary::Dictionary& reader, const dictionary::Stop& stop) {
-    // Sources cannot change within a mount session: USB and remount reset it. Remembered
-    // results therefore skip path checks. Preparation always hashes the source; explicit retry
-    // hashes only a source whose definitive failure it clears.
     auto* session = request.dictionary_session.get();
     bool full_check = request.kind == Kind::DictionaryPrepare;
     if (session) {
@@ -182,12 +179,10 @@ void ContentJob::search_dictionaries(FileStore& store, const dictionary::Stop& s
         result.dictionary_status = {dictionary::Status::ResourceLimit, "Too many dictionary sources"};
         result.error = result.dictionary_status.message; return;
     }
-    // Candidates arrive best first. A source may only replace the current match with a
-    // strictly better candidate, so equal candidates keep the earlier source.
-    std::size_t limit = candidates.size();
+    std::size_t candidate_rank_limit = candidates.size();
     dictionary::Result failure;
     bool found = false, absent_candidate = false;
-    for (std::size_t source = 0; source < sources.size() && limit; ++source) {
+    for (std::size_t source = 0; source < sources.size() && candidate_rank_limit; ++source) {
         if (stop()) break;
         dictionary::Dictionary reader;
         auto status = open_dictionary(store, sources[source], reader, stop);
@@ -196,30 +191,27 @@ void ContentJob::search_dictionaries(FileStore& store, const dictionary::Stop& s
         std::vector<dictionary::Entry> entries, matched;
         std::vector<dictionary::Field> fields;
         bool more = false, matched_more = false;
-        std::size_t hit = limit;
-        // Exact candidates sharing a start are prefixes of each other. Querying them from
-        // short to long lets a prefix that no headword extends rule out every longer one.
-        std::vector<std::size_t> order(limit);
-        for (std::size_t index = 0; index < limit; ++index) order[index] = index;
-        std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+        std::size_t best_candidate_index = candidate_rank_limit;
+        std::vector<std::size_t> prefix_search_order(candidate_rank_limit);
+        for (std::size_t index = 0; index < candidate_rank_limit; ++index) prefix_search_order[index] = index;
+        std::stable_sort(prefix_search_order.begin(), prefix_search_order.end(), [&](std::size_t a, std::size_t b) {
             const auto& x = candidates[a]; const auto& y = candidates[b];
             if (x.inflection != y.inflection) return !x.inflection;
             if (x.selection.begin != y.selection.begin) return x.selection.begin < y.selection.begin;
             return x.selection.end < y.selection.end;
         });
-        std::vector<const dictionary::Candidate*> closed;  // Candidates no headword extends.
-        std::vector<bool> settled(limit);  // Candidates known absent or unusable in this source.
+        std::vector<const dictionary::Candidate*> unextendable_prefixes;
+        std::vector<bool> unusable_candidates(candidate_rank_limit);
         const auto fail = [&](dictionary::Result error) {
-            if (failure) failure = std::move(error);  // Keep the first failure.
+            if (failure) failure = std::move(error);
             result.dictionary_partial = true;
         };
-        // A failed lookup or entry read leaves lower-ranked candidates in this source available.
         while (status) {
-            hit = limit;
-            for (const auto index : order) {
+            best_candidate_index = candidate_rank_limit;
+            for (const auto index : prefix_search_order) {
                 const auto& candidate = candidates[index];
-                if (index > hit || settled[index]) continue;  // Cannot outrank the current match.
-                if (!candidate.inflection && std::any_of(closed.begin(), closed.end(), [&](const auto* prefix) {
+                if (index > best_candidate_index || unusable_candidates[index]) continue;
+                if (!candidate.inflection && std::any_of(unextendable_prefixes.begin(), unextendable_prefixes.end(), [&](const auto* prefix) {
                         return prefix->selection.begin == candidate.selection.begin &&
                                candidate.word.size() > prefix->word.size() &&
                                candidate.word.compare(0, prefix->word.size(), prefix->word) == 0;
@@ -228,36 +220,36 @@ void ContentJob::search_dictionaries(FileStore& store, const dictionary::Stop& s
                 auto lookup = reader.lookup(candidate.word, entries, more, request.dictionary_ordinal, stop, &extensible);
                 if (lookup.status == dictionary::Status::NotFound) {
                     absent_candidate = true;
-                    settled[index] = true;
-                    if (!candidate.inflection && !extensible) closed.push_back(&candidate);
+                    unusable_candidates[index] = true;
+                    if (!candidate.inflection && !extensible) unextendable_prefixes.push_back(&candidate);
                     continue;
                 }
                 if (lookup.status == dictionary::Status::Cancelled) { status = std::move(lookup); break; }
-                if (!lookup) { settled[index] = true; fail(std::move(lookup)); continue; }
-                hit = index; matched = std::move(entries); matched_more = more;
+                if (!lookup) { unusable_candidates[index] = true; fail(std::move(lookup)); continue; }
+                best_candidate_index = index; matched = std::move(entries); matched_more = more;
             }
-            if (!status || hit == limit) break;
+            if (!status || best_candidate_index == candidate_rank_limit) break;
             auto read = reader.read(matched.front().ordinal, fields, stop);
             if (read) { entries = std::move(matched); more = matched_more; status = std::move(read); break; }
             if (read.status == dictionary::Status::Cancelled) { status = std::move(read); break; }
-            settled[hit] = true; fail(std::move(read));
+            unusable_candidates[best_candidate_index] = true; fail(std::move(read));
         }
         if (status.status == dictionary::Status::Cancelled || stop()) break;
         if (!status) { fail(std::move(status)); continue; }
-        if (hit == limit) continue;
+        if (best_candidate_index == candidate_rank_limit) continue;
         found = true;
         result.dictionary_source = source;
         result.dictionary_info = reader.info(); result.dictionary_reused = reader.reused_index();
-        result.dictionary_match = candidates[hit];
+        result.dictionary_match = candidates[best_candidate_index];
         result.dictionary_entries = std::move(entries); result.dictionary_more = more;
         result.dictionary_fields = std::move(fields);
-        result.dictionary_status = std::move(status);  // Retains omitted_fields from the read.
+        result.dictionary_status = std::move(status);
         if (request.dictionary_navigation) {
             if (stop()) break;
             return;
         }
-        limit = hit;
-        while (limit && same_rank(candidates[limit - 1], candidates[hit])) --limit;
+        candidate_rank_limit = best_candidate_index;
+        while (candidate_rank_limit && same_rank(candidates[candidate_rank_limit - 1], candidates[best_candidate_index])) --candidate_rank_limit;
     }
     if (stop()) {
         result.dictionary_match.reset(); result.dictionary_entries.clear(); result.dictionary_fields.clear();
@@ -265,11 +257,10 @@ void ContentJob::search_dictionaries(FileStore& store, const dictionary::Stop& s
         result.error = result.dictionary_status.message; return;
     }
     if (found) return;
-    // Report a read failure when no source could establish a genuine absence.
     if (!failure && (sources.size() == 1 || !absent_candidate)) {
         result.dictionary_status = std::move(failure); result.error = result.dictionary_status.message;
     }
     else result.dictionary_status = {dictionary::Status::NotFound, "No dictionary entry found"};
 }
 
-}  // namespace pico_page
+}

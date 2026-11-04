@@ -117,9 +117,8 @@ void run(void*) {
     std::printf("CSS_BENCH complete\n");
     vTaskDelete(nullptr);
 }
-} // namespace
+}
 extern "C" void app_main() {
-    // Allow the host to reopen the console after the application reset.
     vTaskDelay(pdMS_TO_TICKS(3000));
     if (xTaskCreate(run, "css_bench", content_stack_bytes, nullptr, 1, nullptr) != pdPASS)
         std::printf("CSS_BENCH task_create_failed\n");

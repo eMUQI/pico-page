@@ -7,7 +7,6 @@ bool ReaderApp::Impl::open(std::string path) {
     abandon_content();
     invalidate_counting();
     if (counting_job) counting_job->cancel();
-    // A remote position kept as a header reminder belongs to the book being left.
     remote_anchor.reset();
     refresh_badge_config();
     clear_body_cache();
@@ -32,7 +31,6 @@ bool ReaderApp::Impl::open(std::string path) {
     }
     return finish_open(path);
 }
-
 
 bool ReaderApp::Impl::finish_open(const std::string& path, ContentJob::Result* loaded) {
     std::string detail;
@@ -102,14 +100,12 @@ bool ReaderApp::Impl::finish_open(const std::string& path, ContentJob::Result* l
     return show_page(offset);
 }
 
-
 void ReaderApp::Impl::footer() {
     canvas.fill_rect(0, footer_top, 684, 88, 15);
     text(notice().empty() && footer_position == reading_footer::Position::ChapterName ? body : ui,
          notice().empty() ? footer_position_text() : message, 36, 1156, 24, 476, 3);
     footer_charging = battery_charging;
     if (footer_device == reading_footer::Device::Clock) {
-        // The system clock is restored from RTC or calibrated by on-demand networking.
         center(reading_footer::clock(std::time(nullptr), 8 * 60), reading_footer::device_left, 1156,
                684 - reading_footer::device_left, 24, 3);
     } else if (footer_device == reading_footer::Device::Battery && (battery_charging || battery_percent)) {
@@ -118,7 +114,6 @@ void ReaderApp::Impl::footer() {
         outline(icon_x, icon_y, icon_width, icon_height, 2, 3);
         canvas.fill_rect(icon_x + icon_width, 1171, 3, 8, 3);
         if (battery_charging) {
-            // Each row stores nine pixels, with the leftmost pixel in bit 8.
             static constexpr std::uint16_t bolt[] = {12, 28, 56, 112, 224, 510, 255, 14, 28, 56, 112, 224, 192};
             for (int y = 0; y < 13; ++y)
                 for (int x = 0; x < 9; ++x)
@@ -131,12 +126,9 @@ void ReaderApp::Impl::footer() {
     }
 }
 
-
 void ReaderApp::Impl::reclaim_caches() {
     if (view != View::Reading || display.busy() || content_loading ||
         (counting_job && (counting_job->request.kind == ContentJob::Kind::SleepCover || counting_job->request.kind == ContentJob::Kind::LockScreen))) return;
-    // This owner alone changes page capacities during reclamation. Keep the subtotal local;
-    // pressure still observes every other cache and the same capability-heap queries.
     auto page_bytes = page_index_bytes();
     const auto pressure = [&] {
         if (cache_usage(page_bytes).retained > cache_target) return true;
@@ -159,7 +151,6 @@ void ReaderApp::Impl::reclaim_caches() {
     if (!pressure()) return;
     if (chapter_cache) { chapter_cache.reset(); chapter_cache_write_needed = false; ++cache_evictions; }
     if (!pressure()) return;
-    // The counting session is rebuilt on demand, so it goes before any counted pages.
     if (yield_counting_session()) { defer_counting(); return; }
     const StageTimer timer{"cache_reclaim"};
     if (!covers.empty()) { covers.clear(); ++cache_evictions; }
@@ -191,7 +182,6 @@ void ReaderApp::Impl::reclaim_caches() {
     }
 }
 
-
 void ReaderApp::Impl::count_pages(const std::function<bool()>& stop) {
     const StageTimer timer{"count_slice"};
     if (stop && stop()) return;
@@ -213,7 +203,6 @@ void ReaderApp::Impl::count_pages(const std::function<bool()>& stop) {
     if (async_content && !font_identity.empty() && !pages_cache_disabled && (pages_cache_pending || pages_dirty)) {
         if (counting_job) return;
 #ifdef ESP_PLATFORM
-        // The encoded payload and expanded index are each bounded to kPageIndexBytes.
         if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2 * kPageIndexBytes + 256U * 1024 ||
             heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < kPageIndexBytes + 64U * 1024) {
             if (yield_counting_session()) return;
@@ -247,8 +236,6 @@ void ReaderApp::Impl::count_pages(const std::function<bool()>& stop) {
     if (async_content) {
         if (counting_job) return;
         font_scan_turn = true;
-        // No job runs here, so the session members may be read. The memory check covers the
-        // load of a new part and assumes that the previous part is no longer held.
         const bool part_loaded = counting_session && counting_session->loaded &&
             counting_session->chapter_index == counting_index && counting_session->part == counting_part;
         if (!part_loaded) {
@@ -286,7 +273,6 @@ void ReaderApp::Impl::count_pages(const std::function<bool()>& stop) {
         else if (memory_error(detail))
             defer_counting();
         else if (detail.find("limit") != std::string::npos) {
-            // An item beyond the parser limits cannot be shown either; it has no pages.
             chapter_pages[counting_index].assign(1, {});
             finish_counting();
         } else
@@ -322,7 +308,6 @@ void ReaderApp::Impl::count_pages(const std::function<bool()>& stop) {
         counting_offset = planned.end;
     } while (std::chrono::steady_clock::now() < deadline);
 }
-
 
 bool ReaderApp::Impl::draw_page_content(const graphics::Page& planned, const graphics::LayoutSpec& spec, bool progressive) {
     const StageTimer timer{"page_draw"};
@@ -360,7 +345,6 @@ bool ReaderApp::Impl::draw_page_content(const graphics::Page& planned, const gra
         }
         bool all_drawn = true;
         for (const auto& box : planned.images) {
-            // Foreground images are prepared by a worker; overlays do not start a decoder.
             if (async_content) { draw_image_error(box); all_drawn = false; continue; }
             std::vector<std::uint8_t> encoded;
             std::string detail;
@@ -379,7 +363,6 @@ bool ReaderApp::Impl::draw_page_content(const graphics::Page& planned, const gra
     return graphics::render_page(canvas, body, planned);
 }
 
-
 bool ReaderApp::Impl::render_body(std::size_t start) {
     const StageTimer timer{"body_draw"};
     const auto spec = layout(settings, link_return ? 144 : 64);
@@ -387,7 +370,6 @@ bool ReaderApp::Impl::render_body(std::size_t start) {
         canvas = *body_canvas;
         const bool marked = bookmarked(page.start, page.end);
         if (body_bookmarked != marked) {
-            // The ribbon sits in the blank top margin, above text and image layout.
             canvas.fill_rect(bookmark_cell_left + 38, 0, 24, 44, 15);
             if (marked) bookmark_ribbon(bookmark_cell_left + 50, 0, 44, true);
             *body_canvas = canvas;
@@ -407,8 +389,6 @@ bool ReaderApp::Impl::render_body(std::size_t start) {
         error("本页无法排版。" + reason(candidate.error) + "。");
         return false;
     }
-    // No face covers every character; the page stays readable and the missing ones draw
-    // as the placeholder box. The notice applies to this page alone.
     const bool missing = std::any_of(candidate.glyphs.begin(), candidate.glyphs.end(),
         [this](const auto &glyph) { return body.missing(glyph.scalar); });
     if (missing) message = kMissingNotice;
@@ -468,7 +448,6 @@ bool ReaderApp::Impl::render_body(std::size_t start) {
     return true;
 }
 
-
 bool ReaderApp::Impl::show_page(std::size_t start, bool reverse_page_effect) {
     const auto spec = layout(settings, link_return ? 144 : 64);
     const bool reused = body_reusable(start, spec);
@@ -506,12 +485,10 @@ bool ReaderApp::Impl::show_page(std::size_t start, bool reverse_page_effect) {
     return true;
 }
 
-
 void ReaderApp::Impl::turn(bool forward) {
     if (!has_book())
         return;
     turned = true;
-    // The font notice is shown on the page where the book opened; later pages show the position.
     if (message == kBuiltinFontNotice || message == kFallbackFontNotice || message == kWeightUnavailableNotice) message.clear();
     if (forward) {
         const auto next_offset = readable_offset(page.end);
@@ -574,5 +551,4 @@ void ReaderApp::Impl::turn(bool forward) {
     }
 }
 
-
-} // namespace pico_page
+}

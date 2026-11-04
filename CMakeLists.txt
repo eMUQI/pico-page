@@ -24,7 +24,6 @@ add_test(NAME power_key COMMAND power_key_test)
 add_subdirectory(firmware/components/reader_core)
 add_subdirectory(firmware/components/platform_contract)
 add_subdirectory(firmware/components/reader_input)
-# Each public port must compile on the host without relying on include order or SDK headers.
 set(contract_headers build_profile platform platform_input platform_display platform_storage
     platform_power platform_system platform_network platform_update)
 foreach(header IN LISTS contract_headers)
@@ -112,14 +111,12 @@ add_test(NAME project_version COMMAND ${Python3_EXECUTABLE} -m unittest discover
     -s ${CMAKE_CURRENT_SOURCE_DIR}/tests -p test_project_version.py -v)
 add_test(NAME ota_manifest COMMAND ${Python3_EXECUTABLE} -m unittest discover
     -s ${CMAKE_CURRENT_SOURCE_DIR}/tests -p test_ota_manifest.py -v)
-# Compile the firmware worker path with controlled queue, allocation and scheduling failures.
 add_executable(content_worker_test tests/content_worker_test.cpp firmware/components/reader_app/content_job.cpp firmware/components/reader_app/dictionary_job.cpp)
 target_compile_definitions(content_worker_test PRIVATE ESP_PLATFORM)
 target_include_directories(content_worker_test PRIVATE tests/rtos_stubs)
 target_link_libraries(content_worker_test PRIVATE reader_app)
 target_compile_options(content_worker_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    # Inject failure inside pngle after decoder creation, beyond the PSRAM admission checks.
     target_link_options(content_worker_test PRIVATE "LINKER:--wrap=calloc" "LINKER:--wrap=fopen")
     target_compile_definitions(content_worker_test PRIVATE PICO_PAGE_WRAP_CALLOC_TEST=1)
 endif()
@@ -132,8 +129,6 @@ target_compile_options(graphics_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME graphics COMMAND graphics_test)
 
 set(document_fixtures ${CMAKE_CURRENT_BINARY_DIR}/document-fixtures)
-# The generator writes every fixture in one run and owns their names. Running it on each build restores
-# a missing or stale file without a second list of outputs here.
 add_custom_target(document_fixtures_target
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/make_document_fixtures.py ${document_fixtures}
     VERBATIM)
@@ -204,7 +199,6 @@ target_link_libraries(update_test PRIVATE reader_sync)
 target_compile_options(update_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME update COMMAND update_test)
 
-# The transfer page script runs in the phone browser; Node executes it against a DOM stand-in.
 find_program(NODE_EXECUTABLE node)
 if(NODE_EXECUTABLE)
     add_test(NAME wifi_upload_page COMMAND ${NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/wifi_upload_page_test.mjs)
@@ -217,7 +211,6 @@ target_compile_options(sync_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME sync COMMAND sync_test ${document_fixtures}/valid.epub ${tool_card})
 set_tests_properties(sync PROPERTIES FIXTURES_REQUIRED tool_card)
 
-# Build the same recorder with all three compile-time configurations.
 find_package(Threads REQUIRED)
 foreach(mode release performance diagnostic)
     add_executable(diagnostics_${mode}_test tests/diagnostics_test.cpp
@@ -244,7 +237,6 @@ target_compile_features(changed_pixels_waveform_test PRIVATE cxx_std_17)
 target_compile_options(changed_pixels_waveform_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME changed_pixels_waveform COMMAND changed_pixels_waveform_test)
 
-# This opt-in test compiles the pinned BSP tables, not synthetic waveform fixtures.
 option(PICO_PAGE_TEST_BSP_WAVEFORM "Test footer drive against the pinned BSP" OFF)
 if(PICO_PAGE_TEST_BSP_WAVEFORM)
     set(bsp_source "${CMAKE_CURRENT_SOURCE_DIR}/.local/read_pico_firmware")

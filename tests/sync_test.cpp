@@ -36,7 +36,6 @@ int main(int argc, char** argv) {
                 assert(sync::from_xpointer(book, prefix + "1].0", version, recovered, error) == !refused);
                 if (refused) {
                     assert(recovered == Anchor{} && error == sync::kLongSourceNode);
-                    // A later engine text node must not resolve to the source sibling after em.
                     assert(!sync::from_xpointer(book, prefix + "2].0", version, recovered, error));
                     assert(recovered == Anchor{});
                 }
@@ -46,7 +45,6 @@ int main(int argc, char** argv) {
     }
     const Anchor emoji{chapter.resource, "/html[1]/body[1]/p[1]/em[1]/text()[1]", 3};
     const Anchor leading{chapter.resource, "/html[1]/body[1]/p[1]/text()[1]", 2};
-    // These expected paths and normalized text offsets were exported by the pinned CREngine.
     for (int version : {20240114, 20260812}) {
         double progress_fraction = -1;
         assert(sync::map_upload_position(document, emoji, version, pointer, progress_fraction, error));
@@ -59,7 +57,6 @@ int main(int argc, char** argv) {
         assert(recovered == emoji);
         assert(sync::to_xpointer(document, chapter, leading, version, pointer, error));
         assert(pointer == "/body[1]/DocFragment[1]/body[1]/p[1]/text()[1].1");
-        // The reported place is the part that holds the anchor and the anchor's offset in its text.
         sync::PartPosition place;
         std::uint32_t visible = 0;
         assert(sync::from_xpointer(document, pointer, version, recovered, error, {}, &place));
@@ -71,7 +68,6 @@ int main(int argc, char** argv) {
         assert(!sync::from_xpointer(document, "/body/DocFragment[99]/body/p/text().0", version, recovered, error));
     }
     {
-        // Rejected uploads must not expose outputs retained from a previous successful mapping.
         double progress_fraction = 1;
         pointer = "stale";
         assert(!sync::map_upload_position(document, {"missing.xhtml", emoji.node, emoji.offset},
@@ -86,8 +82,6 @@ int main(int argc, char** argv) {
     assert(!sync::to_xpointer(document, chapter, emoji, 20260812, pointer, error));
     assert(error == sync::kUnsupportedStructure);
     {
-        // Element outside the profile, here a table: every position of the chapter is refused
-        // in both directions with the error that names this cause.
         EpubDocument tables;
         Chapter refused_chapter;
         const auto fixtures = std::filesystem::path(argv[1]).parent_path();
@@ -102,13 +96,9 @@ int main(int argc, char** argv) {
         Anchor refused;
         assert(!sync::from_xpointer(tables, "/body[1]/DocFragment[1]/body[1]/p[1]/text()[1].0", 20260812, refused, error));
         assert(error == sync::kUnsupportedStructure);
-        // A position inside the table itself names the same cause, not a missing node.
         assert(!sync::from_xpointer(tables, "/body[1]/DocFragment[1]/body[1]/table[1]/tr[1]/td[1]/text()[1].0", 20260812, refused, error));
         assert(error == sync::kUnsupportedStructure);
 
-        // An image stays inside the profile. Text beside it maps as before and the image maps as
-        // its element at offset zero. The pinned CREngine resolves these paths to the same
-        // nodes; tools/check_koreader_mapping.py repeats that comparison.
         EpubDocument images;
         Chapter flow;
         assert(images.open((fixtures / "image-flow.epub").string(), error) && images.load_chapter(0, flow, error));
@@ -127,19 +117,14 @@ int main(int argc, char** argv) {
                 assert(recovered == flow.images[i].source && flow.offset_for(recovered, visible));
                 assert(place.part == flow.part && place.offset == visible && visible == flow.images[i].begin);
             }
-            // The engine omits a first index in the earlier DOM version.
             assert(sync::from_xpointer(images, "/body/DocFragment[1]/body/img.0", version, recovered, error));
             assert(recovered == flow.images[0].source);
-            // An image position has no offset other than zero, and the image must exist.
             assert(!sync::from_xpointer(images, "/body[1]/DocFragment[1]/body[1]/img[1].1", version, recovered, error));
             assert(!sync::from_xpointer(images, "/body[1]/DocFragment[1]/body[1]/img[3].0", version, recovered, error));
             assert(!sync::from_xpointer(images, "/body[1]/DocFragment[1]/body[1]/p[1]/img[1].0", version, recovered, error));
             assert(recovered == Anchor{});
         }
 
-        // A stylesheet that can remove elements from the layout leaves the visibility of an image
-        // unknown, so its position is refused in both directions; text keeps its mapping. A
-        // display value other than none does not hide anything.
         EpubDocument hiding;
         Chapter hidden, shown;
         assert(hiding.open((fixtures / "hidden-image.epub").string(), error));
@@ -155,8 +140,6 @@ int main(int argc, char** argv) {
         assert(pointer == "/body[1]/DocFragment[2]/body[1]/img[1].0");
         assert(sync::from_xpointer(hiding, pointer, 20260812, unused, error) && unused == shown.images[0].source);
 
-        // An image that opens a chapter part lies inside that part: its run, its image entry and
-        // the place reported for its position all use offsets of the part that holds it.
         EpubDocument split;
         Chapter second;
         assert(split.open((fixtures / "part-boundary-image.epub").string(), error));
@@ -224,7 +207,6 @@ int main(int argc, char** argv) {
     assert(!sync::load_config(directory, config, error));
     assert(config.userkey.empty() && error.find("test-private-key") == std::string::npos);
     std::filesystem::remove_all(directory);
-    // argv[2] is a card written by tools/setup_network.py; see tests/test_setup_network.py.
     assert(sync::load_config(argv[2], config, error));
     assert(config.endpoint == "https://sync.example.invalid" && config.username == "读者 \"a\\b\"" &&
            config.userkey == "55d2fddf8ba5768bbc44b083846cf439" && config.device_id == "DEVICE-1" &&

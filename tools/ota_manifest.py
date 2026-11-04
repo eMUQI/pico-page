@@ -26,13 +26,11 @@ BOARD = 'read_pico'
 PROJECT = 'pico_page'
 SLOT_BYTES = 4 * 1024 * 1024
 FLASH_BYTES = 16 * 1024 * 1024
-# Flash layout of ESP32-S3: second-stage bootloader, partition table, then the first application slot.
 TABLE_OFFSET = 0x8000
 TABLE_BYTES = 0x1000
 APP_OFFSET = 0x10000
 NOTES_LIMIT = 8 * 1024
 ESP32S3_CHIP_ID = 9
-# The device reads version numbers of at most nine digits.
 NUMBER = r'(?:0|[1-9][0-9]{0,8})'
 RELEASE = re.compile(rf'{NUMBER}\.{NUMBER}\.{NUMBER}(?:-(?:beta|rc)\.[1-9][0-9]{{0,8}})?')
 # esp_image_header_t (24 bytes), esp_image_segment_header_t (8 bytes), then esp_app_desc_t.
@@ -40,7 +38,6 @@ DESCRIPTION = 32
 
 
 def schema_defaults(root=ROOT):
-    """The data format versions this source tree reads and writes, from the device's own constants."""
     header = (root / 'firmware/components/reader_sync/include/pico_page/update.h').read_text()
     found = re.search(r'progress_schema = (\d+), config_schema = (\d+);', header)
     if not found:
@@ -49,12 +46,6 @@ def schema_defaults(root=ROOT):
 
 
 def verify_image(image):
-    """Validate ESP image framing, segment bounds, checksum and appended digest.
-
-    An image that keeps a valid start but is truncated or altered would otherwise be published
-    and fail on every device only after its complete download. Returns the length of the image;
-    the caller decides what may follow it.
-    """
     if len(image) < DESCRIPTION + 256 or image[0] != 0xE9:
         raise ValueError('Not an ESP image')
     # ESP_IMAGE_MAX_SEGMENTS: the bootloader refuses an image with more segments.
@@ -85,12 +76,11 @@ def verify_image(image):
 
 
 def image_version(image):
-    """Version from the application description of a complete ESP32-S3 pico_page image."""
     if verify_image(image) != len(image):
         raise ValueError('Image does not end with its digest')
     if struct.unpack_from('<H', image, 12)[0] != ESP32S3_CHIP_ID:
         raise ValueError('Image is not built for ESP32-S3')
-    # The bootloader reads the description from the first segment and refuses a shorter one.
+    # ESP-IDF stores the application descriptor at the start of the first segment.
     if struct.unpack_from('<I', image, 28)[0] < 256:
         raise ValueError('First segment is shorter than the application description')
     magic, = struct.unpack_from('<I', image, DESCRIPTION)
@@ -111,8 +101,6 @@ def build_manifest(image, notes, base_url, published, schema):
         raise ValueError('Release notes exceed 8 KiB; the device would cut them')
     datetime.date.fromisoformat(published)
     name = f'pico-page-{version}-{BOARD}-release.bin'
-    # The device accepts only such addresses: https with a host, printable ASCII without user
-    # information, query, fragment or backslash, at most 512 bytes.
     parts = urllib.parse.urlsplit(base_url)
     if (parts.scheme != 'https' or not parts.hostname or '@' in base_url or parts.query or parts.fragment
             or not parts.path.endswith('/') or not base_url.startswith('https://' + parts.netloc)
@@ -128,7 +116,6 @@ def full_name(version):
 
 
 def verify_table(table):
-    """Check partition entries, their digest, flash bounds and the OTA slots required by this project."""
     entries = []
     for offset in range(0, len(table), 32):
         magic, kind, subtype, start, size, label = struct.unpack_from('<HBBII16s', table, offset)
@@ -143,8 +130,7 @@ def verify_table(table):
         raise ValueError('Partition table has no digest')
     if any(start < TABLE_OFFSET + TABLE_BYTES or start + size > FLASH_BYTES for _, _, _, start, size in entries):
         raise ValueError('Partition table has an entry outside the 16 MiB flash')
-    # An erased otadata starts ota_0, where the full image places the application; the device
-    # installs an update into ota_1 and needs otadata to switch to it.
+    # With erased otadata and no factory partition, ESP-IDF boots the first OTA slot.
     apps = {subtype: (start, size) for _, kind, subtype, start, size in entries if kind == 0}
     if (apps.get(0x10) != (APP_OFFSET, SLOT_BYTES) or apps.get(0x11, (0, 0))[1] != SLOT_BYTES
             or not any(kind == 1 and subtype == 0 for _, kind, subtype, _, _ in entries)):
@@ -152,17 +138,12 @@ def verify_table(table):
 
 
 def build_full(bootloader, table, application):
-    """Full-flash image for an erased flash: bootloader at 0, partition table, application in ota_0.
-
-    Everything between the parts stays erased, so the device starts with empty NVS and otadata.
-    """
     full = (bootloader.ljust(TABLE_OFFSET, b'\xff') + table.ljust(TABLE_BYTES, b'\xff')).ljust(APP_OFFSET, b'\xff') + application
     verify_full(full, application)
     return full
 
 
 def verify_full(full, application):
-    """Check the Read Pico full-image layout and embedded application bytes; this does not verify booting."""
     if len(full) <= APP_OFFSET:
         raise ValueError('Full image is truncated')
     end = verify_image(full[:TABLE_OFFSET])
@@ -177,11 +158,6 @@ def verify_full(full, application):
 
 
 def newest_release(releases):
-    """Tag of the highest released version among `gh release list --json tagName,isDraft` entries.
-
-    Only tags of the form v<release version> count. Order follows docs/development/versioning.md:
-    X.Y.Z-beta.N before X.Y.Z-rc.N before X.Y.Z. None when no such release exists.
-    """
     def order(tag):
         core, _, stage = tag[1:].partition('-')
         name, _, number = stage.partition('.')
@@ -278,7 +254,6 @@ def main():
     except (OSError, ValueError) as error:
         sys.exit(str(error))
     arguments.out.mkdir(parents=True, exist_ok=True)
-    # The manifest names one version; images of an earlier release in the directory would fail the check.
     for stale in arguments.out.glob('pico-page-*-' + BOARD + '-release*.bin'):
         stale.unlink()
     (arguments.out / name).write_bytes(image)

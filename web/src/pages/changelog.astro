@@ -2,11 +2,8 @@
 import { readdirSync, readFileSync } from "node:fs";
 import Site from "../layouts/Site.astro";
 
-// Release notes are written once, in docs/releases/<version>.md: the update manifest carries
-// them to devices and this page renders the same files.
 const directory = "../docs/releases";
 
-// Order of docs/development/versioning.md: X.Y.Z-beta.N before X.Y.Z-rc.N before X.Y.Z.
 function order(version) {
   const [core, stage = ""] = version.split("-");
   const [name, number = "0"] = stage.split(".");
@@ -18,8 +15,6 @@ const newestFirst = (a, b) => {
   return at < 0 ? 0 : y[at] - x[at];
 };
 
-// The same subset of Markdown the device shows: headings, list items, paragraphs, **bold** and
-// `code`; a link keeps only its text. Returns [{ kind: "heading" | "list" | "text", ... }].
 function blocks(markdown) {
   const spans = (line) => line.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").split(/(\*\*[^*]+\*\*|`[^`]+`)/).filter(Boolean).map((part) =>
     part.startsWith("**") ? { bold: part.slice(2, -2) } : part.startsWith("`") ? { code: part.slice(1, -1) } : { text: part });
@@ -35,8 +30,6 @@ function blocks(markdown) {
   return result;
 }
 
-// The website build stores the published releases beside the fetched firmware. Notes merged
-// ahead of their release stay off the page; a build without the list shows every file, undated.
 let published;
 try {
   published = new Map(JSON.parse(readFileSync("public/firmware/releases.json", "utf8")).map(

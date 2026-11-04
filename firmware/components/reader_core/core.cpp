@@ -23,7 +23,6 @@ bool InputRouter::accept(InputEvent event) {
     }
     if (event.sequence == 0 || event.sequence <= last_sequence_) return false;
     last_sequence_ = event.sequence;
-    // Concurrent contacts are consumed without replacing the original gesture owner.
     if (active_) return false;
     active_ = event.sequence;
     return true;
@@ -125,7 +124,6 @@ bool Session::presented(const FrameResult& result) {
         result.frame.anchor != pending_body_->anchor) return false;
     pending_body_.reset();
     if (!result.success) return false;
-    // Repainting the same source position does not create another reading revision.
     if (!visible_ && saved_ && saved_->anchor == result.frame.anchor) {
         visible_ = saved_;
     } else if (!visible_ || visible_->anchor != result.frame.anchor) {
@@ -151,4 +149,4 @@ bool Session::saved(const SaveRequest& request, bool success) {
     return true;
 }
 
-}  // namespace pico_page
+}

@@ -18,8 +18,6 @@ constexpr std::uint8_t input_pins = (1U << 2) | (1U << 5) | (1U << 6);
 constexpr std::uint8_t panel_power = (1U << 3) | (1U << 4);
 
 esp_err_t configure_sleep_pins() {
-    // Read Pico panel clock/control/data and TF CLK. Only sleep registers change;
-    // active SDMMC signals remain under the driver's ownership.
     constexpr gpio_num_t pins[] = {
         GPIO_NUM_21, GPIO_NUM_48, GPIO_NUM_3, GPIO_NUM_46, GPIO_NUM_47,
         GPIO_NUM_4, GPIO_NUM_5, GPIO_NUM_6, GPIO_NUM_7, GPIO_NUM_8,
@@ -107,4 +105,4 @@ esp_err_t SleepIo::resume() {
     return ESP_OK;
 }
 
-} // namespace pico_page::platform
+}

@@ -9,4 +9,4 @@ bool validate_display_geometry(const graphics::Canvas& canvas, platform::Display
     error = "Application canvas dimensions do not match the display";
     return false;
 }
-} // namespace pico_page::runtime
+}

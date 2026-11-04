@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Bind successful firmware builds to source contents and artifact hashes."""
 import hashlib
 import json
 from pathlib import Path
@@ -33,7 +32,6 @@ def artifacts(build):
 
 
 def unapplied_defaults(config, defaults):
-    """Returns the options whose value in the generated sdkconfig differs from the defaults files; later files win."""
     wanted = {}
     for path in defaults:
         for line in path.read_text().splitlines():

@@ -16,9 +16,6 @@ std::optional<PageCache> read_page_cache(const FileStore& store, const std::stri
     const auto checksum = cached.substr(cached.size() - 32);
     cached.resize(cached.size() - 32);
     if (md5_hex(cached) != checksum) return std::nullopt;
-    // Payload, as 32-bit words in the little-endian order native to the device and the host:
-    // per spine item the number of parts, or uncounted for an item that was not
-    // finished, then per part a count and that many ascending page starts.
     PageIndices loaded(spine.size());
     std::vector<bool> finished;
     for (const auto& item : spine) finished.push_back(!item.linear);

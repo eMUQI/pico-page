@@ -29,17 +29,10 @@
 namespace {
 constexpr auto tag = "pico_page";
 constexpr std::int64_t idle_slow_us = 3'000'000;
-// Defer background saves until the page settles to avoid writing every intermediate turn.
-// Leaving the book, sleeping and USB transfer flush pending saves and handle failures before handoff.
 constexpr std::int64_t idle_save_us = 2'000'000;
-// Delay optional content-worker tasks until the page settles so foreground work has priority.
 constexpr std::int64_t idle_background_us = 1'000'000;
 std::uint64_t presentation_sequence = 0;
-// When the most recent frame and its follow-up work finished; contacts sampled earlier were
-// made while the previous screen was still being replaced.
 std::int64_t settled_us = 0;
-// An upload session ends itself after this long without an upload; the access point keeps the
-// radio powered for as long as it is up.
 constexpr std::int64_t portal_idle_us = 600'000'000;
 constexpr char manual_paused[] = "手动连接已暂停，点「立即连接」可恢复。";
 namespace diag = pico_page::diagnostics;
@@ -49,23 +42,17 @@ struct NetworkJob {
     pico_page::NetworkOperation operation;
     std::string card, body, error;
     int status = 0;
-    // A book upload session instead of one request: operation.cancelled asks it to end and error
-    // returns the closing message. station runs it over a saved network instead of the access point.
     bool portal = false;
     bool station = false;
     std::optional<pico_page::WifiOperation> wifi = std::nullopt;
     std::vector<provision::NearbyWifi> nearby = {};
-    // Set when the station link could not be established; error then names the cause.
     pico_page::LinkFailure failure = pico_page::LinkFailure::None;
-    // A firmware update check or download; update_failure reports how it ended.
     std::optional<pico_page::UpdateOperation> update = std::nullopt;
     pico_page::UpdateFailure update_failure = pico_page::UpdateFailure::None;
-    // Network the update request ran over; empty when no station link was established.
     std::string joined = {};
 };
 QueueHandle_t requests = nullptr, responses = nullptr;
 QueueHandle_t wifi_events = nullptr;
-// Latest progress of a firmware download; the application task draws it between frames.
 struct UpdateEvent { std::uint64_t id; std::uint32_t bytes; };
 QueueHandle_t update_events = nullptr;
 // Held for each panel update and for each flash write of a firmware download. A flash
@@ -108,21 +95,17 @@ void release_radio(const std::string& detail = "") {
     station_target = {};
     publish_wifi(pico_page::WifiPhase::Offline, "", detail);
 }
-// PortalStatus pointers from the network worker; the application task draws and deletes them.
 QueueHandle_t portal_events = nullptr;
 SemaphoreHandle_t portal_emit_lock = nullptr;
-// State of one upload session shared by the network worker and the HTTP server task.
 struct PortalSession {
     SemaphoreHandle_t lock = xSemaphoreCreateMutex();
     pico_page::network::IdleTimer upload_idle;
-    // The state the device shows, updated as files are saved.
     pico_page::PortalStatus status;
 };
 void emit(const pico_page::PortalStatus &status) {
     auto *event = new pico_page::PortalStatus(status);
     xSemaphoreTake(portal_emit_lock, portMAX_DELAY);
     if (xQueueSend(portal_events, &event, 0) != pdTRUE) {
-        // E-paper refresh can block the consumer; retain the newest cumulative status.
         pico_page::PortalStatus *oldest = nullptr;
         if (xQueueReceive(portal_events, &oldest, 0) == pdTRUE)
             delete oldest;
@@ -170,14 +153,6 @@ pico_page::LinkFailure link_failure(const platform::ConnectFailure& failure) {
     return provision::network_absent(failure.reason) ? LinkFailure::NotNearby
          : provision::password_rejected(failure.reason) ? LinkFailure::Password : LinkFailure::Other;
 }
-/**
- * Brings the station link up for one task; the worker is the only driver owner and the
- * credentials were copied before leaving card access. A link that is already up is used as it
- * is unless replace is set. With targets.automatic one scan (up to 10 s) orders the saved
- * networks in range, strongest first, and each is tried until one connects; otherwise only the
- * single listed network is tried. Every attempt blocks for up to 20 s and stops at the next
- * driver call after cancelled is set. A refused password is reported before other causes.
- */
 bool ensure_station(const pico_page::WifiTargets& targets, const std::atomic_bool& cancelled, std::string& error,
                     pico_page::LinkFailure& failure, bool replace = false) {
     using pico_page::LinkFailure;
@@ -222,26 +197,23 @@ bool ensure_station(const pico_page::WifiTargets& targets, const std::atomic_boo
     failure = refused.empty() ? last_kind : LinkFailure::Password;
     return false;
 }
-/** Records connection history without changing the explicitly selected target. */
 void remember_connection(const std::string &card, const std::string &ssid) {
     std::string error;
     if (!provision::save_connection(card, ssid, std::time(nullptr), error))
         ESP_LOGW(tag, "Connection record not saved: %s", error.c_str());
 }
-/** Starts the device access point and the upload server on it. */
 bool start_hotspot(NetworkJob &job, PortalSession &session) {
     std::uint8_t mac[6]{};
     esp_efuse_mac_get_default(mac);
     char name[20];
     std::snprintf(name, sizeof(name), "PicoPage-%02X%02X", mac[4], mac[5]);
-    // Read off the screen and typed on a phone, so look-alike characters are left out. The
-    // radio is still off here, which leaves esp_random() pseudo-random; the time of the tap that
-    // started the session adds entropy of its own.
-    static constexpr char alphabet[] = "abcdefghjkmnpqrstuvwxyz23456789";
+    // ESP-IDF's hardware RNG lacks a continuous entropy source before Wi-Fi starts.
+    static constexpr char unambiguous_password_chars[] = "abcdefghjkmnpqrstuvwxyz23456789";
     std::string password;
     for (int i = 0; i < 8; ++i)
-        password += alphabet[(esp_random() ^ static_cast<std::uint32_t>(esp_timer_get_time())) %
-                             (sizeof(alphabet) - 1)];
+        password += unambiguous_password_chars[
+            (esp_random() ^ static_cast<std::uint32_t>(esp_timer_get_time())) %
+            (sizeof(unambiguous_password_chars) - 1)];
     std::vector<platform::NearbyNetwork> scanned;
     holds.manual_suspended = pico_page::network::live(holds.manual);
     pico_page::network::release(holds.sync);
@@ -262,11 +234,6 @@ bool start_hotspot(NetworkJob &job, PortalSession &session) {
     server.activity = upload_activity;
     return platform::start_upload_server(server, job.error);
 }
-/**
- * Joins a saved network under the connection mode and serves the upload page at an address that
- * includes a short random path, so the page is reached from the screen rather than by guessing.
- * On failure job.error is the sentence the network page shows.
- */
 bool start_station_upload(NetworkJob &job, PortalSession &session) {
     std::string error;
     if (job.operation.targets.networks.empty()) {
@@ -334,17 +301,12 @@ void run_portal(NetworkJob &job) {
         }
     }
     job.operation.cancelled->store(true);
-    // Stop retries retain this stack session and its mutex until every HTTP handler exits.
     platform::stop_portal_server();
     if (!job.station || !retained_station())
         release_radio(holds.manual_suspended ? manual_paused : "");
     if (session.lock)
         vSemaphoreDelete(session.lock);
 }
-/**
- * Records a sync/update phase: detail 1 station, 2 clock, 3 HTTP, 4 resolver, 5 firmware download.
- * A request cancelled before its first phase therefore leaves no evidence that networking ran.
- */
 template <typename Call>
 bool network_stage([[maybe_unused]] const NetworkJob& job, [[maybe_unused]] std::uint32_t stage, Call&& call) {
     PP_DIAGNOSTIC(const auto measurement = diag::begin(diag::Kind::NetworkStage,
@@ -354,7 +316,6 @@ bool network_stage([[maybe_unused]] const NetworkJob& job, [[maybe_unused]] std:
         : okay ? diag::Outcome::Success : diag::Outcome::Failure);)
     return okay;
 }
-/** One request borrows a whole sync transaction, including the bounded decision interval. */
 #ifdef CONFIG_PICO_PAGE_PERF_METRICS
 void execute_request(NetworkJob &job) {
 #else
@@ -366,7 +327,6 @@ void run_request(NetworkJob &job) {
     publish_wifi(pico_page::WifiPhase::Clock, station_target.ssid);
     platform::ConnectFailure failure;
     if (!network_stage(job, 2, [&] { return platform::synchronize_clock(job.error, &failure, &cancelled); })) {
-        // Without a clock TLS cannot start; the user sees it as a network that does not work.
         job.error = cancelled.load() ? "操作已取消。" : wifi_failure(station_target.ssid, failure);
         job.failure = pico_page::LinkFailure::Other;
         return;
@@ -396,12 +356,6 @@ void guard_flash(void*, bool begin) {
         xSemaphoreGive(flash_lock);
     }
 }
-/**
- * Fetches the update manifest or streams the firmware image into the inactive slot. The link
- * is released afterwards unless another hold keeps it. The download-stage retry budget excludes
- * connection and clock setup and is not an end-to-end task deadline. Cancellation is observed at
- * explicit checkpoints; in-flight SDK operations and resource cleanup must still complete.
- */
 void run_update(NetworkJob& job) {
     using pico_page::UpdateFailure;
     const auto& operation = *job.update;
@@ -423,7 +377,6 @@ void run_update(NetworkJob& job) {
             return UpdateFailure::Internet;
         }
         if (operation.kind == pico_page::UpdateOperation::Kind::Check) {
-            // A failed lookup separates a network without internet access from a failing server.
             if (!network_stage(job, 4, [&] { return platform::resolve_host(operation.url, job.error, &cancelled); })) {
                 ESP_LOGW(tag, "Update check: %s", job.error.c_str());
                 job.error = "无法解析更新服务器的地址";
@@ -456,7 +409,6 @@ void run_update(NetworkJob& job) {
         }
     };
     job.update_failure = perform();
-    // Only link and internet failures carry text for the user; other diagnostics stay in the log.
     if (job.update_failure != UpdateFailure::Link && job.update_failure != UpdateFailure::Internet) job.error.clear();
     if (cancelled.load() && job.update_failure != UpdateFailure::None) job.update_failure = UpdateFailure::Cancelled;
     PP_DIAGNOSTIC(diag::end(measurement, cancelled.load() ? diag::Outcome::Cancelled
@@ -489,7 +441,6 @@ void network_worker(void *) {
                         if (!ensure_station(operation.targets, *operation.cancelled, job->error, job->failure))
                             pico_page::network::release(holds.manual);
                     } else if (operation.kind == pico_page::WifiOperation::Kind::Join) {
-                        // Verifies new credentials on a link of their own; nothing keeps it afterwards.
                         ensure_station(operation.targets, *operation.cancelled, job->error, job->failure, true);
                     } else if (operation.kind == pico_page::WifiOperation::Kind::Clock) {
                         if (ensure_station(operation.targets, *operation.cancelled, job->error, job->failure)) {
@@ -525,7 +476,6 @@ void network_worker(void *) {
         if (!pico_page::network::live(holds.manual)) holds.manual_suspended = false;
         if (!retained_station()) { release_radio(holds.manual_suspended ? manual_paused : ""); continue; }
         if (!platform::station_connected()) {
-            // One reconnect to the same network; no background scan or unbounded retry loop.
             std::string error;
             pico_page::LinkFailure failure;
             if (!holds.manual_suspended && pico_page::network::live(holds.manual) && reconnects++ == 0 &&
@@ -536,7 +486,6 @@ void network_worker(void *) {
 }
 bool present(pico_page::ReaderApp &app) {
     if (!app.pending_frame()) { pico_page::platform::cancel_display(); return true; }
-    // Deferred presentation is not a display failure; the main loop continues to handle input.
     if (!pico_page::platform::try_begin_display()) return true;
     struct Release {
         ~Release() { pico_page::platform::finish_display(); }
@@ -606,13 +555,11 @@ bool present(pico_page::ReaderApp &app) {
     }
     return true;
 }
-} // namespace
+}
 void pico_page::runtime::run() {
     std::string error;
     if (!pico_page::console::initialize(error))
         ESP_LOGW(tag, "Diagnostic console unavailable: %s", error.c_str());
-    // First start of an installed update: the bootloader returns to the previous slot unless
-    // this start reaches a presented first frame and confirms the image.
     const bool unconfirmed = pico_page::platform::firmware_unconfirmed();
     if (!pico_page::platform::initialize(error)) {
         ESP_LOGE(tag, "Board initialization failed: %s", error.c_str());
@@ -648,10 +595,8 @@ void pico_page::runtime::run() {
         if (unconfirmed) pico_page::platform::reject_firmware();
         return;
     }
-    // A missing card is a supported state and does not count against the image.
     const bool first_frame = present(*app);
-    // An image that cannot be confirmed would be dropped at a later reset, after this firmware
-    // may have written data; it is given up now instead.
+    // The bootloader rolls back an unconfirmed image on its next reset.
     if (unconfirmed && !(first_frame && pico_page::platform::confirm_firmware())) pico_page::platform::reject_firmware();
     if (!card) {
         app->card_unavailable(pico_page::platform::card_start_issue());
@@ -671,7 +616,6 @@ void pico_page::runtime::run() {
     bool network_busy = false, sleep_requested = false, physical_suppressed = false;
     pico_page::PowerRequest pending_power;
     bool pending_usb = false, power_prepared = false;
-    // Set while an upload session runs on the network worker; storing true ends it.
     std::shared_ptr<std::atomic_bool> portal_stop;
     std::optional<pico_page::PortalStatus> deferred_portal_failure;
     std::uint64_t input_sequence = 0, physical_sequence = 0, physical_source = 0;
@@ -707,7 +651,6 @@ void pico_page::runtime::run() {
         const bool ready = app->prepare_sleep();
         if (!ready && app->sleep_pending()) return false;
         if (ready && present(*app)) {
-            // Presentation can outlast a new input; poll both the input queue and PMU before suspension.
             const bool polled = pico_page::platform::poll(sleep_input, error);
             if (!polled) ESP_LOGW(tag, "Sleep input check failed: %s", error.c_str());
             if (pico_page::input::SleepInput::ignores(sleep_input.kind)) sleep_input = {};
@@ -716,7 +659,6 @@ void pico_page::runtime::run() {
                 if (!pico_page::platform::sleep(error, slept))
                     ESP_LOGW(tag, "Sleep failed: %s", error.c_str());
             }
-            // A second short press cancels; a long press is retained until restoration completes.
             if (sleep_input.kind == pico_page::platform::EventKind::Power) sleep_input = {};
             if (!slept) resume_input.begin();
             app->wake(slept);
@@ -725,7 +667,6 @@ void pico_page::runtime::run() {
             app->cancel_sleep();
             resume_input.begin();
         }
-        // The timer keeps counting during light sleep; a failed attempt also waits a full period.
         last_activity = esp_timer_get_time();
         return true;
     };
@@ -749,7 +690,7 @@ void pico_page::runtime::run() {
             sleep_requested = false;
             if (power_prepared || app->prepare_power(power_request)) {
                 if (!power_prepared) {
-                    present(*app); // The final image is best effort; it cannot veto shutdown.
+                    present(*app);
                     app->stop_wifi();
                     power_prepared = true;
                 }
@@ -758,8 +699,6 @@ void pico_page::runtime::run() {
                     ESP_LOGE(tag, "Power teardown did not close file consumers");
                     for (;;) vTaskDelay(pdMS_TO_TICKS(1000));
                 }
-                // The record is written only once the boot slot is switched and while the card is
-                // still mounted. Without the switch the restart returns to this firmware unreported.
                 if (power_request.install) {
                     if (pico_page::platform::activate_firmware(error)) app->record_install();
                     else ESP_LOGE(tag, "Firmware activation: %s", error.c_str());
@@ -771,10 +710,9 @@ void pico_page::runtime::run() {
                     ESP_LOGE(tag, "PMU power-off: %s", error.c_str());
                     app->show_power_off_help();
                     present(*app);
-                    // Drop panel rails after the fallback frame; at most one more release attempt.
                     pico_page::platform::finish_power(error);
                 }
-                // USB supply can keep the ESP alive. Do not resume app or storage work.
+                // USB power can keep the ESP running after PMU shutdown.
                 pico_page::platform::set_performance(false);
                 for (;;) vTaskDelay(pdMS_TO_TICKS(1000));
             }
@@ -820,7 +758,6 @@ void pico_page::runtime::run() {
         const auto portal_action = app->take_portal_action();
         if (portal_action == pico_page::PortalAction::Upload || portal_action == pico_page::PortalAction::UploadStation) {
             const bool station = portal_action == pico_page::PortalAction::UploadStation;
-            // Read before the session owns the card.
             const auto targets = station ? app->upload_targets() : pico_page::WifiTargets{};
             if (portal_stop || !worker_ready || usb_mode || network_busy || sleep_requested ||
                 pico_page::console::transfer_active() || !app->prepare_portal(station)) {
@@ -832,18 +769,14 @@ void pico_page::runtime::run() {
             } else {
                 portal_stop = std::make_shared<std::atomic_bool>(false);
                 auto *job = new NetworkJob{{app->portal_generation(), {}, portal_stop, {}, targets}, card ? card : pico_page::platform::card_mount_path(), {}, {}, 0, true, station};
-                // The request queue is empty whenever network_busy is false.
                 xQueueSend(requests, &job, portMAX_DELAY);
                 network_busy = true;
             }
             present(*app);
         }
-        // A session also ends when its page is gone: the card was removed, the display failed
-        // or the power key asked for sleep.
         if (portal_stop && (portal_action == pico_page::PortalAction::Stop || sleep_requested ||
                             !app->portal_visible()))
             portal_stop->store(true);
-        // A check and its upload report several states within one refresh; only the newest is drawn.
         pico_page::PortalStatus *portal_status = nullptr, *latest_portal = nullptr;
         while (portal_stop && !app->pending_frame() &&
                xQueueReceive(portal_events, &portal_status, 0) == pdTRUE) {
@@ -854,7 +787,6 @@ void pico_page::runtime::run() {
         if (network_busy && !app->pending_frame() &&
             xQueueReceive(responses, &completed, 0) == pdTRUE) {
             if (completed->portal) {
-                // States queued after the last drain belong to the session that has ended.
                 while (xQueueReceive(portal_events, &portal_status, 0) == pdTRUE)
                     delete portal_status;
                 app->show_portal({pico_page::PortalPhase::Closed, "", "", "", completed->error, "", 0, "", completed->operation.id});
@@ -901,7 +833,6 @@ void pico_page::runtime::run() {
         if (!usb_mode && !network_busy && !sleep_requested && !resume_input.active() && !pico_page::console::transfer_active()) {
             if (auto update = app->take_update_request()) {
                 const auto id = update->id;
-                // Without its progress queue or flash lock only the update is refused; other network work continues.
                 auto* job = worker_ready && update_events && flash_lock ? new NetworkJob{} : nullptr;
                 if (job) job->update = std::move(*update);
                 if (job && xQueueSend(requests, &job, 0) == pdTRUE) network_busy = true;
@@ -941,7 +872,6 @@ void pico_page::runtime::run() {
         using pico_page::platform::EventKind;
         const bool sleep_recovery = sleep_requested || resume_input.active();
         if (sleep_requested && pico_page::input::SleepInput::ignores(event.kind)) event = {};
-        // An update check or download keeps the device awake and at full speed.
         if (event.kind != EventKind::None || pico_page::console::transfer_active() || app->update_busy()) {
             last_activity = esp_timer_get_time();
             pico_page::platform::set_performance(true);
@@ -1014,7 +944,6 @@ void pico_page::runtime::run() {
             sleep_requested = false;
             if (sleep_recovery && !usb_mode && !pico_page::console::transfer_active() &&
                 (network_busy || radio_active.load())) {
-                // Keep the menu intent until the existing cancellation returns the radio and files.
                 resume_input.begin();
                 resume_input.accept(event);
             } else if (!usb_mode && !network_busy && !pico_page::console::transfer_active()) {
@@ -1083,8 +1012,6 @@ void pico_page::runtime::run() {
             const auto tap = released_tap.accept(event, presentation_sequence);
             if (event.phase == pico_page::platform::EventPhase::End || event.phase == pico_page::platform::EventPhase::Cancel)
                 physical_source = 0;
-            // Several contacts made during one busy period collapse into the latest one. The
-            // keyboard instead receives every tap in order and draws them in one update.
             if (tap && tap->time_us < settled_us && !app->keyboard_visible() &&
                 pico_page::platform::input_waiting_before(settled_us)) {
 #ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
@@ -1108,7 +1035,6 @@ void pico_page::runtime::run() {
                 released_tap.accept(end, presentation_sequence);
                 if (app->view() == pico_page::View::Library) {
                     dispatch_tap(*held, end);
-                    // Complete input ownership so inspection can progress before physical release.
                     physical_source = physical_sequence = 0;
                 } else {
                     continuous_contact = true;
@@ -1150,7 +1076,6 @@ void pico_page::runtime::run() {
                 return pico_page::platform::input_waiting_before(std::numeric_limits<std::int64_t>::max());
             });
 #ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
-            // Storage, decompression and one page layout can exceed the pagination target.
             const auto elapsed_ms = (esp_timer_get_time() - started) / 1000;
             if (elapsed_ms >= 150)
                 ESP_LOGI(tag, "Page counting slice: %lld ms state=%s", static_cast<long long>(elapsed_ms),
@@ -1166,7 +1091,6 @@ void pico_page::runtime::run() {
             begin_sleep();
         }
         if (pico_page::console::transfer_active()) vTaskDelay(pdMS_TO_TICKS(1));
-        // A full tick between counting slices lets lower-priority tasks run.
         else pico_page::platform::wait_for_input(background ? portTICK_PERIOD_MS : 20);
     }
 }

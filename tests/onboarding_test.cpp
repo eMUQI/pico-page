@@ -56,9 +56,7 @@ int main(int argc, char** argv) {
             d.tap(300, 700); assert(!app.pending_frame());
             d.tap(300, 1000); d.present(); d.capture((shots / "practice.pgm").string());
             const auto practice = app.canvas().pixels(); d.refresh(); d.sleep();
-            // Nothing precedes the first practice page.
             d.tap(100, 500); d.input(Input::K1); d.input(Input::Previous); assert(!app.pending_frame());
-            // The middle opens a toolbar like the reading one; its tools only explain themselves.
             d.tap(300, 500); d.present(); d.capture((shots / "practice-toolbar.pgm").string());
             const auto toolbar = app.canvas().pixels(); assert(toolbar != practice);
             d.input(Input::K1); d.input(Input::K3); d.input(Input::Next); assert(!app.pending_frame());
@@ -67,7 +65,6 @@ int main(int argc, char** argv) {
             d.tap(60, 1150); d.tap(300, 50); assert(!app.pending_frame());
             d.tap(600, 700); d.present(); assert(app.canvas().pixels() == practice);
             d.input(Input::K3, false, 0, 0, true); assert(!app.pending_frame());
-            // A queued or duplicate tail cannot consume the next task.
             d.tap(600, 500); const auto turned = app.canvas().pixels(); assert(turned != practice);
             app.input({{d.sequence, Phase::End, Input::TouchCenter}, true, 600, 500});
             assert(app.canvas().pixels() == turned); d.present();
@@ -76,7 +73,6 @@ int main(int argc, char** argv) {
             d.tap(300, 500); d.present(); d.tap(300, 900); d.present();
             d.capture((shots / "practice-done.pgm").string()); d.refresh();
             const auto done = app.canvas().pixels();
-            // The toolbar reopened after the practice covers the next-step button and its hit.
             d.tap(300, 500); d.present(); d.tap(300, 1150); d.present();
             assert(app.view() == View::Onboarding && app.canvas().pixels() != done);
             d.tap(300, 700); d.present(); assert(app.canvas().pixels() == done);
@@ -93,7 +89,6 @@ int main(int argc, char** argv) {
         d.capture((shots / "help.pgm").string());
         d.tap(300, 1060); d.present(); assert(upgraded.view() == View::Onboarding);
         d.tap(300, 1120); d.present(); assert(upgraded.view() == View::Help);
-        // Keys alone reach the end: turning past the last practice page leaves the practice.
         d.tap(300, 1060); d.present(); d.input(Input::K3); d.present();
         for (int i = 0; i < 3; ++i) { d.input(Input::Next); d.present(); }
         d.input(Input::K3); d.present(); assert(upgraded.view() == View::Help);
@@ -108,12 +103,10 @@ int main(int argc, char** argv) {
         d.tap(practice ? 600 : 300, practice ? 50 : 1120); d.present();
         assert(app.view() == View::Library && FileStore(root.string()).load_settings().settings.onboarding_done);
     }
-    // A reboot before completion starts at Welcome, without any completion file.
     const auto interrupted = base / "interrupted"; fs::create_directories(interrupted);
     std::vector<std::uint8_t> welcome_pixels;
     { ReaderApp app(interrupted.string()); Driver d{app}; assert(app.initialize()); d.present(); welcome_pixels = app.canvas().pixels(); d.input(Input::K3); d.present(); }
     { ReaderApp app(interrupted.string()); Driver d{app}; assert(app.initialize()); d.present(); assert(app.view() == View::Onboarding && app.canvas().pixels() == welcome_pixels); d.tap(300,1000); d.present(); }
-    // Missing card and failed commit both allow escape and remain incomplete on the next boot.
     for (bool absent : {false, true}) {
         const auto root = base / (absent ? "absent" : "blocked");
         if (!absent) fs::create_directories(root / "PicoPage/settings.toml.tmp");
@@ -146,7 +139,6 @@ int main(int argc, char** argv) {
     const auto config = base / "config";
     put(config / "PicoPage/settings.toml", "schema_version=1\n[onboarding]\ndone='yes'\n");
     assert(!FileStore(config.string()).load_settings().diagnostics.empty());
-    // Failed presentation leaves the first-boot flow for the library, without marking it done.
     const auto failed = base / "display-failure"; fs::create_directories(failed);
     ReaderApp app(failed.string()); Driver d{app}; assert(app.initialize());
     app.complete_frame(false); assert(app.view() == View::Error); d.present();

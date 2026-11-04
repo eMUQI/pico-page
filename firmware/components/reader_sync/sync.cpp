@@ -48,7 +48,7 @@ std::string json_string(const cJSON* object, const char* key, std::size_t maximu
     if (!cJSON_IsString(field) || !field->valuestring || std::strlen(field->valuestring) > maximum) return {};
     return field->valuestring;
 }
-}  // namespace
+}
 
 bool valid_config(const Config& config) {
     return endpoint_valid(config.endpoint) && plain_header(config.username) &&
@@ -181,4 +181,4 @@ bool upload_confirmed(int http_status, std::string& error) {
     return false;
 }
 
-}  // namespace pico_page::sync
+}

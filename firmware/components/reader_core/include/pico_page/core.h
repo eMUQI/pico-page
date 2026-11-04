@@ -12,7 +12,6 @@ enum class Action { None, PreviousPage, NextPage, ForceRefresh, OpenTools, Close
                     CancelPreview, KeepLocal, Cancel, EndTransfer, Wake };
 Action map_input(Context context, Input input);
 
-/** Why the card is unavailable: removed while running, or absent/unmountable at start. */
 enum class CardIssue { Removed, NotInserted, NoFilesystem, Unreadable };
 
 enum class Phase { Begin, End, Cancel, Move };
@@ -59,9 +58,8 @@ struct Frame {
     FramePurpose purpose = FramePurpose::Body;
     RefreshIntent refresh = RefreshIntent::Content;
     std::optional<RefreshRegion> region = std::nullopt;
-    /** Display sets this for Overlay+Content only; equal old/new pixels stay electrically idle. */
+    /** Holds equal nonwhite pixels during an overlay update; white maintenance follows the waveform. */
     bool changed_pixels_only = false;
-    /** Previous-page body frames reverse directional display effects; other frames default forward. */
     bool reverse_page_effect = false;
 };
 struct FrameResult {
@@ -75,9 +73,9 @@ struct SaveRequest {
 };
 
 /**
- * Board adapters start a transaction; completion must arrive separately on the
- * application task. The frame remains valid until Display::finish is called.
- * start must not call finish synchronously or retain the reference afterward.
+ * start() must not call Display::finish() synchronously; completion runs on the application task.
+ * On successful start,
+ * the borrowed frame is valid until Display::finish; on failure, until start returns.
  */
 class DisplayBackend {
 public:
@@ -85,11 +83,10 @@ public:
     virtual bool start(const Frame& frame) = 0;
 };
 
-/** Owns the single in-flight frame and physical baseline validity. */
 class Display {
 public:
     explicit Display(DisplayBackend& backend) : backend_(backend) {}
-    /** Applies baseline recovery and changed-pixel policy before submitting to the backend. */
+    /** Invalid baseline or manual refresh forces a full clean and discards the damage region. */
     bool present(Frame frame);
     std::optional<FrameResult> finish(const OperationContext& token, bool success);
     bool busy() const { return in_flight_.has_value(); }
@@ -131,4 +128,4 @@ private:
     std::optional<SaveRequest> pending_save_;
 };
 
-}  // namespace pico_page
+}

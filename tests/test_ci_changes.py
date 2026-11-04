@@ -1,4 +1,3 @@
-"""Regression coverage for PR routing and deployment freshness."""
 import os
 from pathlib import Path
 import subprocess

@@ -33,13 +33,11 @@ void ReaderApp::Impl::draw_import() {
         entry_row(WifiUpload, "Wi-Fi 传书", "经设备热点，不需要路由器", "", y + height, 120);
         wrapped("添加 Wi-Fi 后，也可以经已保存的网络传书，手机传书时仍能上网。", 36, y + height + 140, 612, 24, true, 3);
     }
-    // Start failures name their cause in several clauses, so the notice wraps.
     if (!notice().empty()) {
         canvas.line(0, 1012, 683, 1012, 1, 3);
         wrapped(message, 36, 1044, 612, 24);
     }
 }
-
 
 void ReaderApp::Impl::draw_portal() {
     view = View::Portal;
@@ -81,5 +79,4 @@ void ReaderApp::Impl::draw_portal() {
     if (!portal_closing) button(PortalStop, "结束传书", 24, 1080, 636, 96);
 }
 
-
-} // namespace pico_page
+}

@@ -23,7 +23,6 @@ Result failure(Status status, const char* message) { return {status, message}; }
 
 bool memory_room(std::size_t bytes) {
 #ifdef ESP_PLATFORM
-    // Preserve the existing reader's reserve while optional dictionary work allocates.
     return heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= bytes + 768 * 1024 &&
         heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >= bytes;
 #else
@@ -134,7 +133,6 @@ Result File::open(const std::string& path, bool dictzip, const Stop& stop) {
         pos += length;
     }
     if (!offsets_) return failure(Status::Unsupported, "Gzip dictionary has no random-access table");
-    // Optional strings are bounded independently of the external member length.
     for (const unsigned flag : {8U, 16U}) {
         if (!(header[3] & flag)) continue;
         unsigned n = 0;
@@ -232,4 +230,4 @@ Result File::read(std::uint32_t offset, void* output, std::size_t count, const S
     }
     return {};
 }
-}  // namespace pico_page::dictionary
+}

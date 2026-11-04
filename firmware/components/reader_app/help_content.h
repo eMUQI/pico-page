@@ -12,7 +12,6 @@ struct HelpPage {
     std::array<HelpSection, 3> sections;
 };
 
-// Fixed screens keep the offline guide bounded and independent of a reading session.
 inline constexpr std::array<HelpPage, 12> kHelpPages{{
     {"开始阅读", {{{"放入书籍", "将 EPUB 或 TXT 放入 TF 卡的 Books/。文章可放在 Books/Articles/；这是默认书库目录。TXT 支持 UTF-8、GB18030 和带 BOM 的 UTF-16，并从常见章节标题生成目录。"},
                        {"打开与继续", "在书库点按一本书开始阅读，点按文件夹查看其中的书。再次打开同一本书会恢复已保存的位置；主页的「继续阅读」可打开上次阅读的书。"},
@@ -47,4 +46,4 @@ inline constexpr std::array<HelpPage, 12> kHelpPages{{
                              {"保存失败或配置无效", "检查 TF 卡是否插好、空间是否足够，修正设置文件后重新打开设置。不要用清理缓存代替修复保存错误；「清理全部缓存」不会删除原书和阅读进度。"},
                              {"再次查看说明", "随时从「设置 → 使用说明」打开。本说明无需联网，可左右轻扫，或按 K1、K3、页脚翻屏，K2 全刷，左上角返回上一页。"}}}},
 }};
-} // namespace pico_page
+}

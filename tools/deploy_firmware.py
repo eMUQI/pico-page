@@ -11,7 +11,6 @@ import sys
 import tarfile
 import tempfile
 
-# The server invokes this root-owned file with Python isolated mode.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ota_manifest
 
@@ -21,7 +20,6 @@ NAME = re.compile(r'manifest\.json|pico-page-' + ota_manifest.RELEASE.pattern + 
 
 
 def publish(stream, root=ROOT):
-    """Validate all inputs before installing immutable images and replacing the manifest last."""
     payload = stream.read(9 * 1024 * 1024 + 1)
     if len(payload) > 9 * 1024 * 1024:
         raise ValueError('Firmware archive exceeds 9 MiB')
@@ -49,7 +47,6 @@ def publish(stream, root=ROOT):
                 expected.add(full)
             if received != expected:
                 raise ValueError('Archive contains files outside the manifest')
-            # Check every collision before making any public file visible.
             for name in sorted(received - {'manifest.json'}):
                 destination = root / name
                 if destination.is_symlink() or (destination.exists() and destination.read_bytes() != (stage / name).read_bytes()):

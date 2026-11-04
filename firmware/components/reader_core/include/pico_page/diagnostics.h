@@ -80,4 +80,4 @@ void start();
 void stop();
 #endif
 #endif
-} // namespace pico_page::diagnostics
+}

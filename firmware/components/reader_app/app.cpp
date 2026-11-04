@@ -30,8 +30,6 @@ void ReaderApp::Impl::poll_save() {
     }
 }
 
-
-
 void ReaderApp::Impl::apply_typography() {
     if (!bookmark_io_ready()) return;
     std::string detail;
@@ -84,7 +82,6 @@ void ReaderApp::Impl::save_refresh(const ReaderSettings &values) {
         error("刷新设置未保存。" + reason(detail) + "。");
         return;
     }
-    // Refresh edits do not apply external typography changes to the visible page.
     const auto effective = store.load_settings(book_path).settings;
     settings.refresh_preset = effective.refresh_preset;
     settings.balanced_full_refresh_pages = effective.balanced_full_refresh_pages;
@@ -136,8 +133,8 @@ void ReaderApp::set_battery(std::optional<int> percent, bool charging, bool allo
 }
 void ReaderApp::set_firmware_version(const std::string& version) { impl_->running_version = version; }
 std::optional<UpdateOperation> ReaderApp::take_update_request() {
-    if (impl_->display.busy() || impl_->update_worker || !impl_->update_request) return std::nullopt;
-    impl_->update_worker = impl_->update_request->id;
+    if (impl_->display.busy() || impl_->update_worker_id || !impl_->update_request) return std::nullopt;
+    impl_->update_worker_id = impl_->update_request->id;
     return std::exchange(impl_->update_request, std::nullopt);
 }
 void ReaderApp::update_progress(std::uint64_t id, std::uint32_t bytes) { impl_->update_progress(id, bytes); }
@@ -193,7 +190,6 @@ void ReaderApp::complete_frame(bool success) {
     if (impl_->foreground_job) impl_->foreground_job->resume();
     if (impl_->counting_job) impl_->counting_job->resume();
     if (impl_->view == View::Sleeping && !impl_->custom_rotation_name.empty()) {
-        // Only a presented image advances the rotation.
         if (success) impl_->custom_rotation_shown = impl_->custom_rotation_name;
         impl_->custom_rotation_name.clear();
     }
@@ -227,7 +223,6 @@ void ReaderApp::complete_frame(bool success) {
     }
     if (auto work = std::exchange(impl_->deferred, nullptr); work && success)
         work();
-    // A final-frame failure must not restart application work during shutdown.
     if (impl_->view == View::PowerOff) return;
     if (success && impl_->sleep_wait_restore_pending) {
         if (impl_->sleep_wait_footer) impl_->restore_sleep_wait();
@@ -380,7 +375,6 @@ void ReaderApp::complete_wifi(std::uint64_t id, const std::vector<provision::Nea
         impl_->wifi_notice = error;
         break;
     case WifiOperation::Kind::Join:
-        // A join that was cancelled after the link came up saves nothing.
         impl_->join_complete(error.empty() && !network::live(impl_->wifi_hold) ? "操作已取消。" : error, failure);
         network::release(impl_->wifi_hold);
         break;
@@ -401,18 +395,13 @@ void ReaderApp::show_wifi(const WifiStatus& status) {
     impl_->wifi_status = status;
     if (status.phase == WifiPhase::Offline && !network::live(impl_->manual_hold) &&
         status.detail == "手动连接已暂停，点「立即连接」可恢复。") impl_->wifi_status.detail.clear();
-    // A join saves its network, with the connection time, only when it completes; a cancelled or
-    // failed join must leave network.toml as it was.
     if (status.phase == WifiPhase::Offline) impl_->join_link = false;
     if (status.phase == WifiPhase::Connected && !impl_->join_link) impl_->pending_wifi_record = status.ssid;
     if (status.phase == WifiPhase::Offline && impl_->wifi_notice == "正在结束…") impl_->wifi_notice.clear();
-    // The join pages report their own result; link phases must not replace them.
     const bool joining = impl_->wifi_page == Impl::WifiPage::Joining || impl_->wifi_page == Impl::WifiPage::JoinFailed ||
                          impl_->wifi_page == Impl::WifiPage::Joined;
     if (impl_->view == View::WifiSettings && !joining) { impl_->draw_wifi(); impl_->overlay(); }
-    // Panel frames and HTTPS steps are serialized, so the check page can follow its steps.
     if (impl_->view == View::Update && impl_->update_page == Impl::UpdatePage::Checking) { impl_->draw_update(); impl_->overlay(); }
-    // Sync retains one busy frame until completion; network phase notifications must not drive the panel during TLS.
 }
 bool ReaderApp::portal_visible() const {
     return impl_->portal_live && (impl_->view == View::Portal || impl_->view == View::WifiSettings);
@@ -439,7 +428,7 @@ bool ReaderApp::prepare_portal(bool station) {
     impl_->portal_open_wifi = false;
     impl_->portal_station = station;
     if (!impl_->portal_station) impl_->manual_target.reset();
-    impl_->portal_started = false;
+    impl_->portal_ready_received = false;
     impl_->portal = {};
     impl_->portal_closing = false;
     impl_->draw_portal();
@@ -455,9 +444,7 @@ void ReaderApp::show_portal(const PortalStatus &status) {
         const bool requested = impl_->portal_requested;
         impl_->portal_live = impl_->portal_requested = false;
         const bool open_wifi = std::exchange(impl_->portal_open_wifi, false) || view == View::WifiSettings;
-        if (impl_->portal_started && impl_->card_available) {
-            // The session may have added fonts and lock screen images. A selected font that was
-            // missing may now exist, so the next load opens it instead of keeping the fallback.
+        if (impl_->portal_ready_received && impl_->card_available) {
             impl_->scan_fonts();
             impl_->effective_font.clear();
             impl_->custom_prepare_finished = false; impl_->custom_prepare_attempts = 0;
@@ -470,10 +457,10 @@ void ReaderApp::show_portal(const PortalStatus &status) {
             }
             impl_->portal = {};
             impl_->portal_closing = false;
-            impl_->portal_station = impl_->portal_started = false;
+            impl_->portal_station = impl_->portal_ready_received = false;
             impl_->message = status.detail;
             impl_->wifi_notice = status.detail;
-            impl_->wifi_page = impl_->wifi_root = Impl::WifiPage::Home;
+            impl_->wifi_page = impl_->wifi_entry_page = Impl::WifiPage::Home;
             impl_->draw_wifi(); impl_->overlay(); return;
         }
         impl_->refresh_badge_config();
@@ -481,9 +468,9 @@ void ReaderApp::show_portal(const PortalStatus &status) {
         impl_->portal_closing = false;
         impl_->message = status.detail;
         const bool uploaded = view == View::Portal;
-        const bool started = impl_->portal_started;
+        const bool started = impl_->portal_ready_received;
         const bool station_failed = uploaded && impl_->portal_station && !status.detail.empty();
-        impl_->portal_station = impl_->portal_started = false;
+        impl_->portal_station = impl_->portal_ready_received = false;
         if (!uploaded || !started || station_failed) {
             if (started && impl_->card_available) {
                 invalidate_identity_cache();
@@ -498,14 +485,11 @@ void ReaderApp::show_portal(const PortalStatus &status) {
         return;
     }
     if (view != View::Portal && view != View::WifiSettings) return;
-    // The codes must be scannable under every refresh preset, so their first frame clears the panel.
     const bool codes_appear = impl_->portal.url.empty() && !status.url.empty();
-    // With the same codes on screen only the summary between its rule and the button changes.
     const bool summary_only = view == View::Portal && !impl_->portal_closing && !status.url.empty() &&
         status.url == impl_->portal.url && status.network == impl_->portal.network &&
         status.access_ssid == impl_->portal.access_ssid && status.access_password == impl_->portal.access_password;
-    // The first Waiting state may be superseded by Receiving before it is drawn.
-    impl_->portal_started = impl_->portal_started || status.phase == PortalPhase::Waiting ||
+    impl_->portal_ready_received = impl_->portal_ready_received || status.phase == PortalPhase::Waiting ||
         status.phase == PortalPhase::Receiving;
     impl_->portal = status;
     if (view == View::WifiSettings) impl_->draw_wifi();
@@ -556,7 +540,6 @@ bool ReaderApp::prepare_power(PowerRequest request) {
         request.action != impl_->power_selected || impl_->display.busy() || impl_->active_network ||
         impl_->usb_prepared || (request.without_save && !impl_->power_save_failed)) return false;
     bool saved = !request.without_save && impl_->persist();
-    // Names the record that failed; persist() leaves the position pending when that commit failed.
     std::string unsaved = saved || request.without_save ? "" : impl_->session.needs_save() ? "阅读位置" : "书签";
     std::string detail;
     const bool reading = impl_->has_book() && impl_->session.visible_record() && impl_->card_available;
@@ -591,7 +574,6 @@ bool ReaderApp::prepare_power(PowerRequest request) {
     impl_->cancel_sync();
     impl_->drain_save(); impl_->abandon_content(); impl_->foreground_job.reset();
     impl_->stop_covers(); impl_->clear_prefetch(); impl_->stop_counting_job();
-    // Saving is the last cancellable step. Never restore a snapshot after teardown starts.
     impl_->power_return_canvas.reset(); impl_->power_return_hits.clear();
     impl_->power_request = {};
     if (install) impl_->draw_installing();
@@ -643,7 +625,6 @@ void ReaderApp::cancel_sleep() {
     }
     if (const auto target = std::exchange(impl_->sleep_wifi_target, std::nullopt);
         target && impl_->card_available && impl_->wifi_enabled() && !impl_->usb_prepared && !impl_->portal_live) {
-        // A released hold cannot be reused: the worker may already have completed its teardown.
         impl_->manual_hold = std::make_shared<std::atomic_bool>(false);
         impl_->wifi_worker = ++impl_->wifi_sequence;
         impl_->wifi_request = WifiOperation{WifiOperation::Kind::Connect, impl_->wifi_worker, *target, impl_->manual_hold};
@@ -659,7 +640,6 @@ bool ReaderApp::prepare_sleep() {
     if (impl_->sleep_cover_deadline) {
         impl_->poll_counting_job();
         if (impl_->counting_job) {
-            // Cancellation does not release files; completion must precede storage suspension.
             if (std::chrono::steady_clock::now() >= *impl_->sleep_cover_deadline)
                 impl_->counting_job->cancel();
             return false;
@@ -675,7 +655,6 @@ bool ReaderApp::prepare_sleep() {
         impl_->sleep_destination_captured = true;
     }
     if (impl_->counting_job) {
-        // Every background owner must return before cleanup or a sleep image can replace it.
         const auto kind = impl_->counting_job->request.kind;
         impl_->sleep_waiting_for_cover = kind == ContentJob::Kind::SleepCover;
         if (kind != ContentJob::Kind::SleepCover && kind != ContentJob::Kind::LockScreen)
@@ -698,7 +677,7 @@ bool ReaderApp::prepare_sleep() {
     impl_->clear_prefetch();
     impl_->release_counting();
     if (impl_->settings.sleep_screen == "custom" && !impl_->custom_sleep_attempted) {
-        impl_->covers.clear(); impl_->make_image_room();
+        impl_->covers.clear(); impl_->make_room_for_cold_image();
         impl_->prepare_custom_sleep(true);
         if (impl_->counting_job) {
             impl_->sleep_waiting_for_cover = false;
@@ -708,7 +687,7 @@ bool ReaderApp::prepare_sleep() {
     }
     if (!cover_attempted && impl_->async_content && impl_->has_book() && !txt_name(impl_->book_path) &&
         impl_->settings.sleep_screen == "cover") {
-        impl_->covers.clear(); impl_->make_image_room();
+        impl_->covers.clear(); impl_->make_room_for_cold_image();
         impl_->prepare_sleep_cover();
         if (impl_->counting_job) {
             impl_->sleep_waiting_for_cover = true;
@@ -720,7 +699,6 @@ bool ReaderApp::prepare_sleep() {
     impl_->cancel_sync();
     network::release(impl_->manual_hold);
     network::release(impl_->wifi_hold);
-    // Password drafts never outlive the flow that entered them.
     impl_->leave_join(Impl::WifiPage::Home);
     std::fill(impl_->account.password.begin(), impl_->account.password.end(), '\0');
     impl_->account.password.clear();
@@ -730,7 +708,6 @@ bool ReaderApp::prepare_sleep() {
     return true;
 }
 void ReaderApp::wake(bool slept) {
-    // A cancelled sleep must preserve failures raised while storage or display was returning.
     if (impl_->display.busy() || (!slept && impl_->view == View::Error))
         return;
     impl_->wifi_status.phase = WifiPhase::Offline;
@@ -765,7 +742,6 @@ void ReaderApp::card_unavailable(CardIssue issue) {
     if (impl_->usb_prepared) { show_usb_transfer(false, "TF 卡已移除。请退出 USB 传输，插回 TF 卡后重启。"); return; }
     impl_->cancel_sync();
     impl_->covers.clear();
-    // The library drawn later must not list entries of the removed card.
     impl_->entries.clear();
     impl_->library_resume_omitted = false;
     const bool unsaved = impl_->card_available && impl_->session.needs_save();
@@ -778,7 +754,6 @@ void ReaderApp::card_unavailable(CardIssue issue) {
     if (impl_->view == View::Onboarding) {
         impl_->draw_onboarding(); impl_->overlay();
     } else if (issue != CardIssue::Removed || impl_->view == View::Library) {
-        // The library page itself explains the card state and offers a restart.
         impl_->draw_library(); impl_->overlay();
     } else {
         impl_->error(unsaved ? "TF 卡已移除。最近的阅读位置没有保存。插回 TF 卡后，请重启设备。"
@@ -812,7 +787,6 @@ bool ReaderApp::background_due() const {
            impl_->chapter_prefetch_due() || impl_->counting_due();
 }
 #if !defined(ESP_PLATFORM) || defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
-// Only the diagnostic console reads this; other firmware builds do not carry the name table.
 const char *ReaderApp::sync_state() const {
     static constexpr const char *names[] = {"unchecked", "no-record", "same", "different", "unmapped", "uploaded",
                                             "uncertain", "unauthorized", "failed", "link-failed", "config-changed"};
@@ -850,10 +824,8 @@ void ReaderApp::poll_background(bool cancel) {
     if (cancel && impl_->counting_job) impl_->counting_job->cancel();
     impl_->poll_counting_job();
     if (impl_->sleep_wait_restore_pending) impl_->restore_sleep_wait();
-    // Keep completed background work from replacing the sleep feedback before preparation.
     if (impl_->sleep_wait_footer && !impl_->sleep_wait_restore_pending && impl_->view == impl_->sleep_wait_view) return;
     if (!cancel || !impl_->dictionary_contact) impl_->flush_dictionary_selection();
-    // The counting session lives only while the reading page is shown.
     if (impl_->view != View::Reading && !impl_->counting_job) impl_->counting_session.reset();
     impl_->poll_covers();
     impl_->poll_save();
@@ -868,7 +840,6 @@ void ReaderApp::poll_background(bool cancel) {
     }
     if (!cancel || !impl_->content_loading) impl_->poll_content(!cancel);
     if (!cancel) impl_->poll_dictionary_panel();
-    // Waits for the queued taps of one burst, so they reach the panel in a single update.
     if (!cancel) impl_->flush_entry();
     if (!cancel && impl_->custom_notice_pending &&
         !impl_->sleep_cover_deadline && !impl_->display.busy() && !impl_->content_loading &&
@@ -879,7 +850,6 @@ void ReaderApp::poll_background(bool cancel) {
         ESP_LOGW("reader_app", "Sleep image notice: %s", impl_->custom_notice.c_str());
 #endif
         impl_->message = kSleepFallbackNotice;
-        // Optional sleep imagery must not cancel body image work or replace the wake destination.
         if (impl_->view == View::Reading) impl_->footer();
         else if (impl_->view == View::Library) impl_->footer_bar(impl_->notice(), impl_->library_page, impl_->library_pages());
         else impl_->footer_bar(impl_->notice());
@@ -903,7 +873,6 @@ void ReaderApp::poll_background(bool cancel) {
             show_power_menu();
         }
     }
-    // The first body frame permits image preparation immediately; subsequent pages retain the dwell interval.
     if (!cancel && !impl_->sleep_cover_deadline && !impl_->power_menu_wait && impl_->async_content && impl_->body_images_pending && !impl_->inline_image_pending &&
         std::chrono::steady_clock::now() >= impl_->inline_image_after &&
         !impl_->content_loading && !impl_->foreground_job && !impl_->pending_content &&
@@ -960,4 +929,4 @@ void ReaderApp::complete_network(std::uint64_t id, int status, const std::string
     }
     if (!impl_->usb_prepared) impl_->network_complete(id, status, body, error, failure);
 }
-} // namespace pico_page
+}

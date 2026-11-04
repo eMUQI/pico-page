@@ -53,7 +53,6 @@ int main(int argc, char **argv) {
                     if (!pixels.good()) return 1;
                     std::cout << "IMAGE resource=" << chapter.images[image].resource << " output=" << path << '\n';
                 }
-                // Synthetic block separators have no source; every retained run must round-trip.
                 for (const auto &run : chapter.runs) {
                     for (auto offset = run.begin; offset < run.end; ++offset) {
                         Anchor anchor;

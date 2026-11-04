@@ -29,7 +29,7 @@
  #include "output_common/render_method.h"
  #include "output_lcd/render_lcd.h"
 
-@@ -46,6 +47,35 @@
+@@ -46,6 +47,34 @@
  static const uint8_t* const* page_phase_luts;
  static const int8_t* page_line_phase;
  static unsigned page_phase_count;
@@ -37,7 +37,6 @@
 +static uint8_t* unchanged_pixel_mask;
 +static bool unchanged_pixel_mask_prepared;
 +void epd_set_unchanged_pixel_hold(int first_column) {
-+    // Only the display owner calls this after all synchronous producers return.
 +    heap_caps_free(unchanged_pixel_mask);
 +    unchanged_pixel_mask = NULL;
 +    unchanged_pixel_mask_prepared = false;
@@ -65,7 +64,7 @@
  void epd_set_line_phase_luts(const uint8_t* const* luts, const int8_t* rows, unsigned count) {
      page_phase_luts = luts;
      page_line_phase = rows;
-@@ -256,6 +286,15 @@
+@@ -256,6 +285,15 @@
      if (page_phase_luts && (!(mode & MODE_PACKING_1PPB_DIFFERENCE) || frame_count != 1)) {
          return EPD_DRAW_INVALID_PACKING_MODE;
      }
@@ -81,7 +80,7 @@
      render_context.phase_luts = page_phase_luts;
      render_context.line_phase = page_line_phase;
      render_context.phase_count = page_phase_count;
-@@ -308,6 +347,7 @@
+@@ -308,6 +346,7 @@
 
      lcd_do_update(&render_context);
      /* Producers have joined; the caller may now release borrowed phase tables. */

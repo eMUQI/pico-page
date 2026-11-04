@@ -1,4 +1,3 @@
-"""Original EPUB fixtures verify CSS association and private-output naming."""
 import importlib.util
 import json
 from itertools import islice

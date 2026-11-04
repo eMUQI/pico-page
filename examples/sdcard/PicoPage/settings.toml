@@ -1,4 +1,3 @@
-# Pico Page configuration v1. Shared by the device and host reader.
 # Paths under library.roots are relative to the mounted card root, not the host OS.
 schema_version = 1
 
@@ -10,7 +9,6 @@ sort = "recent"
 folders = "first"
 
 [reader]
-# Obtain the complete body font with tools/setup_fonts.py.
 # The font path is relative to the card root.
 font = "Fonts/LXGWWenKai-Regular.ttf"
 # Weight: light / regular / medium / bold. Light requires a sibling Light font and at least 34 px.
@@ -20,7 +18,7 @@ line_height = 1.5
 margin_x_px = 36
 
 [display]
-# Refresh presets: clear / balanced / fast. Physical behavior still requires device validation.
+# Refresh presets: clear / balanced / fast.
 refresh_preset = "balanced"
 # Body updates between full refreshes in each mode; valid range 0..30; zero disables automatic full refresh.
 balanced_full_refresh_pages = 25
@@ -39,6 +37,3 @@ sleep_screen = "cover"
 sleep_image = ""
 # Transparent PNGs preserve the pre-sleep frame when enabled.
 sleep_overlay = false
-
-# No input-remapping configuration in the first version.
-# K2 = ForceRefresh on every interactive page; use on-screen close/cancel controls.

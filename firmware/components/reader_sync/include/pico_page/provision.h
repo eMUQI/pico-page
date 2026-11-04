@@ -8,17 +8,10 @@
 #include <string_view>
 #include <vector>
 
-/**
- * Saved Wi-Fi networks and the KOSync account file: reading and editing network.toml, the
- * connection order and the sentences that report a connection failure. Card access is limited
- * to the network file readers and compared commits; this module does not operate the radio.
- */
 namespace pico_page::provision {
 
 inline constexpr char default_endpoint[] = "https://sync.koreader.rocks";
-/** Most Wi-Fi networks network.toml holds. */
 inline constexpr std::size_t saved_limit = 5;
-/** Earliest Unix time accepted as a set clock (2024-01-01T00:00:00Z). */
 inline constexpr std::int64_t clock_floor = 1704067200;
 
 struct WifiCredentials {
@@ -68,7 +61,7 @@ bool save_selected_network(const std::string& root, const std::string& ssid, std
 std::vector<WifiCredentials> connection_order(const std::vector<WifiCredentials>& saved,
                                               const std::vector<NearbyWifi>& nearby);
 
-/** Schema 2 file contents for at most saved_limit valid entries with distinct names; the final entry is the fallback network. */
+/** Serializes schema 2 for at most saved_limit valid entries with distinct names. */
 std::string network_toml(const std::vector<SavedWifi>& networks);
 std::string sync_toml(const sync::Config& config);
 
@@ -76,7 +69,7 @@ std::string sync_toml(const sync::Config& config);
 const SavedWifi* last_network(const std::vector<SavedWifi>& saved);
 
 /**
- * Moves the connected network to the fallback position. Updates its Unix time only when now is
+ * Moves the connected network to the end. Updates its Unix time only when now is
  * valid and differs by at least an hour. true when the list changed and should be written.
  */
 bool record_connection(std::vector<SavedWifi>& saved, const std::string& ssid, std::int64_t now);
@@ -84,7 +77,7 @@ bool record_connection(std::vector<SavedWifi>& saved, const std::string& ssid, s
 /**
  * Records a successful connection in network.toml while retaining comments and untouched text.
  * A missing, invalid, externally changed or unsupported file is left unchanged and returns
- * false with an error. true also covers an unchanged fallback and connection time.
+ * false with an error. true also covers unchanged order and connection time.
  */
 bool save_connection(const std::string& card_root, const std::string& ssid, std::int64_t now,
                      std::string& error);
@@ -107,22 +100,19 @@ bool save_network_edit(const std::string& card_root, const WifiCredentials& wifi
 
 /**
  * Adds a network, or replaces the password of a saved network with the same name, and
- * moves it to the fallback position. false, with the list unchanged, when the name is new and
+ * moves it to the end. false, with the list unchanged, when the name is new and
  * the list already holds saved_limit entries.
  */
 bool add_network(std::vector<SavedWifi>& saved, const WifiCredentials& credentials, std::int64_t now);
 
-/** Removes the named network; false when it is not saved. */
 bool remove_network(std::vector<SavedWifi>& saved, const std::string& ssid);
 
-/** Why joining a network failed; Rejected carries the Wi-Fi driver's disconnect reason. */
 enum class WifiFailure { Setup, Rejected, NoAddress, NoClock };
 std::string wifi_problem(const std::string& ssid, WifiFailure failure, int reason);
 /** Wi-Fi driver disconnect reasons for a network that is not in range, and for a refused password. */
 bool network_absent(int reason);
 bool password_rejected(int reason);
 
-/** Payload of a QR code that joins a WPA network. */
 std::string wifi_qr(const WifiCredentials& access);
 
-}  // namespace pico_page::provision
+}

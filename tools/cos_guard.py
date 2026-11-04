@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""SCF timer handler that makes the firmware bucket private on excessive traffic."""
 from datetime import datetime, timedelta, timezone
 import json
 import math
@@ -16,7 +15,6 @@ MAX_AGE_SECONDS = 900
 
 
 def peak_bytes(response, now):
-    """Return the largest five-minute byte count; reject missing or stale monitoring data."""
     points = response.get('DataPoints')
     if response.get('Period') != PERIOD_SECONDS or not isinstance(points, list) or len(points) != 1:
         raise ValueError('Missing five-minute COS monitoring data')
@@ -39,7 +37,6 @@ def peak_bytes(response, now):
 
 
 def enforce(cos, fetch_metrics, now):
-    """Close anonymous access on excess or monitoring failure; never restore public access."""
     try:
         peak = peak_bytes(fetch_metrics(), now)
     except Exception:
@@ -52,9 +49,7 @@ def enforce(cos, fetch_metrics, now):
 
 
 def role_credentials(context):
-    """Read request-scoped credentials from direct or JSON-encoded context fields."""
     keys = ('TENCENTCLOUD_SECRETID', 'TENCENTCLOUD_SECRETKEY', 'TENCENTCLOUD_SESSIONTOKEN')
-    # Python 3.10 encodes per-request environment values inside the context.
     values = context if all(context.get(key) for key in keys) else json.loads(context['environment'])
     return tuple(values[key] for key in keys)
 

@@ -18,10 +18,7 @@ on:
 permissions:
   contents: read
 env:
-  # Production deployments: the default branch, a published release, or a manual run on the default branch.
   DEPLOY: ${{ github.event_name == 'release' || (github.event_name != 'pull_request' && github.ref == 'refs/heads/main') }}
-# Production deployments never overlap. A run yields only to newer website inputs;
-# unrelated default-branch changes do not invalidate the site already being built.
 concurrency:
   group: ${{ (github.event_name == 'release' || (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')) && 'pages-production' || format('web-{0}', github.event.pull_request.number || github.ref) }}
   cancel-in-progress: ${{ !(github.event_name == 'release' || (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')) }}
@@ -36,9 +33,7 @@ jobs:
       run:
         working-directory: web
     steps:
-      # A release run uses the workflow file of its tag, but builds the site from the default
-      # branch, so a tag behind the default branch does not publish an older site. Other runs keep
-      # the commit that triggered them.
+      # GitHub release events default to the tagged revision. Check out the default branch for the current site.
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'release' && github.event.repository.default_branch || '' }}
@@ -62,10 +57,6 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: web/package-lock.json
-      # Firmware is not kept in the repository. The site serves the manifest and the images attached
-      # to the newest release: the application image devices download, and the full-flash image of
-      # the installer when the release has one. The manifest must describe the application, and
-      # the full-flash image must hold the same application.
       - name: Fetch published firmware
         if: steps.changes.outputs.web == 'true'
         working-directory: ${{ github.workspace }}
@@ -75,7 +66,6 @@ jobs:
         run: |
           gh release list --limit 100 --json tagName,isDraft > "$RUNNER_TEMP/releases.json"
           tag=$(python3 tools/ota_manifest.py --pick-release "$RUNNER_TEMP/releases.json")
-          # The changelog page lists the releases that are public, with their dates.
           mkdir -p web/public/firmware
           gh release list --limit 100 --exclude-drafts --json tagName,publishedAt > web/public/firmware/releases.json
           if [ -n "$tag" ]; then
@@ -97,7 +87,6 @@ jobs:
         env:
           PUBLIC_GA_MEASUREMENT_ID: ${{ vars.PUBLIC_GA_MEASUREMENT_ID || 'G-S9XSC6V1KV' }}
         run: npm run build
-      # Unrelated default-branch commits do not start a replacement website build.
       - name: Leave deployment to newer website inputs
         if: env.DEPLOY == 'true'
         working-directory: ${{ github.workspace }}
@@ -131,8 +120,6 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/pico-page-cos"
           "$RUNNER_TEMP/pico-page-cos/bin/python" -m pip install -r tools/cos-requirements.txt
           "$RUNNER_TEMP/pico-page-cos/bin/python" tools/publish_cos.py web/dist/firmware
-      # The deployment carries the firmware fetched above: devices install what it publishes.
-      # deployment.txt identifies this run, so the check below can tell whether production serves it.
       - name: Deploy to Cloudflare Pages
         if: env.DEPLOY == 'true' && env.STALE != 'true'
         env:

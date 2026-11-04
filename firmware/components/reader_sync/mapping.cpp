@@ -46,7 +46,6 @@ bool block_tag(const std::string& tag) {
            tag == "footer" || tag == "nav" || tag == "blockquote" || tag == "ul" || tag == "ol" || tag == "li";
 }
 bool supported_structure(const std::vector<Segment>& parts) {
-    // Text directly in the body is not covered; an image there is.
     const bool image = parts.size() >= 3 && parts.back().name == "img";
     if (parts.size() < (image ? 3U : 4U) || parts[0].name != "html" || parts[0].index != 1 ||
         parts[1].name != "body" || parts[1].index != 1 || (parts.back().name != "text()" && !image)) return false;
@@ -73,7 +72,7 @@ bool xml_space(char32_t value) { return value == U' ' || value == U'\t' || value
 struct CssProfile {
     bool normal_whitespace = true;
     bool changes_display = false;
-    bool hides_elements = false;  // A "display: none" declaration; which elements it selects is not resolved.
+    bool hides_elements = false;
 };
 
 CssProfile css_profile(const Chapter& chapter) {
@@ -87,7 +86,6 @@ CssProfile css_profile(const Chapter& chapter) {
                 if (end == std::string::npos) { profile.normal_whitespace = false; return profile; }
                 i = end + 1;
             } else if (source[i] == '\\') {
-                // Escaped identifiers require a CSS parser before their whitespace effect can be established.
                 profile.normal_whitespace = false; return profile;
             } else css.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(source[i]))));
         }
@@ -161,7 +159,7 @@ bool supported_version(int version, std::string& error) {
     if (version == 20240114 || version == 20260812) return true;
     error = "Unsupported KOReader DOM version"; return false;
 }
-}  // namespace
+}
 
 bool to_xpointer(const EpubDocument& document, const Chapter& chapter, const Anchor& anchor,
                  int dom_version, std::string& xpointer, std::string& error) {
@@ -179,7 +177,6 @@ bool to_xpointer(const EpubDocument& document, const Chapter& chapter, const Anc
         // CREngine addresses an image as its element at offset zero. The boxing nodes it inserts
         // around inline content are not part of an XPointer in the supported DOM versions.
         if (!supported_structure(element)) { error = "Unsupported source node structure"; return false; }
-        // A hidden image has no position in the engine's layout.
         if (css.hides_elements) { error = kUnresolvedVisibility; return false; }
         xpointer = "/body[1]/DocFragment[" + std::to_string(spine + 1) + ']' + canonical(element, 1) + ".0";
         return true;
@@ -239,8 +236,6 @@ bool from_xpointer(EpubDocument& document, const std::string& xpointer, int dom_
     const auto index = static_cast<std::size_t>(parts[1].index - 1);
     Chapter chapter;
     const std::string source = "/html[1]" + canonical(parts, 2);
-    // A path through an element outside the profile, such as a table cell, is refused for that
-    // cause before any chapter is read; no node of this document could match it.
     std::vector<Segment> shape;
     if (!parse_path(source, shape) || !supported_structure(shape)) { error = kUnsupportedStructure; return false; }
     const auto report = [&](std::uint32_t visible) {
@@ -274,8 +269,6 @@ bool from_xpointer(EpubDocument& document, const std::string& xpointer, int dom_
         }
         return nullptr;
     };
-    // The part is chosen before the stylesheets are complete; the profile check below repeats
-    // the lookup with them and rejects what they make inexact.
     if (!document.find_chapter_part(index, chapter, error, ChapterLoad::Mapping,
                                     [&](const Chapter& candidate) { return locate(candidate, CssProfile{}) != nullptr; }, stop)) {
         if (error.rfind("Chapter part is not available", 0) == 0) error = "KOReader text node cannot be mapped exactly";
@@ -296,4 +289,4 @@ bool from_xpointer(EpubDocument& document, const std::string& xpointer, int dom_
     return true;
 }
 
-}  // namespace pico_page::sync
+}

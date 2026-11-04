@@ -26,4 +26,4 @@ void guard_flash_io(bool begin);
  */
 void set_performance(bool high);
 
-} // namespace pico_page::platform
+}

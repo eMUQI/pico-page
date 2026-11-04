@@ -73,4 +73,4 @@ EpdDrawError present_ripple(EpdiyHighlevelState& display, int temperature, bool 
     std::memcpy(display.back_fb, display.front_fb, framebuffer_bytes);
     return EPD_DRAW_SUCCESS;
 }
-} // namespace pico_page::platform
+}

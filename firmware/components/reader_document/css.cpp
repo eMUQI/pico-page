@@ -191,7 +191,6 @@ private:
     void advance() {
         if (position_ < source_.size()) ++position_;
         if (position_ >= next_check_) { check(); next_check_ = position_ + 256; }
-        // Cancelled scanning still needs to make bounded forward progress in the current token.
         if (result != Result::Complete) position_ = source_.size();
     }
     bool escape(size_t offset = 0) const {
@@ -251,7 +250,6 @@ private:
     }
 };
 
-// Pool indices are 16-bit; hard ceilings are checked before any allocation or arithmetic.
 template<class T> struct Pool {
     std::unique_ptr<T[]> data;
     uint32_t size = 0, capacity = 0;
@@ -287,7 +285,6 @@ struct TokenList { std::array<Token, max_tokens> values; size_t size = 0; bool v
 
 bool opening(char c) { return c == '{' || c == '(' || c == '['; }
 char closing(char c) { return c == '{' ? '}' : c == '(' ? ')' : ']'; }
-/** Collect one balanced prelude/declaration. Terminators inside strings/blocks are ordinary tokens. */
 Token collect(Scanner& scanner, Token first, TokenList& list, bool declaration) {
     std::array<char, max_nesting> stack{};
     size_t depth = 0;
@@ -310,7 +307,6 @@ Token collect(Scanner& scanner, Token first, TokenList& list, bool declaration) 
         else list.valid = false;
         token = scanner.next();
     }
-    // CSS Syntax closes open simple blocks at EOF, but this subset rejects incomplete values.
     if (depth) list.valid = false;
     return token;
 }
@@ -389,7 +385,6 @@ bool property_value(Property property, const Token& token, Value& value) {
     if ((property == Property::FontSize || property == Property::LineHeight || property >= Property::PaddingTop) && value.number < 0) return false;
     return property != Property::FontSize || value.number > 0;
 }
-/** Expand only the documented one-to-four-value margin/padding shorthand, atomically. */
 size_t declarations(const TokenList& list, std::array<Declaration, 4>& output) {
     if (!list.valid) return 0;
     std::array<Token, max_tokens> tokens{};
@@ -562,7 +557,7 @@ private:
     Checkpoint checkpoint_;
     uint32_t checked_ = 0;
 };
-} // namespace
+}
 
 struct StyleSheet::Impl {
     Limits limits;
@@ -793,4 +788,4 @@ Result StyleSheet::compute(const Element& element, const ComputedStyle* parent, 
     resolve(winners, parent, context, output);
     return Result::Complete;
 }
-} // namespace pico_page::document::css
+}

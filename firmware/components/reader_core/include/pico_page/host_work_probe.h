@@ -1,6 +1,5 @@
 #pragma once
 
-// Host probes count work without changing target timing, storage or allocation budgets.
 #ifdef ESP_PLATFORM
 #define PP_HOST_WORK(...)
 #else
@@ -49,5 +48,5 @@ struct Stage {
         current_stage = previous;
     }
 };
-} // namespace pico_page::host_work
+}
 #endif

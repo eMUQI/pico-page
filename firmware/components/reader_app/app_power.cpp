@@ -40,7 +40,6 @@ void ReaderApp::Impl::prepare_custom_sleep(bool sleeping) {
     }
 }
 
-
 void ReaderApp::Impl::draw_power(const std::string& preview_notice) {
     view = View::PowerSettings;
     hits.clear(); canvas.clear(); header("电源与休眠", Back, "设置");
@@ -77,7 +76,6 @@ void ReaderApp::Impl::draw_power(const std::string& preview_notice) {
     button(Back, "取消", 24, 1080, 306, 96);
     button(PowerSave, "保存设置", 354, 1080, 306, 96, true);
 }
-
 
 void ReaderApp::Impl::draw_sleep(const std::string &sync_state) {
     sleep_wait_footer.reset();
@@ -146,5 +144,4 @@ void ReaderApp::Impl::draw_sleep(const std::string &sync_state) {
     view = View::Sleeping;
 }
 
-
-} // namespace pico_page
+}

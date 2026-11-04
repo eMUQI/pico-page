@@ -49,7 +49,6 @@ struct Raster {
     const std::function<bool()>* stop = nullptr;
     const std::function<void(int, int, int, int, std::uint8_t, std::uint8_t)>* paint = nullptr;
     bool cancelled() const { return stop && *stop && (*stop)(); }
-    // Destination edge of every source column and row; sample() runs once per source pixel.
     std::vector<std::uint16_t> columns, rows;
     bool create(unsigned source_w, unsigned source_h, int box_w, int box_h) {
         width = static_cast<unsigned>(box_w);
@@ -82,7 +81,6 @@ struct Raster {
         source(source_w, source_h);
         return true;
     }
-    /** Sets the decoded size, which a prescaling decoder reduces after create(). */
     void source(unsigned source_w, unsigned source_h) {
         source_width = source_w; source_height = source_h;
         columns.resize(source_w + 1);
@@ -113,7 +111,6 @@ struct Raster {
             }
             return;
         }
-        // Each destination pixel samples its source coordinate; Adam7 updates are progressively refined.
         const unsigned left = columns[x], right = columns[std::min(x + w, source_width)];
         const unsigned top = rows[y], bottom = rows[std::min(y + h, source_height)];
         if (left == right || top == bottom) return;
@@ -188,7 +185,6 @@ struct GifLzw {
     std::array<std::uint16_t, 4096> prefix{};
     std::array<std::uint8_t, 4096> suffix{}, stack{};
 };
-/** Decodes the first GIF frame without allocating the source-sized index raster. */
 bool gif(const std::vector<std::uint8_t>& input, int width, int height, Raster& raster, std::string& error, ContentFailureKind* failure_kind) {
     const auto word = [&](std::size_t at) { return unsigned(input[at]) | unsigned(input[at + 1]) << 8; };
     if (input.size() < 13) return fail(error, failure_kind, "Truncated GIF header");
@@ -424,7 +420,7 @@ bool jpeg(const std::vector<std::uint8_t>& input, int width, int height, Raster&
         return fail(error, failure_kind, "JPEG pixel stream is invalid or incomplete");
     return true;
 }
-} // namespace
+}
 
 std::uint64_t image_decode_count() { return decode_count.load(std::memory_order_relaxed); }
 
@@ -573,4 +569,4 @@ bool render_image(Canvas& canvas, const std::vector<std::uint8_t>& encoded,
     }
     return true;
 }
-} // namespace pico_page::graphics
+}

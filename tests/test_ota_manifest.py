@@ -14,11 +14,6 @@ import ota_manifest
 
 
 def image(version='0.2.0-beta.2', project='pico_page', chip=9, size=4096, flash=0x4F, tail=0):
-    """A complete image: header, one segment that starts with the application description, checksum and digest.
-
-    `flash` is the flash size and frequency a bootloader is built for (0x4F: 16 MiB at 80 MHz);
-    `tail` adds a second segment of that many zero bytes.
-    """
     body = bytearray(size)
     struct.pack_into('<I', body, 0, 0xABCD5432)
     body[16:16 + len(version)] = version.encode()
@@ -34,7 +29,6 @@ def image(version='0.2.0-beta.2', project='pico_page', chip=9, size=4096, flash=
 
 
 def table(*entries):
-    """A partition table of (type, subtype, offset, size) entries, closed by its MD5 entry."""
     data = b''.join(struct.pack('<HBBII16sI', 0x50AA, *entry, b'part', 0) for entry in entries)
     return data + b'\xeb\xeb' + b'\xff' * 14 + hashlib.md5(data).digest()
 
@@ -94,21 +88,17 @@ class ManifestTest(unittest.TestCase):
                      image(size=ota_manifest.SLOT_BYTES + 1)):
             with self.assertRaises(ValueError):
                 self.build(data)
-        # A valid start is not enough: every device would reject these only after a full download.
         whole = image()
         for data in (whole[:-1], whole[:2000], whole + b'\0', whole[:300] + bytes([whole[300] ^ 1]) + whole[301:],
                      whole[:23] + b'\0' + whole[24:], whole[:1] + b'\x11' + whole[2:],
                      whole[:1] + b'\x10' + whole[2:32] + bytes(256)):
             with self.assertRaises(ValueError):
                 self.build(data)
-        # ESP-IDF refuses a segment whose length is not a multiple of 4 and a first segment
-        # shorter than the application description, even when checksum and digest agree.
         for data in (image(size=4098), image(size=128, tail=1024)):
             with self.assertRaises(ValueError):
                 self.build(data)
         with self.assertRaises(ValueError):
             self.build(image(), notes='长' * 3000)
-        # The device refuses these addresses, so a manifest must never be written with them.
         for url in ('http://picopage.wulu.zone/firmware/', 'https://picopage.wulu.zone/firmware', 'https:///firmware/',
                     'https://user@picopage.wulu.zone/firmware/', 'https://picopage.wulu.zone/a b/', 'https://#/',
                     'https://picopage.wulu.zone/firmware/#x/', 'https://picopage.wulu.zone/' + 'a' * 500 + '/',
@@ -133,7 +123,6 @@ class ManifestTest(unittest.TestCase):
                 ota_manifest.check_directory(directory, url)
             (directory / 'manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
             self.assertEqual(ota_manifest.check_directory(directory, url), '0.2.0-beta.2')
-            # Every field is recomputed from the image, so a stale digest, size or version is caught.
             for key, value in (('sha256', '0' * 64), ('size', 1), ('version', '0.2.0-beta.3'), ('board', 'other'),
                                ('url', 'https://example.com/firmware/' + name), ('extra', 1)):
                 (directory / 'manifest.json').write_text(json.dumps({**manifest, key: value}), encoding='utf-8')
@@ -153,18 +142,17 @@ class ManifestTest(unittest.TestCase):
         self.assertEqual(full[:len(bootloader)], bootloader)
         self.assertEqual(full[0x8000:0x8000 + len(table(*LAYOUT))], table(*LAYOUT))
         self.assertEqual(full[0x10000:], application)
-        # Whatever is not one of the three parts stays erased: empty NVS, and otadata that starts ota_0.
         self.assertEqual(set(full[len(bootloader):0x8000] + full[0x8000 + len(table(*LAYOUT)):0x10000]), {0xFF})
         damaged = table(*LAYOUT)[:-1] + b'\0'
-        for parts in ((image(size=512, chip=5), table(*LAYOUT)),             # another chip
-                      (image(size=512, flash=0x3F), table(*LAYOUT)),         # built for 8 MiB flash
+        for parts in ((image(size=512, chip=5), table(*LAYOUT)),
+                      (image(size=512, flash=0x3F), table(*LAYOUT)),
                       (bootloader[:-1], table(*LAYOUT)), (image(size=0x8000), table(*LAYOUT)),
                       (bootloader, damaged), (bootloader, table(*LAYOUT)[:-32]),
-                      (bootloader, table(*LAYOUT[:3])),                       # single slot: no update possible
-                      (bootloader, table(*LAYOUT[:4])),                       # no otadata
-                      (bootloader, table(*LAYOUT[:3], LAYOUT[4])),            # no second slot
-                      (bootloader, table((0, 0x10, 0x20000, SLOT), *LAYOUT[3:])),  # application is not where ota_0 starts
-                      (bootloader, table(*LAYOUT, (1, 0x81, 0xFFF000, 0x2000)))):  # beyond the flash
+                      (bootloader, table(*LAYOUT[:3])),
+                      (bootloader, table(*LAYOUT[:4])),
+                      (bootloader, table(*LAYOUT[:3], LAYOUT[4])),
+                      (bootloader, table((0, 0x10, 0x20000, SLOT), *LAYOUT[3:])),
+                      (bootloader, table(*LAYOUT, (1, 0x81, 0xFFF000, 0x2000)))):
             with self.assertRaises(ValueError):
                 ota_manifest.build_full(*parts, application)
         for other in (full + b'\0', full[:-1], full[:0x9000] + b'\0' + full[0x9001:], full[:0x7000] + b'\0' + full[0x7001:],
@@ -196,7 +184,6 @@ class ManifestTest(unittest.TestCase):
         self.assertEqual(ota_manifest.newest_release(releases[:4]), 'v0.2.0')
         self.assertEqual(ota_manifest.newest_release(releases[:3]), 'v0.2.0-rc.1')
         self.assertEqual(ota_manifest.newest_release(releases[:2]), 'v0.2.0-beta.10')
-        # Drafts and tags outside the version scheme are never published to devices.
         self.assertIsNone(ota_manifest.newest_release(
             [dict(tagName='v0.1.0-mvp', isDraft=False), dict(tagName='v0.3.0', isDraft=True),
              dict(tagName='0.3.0', isDraft=False), dict(tagName='nightly', isDraft=False)]))

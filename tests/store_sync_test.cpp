@@ -19,7 +19,6 @@ static int checked_unlink(const char* path) {
     return unlink(path);
 }
 
-// Fault only fsync; all reads, writes, verification and publication use real files.
 static int checked_fsync(int fd) {
     struct stat descriptor{}, selected{};
     assert(fstat(fd, &descriptor) == 0);

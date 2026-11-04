@@ -1,4 +1,3 @@
-// Exercise the page's real download-to-write flow without accessing a serial device.
 import { readFileSync } from 'node:fs';
 import { webcrypto, createHash } from 'node:crypto';
 import vm from 'node:vm';

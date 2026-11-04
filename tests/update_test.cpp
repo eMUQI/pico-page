@@ -15,7 +15,6 @@ static std::string manifest_json(const std::string& version, const std::string& 
 }
 
 int main() {
-    // The order given in docs/development/versioning.md; build metadata takes no part in it.
     const char* ascending[] = {"0.2.0-beta.1", "0.2.0-beta.2", "0.2.0-beta.10", "0.2.0-rc.1", "0.2.0", "0.2.1",
                                "0.3.0-beta.1", "0.10.0", "1.0.0"};
     for (std::size_t i = 0; i < std::size(ascending); ++i)
@@ -36,7 +35,6 @@ int main() {
     assert(manifest.version == "0.2.0-beta.2" && manifest.size == 2936012 && manifest.sha256 == std::string(64, 'a') &&
            manifest.published_at == "2026-10-18" && manifest.progress_schema == update::progress_schema &&
            manifest.config_schema == update::config_schema && !manifest.notes_truncated);
-    // Anything the device cannot verify later is refused before it is cached or offered.
     for (const auto& bad : {std::string("[]"), std::string("{\"manifest\":2}"),
              std::string("{\"manifest\":1,\"board\":\"other\"}"), manifest_json("0.2.0-beta.2+g1234567"), manifest_json("0.2")})
         assert(!update::parse_manifest(bad, manifest, error) && !error.empty() && manifest.version.empty());
@@ -49,7 +47,6 @@ int main() {
     altered = manifest_json("0.2.0");
     altered.replace(altered.find(std::string(64, 'A')), 64, std::string(63, 'a') + "g");
     assert(!update::parse_manifest(altered, manifest, error));
-    // Notes are cut on a scalar boundary; the three-byte scalar that straddles the limit is dropped.
     assert(update::parse_manifest(manifest_json("0.2.0", "", std::string(update::notes_limit - 1, 'a') + "书签"), manifest, error));
     assert(manifest.notes_truncated && manifest.notes.size() == update::notes_limit - 1);
 
@@ -60,7 +57,6 @@ int main() {
     assert(update::evaluate(manifest, "0.2.0-beta.1", "0.2.0-beta.2") == Offer::Skipped);
     assert(update::evaluate(manifest, "0.2.0-beta.1", "0.2.0-beta.1") == Offer::Newer);
     assert(update::evaluate(manifest, "0.2.0-beta.3+g1234567", "") == Offer::Development);
-    // A development build also withholds the exact version that failed to start.
     assert(update::evaluate(manifest, "0.2.0-beta.3+g1234567", "0.2.0-beta.2") == Offer::Skipped);
     assert(update::evaluate(manifest, "0.2.0-beta.3+g1234567", "0.2.0-beta.1") == Offer::Development);
     assert(update::evaluate(manifest, "unknown", "") == Offer::Development);
@@ -78,10 +74,8 @@ int main() {
     assert(update::evaluate(changed, "0.2.0-beta.1", "") == Offer::NewerSchema);
     changed.progress_schema = update::progress_schema; changed.config_schema = update::config_schema - 1;
     assert(update::evaluate(changed, "0.2.0-beta.1", "") == Offer::OlderSchema);
-    // Cleared-progress markers use schema 2, so firmware that writes only schema 1 is older.
     changed = manifest; changed.progress_schema = 1;
     assert(update::progress_schema == 2 && update::evaluate(changed, "0.2.0-beta.1", "") == Offer::OlderSchema);
-    // The hold names one version: another version that is newer than the running one is offered.
     assert(update::evaluate(manifest, "0.2.0-beta.1", "0.2.0-beta.3") == Offer::Newer);
     changed = manifest; changed.size = update::slot_bytes + 1;
     assert(update::evaluate(changed, "0.2.0-beta.1", "") == Offer::TooLarge);
@@ -114,7 +108,6 @@ int main() {
            loaded.pending_to == state.pending_to && loaded.skipped == state.skipped);
     assert(update::decode_state(update::encode_state({}), loaded) && !loaded.manifest && loaded.pending_to.empty());
     assert(!update::decode_state("{", loaded) && !update::decode_state("{\"checked_at\":1}", loaded));
-    // A cached manifest that no longer passes validation invalidates the whole entry.
     auto broken = encoded;
     broken.replace(broken.find("https://"), 8, "http://x");
     assert(!update::decode_state(broken, loaded) && !loaded.manifest && loaded.skipped.empty());

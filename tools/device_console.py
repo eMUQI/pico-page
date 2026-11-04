@@ -120,7 +120,6 @@ class Console:
         return state
 
     def upload(self, source, destination):
-        """Import a new resource, verifying the committed file without overwriting existing files."""
         size = source.stat().st_size
         if not source.is_file() or not 1 <= size <= 64 * 1024 * 1024:
             raise ValueError("Resource must be a regular file of 1 byte through 64 MiB")

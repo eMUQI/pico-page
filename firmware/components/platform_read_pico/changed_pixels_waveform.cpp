@@ -37,4 +37,4 @@ bool build_changed_pixels_waveform(const std::uint8_t* source, std::size_t sourc
     }
     return true;
 }
-} // namespace pico_page::platform
+}

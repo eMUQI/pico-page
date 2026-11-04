@@ -8,7 +8,6 @@
 #include <new>
 
 namespace {
-// Fixed test storage avoids recursive allocation in the accounting path.
 struct Entry { void* pointer = nullptr; std::size_t bytes = 0; };
 constexpr std::size_t slots = 1U << 18;
 Entry entries[slots];

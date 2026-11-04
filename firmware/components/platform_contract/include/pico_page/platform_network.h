@@ -21,23 +21,21 @@ struct NearbyNetwork {
 };
 
 /**
- * Joins an open or WPA2-or-later personal network. With clock it also obtains a usable TLS
- * clock, as synchronize_clock() does. Call only after an explicit user network action. The
- * credentials remain in RAM inside the Wi-Fi driver; this function never writes them to NVS or
- * logs. It blocks its worker task for up to 20 s for an address and 10 s for the time. The
- * first call establishes a session owner independent of the display/input task. While Wi-Fi is
- * already running for this owner (an access point from start_access_point() or a station from
- * scan_networks()), only the station link is replaced; a failure then leaves an access point
- * running and releases a station-only session.
+ * Joins an open or WPA2-or-later personal network on the network owner task.
+ * Call only after an explicit user network action. Credentials are kept in RAM.
+ * The address wait has a 20 s budget after driver setup. With clock, a separate
+ * SNTP wait follows. Cancellation is checked during the waits and cannot interrupt
+ * in-flight driver operations or cleanup. A failed station attempt preserves an
+ * existing access point and releases a station-only session.
  */
 bool connect_network(const std::string& ssid, const std::string& password, std::string& error,
                      ConnectFailure* failure = nullptr, bool clock = true, const std::atomic_bool* cancelled = nullptr);
 
 /**
- * Waits up to 10 s for SNTP on a connection until its first successful sync, even with RTC time.
- * Timeout may use an already valid system clock. Returns false on cancellation, missing link
- * or a clock before 2024; the link stays up either way. With fresh, restarts SNTP and requires a
- * new synchronization even if the system clock is valid. Actual SNTP updates queue RTC persistence.
+ * Uses a 10 s SNTP wait budget until the connection's first successful sync, even with RTC time.
+ * An already valid clock suffices after the wait unless fresh requires a new synchronization.
+ * Cancellation or failure leaves the current link untouched by this function.
+ * Actual SNTP updates queue RTC persistence.
  */
 bool synchronize_clock(std::string& error, ConnectFailure* failure = nullptr, const std::atomic_bool* cancelled = nullptr,
                        bool fresh = false);
@@ -52,7 +50,6 @@ bool scan_networks(std::vector<NearbyNetwork>& networks, std::string& error, con
 /** Dotted IPv4 address of the joined station link, or empty without one. */
 std::string station_address();
 
-/** True while the station still has an IP address on its current link. */
 bool station_connected();
 
 /**
@@ -65,10 +62,8 @@ bool station_connected();
 bool start_access_point(const std::string& ssid, const std::string& password,
                         std::vector<NearbyNetwork>& networks, std::string& error, const std::atomic_bool* cancelled = nullptr);
 
-/** Stops Wi-Fi, including an access point, and releases the driver, interfaces and session. */
 void disconnect_network();
 
-/** File upload over the transfer page; see start_upload_server(). */
 struct UploadServer {
     /**
      * Card root. Books go to Books/, fonts to Fonts/ and lock screen images to LockScreens/,
@@ -83,7 +78,6 @@ struct UploadServer {
      * /code; every other path, including /, gets a page that asks for the address on the screen.
      */
     std::string code;
-    /** Shown under the page title: the access point name, or the joined network name. */
     std::string network;
     /** Called on the server task after each file is committed and verified; may be null. */
     void (*saved)(void* context, const std::string& name) = nullptr;
@@ -132,4 +126,4 @@ bool http_request(const std::string& method, const std::string& url,
                   const std::string& body, std::string& response, int& status,
                   std::string& error, const std::atomic_bool* cancelled = nullptr);
 
-} // namespace pico_page::platform
+}

@@ -19,37 +19,29 @@ int main(int argc, char** argv) {
     assert(font.open_fallback());
     const auto fallback_text = decode_utf8("未检测到存储卡，请插入后重新启动。初始化失败，重试。正在准备书籍章节图片…取消。内容任务无法启动。内存不足。");
     for (const auto c : fallback_text) assert(font.contains(c));
-    // The built-in subset holds common body characters; a rare one is absent and draws as the placeholder box.
     for (const auto c : decode_utf8("我们在黄昏时读完了这本书，“窗外”下起雨来——他说：好！①")) assert(font.contains(c));
     {
         Canvas missing, other, space;
         assert(!font.contains(U'龘') && font.set_pixel_size(28) && font.draw(missing, U'龘', 40, 60));
         assert(missing.pixels() != Canvas().pixels());
-        // Every missing character draws the same hollow box inside its advance and shares one cache entry.
         const auto cached = font.cached_glyphs();
         assert(!font.contains(U'歡') && font.advance(U'歡') == 28 && font.advance(U'龘') == 28);
         assert(font.draw(other, U'歡', 40, 60) && other.pixels() == missing.pixels() && font.cached_glyphs() == cached);
-        // A wide character takes a full em and a 24 x 22 box; the box sits one tenth of an em below the baseline.
         assert(missing.pixel(42, 50) == 1 && missing.pixel(65, 50) == 1 && missing.pixel(41, 50) == 15 && missing.pixel(66, 50) == 15);
         assert(missing.pixel(50, 40) == 1 && missing.pixel(50, 61) == 1 && missing.pixel(50, 39) == 15 && missing.pixel(50, 62) == 15);
         assert(missing.pixel(50, 50) == 15);
-        // A narrow character takes half an em and a narrower box of the same height.
         Canvas narrow;
         assert(!font.contains(U'Ж') && font.advance(U'Ж') == 14 && font.draw(narrow, U'Ж', 40, 60));
         assert(narrow.pixel(42, 50) == 1 && narrow.pixel(51, 50) == 1 && narrow.pixel(52, 50) == 15 && narrow.pixel(46, 50) == 15);
         assert(font.cached_glyphs() == cached + 1);
-        // A zero-width character the face lacks takes no room and leaves the canvas untouched.
         assert(!font.contains(U'\u200b') && font.advance(U'\u200b') == 0);
         assert(font.missing(U'龘') && font.missing(U'Ж') && !font.missing(U'\u200b') && !font.missing(U'我'));
-        // A missing separator or space is not known to be invisible, so it draws the box and cannot join its neighbours.
         assert(font.missing(U'\u2028') && font.advance(U'\u2028') == 14 && font.missing(U'\u0085'));
-        // Default-ignorable format characters outside the common ranges are blank as well.
         for (const char32_t ignorable : {U'\u034f', U'\u2066', U'\u2069', U'\U000e0001'})
             assert(!font.missing(ignorable) && font.advance(ignorable) == 0);
         assert(font.draw(space, U'\u200b', 40, 60) && space.pixels() == Canvas().pixels());
     }
     {
-        // Prewarming an independent font face must preserve the rasterized pixels.
         Canvas rasterized, cached;
         assert(font.set_pixel_size(28) && font.draw(rasterized, fallback_text[0], 40, 60));
         Font warmed;
@@ -266,7 +258,6 @@ int main(int argc, char** argv) {
     assert(!render_image(canvas, jpeg, 0, 0, 32, 24, image_error, false,
                          [&] { return ++cancellation_checks >= 3; }));
     assert(image_error == kImageCancelled && canvas.pixels() == jpeg_unchanged);
-    // Cancel after output starts; the remaining rows must retain their previous pixels.
     Canvas partial;
     partial.clear(7);
     assert(!render_image(partial, rgba, 10, 20, 4, 4, image_error, false,
@@ -422,7 +413,6 @@ int main(int argc, char** argv) {
         assert(selection_boxes(failed, 0, page.end).empty());
     }
     {
-        // Every module lands where the encoder put it: 264 px holds version 2 at 8 px a module.
         const std::string address = "http://192.168.4.1";
         std::vector<std::uint8_t> work(qrcodegen_BUFFER_LEN_FOR_VERSION(10)), code(work.size());
         assert(qrcodegen_encodeText(address.c_str(), work.data(), code.data(), qrcodegen_Ecc_MEDIUM, 1, 10,

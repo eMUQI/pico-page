@@ -51,13 +51,12 @@ enum class View {
 };
 enum class PageEffect { Off, Ripple };
 enum class PowerAction { None, Shutdown, Restart };
-/** install restarts into the firmware image that the last completed update download verified. */
+/** install requests activation of the last verified download before the restart. */
 struct PowerRequest { PowerAction action = PowerAction::None; bool without_save = false; bool install = false; };
 enum class UsbTransferAction { None, Start, Exit };
 /** Upload runs over the device access point; UploadStation over a saved network. */
 enum class PortalAction { None, Stop, Upload, UploadStation };
 enum class PortalPhase { Starting, Waiting, Closed, Receiving };
-/** One state of a book upload session, reported by the task that owns the radio. */
 struct PortalStatus {
     PortalPhase phase = PortalPhase::Starting;
     /** The device's own access point and upload page address; empty until the access point is up. */
@@ -85,11 +84,8 @@ struct WifiStatus {
 };
 /** Why a station link was not established; None also covers failures after the link is up. */
 enum class LinkFailure { None, NotNearby, Password, Other };
-/**
- * Networks a worker may join. With automatic it scans and tries the listed networks that are in
- * range, strongest first, until one connects; otherwise it joins only the single listed network.
- * A station link that is already up is used as it is.
- */
+/** Automatic selection tries nearby saved networks by signal strength. Otherwise supply one target.
+ * An existing station link may be reused. */
 struct WifiTargets {
     std::vector<provision::WifiCredentials> networks;
     bool automatic = false;
@@ -119,7 +115,7 @@ enum class UpdateFailure {
     Server,      // The server did not answer with the requested file.
     Mismatch,    // Length or digest differs from the manifest.
     TooLarge,    // The image does not fit the update slot.
-    WrongImage,  // Not an image of this board, project and version.
+    WrongImage,  // Invalid image header or mismatched chip, project or version.
     Flash,       // The update slot could not be written.
 };
 /** One update request for the network worker. Check fetches url as text; Download streams the image at url into the inactive slot. */
@@ -128,7 +124,7 @@ struct UpdateOperation {
     Kind kind = Kind::Check;
     std::uint64_t id = 0;
     std::string url;
-    /** Download only: expected length, SHA-256 in lowercase hexadecimal and the version the image must carry. */
+    /** Download validation: byte length, lowercase hexadecimal SHA-256 and embedded version. */
     std::uint32_t size = 0;
     std::string sha256, version;
     WifiTargets targets;
@@ -140,8 +136,8 @@ struct AppInput {
     int x = 0;
     int y = 0;
     /**
-     * The contact began before the previous frame finished, so it was aimed at the earlier
-     * screen. Only a page turn that follows a page turn is honoured; anything else is ignored.
+     * The contact began before the previous frame finished and targets the earlier screen.
+     * Ordinary reading input only chains page turns; keyboard and loading controls handle their own cases.
      * For continuous Move/Cancel, defers drawing while queued input or a system handoff is pending.
      */
     bool queued = false;
@@ -210,15 +206,13 @@ class ReaderApp {
     int auto_sleep_minutes() const;
     /** Reloads global settings when idle; uses the admitted network state, and rejects access during a bookmark commit. */
     bool wifi_enabled() const;
-    /** Cancels network work on the application owner without waiting for the worker.
-     * for_sleep retains the manual target for a cancelled sleep attempt. */
+    /** Requests cancellation without waiting; for_sleep retains the manual target for a cancelled sleep attempt. */
     void stop_wifi(bool for_sleep = false);
     /** Consumes a Wi-Fi request when display and power-menu work permit it; credentials are owned values. */
     std::optional<WifiOperation> take_wifi_request();
     void complete_wifi(std::uint64_t id, const std::vector<provision::NearbyWifi>& nearby, const std::string& error,
                        LinkFailure failure = LinkFailure::None);
     void show_wifi(const WifiStatus& status);
-    /** True while the portal or its read-only Wi-Fi status page is visible. */
     bool portal_visible() const;
     /** Consumes one explicit UI request; the main loop arbitrates device ownership. */
     UsbTransferAction take_usb_transfer_action();
@@ -237,11 +231,11 @@ class ReaderApp {
      * the card is absent or the save fails.
      */
     bool prepare_portal(bool station = false);
-    /** Networks for an upload session over a saved network, read before the session owns the card. */
+    /** Reads saved-network settings before the upload worker takes ownership of the card. */
     WifiTargets upload_targets() const;
     /**
-     * Draws a state tagged with the request generation. Closed confirms that the worker has
-     * stopped accessing the card and radio; only then can the requested next page read settings.
+     * Draws a state tagged with the request generation. Closed confirms that the upload session
+     * stopped accessing the card; an independently held station link may remain active.
      * Closed leaves that page, or the page
      * that requested the session, or the refreshed library after upload. A session that closes
      * before its first Waiting state returns to the network page with the closing sentence.
@@ -255,8 +249,8 @@ class ReaderApp {
      */
     bool begin_sleep();
     /**
-     * Saves progress and prepares a sleep frame. false with sleep_pending() means the cover
-     * worker is still handing back resources; call again from the event loop. Other false
+     * Saves progress and prepares a sleep frame. false with sleep_pending() means content
+     * work is still completing or handing back resources; poll again from the event loop. Other false
      * results reject sleep. Present a successful frame before suspending storage or hardware.
      */
     bool prepare_sleep();
@@ -340,11 +334,10 @@ class ReaderApp {
      */
     void poll_background(bool cancel = false);
     /**
-     * Prepares one next-page layout and warms glyphs in 15 ms slices, then starts statistics.
-     * With async_content, an independent parser and font return page boundaries; otherwise
-     * counting runs here in 15 ms slices or one chapter load. Storage and individual operations
-     * can exceed that target. Call only on the application owner task while no input is waiting;
-     * stop must not call back into ReaderApp. No frame or reading position is changed.
+     * Advances eligible cache writes, sleep-image preparation, prefetch or page counting.
+     * Call on the application owner task while no input is waiting; stop must not call back
+     * into ReaderApp. Synchronous parsing, storage and individual rendering operations may
+     * exceed the 15 ms cooperative layout/counting slice.
      */
     void background_step(const std::function<bool()>& stop = {});
     void show_error(const std::string &message);
@@ -368,12 +361,11 @@ class ReaderApp {
     /** True from a check or download request until its completion; the device stays awake meanwhile. */
     bool update_busy() const;
     /**
-     * Records the installing restart so that the next start reports its result once. Call after
-     * the boot slot has been switched and before the card is released: a record therefore always
-     * means that the new firmware was given a start. Best effort; without it no result is shown.
+     * Best-effort record of an installation request, after switching the boot slot and before
+     * releasing the card. The next startup uses it for the result report; it does not confirm
+     * that a restart or boot into the new image occurred.
      */
     void record_install();
-    /** True while the on-screen keyboard is shown; every tap made during a refresh is then kept, in order. */
     bool keyboard_visible() const;
 
   private:
@@ -383,4 +375,4 @@ class ReaderApp {
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
-} // namespace pico_page
+}

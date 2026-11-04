@@ -127,7 +127,6 @@ bool stop_usb_storage(std::string& error) {
 }
 
 extern "C" {
-// Ownership is explicit; attach, detach and SCSI eject never mount local FAT.
 void msc_storage_mount_to_usb(void) {}
 void msc_storage_mount_to_app(void) {}
 void tud_msc_inquiry_cb(uint8_t, uint8_t vendor[8], uint8_t product[16], uint8_t revision[4]) {

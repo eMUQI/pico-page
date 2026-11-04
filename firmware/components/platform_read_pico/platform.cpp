@@ -66,11 +66,9 @@ std::int64_t rails_deadline = 0;
 std::int64_t last_pmu_poll = 0;
 std::int64_t last_card_poll = 0;
 std::int64_t power_ignore_until = 0;
-// Output written before the host re-enumerates the USB console after light sleep is lost,
-// so poll() reports the last sleep once this time has passed.
 constexpr std::int64_t sleep_report_delay_us = 1'000'000;
 struct SleepReport {
-    std::int64_t due = 0;
+    std::int64_t report_after_us = 0;
     int wakes = 0;
     int rejected = 0;
     int pmu_retries = 0;
@@ -85,22 +83,16 @@ EpdiyHighlevelState display{};
 cst836u_handle_t touch = nullptr;
 sc7a20h_handle_t accelerometer = nullptr;
 Battery battery_state{};
-// Touch and key events from the sampler task, oldest first.
 QueueHandle_t touch_events = nullptr;
 TouchMoves touch_moves;
-// Serializes controller reads, contact publication/reception and sleep mode changes.
 SemaphoreHandle_t touch_lock = nullptr;
 SleepIo sleep_io;
-// Asks the sampler to cancel the contact in progress and ignore input until release.
 std::atomic<bool> suppress_touch{true};
-// Faster sampling is limited to contacts and their settling interval to reduce idle CPU use.
-// The controller interrupt starts it; idle polling also detects contacts if the line is missed.
 constexpr TickType_t sample_period = pdMS_TO_TICKS(5);
 constexpr TickType_t idle_sample_period = pdMS_TO_TICKS(50);
 constexpr int settle_samples = 40;
 TaskHandle_t sampler = nullptr;
 std::atomic<std::uint32_t> input_overflows{0};
-// Remains set until the sampler starts a controller read under touch_lock.
 portMUX_TYPE touch_pending_lock = portMUX_INITIALIZER_UNLOCKED;
 bool touch_pending = true;
 
@@ -131,9 +123,6 @@ PageWaveform page_waveform = PageWaveform::Gray16;
 bool reverse_page_effect = false;
 PresentTiming timing{};
 PageWaveform selected_effect = PageWaveform::Gray16;
-// Row/column damage masks cover unchanged pixels between keys. Hold equal
-// nonwhite transitions while retaining the BSP's white maintenance sequence.
-// Separate immutable tables keep the driver's phase cache valid for both modes.
 template<std::size_t Phases>
 struct ChangedPixelsTable {
     std::uint8_t lut[Phases * waveform_phase_bytes]{};
@@ -176,8 +165,6 @@ bool on_owner(std::string& error) {
     return true;
 }
 
-// All register restoration and touch resets run under the sampler lock. Failed
-// restoration stays pending so neither sampling nor panel control can use parked I/O.
 bool restore_sleep_io_locked(std::string& error) {
     const auto result = sleep_io.resume();
     if (result == ESP_OK) return true;
@@ -211,8 +198,6 @@ bool suspend_sleep_io_locked(bool host_off, std::string& error) {
 void copy_portrait(const std::uint8_t* packed) {
     constexpr int source_stride = width / 2;
     constexpr int native_stride = height / 2;
-    // Both frames exceed the 64 KiB data cache. A band of columns reads each source
-    // line once and keeps its destination rows cached while y advances.
     constexpr int band = 64;
     for (int first = 0; first < width; first += band) {
         const int last = std::min(first + band, width);
@@ -297,21 +282,10 @@ bool pmu_events(bool& short_press, bool& wake_press, std::string& error, bool* l
     return true;
 }
 
-/**
- * Clears the expander interrupt and reports whether a later PMU event will produce a new edge.
- *
- * The PMU holds CW_INT (FCA9555 P0.2) low while events are unacknowledged. An event queued
- * after the last acknowledgement but before this clear leaves CW_INT low with the expander
- * latch already reset, so no further edge can wake light sleep. The PMU queue is therefore
- * read after the clear; @p idle also refreshes the snapshot's key_state.
- *
- * @param irq Expander interrupt line, active low.
- * @param idle Set when the line is released and the PMU has no pending events.
- * @param[out] error Failure description when the status read fails.
- * @return false if the PMU status read fails; @p error then describes the failure.
- */
 bool wake_lines_idle(gpio_num_t irq, bool& idle, std::string& error) {
     idle = false;
+    // The PMU holds CW_INT low until acknowledgement. A new event can leave it low
+    // when the expander latch is cleared, so a released expander IRQ alone is insufficient.
     read_pico_clear_ioe_int();
     if (!gpio_get_level(irq)) return true;
     const auto result = read_pico_pmu_poll();
@@ -326,20 +300,6 @@ bool wake_lines_idle(gpio_num_t irq, bool& idle, std::string& error) {
     return true;
 }
 
-/**
- * Consumes the PMU events behind a light-sleep wake and re-arms the expander interrupt.
- *
- * Besides key events, the PMU reports a battery sample about every 30 s while the host is
- * powered. Acknowledging events releases CW_INT, and the expander reports that release as
- * a further input change, so its interrupt is cleared only after the events are consumed.
- * A failed PMU read is retried, since a periodic event must not end the sleep.
- *
- * @param irq Expander interrupt line, active low.
- * @param wake_press Set when the events include a power-key press.
- * @param[out] error Failure description when interrupt settling fails.
- * @return false if the PMU still fails, or if the line or the PMU queue is still not idle,
- *         2 s after the wake without a key press; @p error then describes the failure.
- */
 bool settle_wake_interrupt(gpio_num_t irq, bool& wake_press, std::string& error) {
     wake_press = false;
     const auto deadline = esp_timer_get_time() + 2'000'000;
@@ -350,6 +310,7 @@ bool settle_wake_interrupt(gpio_num_t irq, bool& wake_press, std::string& error)
         // A key event acknowledged before a later read failed is not reported again.
         bool read = pmu_events(short_press, press, error);
         wake_press = wake_press || press;
+        // Releasing CW_INT on acknowledgement also changes the expander input.
         if (!wake_press) read = read && wake_lines_idle(irq, idle, error);
         if (wake_press || (read && idle)) {
             error.clear();
@@ -375,11 +336,6 @@ EventKind hit_test(int x, int y) {
     return x >= 0 && x < width && y >= 0 && y < height ? EventKind::Touch : EventKind::None;
 }
 
-/**
- * Samples the controller independently of the application task, which blocks for the
- * duration of layout, panel updates and card writes. A contact that begins and ends
- * within such a period would otherwise never be observed.
- */
 void sample_touch(void*) {
     Event active{};
     bool move_pending = false;
@@ -393,8 +349,6 @@ void sample_touch(void*) {
         event.time_us = now;
         if (phase == EventPhase::Move && !touch_moves.publish(event)) return touch_moves.pending_for(event.sequence);
         if (xQueueSend(touch_events, &event, 0) == pdTRUE) return true;
-        // Discard the incomplete backlog before publishing the recovery boundary. This task
-        // is the only producer; the consumer can only free space after the reset.
         xQueueReset(touch_events);
         touch_moves.clear();
         const Event reset{EventKind::InputReset, EventPhase::Cancel, event.sequence, 0, 0, now};
@@ -420,7 +374,6 @@ void sample_touch(void*) {
         }
         if (signalled) {
             fast = settle_samples;
-            // A burst of edges must not sample more than once per tick.
             vTaskDelay(1);
         } else if (fast > 0) {
             --fast;
@@ -431,7 +384,6 @@ void sample_touch(void*) {
             xSemaphoreGive(touch_lock);
             continue;
         }
-        // Publish the sampled event before sleep can acquire the controller boundary.
         set_touch_pending(false);
         const auto result = cst836u_read(touch, &sample);
         const auto now = esp_timer_get_time();
@@ -475,7 +427,6 @@ void sample_touch(void*) {
                 active.max_x = std::max<int>(active.max_x, sample.x);
                 active.max_y = std::max<int>(active.max_y, sample.y);
                 move_pending = move_pending || moved;
-                // A prior contact may still own the coalesced slot; retry even after the finger stops.
                 if (move_pending && active.kind == EventKind::Touch) move_pending = !emit(EventPhase::Move, now);
             }
         } else if (active.kind != EventKind::None) {
@@ -486,7 +437,6 @@ void sample_touch(void*) {
     }
 }
 
-/** Reports a board event; the sampler cancels any contact in progress on its next sample. */
 void system_event(EventKind kind, Event& event) {
     suppress_touch = true;
     event = {kind, EventPhase::Begin, ++sequence};
@@ -501,7 +451,7 @@ bool panel_status(sy7636a_status_t& status, std::string& error) {
     }
     return true;
 }
-} // namespace
+}
 
 void set_performance(bool high) {
     if (!performance_lock || high == performance_high) return;
@@ -519,9 +469,7 @@ bool initialize(std::string& error) {
     attempted = true;
     owner = xTaskGetCurrentTaskHandle();
 
-    // 80 MHz keeps the PLL and the 80 MHz APB clock, so peripheral timing is unchanged.
-    // Without a lock the CPU would also render at the idle frequency; scaling is
-    // therefore enabled only together with the lock.
+    // On ESP32-S3, an 80 MHz CPU minimum keeps the APB clock at 80 MHz.
     esp_pm_config_t power{240, 80, false};
     if (esp_pm_configure(&power) == ESP_OK) {
         if (esp_pm_lock_create(ESP_PM_CPU_FREQ_MAX, 0, "pico_active", &performance_lock) == ESP_OK) {
@@ -574,7 +522,6 @@ bool initialize(std::string& error) {
     if (result != ESP_OK) return failure(error, "Touch/key initialization", result);
     touch_events = xQueueCreate(16, sizeof(Event));
     touch_lock = xSemaphoreCreateMutex();
-    // Above the application task so that sampling continues during its CPU-bound work.
     if (!touch_events || !touch_lock ||
         xTaskCreate(sample_touch, "pico_touch", 4096, nullptr, 5, &sampler) != pdPASS) {
         return failure(error, "Touch/key sampler", ESP_ERR_NO_MEM);
@@ -684,8 +631,7 @@ bool refresh_card(std::string& error) {
 
 bool release_card_for_usb(std::string& error) {
     if (!on_owner(error) || !mounted || usb_owns_card) return false;
-    // The TF card is the only mounted FatFs drive and uses drive 0. The host
-    // displays its volume label rather than the USB product string.
+    // USB hosts display the FAT volume label independently of the USB product string.
     char label[64]{};
     const auto read_label = f_getlabel("0:", label, nullptr);
     if (read_label != FR_OK) {
@@ -747,13 +693,12 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
         return false;
     }
     baseline_valid = false;
-    // The driver caches first-active phases by table address; experimental tables
-    // are rebuilt in place and must retain their complete phase sequence.
+    // EPDiy caches first-active phases by table address. The ripple tables are rebuilt in place.
     epd_set_leading_skip(!clear && (page_waveform == PageWaveform::Gray16 ||
                                   page_waveform == PageWaveform::Gray8));
     EpdDrawError draw_result;
-    // In inverted portrait, footer rows map to native columns 1128 through 1215.
-    epd_set_unchanged_pixel_hold(hold_unchanged_footer && !clear ? 1128 : -1);
+    constexpr int footer_first_native_column = 1128;
+    epd_set_unchanged_pixel_hold(hold_unchanged_footer && !clear ? footer_first_native_column : -1);
     // epd_hl_update_area applies EPD_ROT_INVERTED_PORTRAIT, matching copy_portrait.
     const auto update = [&] {
         if (region) return epd_hl_update_area(&display, MODE_GL16, status.temperature_c,
@@ -761,8 +706,6 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
         return epd_hl_update_screen_full(&display, MODE_GL16, status.temperature_c);
     };
     if (clear) {
-        // Physical black/white pulses establish a new baseline independently
-        // of the previous frame, including when all target pixels are equal.
         draw_result = epd_clear_checked();
         if (draw_result == EPD_DRAW_SUCCESS)
             draw_result = epd_hl_update_screen_from_white(&display, MODE_GC16, status.temperature_c);
@@ -782,8 +725,7 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
     epd_set_unchanged_pixel_hold(-1);
     bool power_good = panel_status(status, error);
     if (draw_result == EPD_DRAW_EMPTY_LINE_QUEUE && power_good) {
-        // The driver has joined its producers and detached scan callbacks before returning.
-        // Rebuild the physical baseline once, preserving the immutable target framebuffer.
+        // The driver joins its producers and detaches scan callbacks before returning.
         ESP_LOGW(tag, "display_recovery attempt=1 error=%u", static_cast<unsigned>(draw_result));
         read_pico_epd_set_pclk(12);
         epd_set_leading_skip(false);
@@ -823,14 +765,13 @@ bool poll(Event& event, std::string& error) {
     error.clear();
     if (!on_owner(error) || !ready) return false;
     const auto now = esp_timer_get_time();
-    // Share the sampler lock with OTA across complete I2C transactions, including task-side waits.
     struct InputGuard {
         InputGuard() { xSemaphoreTake(touch_lock, portMAX_DELAY); }
         ~InputGuard() { xSemaphoreGive(touch_lock); }
     } input_guard;
     if (!restore_sleep_io_locked(error)) return false;
-    if (sleep_report.due && now >= sleep_report.due) {
-        sleep_report.due = 0;
+    if (sleep_report.report_after_us && now >= sleep_report.report_after_us) {
+        sleep_report.report_after_us = 0;
         ESP_LOGI(tag, "Light sleep: wakes=%d rejected=%d pmu_retries=%d touch_edges=%d touch_low=%d "
                  "first_pmu_error=%s result=%s",
                  sleep_report.wakes, sleep_report.rejected, sleep_report.pmu_retries,
@@ -898,9 +839,7 @@ bool sleep(std::string& error, bool& entered_sleep) {
     epd_poweroff();
     rails_deadline = 0;
     sleep_report = {};
-    // The sampler must not address the controller between standby and its reset on wake.
     xSemaphoreTake(touch_lock, portMAX_DELAY);
-    // Contacts during preparation do not veto sleep and must not survive a cancelled handoff.
     if (!suspend_sleep_io_locked(false, error)) {
         xSemaphoreGive(touch_lock);
         return false;
@@ -933,7 +872,6 @@ bool sleep(std::string& error, bool& entered_sleep) {
             if (result == ESP_OK) result = esp_sleep_enable_gpio_wakeup();
             if (result != ESP_OK) break;
             while (result == ESP_OK) {
-                // The controller is in standby; only the PMU line is a wake source.
                 if (has_pending_touch()) {
                     set_touch_pending(false);
                     ++sleep_report.touch_edges;
@@ -977,14 +915,13 @@ bool sleep(std::string& error, bool& entered_sleep) {
     xSemaphoreGive(touch_lock);
     suppress_power = entered_sleep;
     if (entered_sleep) power_ignore_until = esp_timer_get_time() + 300'000;
-    // Restore outside touch_lock, including after rejected sleep or failed wake cleanup.
     usb_console.resume();
     if (!slept && error.empty()) error = "Power key or wake interrupt did not become idle";
     if (entered_sleep) {
         sleep_report.result = error;
-        sleep_report.due = esp_timer_get_time() + sleep_report_delay_us;
+        sleep_report.report_after_us = esp_timer_get_time() + sleep_report_delay_us;
     }
     return slept && restored;
 }
 
-} // namespace pico_page::platform
+}

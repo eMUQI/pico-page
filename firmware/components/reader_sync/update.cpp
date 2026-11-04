@@ -12,8 +12,7 @@ namespace pico_page::update {
 namespace {
 using Json = std::unique_ptr<cJSON, decltype(&cJSON_Delete)>;
 
-/** Reads a decimal number without a leading zero; false when text does not start with one. */
-bool number(std::string_view& text, std::uint32_t& value) {
+bool parse_version_number(std::string_view& text, std::uint32_t& value) {
     std::size_t length = 0;
     std::uint64_t parsed = 0;
     while (length < text.size() && text[length] >= '0' && text[length] <= '9' && length < 9)
@@ -29,16 +28,18 @@ bool literal(std::string_view& text, std::string_view expected) {
     text.remove_prefix(expected.size());
     return true;
 }
-/** Major, minor, patch, stage (0 beta, 1 rc, 2 release) and stage number. */
 using Precedence = std::array<std::uint32_t, 5>;
+enum VersionStageRank : std::uint32_t { BetaRank, ReleaseCandidateRank, ReleaseRank };
+
 bool precedence(std::string_view version, Precedence& order) {
     version = version.substr(0, version.find('+'));
-    order = {0, 0, 0, 2, 0};
-    if (!number(version, order[0]) || !literal(version, ".") || !number(version, order[1]) ||
-        !literal(version, ".") || !number(version, order[2])) return false;
+    order = {0, 0, 0, ReleaseRank, 0};
+    auto& [major, minor, patch, stage_rank, stage_number] = order;
+    if (!parse_version_number(version, major) || !literal(version, ".") || !parse_version_number(version, minor) ||
+        !literal(version, ".") || !parse_version_number(version, patch)) return false;
     if (version.empty()) return true;
-    order[3] = literal(version, "-beta.") ? 0 : literal(version, "-rc.") ? 1 : 2;
-    return order[3] != 2 && number(version, order[4]) && order[4] >= 1 && version.empty();
+    stage_rank = literal(version, "-beta.") ? BetaRank : literal(version, "-rc.") ? ReleaseCandidateRank : ReleaseRank;
+    return stage_rank != ReleaseRank && parse_version_number(version, stage_number) && stage_number >= 1 && version.empty();
 }
 bool text_field(const cJSON* object, const char* key, std::size_t maximum, std::string& value) {
     const auto* field = cJSON_GetObjectItemCaseSensitive(object, key);
@@ -60,15 +61,13 @@ bool plain_url(const std::string& url) {
                return c <= 32 || c >= 127 || c == '@' || c == '#' || c == '\\';
            });
 }
-/** Cuts at a UTF-8 scalar boundary at or below limit. */
-bool truncate(std::string& text, std::size_t limit) {
+bool truncate_utf8(std::string& text, std::size_t limit) {
     if (text.size() <= limit) return false;
     while (limit && (static_cast<unsigned char>(text[limit]) & 0xC0) == 0x80) --limit;
     text.resize(limit);
     return true;
 }
-/** Splits one line into spans, dropping the inline syntax that the notes page does not draw. */
-std::vector<NoteSpan> spans(std::string_view line) {
+std::vector<NoteSpan> parse_note_spans(std::string_view line) {
     std::vector<NoteSpan> result;
     bool bold = false;
     std::string run;
@@ -130,14 +129,14 @@ bool read_manifest(const cJSON* object, Manifest& manifest, std::string& error) 
         manifest.progress_schema = static_cast<int>(progress);
         manifest.config_schema = static_cast<int>(config);
         const auto* truncated = cJSON_GetObjectItemCaseSensitive(object, "notes_truncated");
-        manifest.notes_truncated = truncate(manifest.notes, notes_limit) || cJSON_IsTrue(truncated);
+        manifest.notes_truncated = truncate_utf8(manifest.notes, notes_limit) || cJSON_IsTrue(truncated);
         error.clear();
         return true;
     }
     manifest = {};
     return false;
 }
-}  // namespace
+}
 
 std::optional<int> compare_versions(std::string_view a, std::string_view b) {
     Precedence left, right;
@@ -197,7 +196,7 @@ std::vector<NoteBlock> parse_notes(const std::string& markdown) {
             line.remove_prefix(2);
         }
         while (!line.empty() && line.front() == ' ') line.remove_prefix(1);
-        auto parts = spans(line);
+        auto parts = parse_note_spans(line);
         if (!parts.empty()) blocks.push_back({kind, std::move(parts)});
     }
     return blocks;
@@ -234,4 +233,4 @@ bool decode_state(const std::string& json, State& state) {
     return true;
 }
 
-}  // namespace pico_page::update
+}

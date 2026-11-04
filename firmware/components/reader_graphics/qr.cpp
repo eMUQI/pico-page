@@ -9,10 +9,10 @@ extern "C" {
 
 namespace pico_page::graphics {
 namespace {
-constexpr int max_version = 10;  // 57 modules; 213 bytes of text at error correction level M.
+constexpr int max_version = 10;
 constexpr int quiet_modules = 4;
 constexpr int min_module_px = 3;
-}  // namespace
+}
 
 bool draw_qr(Canvas& canvas, std::string_view text, int x, int y, int size) {
     // The encoder needs a terminated string and two working buffers of this length.
@@ -33,4 +33,4 @@ bool draw_qr(Canvas& canvas, std::string_view text, int x, int y, int size) {
     return true;
 }
 
-}  // namespace pico_page::graphics
+}

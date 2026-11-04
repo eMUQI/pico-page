@@ -159,7 +159,7 @@ Result next(const std::vector<Field>& fields, TextCursor& cursor, char32_t& cp, 
     }
     end = true; return {};
 }
-}  // namespace
+}
 
 Result text_chunk(const std::vector<Field>& fields, TextCursor& cursor, std::size_t limit, TextChunk& chunk, const Stop& stop) {
     chunk = {};
@@ -180,4 +180,4 @@ Result text_chunk(const std::vector<Field>& fields, TextCursor& cursor, std::siz
     next_cursor.scalars += chunk.text.size();
     cursor = next_cursor; return {};
 }
-}  // namespace pico_page::dictionary
+}

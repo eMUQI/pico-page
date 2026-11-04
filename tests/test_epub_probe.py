@@ -1,5 +1,3 @@
-"""Focused checks for source offsets, identity and untrusted EPUB boundaries."""
-
 import hashlib
 from pathlib import Path
 import sys

@@ -45,7 +45,6 @@ template<class Action> Measurement measure(const char* path, unsigned chapters, 
         if (stage && !result.times[stage]) continue;
         std::cout << path << ',' << chapters << ',' << sample << ',' << work::stages[stage] << ',' << result.times[stage];
         for (const auto count : result.counts[stage]) std::cout << ',' << count;
-        // Allocation peaks are capture-wide, not sums of nested stage peaks.
         if (!stage) std::cout << ',' << result.allocations.calls << ',' << result.allocations.bytes << ',' << result.allocations.peak;
         else std::cout << ",,,";
         std::cout << '\n';
@@ -56,7 +55,6 @@ template<class Action> Measurement measure(const char* path, unsigned chapters, 
 }
 
 namespace pico_page {
-/** Drives the private owner operation with a bounded synthetic page index and host pressure. */
 class LargeEpubProbe {
 public:
     static Measurement reclaim(const fs::path& path, unsigned chapters, unsigned sample, bool pressure) {

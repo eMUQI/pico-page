@@ -12,7 +12,6 @@
 using namespace pico_page;
 using Clock = std::chrono::steady_clock;
 
-// The digest compares semantic fields on the same host, without exporting book content.
 static std::string signature(const Chapter& c) {
     Sha256Digest digest;
     const auto number = [&](std::uint64_t n) {

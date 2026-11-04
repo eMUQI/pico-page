@@ -34,8 +34,6 @@ void ReaderApp::Impl::layout_notes(const std::string& markdown, bool truncated, 
         note_lines.push_back(std::move(line));
         note_lines[first].block_rows = note_lines.size() - first;
     }
-    // A block moves to the next screen whole when it fits there; a longer one is divided between
-    // lines. A heading also takes the first line of the block after it along.
     int y = first_top;
     note_starts.push_back(0);
     for (std::size_t i = 0; i < note_lines.size(); ++i) {
@@ -54,7 +52,6 @@ void ReaderApp::Impl::layout_notes(const std::string& markdown, bool truncated, 
     }
     note_page = std::min(note_page, note_starts.size() - 1);
 }
-
 
 void ReaderApp::Impl::draw_update_home(update::Offer offer, int preview_bottom) {
     const auto& manifest = update_state.manifest;
@@ -79,7 +76,6 @@ void ReaderApp::Impl::draw_update_home(update::Offer offer, int preview_bottom) 
         if (update_notice != update_check.body) wrapped(update_notice, 36, 900, 612, 24);
         if (manifest) {
             const auto at = update_checked_at();
-            // The cache keeps the manifest and the time, not how it compared with the firmware then.
             text("上次成功检查" + (at.empty() ? "时间未知" : " " + at) + " · 服务器版本 " + manifest->version,
                  36, 1010, 22, 612, 3);
         }
@@ -131,7 +127,6 @@ void ReaderApp::Impl::draw_update_home(update::Offer offer, int preview_bottom) 
     wrapped(update_notice.empty() ? reason : update_notice, 36, 1104, 612, 24);
 }
 
-
 void ReaderApp::Impl::draw_update() {
     view = View::Update;
     const auto& manifest = update_state.manifest;
@@ -143,7 +138,6 @@ void ReaderApp::Impl::draw_update() {
         button(UpdateDismiss, "知道了", 24, 1088, 636, 96, true);
         return;
     }
-    // Pages that describe a manifest fall back to the home page when it is gone.
     if (!manifest && update_page != UpdatePage::Checking && update_page != UpdatePage::Result) update_page = UpdatePage::Home;
     if (update_page == UpdatePage::Home && update_ready && manifest && manifest->version == update_to && update_installable(offer))
         update_page = UpdatePage::Ready;
@@ -183,8 +177,6 @@ void ReaderApp::Impl::draw_update() {
         update_head("当前版本", running_version);
         canvas.line(36, 300, 647, 300, 1, 2);
         text(update_cancelling ? "正在取消" : "正在检查", 36, 328, 34, 612, 1, true);
-        // The worker publishes Connecting while it joins, Clock while it reaches the internet
-        // and Request for the manifest; the cells follow the latest phase shown.
         const auto phase = wifi_status.phase;
         const bool linked = phase == WifiPhase::Connected || phase == WifiPhase::Clock || phase == WifiPhase::Request;
         const bool requesting = phase == WifiPhase::Request;
@@ -223,7 +215,6 @@ void ReaderApp::Impl::draw_update() {
         case UpdateFailure::Link: title = "没有连上 Wi-Fi"; body = update_notice; break;
         case UpdateFailure::Internet: title = "无法开始下载"; body = "已连接 Wi-Fi，但" + update_notice + "。请确认这个网络可以上网。"; break;
         case UpdateFailure::Network:
-            // The same failure covers a refused connection before any byte and a later interruption.
             if (update_bytes) { title = "下载中断"; body = "下载到 " + megabytes(update_bytes) + " MiB 时连接中断或超时。"; }
             else { title = "无法开始下载"; body = "没有连上固件下载服务器。"; }
             break;
@@ -233,7 +224,6 @@ void ReaderApp::Impl::draw_update() {
         case UpdateFailure::WrongImage: title = "型号不符"; body = "这个固件不是给 Read Pico 的，或版本与服务器公布的不符。"; break;
         default: break;
         }
-        // The same file would fail again; only transfer and write failures are worth repeating.
         const bool repeatable = update_failure != UpdateFailure::TooLarge && update_failure != UpdateFailure::WrongImage;
         canvas.fill_rect(36, 140, 48, 48, 1);
         center("!", 36, 146, 48, 32, 15, true);
@@ -266,7 +256,6 @@ void ReaderApp::Impl::draw_update() {
     }
 }
 
-
 void ReaderApp::Impl::update_begin(UpdateOperation::Kind kind) {
     std::string problem;
     auto targets = wifi_targets(problem);
@@ -278,8 +267,8 @@ void ReaderApp::Impl::update_begin(UpdateOperation::Kind kind) {
     else {
         const bool download = kind == UpdateOperation::Kind::Download;
         update_hold = std::make_shared<std::atomic_bool>(false);
-        update_active = ++update_sequence;
-        UpdateOperation operation{kind, update_active, update::manifest_url, 0, {}, {}, std::move(targets), update_hold};
+        update_request_id = ++update_sequence;
+        UpdateOperation operation{kind, update_request_id, update::manifest_url, 0, {}, {}, std::move(targets), update_hold};
         if (download) {
             const auto& manifest = *update_state.manifest;
             operation.url = manifest.url; operation.size = manifest.size;
@@ -293,15 +282,14 @@ void ReaderApp::Impl::update_begin(UpdateOperation::Kind kind) {
     draw_update(); overlay();
 }
 
-
 void ReaderApp::Impl::update_complete(std::uint64_t id, UpdateFailure failure, int status, const std::string& body, const std::string& detail,
                      LinkFailure link, const std::string& ssid) {
-    if (!id || id != update_worker) return;
-    update_worker = 0;
-    const bool cancelled = std::exchange(update_cancelling, false) || failure == UpdateFailure::Cancelled || id != update_active;
+    if (!id || id != update_worker_id) return;
+    update_worker_id = 0;
+    const bool cancelled = std::exchange(update_cancelling, false) || failure == UpdateFailure::Cancelled || id != update_request_id;
     const bool download = update_page == UpdatePage::Downloading;
     const bool confirming = std::exchange(update_confirming, false);
-    update_active = 0;
+    update_request_id = 0;
     network::release(update_hold);
     if (view != View::Update || (update_page != UpdatePage::Downloading && update_page != UpdatePage::Checking)) {
         if (update_page == UpdatePage::Downloading || update_page == UpdatePage::Checking) update_page = UpdatePage::Home;
@@ -337,12 +325,10 @@ void ReaderApp::Impl::update_complete(std::uint64_t id, UpdateFailure failure, i
             update_check = {CheckStage::Server, ssid,
                 failure != UpdateFailure::None ? "连接失败" : status != 200 ? "HTTP " + std::to_string(status) : "内容无效",
                 failure != UpdateFailure::None ? "已连接互联网，但无法连接更新服务器。稍后再试。"
-                // The update host answers 404 until the first manifest is published.
                 : status == 404 ? "更新服务器上还没有发布固件。"
                 : status != 200 ? "更新服务器返回 HTTP " + std::to_string(status) + "，暂时无法检查。稍后再试。"
                 : "更新服务器返回的内容无法识别。稍后再试。"};
         }
-        // Pages that offer an installation show the cause below their controls.
         if (update_check.stage != CheckStage::None) update_notice = update_check.body;
         else {
             const auto later = update::compare_versions(manifest.version, update_state.skipped);
@@ -367,7 +353,6 @@ void ReaderApp::Impl::update_complete(std::uint64_t id, UpdateFailure failure, i
     if (!display.busy()) { draw_update(); overlay(); }
 }
 
-
 bool ReaderApp::Impl::update_control(int id) {
     const auto offer = update_offer();
     const bool startable = update_installable(offer) && update_block().empty() && !update_waiting();
@@ -383,7 +368,6 @@ bool ReaderApp::Impl::update_control(int id) {
         if ((update_page != UpdatePage::Home && update_page != UpdatePage::Notes) || !update_installable(offer) ||
             update_waiting()) return true;
         if (!startable) break;
-        // A manifest read from the card is confirmed with the server before it directs a download.
         if (!update_fresh) {
             std::string problem;
             if (!wifi_enabled() || wifi_targets(problem).networks.empty()) {
@@ -416,7 +400,6 @@ bool ReaderApp::Impl::update_control(int id) {
         return true;
     case UpdateRestart:
         if (update_page != UpdatePage::Ready || !update_ready) return true;
-        // The download may have drained the battery or the charger may have been removed.
         update_notice = update_battery_block();
         if (!update_notice.empty()) break;
         power_selected = PowerAction::Restart;
@@ -426,7 +409,6 @@ bool ReaderApp::Impl::update_control(int id) {
         if (update_page != UpdatePage::Result) return true;
         if (update_rolled_back) update_state.skipped = update_to;
         update_state.pending_from.clear(); update_state.pending_to.clear();
-        // An unsaved dismissal only repeats this report at the next start.
         save_update_state();
         update_page = UpdatePage::Home; update_rolled_back = false;
         note_lines.clear(); note_page = 0;
@@ -446,5 +428,4 @@ bool ReaderApp::Impl::update_control(int id) {
     return true;
 }
 
-
-} // namespace pico_page
+}

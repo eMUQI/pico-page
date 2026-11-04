@@ -14,4 +14,4 @@ StoreStatus read_file(const std::string& root, const std::string& path,
 StoreStatus commit_file(const std::string& root, const std::string& path,
                         const std::optional<std::string>& expected, const std::string& bytes,
                         std::size_t limit, std::string& error, bool preserve_backup = false);
-}  // namespace pico_page::store_internal
+}

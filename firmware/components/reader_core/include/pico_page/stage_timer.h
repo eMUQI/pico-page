@@ -24,4 +24,4 @@ struct StageTimer {
 #endif
     }
 };
-} // namespace pico_page
+}

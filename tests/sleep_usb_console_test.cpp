@@ -68,7 +68,6 @@ int main() {
         cancelled.resume();
         assert(writes == 0 && !cancelled.entered_sleep());
 
-        // A rejected or failed first attempt must not become a successful sleep or add a wait.
         for (const auto result : {ESP_ERR_SLEEP_REJECT, ESP_ERR_INVALID_STATE}) {
             reset(original);
             SleepUsbConsole rejected;
@@ -86,7 +85,6 @@ int main() {
         sleep_duration_us = 5'000;
         assert(sleep.enter_light_sleep() == ESP_OK && sleep.entered_sleep());
         assert(pad_enables == 0);
-        // A periodic PMU wake and a later rejected attempt keep the same detached snapshot.
         assert(sleep.enter_light_sleep() == ESP_OK);
         sleep_result = ESP_ERR_SLEEP_REJECT;
         sleep_duration_us = 0;

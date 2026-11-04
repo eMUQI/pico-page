@@ -17,7 +17,6 @@ NUMBER = re.compile(r'[+-]?(?:[0-9]*\.[0-9]+|[0-9]+)(?:[eE][+-]?[0-9]+)?')
 
 
 class HtmlTree(HTMLParser):
-    """Tolerant survey fallback; this does not establish firmware XML acceptance."""
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.root = ET.Element('survey-root')
@@ -40,7 +39,6 @@ class HtmlTree(HTMLParser):
             node.text = (node.text or '') + data
 
 def tokens(source, whitespace=False):
-    """Yield lexical tokens; quoted strings and comments cannot form delimiters."""
     i = 0
     while i < len(source):
         c = source[i]
@@ -118,7 +116,6 @@ def selector_usage(prelude):
             continue
         simple = kind in labels or (kind == 'word' and previous not in ('.', '#', ':', '|'))
         if kind in labels:
-            # A pseudo-element's second colon is part of the same selector component.
             if kind != ':' or previous != ':':
                 counts[labels[kind]] += 1
             else:
@@ -157,7 +154,6 @@ def css_usage(source):
                 end = i + 1
                 while end < len(ts) and ts[end][0] not in (';', '}'):
                     end += 1
-                # Count shapes only; never include a private font name or URL.
                 shape = ' '.join(k for k, _ in ts[i + 1:end])
                 shorthands[prop + ':' + shape] += 1
         if kind == 'dimension':
@@ -167,7 +163,6 @@ def css_usage(source):
                     break
             if value.endswith('%'):
                 units['%'] += 1
-    # Group at-rules contain rules; other blocks contain declarations.
     contexts, prelude, rules = [], [], 0
     for kind, value in tokens(source, whitespace=True):
         if kind == '{':
@@ -344,7 +339,6 @@ def cpp_string(value):
 
 
 def benchmark_header(output, destination):
-    """Export private source to an explicitly chosen private build header."""
     lines, cases = [], []
     for index, path in enumerate(sorted(output.glob('*/bench.json'))):
         data = json.loads(path.read_text())

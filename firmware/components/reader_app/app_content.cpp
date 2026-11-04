@@ -18,9 +18,7 @@ void ReaderApp::Impl::prepare_chapter() {
         do { ++index; } while (index < document.spine().size() && !document.spine()[index].linear);
     }
     if (index >= document.spine().size()) return;
-    // Near the boundary, release optional counting resources before assessing reading headroom.
     yield_counting_session();
-    // Reading keeps source anchors; use the existing parser reserve as well as the counting budget.
     if (!counting_memory(document.spine()[index].bytes) ||
         !chapter_memory_available(4U * std::min(document.spine()[index].bytes, 2 * kChapterPartScalars))) return;
     ContentJob::Request request;
@@ -58,7 +56,6 @@ void ReaderApp::Impl::prepare_next(const std::function<bool()>& stop) {
     const StageTimer timer{"next_page_prepare"};
     if (!next_page) {
         const auto start = readable_offset(page.end);
-        // Adjacent content uses the worker after the current page preparation finishes.
         if (start >= chapter.text.size()) { prefetch_done = true; return; }
 #ifdef ESP_PLATFORM
         if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 2048U * 1024 ||
@@ -85,7 +82,6 @@ void ReaderApp::Impl::prepare_next(const std::function<bool()>& stop) {
         next_page.reset(); prefetch_done = true; return;
     }
 #endif
-    // Images are prepared only for a displayed page; the planned layout is kept for the turn.
     if (!next_page->images.empty()) { prefetch_done = true; return; }
     if (!body.set_pixel_size(next_page->font_px)) { next_page.reset(); prefetch_done = true; return; }
     int warm_size = next_page->font_px;
@@ -100,8 +96,6 @@ void ReaderApp::Impl::prepare_next(const std::function<bool()>& stop) {
         warm_size = glyph.font_px;
         ++warm_cursor;
     }
-    // A text page is drawn here, after its glyphs are warm, because the glyph cache belongs to
-    // this task; a cancelled attempt is discarded and repeated in a later step.
     if (!next_bitmap && body_cache_room()) {
         const StageTimer timer{"next_page_bitmap"};
         auto bitmap = std::make_unique<graphics::Canvas>();
@@ -110,7 +104,6 @@ void ReaderApp::Impl::prepare_next(const std::function<bool()>& stop) {
     }
     prefetch_done = true;
 }
-
 
 void ReaderApp::Impl::poll_covers() {
     if (view != View::Library) cancel_covers();
@@ -152,7 +145,6 @@ void ReaderApp::Impl::poll_covers() {
     }
 }
 
-
 ReaderApp::Impl::Origin ReaderApp::Impl::origin_for(View source) const {
     const auto body_origin = has_book() && (session.visible_record() || session.saved_record())
         ? Origin::Reading : Origin::Library;
@@ -187,12 +179,10 @@ ReaderApp::Impl::Origin ReaderApp::Impl::origin_for(View source) const {
     return Origin::Library;
 }
 
-
 void ReaderApp::Impl::draw_image_viewer(bool full) {
     if (!viewer_original) return;
     canvas = *viewer_original;
     if (image_contrast_level) {
-        // Each curve preserves black and white while progressively separating middle tones.
         static constexpr std::uint8_t tones[viewer_contrast_levels][16] = {
             {0, 0, 1, 2, 3, 4, 5, 7, 8, 10, 11, 12, 13, 14, 15, 15},
             {0, 0, 0, 1, 2, 3, 5, 7, 8, 10, 12, 13, 14, 15, 15, 15},
@@ -218,7 +208,6 @@ void ReaderApp::Impl::draw_image_viewer(bool full) {
     overlay(full);
 }
 
-
 bool ReaderApp::Impl::begin_image(std::size_t start, const graphics::Page& planned, bool preview, bool progressive) {
     abandon_content();
     yield_counting_session();
@@ -240,15 +229,13 @@ bool ReaderApp::Impl::begin_image(std::size_t start, const graphics::Page& plann
     request.generation = foreground_generation; request.chapter = chapter_index;
     request.part = chapter.part; request.offset = start;
     pending_content = std::move(request);
-    clear_prefetch(); covers.clear(); make_image_room();
+    clear_prefetch(); covers.clear(); make_room_for_cold_image();
     if (progressive) { inline_image_pending = true; return true; }
-    // The typography panel draws the preview status itself.
     if (preview) { loading_origin = origin_for(view); content_loading = true; view = View::Loading; return true; }
     loading("正在准备图片…");
     clear_body_cache();
     return true;
 }
-
 
 bool ReaderApp::Impl::begin_chapter(std::size_t index, std::uint32_t part, ContentJob::Target target,
                    std::size_t position, const Anchor& anchor, const std::string& fragment) {
@@ -311,7 +298,6 @@ bool ReaderApp::Impl::begin_chapter(std::size_t index, std::uint32_t part, Conte
     return true;
 }
 
-
 void ReaderApp::Impl::complete_inline_image(const ContentJob& job) {
     const StageTimer timer{"image_patch", 0};
     const auto& request = job.request;
@@ -339,7 +325,6 @@ void ReaderApp::Impl::complete_inline_image(const ContentJob& job) {
             canvas.fill_rect(box.x, box.y, box.width, box.height, 15);
             draw_image_error(box);
         } else {
-            // Preserve neighboring nibbles at odd edges; the interior is a packed row copy.
             const int left = (box.x + 1) & ~1;
             const int end = box.x + box.width;
             const int last = end & ~1;
@@ -363,7 +348,6 @@ void ReaderApp::Impl::complete_inline_image(const ContentJob& job) {
             ? diagnostics::Outcome::Success : diagnostics::Outcome::Failure);)
     (void)submitted;
 }
-
 
 void ReaderApp::Impl::poll_content(bool allow_inline) {
     if (inline_image_pending && (view != View::Reading || image_viewing)) abandon_content();
@@ -407,8 +391,6 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
                 if (view == View::Dictionary) draw_dictionary(); else draw_dictionary_settings(); overlay(); return;
             }
             if (mapping) {
-                // Initialization or a full worker queue may recover on a later poll.
-                // Retries remain bounded and do not block input or repeat HTTP requests.
                 if (++mapping_start_attempts < 3) {
                     mapping_start_retry = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
                     return;
@@ -439,7 +421,6 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
     }
     if (!foreground_job->done() && chapter_feedback_after && !display.busy() &&
         std::chrono::steady_clock::now() >= *chapter_feedback_after) {
-        // Chapter parsing must acknowledge a checkpoint before the panel starts scanning.
         if (foreground_job->pause()) {
             chapter_feedback_after.reset();
             loading("正在准备章节…");
@@ -557,10 +538,8 @@ void ReaderApp::Impl::poll_content(bool allow_inline) {
     prepared_image_failures.clear();
 }
 
-
 void ReaderApp::Impl::finish_chapter(ContentJob& job) {
     if (memory_error(job.result.error) && (recent_chapter_cache || job.request.content_cache || job.request.chapter_session)) {
-        // Retry once without optional retained payloads; the completed job releases its references on return.
         auto retry = job.request;
         retry.content_cache.reset(); retry.content_cache_write_needed = false;
         retry.chapter_session.reset(); chapter_session.reset(); chapter_stream_bytes = 0;
@@ -583,7 +562,6 @@ void ReaderApp::Impl::finish_chapter(ContentJob& job) {
     for (const auto& span : job.result.history) record_boundary(computed_pages, span.first, span.second);
     show_page(offset, job.request.target == ContentJob::Target::End || job.request.target == ContentJob::Target::Before);
 }
-
 
 void ReaderApp::Impl::poll_counting_job() {
     if (!counting_job || !counting_job->done()) return;
@@ -623,7 +601,6 @@ void ReaderApp::Impl::poll_counting_job() {
         if (request.preview && custom_sleep_attempted && sleep_cover_deadline) {
             custom_sleep_image = std::move(job->result.image);
             custom_rotation_name = settings.sleep_image.empty() && custom_sleep_image ? result.lock_screen : "";
-            // A prepared image is shown even when its cache commit failed; only a fallback is reported.
             custom_notice = custom_sleep_image ? "" : result.error.empty() ? "休眠图片尚未就绪" : result.error;
         }
         if (request.lock_screen_prepare) {
@@ -669,5 +646,4 @@ void ReaderApp::Impl::poll_counting_job() {
     }
 }
 
-
-} // namespace pico_page
+}

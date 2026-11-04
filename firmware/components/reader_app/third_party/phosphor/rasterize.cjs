@@ -13,6 +13,6 @@ const sharp = require('sharp');
   for(let i=0;i<packed.length;i+=20)header+='    '+packed.slice(i,i+20).map(v=>'0x'+v.toString(16).padStart(2,'0')).join(', ')+',\n';
   header+='};\n';
  }
- header+='}  // namespace pico_page::dictionary_icons\n';
+ header+='}\n';
  fs.writeFileSync(path.join(root,'dictionary_icons.h'),header);
 })();

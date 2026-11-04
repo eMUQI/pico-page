@@ -34,7 +34,6 @@ void ReaderApp::Impl::text(graphics::Font& font, const std::string& value, int x
     }
 }
 
-
 int ReaderApp::Impl::title_lines(const std::string &value, int x, int y, int width, int size, bool bold, int max_rows,
                 std::uint8_t gray, bool draw) {
     return title_lines(ui, value, x, y, width, size, bold, max_rows, gray, draw);
@@ -83,7 +82,6 @@ int ReaderApp::Impl::title_lines(graphics::Font& font, const std::string &value,
     return rows ? metrics.ascender + metrics.descender + (rows - 1) * line_height : 0;
 }
 
-
 std::pair<std::uint64_t, std::uint64_t> ReaderApp::Impl::estimated_position(std::size_t index, const sync::PartPosition &at) const {
     const auto &spine = document.spine();
     const std::uint64_t size = at.part_scalars, end = std::min(at.offset, at.part_scalars);
@@ -94,8 +92,6 @@ std::pair<std::uint64_t, std::uint64_t> ReaderApp::Impl::estimated_position(std:
         if (i < index) read += spine[i].bytes;
         else if (i == index && size) {
             if (txt_name(book_path)) {
-                // Part byte spans use recorded GB18030/UTF-16 boundaries or 48 KiB UTF-8 steps,
-                // limited by the original file size so that a short part is not overstated.
                 const auto &offsets = document.metadata().txt_offsets;
                 std::uint64_t begin = static_cast<std::uint64_t>(at.part) * kTxtPartBytes, span = kTxtPartBytes;
                 if (at.part + 1 < offsets.size()) {
@@ -107,7 +103,6 @@ std::pair<std::uint64_t, std::uint64_t> ReaderApp::Impl::estimated_position(std:
                 read += begin + span * end / size;
                 continue;
             }
-            // The number of parts is unknown before the item is counted; one more is assumed.
             const std::uint64_t parts = at.part + (at.last_part ? 1 : 2);
             const std::uint64_t within = at.part * size + end;
             read += spine[i].bytes * within / (parts * size);
@@ -116,13 +111,11 @@ std::pair<std::uint64_t, std::uint64_t> ReaderApp::Impl::estimated_position(std:
     return {read, total};
 }
 
-
 void ReaderApp::Impl::reading_header(bool panel) {
     canvas.fill_rect(0, 0, 684, 104, 15);
     text(panel ? "‹ 正文" : "‹ 书库", 28, 32, 28, 100);
     hits.push_back({0, 0, 128, 104, panel ? Back : Library});
     const bool unsaved = session.needs_save(), differs = remote_anchor.has_value();
-    // The tool page adds the bookmark cell at the right end and moves the badge left of it.
     const bool marking = view == View::Tools;
     const int edge = marking ? bookmark_cell_left - 12 : 660;
     const int right = unsaved || differs ? edge - 164 : edge;
@@ -146,7 +139,6 @@ void ReaderApp::Impl::reading_header(bool panel) {
     canvas.line(0, 103, 683, 103, 1, 3);
 }
 
-
 void ReaderApp::Impl::tool_icon(int id, int cx, int cy) {
     if (id == Contents) {
         for (int y : {-9, 0, 9}) canvas.line(cx - 15, cy + y, cx + 15, cy + y, 1, 3);
@@ -166,11 +158,9 @@ void ReaderApp::Impl::tool_icon(int id, int cx, int cy) {
                 if (radius <= 324 && (x <= 0 || radius >= 256)) canvas.pixel(cx+x, cy+y, 1);
             }
     } else {
-        // A screen painted solid: the whole panel is redrawn.
         outline(cx - 15, cy - 18, 30, 36, 3);
         canvas.fill_rect(cx - 9, cy - 12, 18, 24, 1);
     }
 }
 
-
-} // namespace pico_page
+}

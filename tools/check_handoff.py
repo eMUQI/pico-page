@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Validate public documentation and examples, not firmware behavior (Python 3.11+)."""
 from __future__ import annotations
 import json
 import os
@@ -18,7 +17,6 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def project_files():
-    """Exclude downloaded dependencies, private data and generated build products."""
     excluded = {'build', 'dist', 'third_party', 'managed_components', 'node_modules', 'local', 'private', 'artifacts', '__pycache__'}
     for directory, dirs, files in os.walk(ROOT):
         dirs[:] = [name for name in dirs if not name.startswith('.') and name not in excluded]
@@ -27,7 +25,6 @@ def project_files():
 
 
 def local_path(relative: str) -> Path:
-    """Reject documentation resource paths outside the repository."""
     rel = Path(relative)
     if rel.is_absolute() or '..' in rel.parts:
         raise ValueError(f'Unsafe resource path: {relative}')

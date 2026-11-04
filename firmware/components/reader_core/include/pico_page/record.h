@@ -32,4 +32,4 @@ inline bool operator==(const ReadingRecord& a, const ReadingRecord& b) {
            a.anchor == b.anchor;
 }
 
-}  // namespace pico_page
+}

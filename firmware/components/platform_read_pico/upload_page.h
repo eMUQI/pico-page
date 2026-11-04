@@ -1,7 +1,6 @@
 #pragma once
 
 namespace pico_page::platform {
-// The server inserts `token` and `route` ({hotspot, network}) at the start of the script.
 inline constexpr char upload_page[] = R"HTML(<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Pico Page 传书</title>
 <style>*{box-sizing:border-box}body{margin:0 auto;max-width:560px;background:#fff;color:#111;font:16px/1.5 system-ui,-apple-system,'PingFang SC','Noto Sans SC',sans-serif}
@@ -35,13 +34,9 @@ const $=id=>document.getElementById(id),files=$('files'),list=$('list'),stop=$('
 const table=Array.from({length:256},(_,i)=>{let c=i;for(let j=0;j<8;j++)c=(c>>>1)^((c&1)?0xedb88320:0);return c>>>0;});
 const esc=s=>String(s).replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');
 const formatFileSize=n=>n<1048576?Math.max(1,Math.round(n/1024))+' KB':(n/1048576).toFixed(1)+' MB';
-// Statuses for which the device refused only this file; the batch goes on with the next one.
-const skip=new Set([400,409,413,415]);
-// Pattern, folder, size limit in MiB and name of each accepted kind; the device applies the same table.
+const fileRefusalStatuses=new Set([400,409,413,415]);
 const kinds=[[/\.(epub|txt)$/i,'Books',64,'书籍'],[/\.(ttf|otf)$/i,'Fonts',32,'字体'],[/\.(png|jpe?g)$/i,'LockScreens',2,'锁屏图片']];
 const kind=file=>kinds.find(k=>k[0].test(file.name));
-// Resolves to a refusal for an image beyond what the device can prepare. An image this browser
-// cannot read is sent on; the device decides when it prepares the image.
 const imageSizeProblem=file=>new Promise(resolve=>{
  if(!globalThis.Image||!globalThis.URL||!URL.createObjectURL)return resolve('');
  const image=new Image(),url=URL.createObjectURL(file),done=why=>{URL.revokeObjectURL(url);resolve(why);};
@@ -93,8 +88,7 @@ const transmit=(url,item,headers,body,timeoutMs)=>new Promise((resolve,reject)=>
  xhr.onabort=()=>reject({status:0,aborted:true});
  xhr.send(body);
 });
-// Returns false when the rest of the batch cannot continue.
-const send=async item=>{
+const sendAndMayContinue=async item=>{
  const k=kind(item.file);
  let local=!k?'仅支持 EPUB、TXT、TTF、OTF、PNG 和 JPEG 文件。':!item.file.size||item.file.size>k[2]*1048576?k[3]+'大小必须为 1 字节至 '+k[2]+' MiB。':'';
  if(!local&&k[1]==='LockScreens')local=await imageSizeProblem(item.file);
@@ -106,26 +100,23 @@ const send=async item=>{
   await transmit('/check',item,headers,null,15000);
   if(stopped)throw {stop:true};
   sending=true;item.state='upload';render();
-  // The limit covers the whole request, including the pauses while the device refreshes its
-  // screen and the read-back after the last byte: two minutes plus the time at 50 KB/s.
-  await transmit('/upload',item,headers,item.file,120000+item.file.size/50);
+  const refreshAndVerifyBudgetMs=120000,uploadBudgetBytesPerMs=50;
+  await transmit('/upload',item,headers,item.file,refreshAndVerifyBudgetMs+item.file.size/uploadBudgetBytesPerMs);
   item.state='saved';return true;
  }catch(e){
   if(e.stop){item.state='stopped';item.why='已停止，未上传。';return false;}
-  // A same-name refusal after an unconfirmed upload proves only that the name exists.
-  if(e.status&&skip.has(e.status)){item.state='rejected';item.why=e.status===409&&item.unconfirmed?'设备上已有同名文件，没有再次上传。可能是中断前已保存的这一份，请在设备书库中核对。':e.why;return true;}
+  if(e.status&&fileRefusalStatuses.has(e.status)){item.state='rejected';item.why=e.status===409&&item.unconfirmed?'设备上已有同名文件，没有再次上传。可能是中断前已保存的这一份，请在设备书库中核对。':e.why;return true;}
   if(e.status){item.state='failed';item.why=e.why;return false;}
   item.state=sending?'unconfirmed':'failed';
   item.why=sending?'连接中断，结果未确认。可以点「重试」；若提示已有同名文件，请在设备书库中核对。':e.aborted?'已停止，未上传。':'连接中断，未上传。请检查与设备的连接。';
   return false;
  }finally{xhr=null;}
 };
-// Sends the waiting files one at a time; the device holds a single upload.
 const pump=async()=>{
  if(running)return;
  running=true;stopped=false;render();
  for(let item;(item=items.find(i=>i.state==='wait'));){
-  if(stopped||!await send(item)){
+  if(stopped||!await sendAndMayContinue(item)){
    for(const rest of items)if(rest.state==='wait'){rest.state='stopped';rest.why=stopped?'已停止，未上传。':'整批已停止，未上传。';}
    break;
   }
@@ -133,7 +124,6 @@ const pump=async()=>{
  }
  running=false;render();
 };
-// Files chosen or dropped at any time join the list; a running transfer takes them in turn.
 const add=chosen=>{if(!chosen.length)return;for(const file of chosen)items.push({file,state:'wait',percent:0});render();return pump();};
 files.onchange=()=>{const done=add(files.files);files.value='';return done;};
 stop.onclick=()=>{stopped=true;if(xhr)xhr.abort();};

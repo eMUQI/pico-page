@@ -23,7 +23,7 @@ struct ProgressResult {
 
 /** A reader-created position in one book. The anchor uses the progress.json format. */
 struct Bookmark {
-    /** Unique within the book and increasing in creation order; never reused. */
+    /** Unique within a bookmark list and increasing in creation order. */
     std::uint64_t sequence = 0;
     Anchor anchor;
     /** Chapter label and page-start text captured at creation, for display only. May be empty. */
@@ -66,7 +66,6 @@ struct BookmarkList {
     std::string detail;
 };
 
-/** Upper bounds that keep one bookmark file within a single bounded read. */
 constexpr std::size_t kMaxBookmarks = 100;
 constexpr std::size_t kBookmarkFileLimit = 64 * 1024;
 
@@ -281,7 +280,6 @@ public:
     /** Boot-only metadata check; ambiguous or bounded-out legacy scans suppress onboarding. */
     bool needs_onboarding() const;
 
-    /** Captures both configuration layers and their effective values for editing. */
     SettingsSnapshot settings_snapshot(const std::string& book_path = "") const;
 
     /**
@@ -304,7 +302,7 @@ public:
     StoreStatus save_last_book(const std::string& book_path, std::string& error,
                                std::int64_t utc = std::time(nullptr)) const;
 
-    /** At most 128 paths in last-opened order; malformed records return an empty list and an error. */
+    /** At most 128 paths in last-opened order. A valid backup can recover a missing or malformed main file. */
     std::vector<RecentBook> load_recent_books(std::string& error) const;
 
     /** Loads the last existing book, recovering a valid committed backup when needed. */
@@ -313,7 +311,8 @@ public:
     /**
      * Starts a new resource import of 1 byte through 64 MiB. Allowed destinations
      * are EPUB or TXT books in Books/, fonts or license text in Fonts/, PNG or JPEG
-     * images of at most 2 MiB directly in LockScreens/, and StarDict files in Dictionaries/.
+     * images of at most 2 MiB directly in LockScreens/, and files with .ifo, .idx, .dict,
+     * .syn, .gz or .dz extensions in Dictionaries/. File contents are checked when used.
      * Existing destinations are preserved. An abandoned regular staging file for this
      * destination is removed before starting; unsafe paths are refused.
      * No settings, credentials or reading records are importable.
@@ -322,7 +321,6 @@ public:
     std::unique_ptr<FileImport> begin_import(const std::string& path, std::uint64_t size,
                                            std::uint32_t crc32, std::string& error) const;
 
-    /** Returns bounded resource size and CRC32 without exposing file contents. */
     StoreStatus inspect_asset(const std::string& path, std::uint64_t& size,
                               std::uint32_t& crc32, std::string& error) const;
 
@@ -427,4 +425,4 @@ private:
     std::string root_;
 };
 
-}  // namespace pico_page
+}

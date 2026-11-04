@@ -137,4 +137,4 @@ Result expand_index(const std::string& path, FileStore& store, const std::string
     digest = expected;
     return {};
 }
-}  // namespace pico_page::dictionary
+}

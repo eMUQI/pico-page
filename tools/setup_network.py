@@ -1,15 +1,4 @@
 #!/usr/bin/env python3
-"""Write PicoPage/network.toml and PicoPage/sync.toml on a mounted Pico Page TF card.
-
-A new Wi-Fi network is added to the networks already saved, up to five; a saved name gets the new
-password.
-
-Values are checked against the limits the firmware parsers enforce before
-anything is written. The KOSync password is never stored or printed; only its
-MD5, which KOReader calls the userkey, reaches the card.
-
-Usage: setup_network.py [--offline] [CARD_ROOT]
-"""
 import argparse
 import getpass
 import glob
@@ -54,7 +43,6 @@ def _wifi_entry(ssid, password):
 
 
 def _networks_from_text(text):
-    """Validate the same network shape and value limits as the firmware parser."""
     invalid = "现有 PicoPage/network.toml 格式不受支持。请先检查或删除它；没有写入任何文件。"
     if len(text.encode("utf-8")) > 4096:
         raise ValueError(invalid)
@@ -106,7 +94,6 @@ def _networks_from_text(text):
 
 
 def existing_networks(path):
-    """Return saved networks, [] if absent; reject a file the firmware cannot use."""
     try:
         return _networks_from_text(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -116,8 +103,6 @@ def existing_networks(path):
 
 
 def wifi_toml(ssid, password, networks=()):
-    """Return schema 2 network.toml text with ssid added to networks, or its password replaced when
-    already saved; raise ValueError for values the firmware rejects or a sixth network."""
     entry = _wifi_entry(ssid, password)
     merged = [dict(saved) for saved in networks]
     for saved in merged:
@@ -137,7 +122,6 @@ def wifi_toml(ssid, password, networks=()):
 
 
 def _replace_password(line, old_password, new_password):
-    """Replace a single-line TOML string value and retain its spacing and trailing comment."""
     match = re.match(r"^(\s*password\s*=\s*)(['\"])", line)
     if not match or line[match.end() - 1:match.end() + 2] == match.group(2) * 3:
         return None
@@ -161,7 +145,6 @@ def _replace_password(line, old_password, new_password):
 
 
 def edited_wifi_toml(source, ssid, password):
-    """Edit supported source lines without removing comments or other entries."""
     _wifi_entry(ssid, password)
     current = _networks_from_text(source)
     desired = [dict(entry) for entry in current]
@@ -210,14 +193,12 @@ def edited_wifi_toml(source, ssid, password):
             edited += newline
         edited += (newline + "[[wifi]]" + newline + "ssid = " + _quote(ssid) + newline +
                    "password = " + _quote(password) + newline)
-    # selected_ssid is left as found: a missing or empty value means automatic connection.
     if _networks_from_text(edited) != desired:
         raise ValueError(unsupported)
     return edited
 
 
 def prepared_wifi_edit(path, ssid, password):
-    """Return the original bytes and proposed source; None means the file is absent."""
     try:
         original = path.read_bytes()
     except FileNotFoundError:
@@ -236,7 +217,6 @@ def userkey(password):
 
 
 def sync_toml(endpoint, username, key, device_id, dom_version):
-    """Return sync.toml text; raise ValueError for values the firmware rejects."""
     endpoint = endpoint.rstrip("/")
     rest = endpoint[8:]
     if (not endpoint.startswith("https://") or not rest or rest[0] == "/" or len(endpoint) > 1024 or
@@ -252,7 +232,6 @@ def sync_toml(endpoint, username, key, device_id, dom_version):
 
 
 def existing_identity(path):
-    """Keep the device_id and dom_version of a readable sync.toml; the server keys records by device_id."""
     try:
         current = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -263,7 +242,6 @@ def existing_identity(path):
 
 
 def account_status(endpoint, username, key):
-    """Return 'ok', 'denied', or a description of why the server could not be asked."""
     request = urllib.request.Request(endpoint.rstrip("/") + "/users/auth", headers={
         "accept": "application/vnd.koreader.v1+json", "x-auth-user": username, "x-auth-key": key})
     try:

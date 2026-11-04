@@ -36,14 +36,13 @@ void* font_reallocate(FT_Memory, long, long size, void* block) {
         heap_caps_free(block);
         return nullptr;
     }
-    // A failed resize preserves the original allocation and its contents.
     return heap_caps_realloc(block, static_cast<std::size_t>(size),
                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
 
 // FreeType retains this descriptor for the lifetime of every library instance.
 FT_MemoryRec_ font_memory{nullptr, font_allocate, font_free, font_reallocate};
-} // namespace
+}
 #endif
 
 Canvas::Canvas(int width, int height)
@@ -199,9 +198,7 @@ void Font::trim_glyph_cache(std::size_t target_bytes, std::size_t max_entries) {
 }
 
 namespace {
-// Unicode Default_Ignorable_Code_Point and the C0 controls: characters with no visible form.
-// A face without them draws nothing; any other missing character draws the placeholder.
-bool blank(char32_t c) {
+bool invisible_without_glyph(char32_t c) {
     return c < 0x20 || c == 0xad || c == 0x34f || c == 0x61c || c == 0x115f || c == 0x1160 || c == 0x17b4 ||
            c == 0x17b5 || (c >= 0x180b && c <= 0x180f) || (c >= 0x200b && c <= 0x200f) ||
            (c >= 0x202a && c <= 0x202e) || (c >= 0x2060 && c <= 0x206f) || c == 0x3164 ||
@@ -212,13 +209,13 @@ bool cjk(char32_t c) {
     return (c >= 0x2e80 && c <= 0x9fff) || (c >= 0xf900 && c <= 0xfaff) ||
            (c >= 0x20000 && c <= 0x323af);
 }
-}  // namespace
+}
 
 bool Font::contains(char32_t scalar) const {
     return face_ && FT_Get_Char_Index(static_cast<FT_Face>(face_), scalar) != 0;
 }
 
-bool Font::missing(char32_t scalar) const { return !contains(scalar) && !blank(scalar); }
+bool Font::missing(char32_t scalar) const { return !contains(scalar) && !invisible_without_glyph(scalar); }
 
 int Font::advance(char32_t scalar) {
     if (scalar == U'\n' || scalar == U'\r') return 0;
@@ -231,9 +228,7 @@ int Font::advance(char32_t scalar) {
     int width;
     FT_Fixed design = 0;
     if (!FT_Get_Char_Index(face, scalar)) {
-        // A missing character takes the cell of a present one, whatever the face's own .notdef
-        // advance is: a full em where line breaking treats it as CJK, half an em otherwise.
-        width = blank(scalar) ? 0 : cjk(scalar) ? pixel_size_ : (pixel_size_ + 1) / 2;
+        width = invisible_without_glyph(scalar) ? 0 : cjk(scalar) ? pixel_size_ : (pixel_size_ + 1) / 2;
     } else {
         // For static SFNT faces the hinted loader yields the scaled design advance rounded to a whole
         // pixel. Reading that advance alone avoids fetching and scaling the outline from storage.
@@ -246,7 +241,6 @@ int Font::advance(char32_t scalar) {
             width = static_cast<int>((face->glyph->advance.x + 32) >> 6);
         }
     }
-    // Bound per-face metrics memory across all sizes; reopening invalidates every entry.
     if (advances_.size() >= advance_cache_limit_) {
         advances_.erase(advance_order_.front());
         advance_order_.pop_front();
@@ -265,20 +259,18 @@ FontMetrics Font::metrics() const {
 }
 
 std::uint64_t Font::glyph_key(char32_t scalar, bool bold) const {
-    // The characters a face lacks share one wide and one narrow placeholder per size.
     if (!contains(scalar))
-        return (std::uint64_t(pixel_size_) << 32) | (blank(scalar) ? 0xfffffffdU : cjk(scalar) ? 0xffffffffU : 0xfffffffeU);
+        return (std::uint64_t(pixel_size_) << 32) | (invisible_without_glyph(scalar) ? 0xfffffffdU : cjk(scalar) ? 0xffffffffU : 0xfffffffeU);
     return (std::uint64_t(bold) << 63) | (std::uint64_t(weight_) << 60) | (std::uint64_t(pixel_size_) << 32) | std::uint32_t(scalar);
 }
 
 bool Font::placeholder(char32_t scalar, Glyph& glyph) {
-    // Faces draw their own .notdef as a box, a pattern or nothing at all. A hollow box inside
-    // the cell that advance() reserves keeps every missing character visible.
+    // A font's .notdef glyph may be blank or a pattern rather than a missing-character box.
     const int reserved = advance(scalar), stroke = std::max(1, pixel_size_ / 16);
     if (reserved < 0) return false;
     const int width = std::min(reserved, pixel_size_) - 2 * std::max(1, pixel_size_ / 10);
     const int rows = pixel_size_ * 4 / 5;
-    if (blank(scalar) || width < 3 * stroke || rows < 3 * stroke) return true;
+    if (invisible_without_glyph(scalar) || width < 3 * stroke || rows < 3 * stroke) return true;
     glyph.left = (reserved - width) / 2; glyph.top = rows - pixel_size_ / 10;
     glyph.width = static_cast<unsigned>(width); glyph.rows = static_cast<unsigned>(rows);
     glyph.coverage.assign(static_cast<std::size_t>(width) * rows, 0);
@@ -378,7 +370,7 @@ bool break_after(char32_t previous, char32_t next) {
     if (closing(next) || opening(previous)) return false;
     return previous == U' ' || previous == U'\t' || previous == U'-' || cjk(previous) || cjk(next);
 }
-}  // namespace
+}
 
 Page layout_page(Font& font, std::u32string_view text, std::size_t start, const LayoutSpec& spec, bool collect, const std::function<bool()>& stop) {
     Page page;
@@ -460,7 +452,7 @@ std::optional<std::size_t> text_hit(const Page& page, int x, int y, bool nearest
                                                static_cast<std::int64_t>(y) - line.bottom + 1});
         for (const auto& glyph : page.glyphs) {
             if (glyph.index < line.start || glyph.index >= line.end || glyph.advance <= 0 ||
-                blank(glyph.scalar) || glyph.scalar == U' ' || glyph.scalar == U'\u00a0' ||
+                invisible_without_glyph(glyph.scalar) || glyph.scalar == U' ' || glyph.scalar == U'\u00a0' ||
                 glyph.scalar == U'\u1680' || (glyph.scalar >= 0x2000 && glyph.scalar <= 0x200a) ||
                 glyph.scalar == U'\u2028' || glyph.scalar == U'\u2029' || glyph.scalar == U'\u202f' ||
                 glyph.scalar == U'\u205f' || glyph.scalar == U'\u3000' || glyph.scalar == U'\ufffc') continue;
@@ -485,7 +477,7 @@ std::vector<SelectionBox> selection_boxes(const Page& page, std::size_t begin, s
         bool present = false;
         for (const auto& glyph : page.glyphs) {
             if (glyph.index < std::max(begin, line.start) || glyph.index >= std::min(end, line.end) ||
-                glyph.advance <= 0 || blank(glyph.scalar) || glyph.scalar == U'\ufffc') continue;
+                glyph.advance <= 0 || invisible_without_glyph(glyph.scalar) || glyph.scalar == U'\ufffc') continue;
             left = present ? std::min(left, glyph.x) : glyph.x;
             right = std::max(right, glyph.x + glyph.advance);
             present = true;
@@ -531,4 +523,4 @@ std::u32string decode_utf8(std::string_view text) {
     return result;
 }
 
-}  // namespace pico_page::graphics
+}

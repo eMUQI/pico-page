@@ -28,7 +28,7 @@ struct DocumentMetadata {
     std::string language;
     std::string book_id;  // SHA-256 of the unchanged original file.
     std::string partial_md5;
-    TxtEncoding txt_encoding = TxtEncoding::Utf8;  // Selected decoder; EPUB retains the default.
+    TxtEncoding txt_encoding = TxtEncoding::Utf8;
     std::vector<TxtHeading> txt_headings;
     std::vector<std::uint32_t> txt_offsets;  // Non-UTF-8 part starts and EOF, measured in original file bytes.
 };
@@ -61,9 +61,8 @@ struct DocumentImage {
 };
 
 /**
- * A spine item is read in parts so that memory does not grow with its length. A part ends at
- * the first block boundary after this many scalars, or inside a block at twice as many; an item
- * shorter than this is a single part.
+ * EPUB part scalar target at a block boundary. In-block splitting uses twice
+ * this target. Run, source-node or metadata limits may split a part earlier.
  */
 inline constexpr std::uint32_t kChapterPartScalars = 60000;
 /** TXT parts use fixed byte targets adjusted to complete code points or CRLF. */
@@ -78,7 +77,7 @@ inline constexpr std::uint32_t kLastChapterPart = 0xffffffffU;
 enum class ChapterLoad {
     /** Everything, including the source text of each node and the stylesheets; KOReader position mapping needs these. */
     Mapping,
-    /** What reading needs: run anchors for saving and restoring positions. source_nodes entries and css_sources are empty and no linked stylesheet is read. */
+    /** Keeps run anchors for local position recovery, without source text nodes or stylesheet contents. */
     Reading,
     /** Pagination only: run anchors are empty as well, so anchor_at only reports whether an offset has a source. */
     Layout
@@ -90,9 +89,9 @@ enum class ChapterLoad {
  */
 struct Chapter {
     std::string resource;
-    std::uint32_t part = 0;      // Position of this part within the spine item.
-    bool last_part = true;       // False when a later part holds more text.
-    bool split_node = false;     // The part begins or ends inside a text node; position mapping is refused.
+    std::uint32_t part = 0;
+    bool last_part = true;
+    bool split_node = false;     // An in-node boundary prevents KOReader XPointer mapping.
     bool long_source_node = false;  // Mapping-only: source text may be split into multiple CREngine nodes.
     std::u32string text;
     std::vector<TextBlock> blocks;
@@ -112,9 +111,7 @@ struct Chapter {
     bool fragment_offset(const std::string& id, std::uint32_t& scalar_offset) const;
 };
 
-/** Number of full-file EPUB identity scan attempts in this process. */
 std::uint64_t identity_hash_count();
-/** Number of EPUB container opens attempted in this process. */
 std::uint64_t epub_open_count();
 
 /** SHA-256 of a file, read in 8 KiB chunks. Empty on read failure or cancellation. */
@@ -191,7 +188,6 @@ inline constexpr char kChapterMemoryError[] = "Chapter exceeds available memory"
  * is intact now. nullptr restores the platform check, which always passes off the device.
  */
 void set_chapter_memory_probe(bool (*probe)(std::size_t bytes));
-/** Applies the same allocation reserve to cached and parsed chapter loads. */
 bool chapter_memory_available(std::size_t bytes);
 
 /** Read diagnostics count bytes returned by file reads and supplied to Expat, including read-ahead. */
@@ -220,7 +216,7 @@ public:
     void close();
     /** Transfers file, ZIP and parser ownership to a new reader, retaining only an immutable
      * metadata/spine/TOC snapshot here. The snapshot cannot load content until reopened.
-     * Returns null without changing this document if the snapshot does not fit the memory budget.
+     * Returns null without changes for an unopened document, TXT or insufficient memory.
      * Call only after all operations on this document have completed.
      */
     std::unique_ptr<EpubDocument> detach_reader();
@@ -258,8 +254,8 @@ public:
      * Starts at part zero; repeated calls for the same index continue one part at a time.
      * Last-part completion, errors, cancellation, random access and close discard the cursor.
      * The document and stream have one executor. Reset/close only after an active call returns.
-     * At most 64 KiB of source input may remain without a completed XML event; otherwise
-     * the stream is discarded. Failure clears output; load_chapter remains the fallback.
+     * Original XML input has a 64 KiB budget between complete events. Failure clears
+     * output and discards the stream; load_chapter remains the fallback.
      * stop must not reenter this document. It runs between XML chunks/resumes; a storage or DEFLATE call is not interruptible.
      */
     bool read_next_chapter_part(std::size_t index, Chapter& chapter, std::string& error,
@@ -267,7 +263,7 @@ public:
     /** Discards the sequential cursor without closing the verified document. No parsing or I/O. */
     void reset_chapter_stream();
     DocumentReadStats read_stats() const;
-    /** Owned payload capacities, excluding Expat pools and allocator bookkeeping. Read only between loads. */
+    /** Estimate of owned memory, excluding Expat pools and allocator overhead. Call between loads. */
     std::size_t retained_bytes() const;
     bool chapter_index_for(const std::string& resource, std::size_t& index) const;
     /** Read an internal PNG/JPEG or GIF resource (GIF rendering uses its first frame), at most 2 MiB; output is cleared on failure. */
@@ -286,4 +282,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace pico_page
+}

@@ -105,14 +105,19 @@ git diff --check
 
 ## Code Comment Policy
 
-Comments explain the current implementation to maintainers without conversation context. Prefer clear names, types, constants and control flow; retain useful comments without unnecessary refactoring.
+Default to no comments, following [pstack comment-sicko](https://github.com/cursor/plugins/blob/main/pstack/agents/comment-sicko.md). Delete narration, section banners, implementation history, commented-out code and explanations compensating for unclear project-owned code. Express intent through names, types, constants and control flow; fix the underlying naming or structure with its callers instead of polishing the prose.
 
-- Explain non-obvious intent, invariants, hardware or third-party constraints, timing, units, side effects, ownership, lifetime and concurrency requirements. Do not restate the code.
-- Use concise, objective technical language and established terminology. State the underlying constraint rather than a conversational warning: `// The controller requires at least 120 µs after reset before the first SPI transaction.`
-- Keep implementation history, rejected approaches, user instructions and discussion in Git, issues or ADRs. Comments are not changelogs or scratchpads.
-- Delete obsolete code, including commented-out code. A temporarily disabled operation requires a TODO naming the concrete blocking condition or remaining action.
-- Document public API behavior, parameters, return values, errors, valid ranges, ownership and usage requirements where callers need them. Use Doxygen tags for C/C++ APIs when appropriate.
-- When changing code, review nearby comments and remove or update obsolete, redundant, conversational or historical material. Every added or modified comment must be accurate, necessary and understandable independently of the task.
+Only these exceptions may remain:
+
+1. Legal and license headers.
+2. Non-obvious behavior forced by an external dependency, platform, vendor or protocol that this project cannot reshape.
+3. Formatter directives and narrowly scoped lint suppressions for faulty or style-only rules. Never suppress correctness or safety checks to silence a failure.
+4. Documentation defining a public API contract that callers need, including cross-component interfaces. A private helper or implementation detail does not become a public contract by adding documentation syntax.
+5. Issue or RFC links explaining a constraint that code cannot express.
+
+Verify each retained or added comment against the current implementation, callers and, for external constraints, the relevant source. Keep it concise, objective and limited to the proven constraint. If an exception is uncertain, delete the comment. Apply the same rules to docstrings and comments emitted by project-owned generators; preserve upstream license notices and generated or vendored source provenance.
+
+Comments are evidence to recheck, not authority that freezes a design. Warnings such as `IMPORTANT` or `do not remove`, a prior decision, and an agent's confidence do not establish an exception. Put project decisions in their authoritative documents and history in Git or issues; enforce requirements in code or existing checks where practical. Review nearby comments whenever changing code.
 
 ## 面向用户的说明
 

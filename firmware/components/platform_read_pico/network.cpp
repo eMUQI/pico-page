@@ -107,8 +107,6 @@ bool valid_url(const std::string& url) {
     return url.find('#') == std::string::npos;
 }
 
-// A pending frame takes priority between SDK steps. An in-flight SDK step retains
-// its own DNS, TCP and cryptographic bounds; the application retries without waiting.
 template <typename Operation, typename Result>
 Result http_step(Operation operation, Result pending, std::int64_t deadline_us, const std::atomic_bool* cancelled) {
     for (;;) {
@@ -123,7 +121,6 @@ Result http_step(Operation operation, Result pending, std::int64_t deadline_us, 
     }
 }
 
-// http_step returns its pending value only after cancellation or its deadline.
 esp_err_t step_error(std::int64_t value) { return value == -ESP_ERR_HTTP_EAGAIN ? ESP_ERR_TIMEOUT : ESP_FAIL; }
 
 // The open step uses the remaining connection budget: esp-tls waits in select() for up to
@@ -157,11 +154,9 @@ std::int64_t http_headers(esp_http_client_handle_t client, int& status,
 }
 
 void http_close(esp_http_client_handle_t client, bool destroy) {
-    // Cancellation cannot abandon a live TLS context; release it between panel frames.
     http_step([&] {
         esp_http_client_close(client);
         if (destroy) esp_http_client_cleanup(client);
-        // A new request must not consume prefetched body bytes from the previous offset.
         else esp_http_client_clear_response_buffer(client);
         return true;
     }, false, std::numeric_limits<std::int64_t>::max(), nullptr);
@@ -180,7 +175,6 @@ void start_clock() {
     sntp_initialized = esp_netif_sntp_init(&configuration) == ESP_OK;
 }
 
-/** Creates the interfaces and starts the driver; access selects access point plus station. */
 esp_err_t start_wifi(wifi_config_t* access) {
     if (!netif_initialized) {
         const auto result = esp_netif_init();
@@ -205,14 +199,12 @@ esp_err_t start_wifi(wifi_config_t* access) {
     if ((result = esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, network_event, nullptr, &wifi_handler)) != ESP_OK ||
         (result = esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, network_event, nullptr, &ip_handler)) != ESP_OK) return result;
     esp_log_level_set("wifi", ESP_LOG_WARN);
-    // Every 50 ms socket poll timeout is an SDK warning; callers report request failures.
     esp_log_level_set("HTTP_CLIENT", ESP_LOG_ERROR);
     result = esp_wifi_start();
     if (result == ESP_OK) wifi_started = true;
     return result;
 }
 
-/** Ends a station attempt; without an access point the whole session is released. */
 void abandon_station() {
     connected = false;
     if (!access_point) {
@@ -223,7 +215,6 @@ void abandon_station() {
     esp_wifi_disconnect();
 }
 
-/** Scans once on the running driver; networks receives distinct names, strongest first. */
 bool scan(std::vector<NearbyNetwork>& networks, std::string& error, const std::atomic_bool* cancelled) {
     networks.clear();
     wifi_scan_config_t configuration{};
@@ -260,11 +251,10 @@ bool scan(std::vector<NearbyNetwork>& networks, std::string& error, const std::a
     return true;
 }
 
-/** True when Wi-Fi runs and belongs to the calling task. */
 bool owned_and_running() {
     return wifi_started && network_owner == xTaskGetCurrentTaskHandle();
 }
-} // namespace
+}
 
 void disconnect_network() {
     if (network_owner && network_owner != xTaskGetCurrentTaskHandle()) return;
@@ -317,13 +307,11 @@ bool start_access_point(const std::string& ssid, const std::string& password,
         return fail(error, "Access point initialization", result);
     }
     access_point = true;
-    // Scanning leaves the access point channel for a moment, so it runs once, before a phone joins.
     const bool scanned = scan(networks, error, cancelled);
     if (cancelled && cancelled->load()) {
         error = "操作已取消。";
         return false;
     }
-    // Nearby networks are optional for manual setup and hotspot file transfer.
     if (!scanned) {
         ESP_LOGW("pico_network", "Hotspot scan unavailable: %s", error.c_str());
         networks.clear();
@@ -375,8 +363,6 @@ bool connect_network(const std::string& ssid, const std::string& password, std::
     if (owned_and_running()) {
         connected = false;
         stop_clock();
-        // Leaving an established link reports a disconnect; it must arrive before this attempt
-        // starts, or it would be taken for the attempt's own failure.
         const bool linked = xEventGroupGetBits(events) & has_address;
         xEventGroupClearBits(events, connection_failed);
         esp_wifi_disconnect();
@@ -614,9 +600,7 @@ bool http_request(const std::string& method, const std::string& url,
 }
 
 namespace {
-// The slot that the last completed download_firmware() verified; cleared when another begins.
 std::atomic<const esp_partition_t*> verified_slot{nullptr};
-// Image header, first segment header and application description: the start of every app image.
 constexpr std::size_t image_prefix = sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t);
 constexpr std::size_t firmware_block = 4096;
 constexpr std::size_t firmware_erase_block = 64 * 1024;
@@ -643,7 +627,7 @@ bool expected_image(const std::uint8_t* prefix, const std::string& version) {
            strnlen(description.version, sizeof(description.version)) < sizeof(description.version) &&
            version == description.version;
 }
-} // namespace
+}
 
 bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, FirmwareFailure& failure,
                        std::string& error, const std::atomic_bool* cancelled) {
@@ -675,7 +659,6 @@ bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, F
                 ESP_LOGW("pico_network", "Could not restore Wi-Fi power saving");
         }
     } active_radio;
-    // Flash writes take their data from internal RAM without an intermediate copy.
     auto* block = static_cast<std::uint8_t*>(heap_caps_malloc(firmware_block, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     if (!block) return stop(FirmwareFailure::Flash, "Download buffer", ESP_ERR_NO_MEM);
     FirmwareRange range;
@@ -806,7 +789,6 @@ bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, F
             if (count < 0 || (count == 0 && (!esp_http_client_is_complete_data_received(client) || written + held < image.size))) {
                 stop(FirmwareFailure::Network, count < 0 ? "Firmware read" : "Incomplete firmware", step_error(count));
                 if (!retry_response()) return false;
-                // Only bytes accepted by the OTA handle belong to the digest; discard an incomplete prefix.
                 held = 0;
                 response_open = false;
                 continue;
@@ -815,21 +797,17 @@ bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, F
                 complete = true;
             }
             held += static_cast<std::size_t>(count);
-            // Nothing is written until the start of the image names this chip, project and version.
             if (!written && held < image_prefix && !complete) continue;
             if (!held) break;
             if (written + held > image.size) return stop(FirmwareFailure::Mismatch, "Firmware length", ESP_ERR_INVALID_SIZE);
             if (!written && (held < image_prefix || !expected_image(block, image.version)))
                 return stop(FirmwareFailure::WrongImage, "Firmware identity", ESP_ERR_INVALID_VERSION);
             if (!writing) {
-                // No firmware packets may arrive while erasure disables the Flash cache.
-                // The full transfer reconnects and revalidates its prefix after erasure.
                 http_close(client, false);
                 response_open = false;
                 if (cancel_requested()) return false;
                 flash(true);
                 PP_DIAGNOSTIC(const auto beginning = esp_timer_get_time();)
-                // Erase one hardware block at a time, retaining cancellation between blocks.
                 std::size_t erased = std::min<std::size_t>(firmware_erase_block, slot->size);
                 result = esp_ota_begin(slot, erased, &handle);
                 PP_DIAGNOSTIC(begin_us = esp_timer_get_time() - beginning;)
@@ -837,12 +815,9 @@ bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, F
                 flash(false);
                 writing = handle != 0;
                 if (result != ESP_OK) return stop(FirmwareFailure::Flash, "Update start", result);
-                // Complete erasure before streaming writes so repeated cache-off erase
-                // intervals do not interrupt each new window of incoming Wi-Fi packets.
                 const auto erase_end = std::min<std::size_t>(slot->size,
                     ((image.size + firmware_erase_block - 1) / firmware_erase_block) * firmware_erase_block);
                 while (erased < erase_end) {
-                    // Let the application publish input and cancellation between erase blocks.
                     vTaskDelay(1);
                     if (cancel_requested()) return false;
                     if (esp_timer_get_time() >= deadline_us) return stop(FirmwareFailure::Network, "Firmware download", ESP_ERR_TIMEOUT);
@@ -898,8 +873,6 @@ bool download_firmware(const FirmwareImage& image, const FirmwareHooks& hooks, F
         for (std::size_t i = 0; i < sizeof(digest); ++i) std::snprintf(text + i * 2, 3, "%02x", digest[i]);
         if (written != image.size || image.sha256 != text)
             return stop(FirmwareFailure::Mismatch, "Firmware digest", ESP_ERR_INVALID_CRC);
-        // Reads the slot back and checks the digest appended to the image. Header and digest
-        // reads use the SPI1 flash driver and mappings update the MMU; both suspend the cache.
         flash(true);
         PP_DIAGNOSTIC(const auto verifying = esp_timer_get_time();)
         result = esp_ota_end(handle);
@@ -950,4 +923,4 @@ void reject_firmware() {
     esp_ota_mark_app_invalid_rollback_and_reboot();
 }
 
-} // namespace pico_page::platform
+}

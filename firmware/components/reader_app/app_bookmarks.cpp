@@ -39,7 +39,6 @@ void ReaderApp::Impl::toggle_bookmark() {
     }
     bookmark_job = std::make_unique<ContentJob>(std::move(request));
     if (!async_content) {
-        // The synchronous mode also commits progress on this task.
         auto &job = *bookmark_job;
         FileStore direct(root);
         job.result.bookmark_status = direct.save_bookmarks(book_path, job.request.identity.book_id, job.request.content_revision,
@@ -56,16 +55,13 @@ void ReaderApp::Impl::toggle_bookmark() {
     poll_bookmark();
 }
 
-
 bool ReaderApp::Impl::finish_bookmark(bool redraw) {
     auto job = std::move(bookmark_job);
     const auto status = job->result.bookmark_status;
-    // A result for a book that is no longer open stays in that book's file only.
     if (job->request.relative_path != book_path || job->request.identity.book_id != document.metadata().book_id)
         return status == StoreStatus::Ok;
     if (status == StoreStatus::Ok) bookmark_drain_failed = false;
     if (status == StoreStatus::Ok || status == StoreStatus::ExternalChange) {
-        // Cached pages update the ribbon on reuse without discarding rendered images.
         bookmarks = std::move(job->result.bookmarks);
         ++bookmark_version;
     }
@@ -76,18 +72,15 @@ bool ReaderApp::Impl::finish_bookmark(bool redraw) {
         if (view == View::Tools) { draw_tools(); overlay(); }
         else if (view == View::Contents && status == StoreStatus::Ok) { draw_contents(); overlay(); }
         else if (view == View::Reading && !image_viewing && render_body(offset)) overlay();
-        // Other pages have no notice line; a failure becomes an error page on the next poll.
         else if (status != StoreStatus::Ok) bookmark_error = message;
     }
     return status == StoreStatus::Ok;
 }
 
-
 void ReaderApp::Impl::draw_toolbar() {
     canvas.fill_rect(0, toolbar_top, 684, 136, 15);
     canvas.line(0, toolbar_top, 683, toolbar_top, 1, 3);
     for (int i = 0; i < 5; ++i) {
-        // Four cells of 137 pixels leave 136 for the last one.
         const int x = i * 137, width = std::min(137, 684 - x);
         if (i) canvas.line(x, toolbar_top, x, 1215, 1, 2);
         tool_icon(kToolbarIds[i], x + 68, 1126);
@@ -113,7 +106,6 @@ void ReaderApp::Impl::draw_tools() {
     }
     hits.push_back({0, 104, 684, toolbar_top - 104, Dismiss});
 }
-
 
 void ReaderApp::Impl::draw_bookmarks(int list_top) {
     constexpr int row = bookmark_row;
@@ -147,7 +139,6 @@ void ReaderApp::Impl::draw_bookmarks(int list_top) {
     }
     footer_bar("", bookmark_page, pages);
 }
-
 
 void ReaderApp::Impl::draw_contents() {
     view = View::Contents;
@@ -224,5 +215,4 @@ void ReaderApp::Impl::draw_contents() {
     footer_bar("", toc_page, toc_starts.size());
 }
 
-
-} // namespace pico_page
+}

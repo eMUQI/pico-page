@@ -54,9 +54,8 @@ private:
     std::string source_, fingerprint_, expanded_digest_;
 };
 
-/** Single-owner StarDict reader. All methods perform synchronous file I/O.
- * Keep it on the content worker and destroy it before unmounting storage.
- * open validates the index before queries; no operation writes source files.
+/** Single-owner StarDict reader. Opening and queries may perform synchronous file I/O.
+ * Close or destroy it before storage unmount. Source files are read-only.
  */
 class Dictionary {
 public:
@@ -82,8 +81,8 @@ public:
     /** Exact UTF-8 headword lookup, including synonyms. At most 32 distinct
      * entries are returned. Continue with entries.back().ordinal + 1 when more
      * is true; results are ordered by original index ordinal.
-     * extensible, when supplied, becomes false only if no other headword begins with
-     * word (ASCII case folded), so no longer word with this prefix can be found.
+     * On Ok or NotFound, extensible indicates that a longer ASCII-case-folded
+     * match remains possible. It may conservatively be true before the first headword.
      */
     Result lookup(const std::string& word, std::vector<Entry>& entries, bool& more,
                   std::uint32_t first_ordinal = 0, const Stop& stop = {}, bool* extensible = nullptr);
@@ -101,4 +100,4 @@ private:
 /** StarDict ordering: ASCII case-insensitive bytes, then original bytes. */
 int compare(const std::string& left, const std::string& right);
 
-}  // namespace pico_page::dictionary
+}

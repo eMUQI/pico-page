@@ -1,8 +1,6 @@
-# Select the implementation at the composition root, not in contract consumers.
 include("${CMAKE_CURRENT_LIST_DIR}/profile.cmake")
 set(COMPONENTS main platform_read_pico)
 set(IDF_TARGET esp32s3)
-# Explicit CMake/environment defaults retain ESP-IDF's override semantics.
 if(NOT SDKCONFIG_DEFAULTS AND "$ENV{SDKCONFIG_DEFAULTS}" STREQUAL "")
     set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults")
 endif()
@@ -25,7 +23,6 @@ if(read_pico_untracked)
     message(FATAL_ERROR "The pinned Read Pico components contain untracked files.")
 endif()
 
-# Patch a build-local copy, preserving the verified upstream checkout.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_LIST_DIR}/bsp-revision.txt"
     "${CMAKE_CURRENT_LIST_DIR}/patches/read-pico-sd-release.patch"
@@ -90,8 +87,7 @@ foreach(component e0470_epaper_waveform
 endforeach()
 
 function(pico_page_board_configure_components)
-    # Bind port consumers to this provider at link time without exporting BSP headers.
-    # Component selection alone does not order static archives after their consumers.
+    # ESP-IDF component selection alone does not order static archives after their consumers.
     idf_component_add_link_dependency(FROM reader_runtime TO platform_read_pico)
     idf_component_add_link_dependency(FROM reader_console TO platform_read_pico)
     # Use TinyUSB's MSC class with synchronous project callbacks. The convenience

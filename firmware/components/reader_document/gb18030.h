@@ -20,4 +20,4 @@ private:
 
 bool decode(std::string_view bytes, std::u32string& text);
 
-}  // namespace pico_page::gb18030
+}

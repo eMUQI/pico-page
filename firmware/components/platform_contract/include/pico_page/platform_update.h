@@ -6,16 +6,15 @@
 
 namespace pico_page::platform {
 
-/** Why download_firmware() stopped. */
 enum class FirmwareFailure {
     None,
     Cancelled,
     Network,     // No link, a failed connection or an interrupted transfer.
-    Server,      // The server did not return 200 initially or 206 for a resumed request.
-    Mismatch,    // Range, length, SHA-256 or the image's own digest differs from the description.
-    TooLarge,    // The image does not fit the update slot.
-    WrongImage,  // Unsupported chip, running project name or requested version.
-    Flash,       // The update slot, a buffer or a flash operation was unavailable.
+    Server,
+    Mismatch,
+    TooLarge,
+    WrongImage,
+    Flash,
 };
 
 struct FirmwareImage {
@@ -68,4 +67,4 @@ bool confirm_firmware();
 /** Marks the running image invalid and restarts into the previous slot; returns only on failure. */
 void reject_firmware();
 
-} // namespace pico_page::platform
+}

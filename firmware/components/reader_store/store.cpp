@@ -28,7 +28,6 @@ namespace pico_page {
 namespace {
 constexpr std::size_t progress_limit = 16384;
 constexpr std::uint64_t import_limit = 64 * 1024 * 1024;
-// Larger sources are refused when the image is prepared, so they are not imported either.
 constexpr std::uint64_t lock_screen_limit = 2 * 1024 * 1024;
 using Json = std::unique_ptr<cJSON, decltype(&cJSON_Delete)>;
 
@@ -192,7 +191,6 @@ bool display_text(const std::string& value, std::size_t maximum) {
     return value.empty() || text_value(value, maximum);
 }
 
-/** Keys of object are distinct, all required ones are present and no others occur. */
 bool known_fields(const cJSON* object, std::initializer_list<const char*> required,
                   std::initializer_list<const char*> optional) {
     if (!cJSON_IsObject(object)) return false;
@@ -228,7 +226,6 @@ bool valid_bookmark(const Bookmark& bookmark) {
            bookmark.created_at.has_value() == bookmark.time_source.has_value();
 }
 
-/** Sorted by strictly increasing sequence, every sequence below next_sequence, within the count bound. */
 bool valid_bookmarks(const std::vector<Bookmark>& bookmarks, std::uint64_t next_sequence) {
     if (bookmarks.size() > kMaxBookmarks || next_sequence == 0) return false;
     for (std::size_t i = 0; i < bookmarks.size(); ++i) {
@@ -238,7 +235,6 @@ bool valid_bookmarks(const std::vector<Bookmark>& bookmarks, std::uint64_t next_
     return true;
 }
 
-/** True for a JSON \u0000 escape; an escaped backslash followed by literal "u0000" is ordinary text. */
 bool json_nul_escape(const std::string& bytes) {
     for (auto at = bytes.find("u0000"); at != std::string::npos; at = bytes.find("u0000", at + 1)) {
         std::size_t backslashes = 0;
@@ -343,7 +339,6 @@ std::string encode_bookmarks(const std::string& book_id, const std::string& cont
             (bookmark.time_source && !cJSON_AddStringToObject(item, "time_source", bookmark.time_source->c_str())))
             return {};
     }
-    // Indented output keeps the file readable for manual inspection on a computer.
     char* printed = cJSON_Print(object.get());
     if (!printed) return {};
     std::string bytes(printed);
@@ -351,7 +346,6 @@ std::string encode_bookmarks(const std::string& book_id, const std::string& cont
     return bytes;
 }
 
-/** Archive name component: up to 8 leading identity characters, restricted to a FAT-safe set. */
 std::string archive_prefix(const std::string& book_id) {
     std::string prefix;
     for (char ch : book_id) {
@@ -362,7 +356,6 @@ std::string archive_prefix(const std::string& book_id) {
     return prefix.empty() ? "unknown" : prefix;
 }
 
-/** Renames a regular file to a currently missing name; an existing destination is never replaced. */
 bool rename_to_new(const std::string& root, const std::string& from, const std::string& to) {
     if (store_internal::safe_path(root, to) != StoreStatus::Missing) return false;
     const auto source = root + "/" + from, destination = root + "/" + to;
@@ -380,7 +373,6 @@ bool rename_to_new(const std::string& root, const std::string& from, const std::
     return sync_directory(root + "/" + to.substr(0, to.rfind('/')));
 }
 
-/** Reads one slot; Missing yields nullopt. Any other failure is returned. */
 StoreStatus read_slot(const std::string& root, const std::string& path, std::optional<std::string>& bytes) {
     std::string contents;
     const auto status = store_internal::read_file(root, path, kBookmarkFileLimit, contents);
@@ -435,8 +427,7 @@ bool publish(const std::string& root, const std::string& temporary, const std::s
     const auto safe = store_internal::safe_path(root, target);
     if (safe != StoreStatus::Ok && safe != StoreStatus::Missing) return false;
     const auto full_target = root + "/" + target;
-    // FatFs rename refuses an existing destination. The caller retains a valid
-    // committed record in the other slot throughout this removal-and-rename gap.
+    // FatFs rename refuses an existing destination, so replacement requires a separate removal.
     if (safe == StoreStatus::Ok) {
         struct stat info{};
         if (inspect(full_target.c_str(), &info) != 0 || !S_ISREG(info.st_mode) ||
@@ -456,9 +447,7 @@ bool asset_path(const std::string& path) {
         return extension == ".epub" || extension == ".txt";
     if (path.compare(0, 6, "Fonts/") == 0)
         return extension == ".ttf" || extension == ".otf" || extension == ".txt";
-    // Lock screen images are listed from the directory root only.
     if (path.compare(0, 12, "LockScreens/") == 0) return valid_lock_screen_name(path.substr(12));
-    // StarDict files: .ifo/.idx/.dict/.syn and their .gz/.dz compressed forms.
     if (path.compare(0, 13, "Dictionaries/") == 0)
         return extension == ".ifo" || extension == ".idx" || extension == ".dict" || extension == ".syn" ||
                extension == ".gz" || extension == ".dz";
@@ -491,8 +480,6 @@ StoreStatus asset_digest(const std::string& root, const std::string& path,
         static_cast<std::uint64_t>(info.st_size) > import_limit) {
         close(fd); return StoreStatus::Invalid;
     }
-    // HTTP imports retain their receive frame while verifying the staged file.
-    // Keep the readback buffer off the limited caller task stack.
     std::unique_ptr<char[]> buffer(new (std::nothrow) char[4096]);
     if (!buffer) { close(fd); return StoreStatus::IoError; }
     while (true) {
@@ -603,7 +590,7 @@ StoreStatus remove_children(const std::string& directory, unsigned depth, const 
     if (closedir(entries) != 0) status = StoreStatus::IoError;
     return status;
 }
-}  // namespace
+}
 
 namespace store_internal {
 bool relative_path(const std::string& path) {
@@ -696,7 +683,6 @@ StoreStatus commit_file(const std::string& root, const std::string& path,
         const auto directory = path.substr(0, slash);
         const auto safe = safe_path(root, directory);
         if (safe == StoreStatus::Missing) {
-            // A concurrent writer of another sidecar file may create the directory first.
             if (mkdir((root + "/" + directory).c_str(), 0700) != 0 && errno != EEXIST) return failed("directory creation failed");
         } else if (safe != StoreStatus::Ok) {
             error = directory + ": unsafe or unreadable directory";
@@ -732,7 +718,7 @@ StoreStatus commit_file(const std::string& root, const std::string& path,
     }
     return StoreStatus::Ok;
 }
-}  // namespace store_internal
+}
 
 FileStore::FileStore(std::string root) : root_(std::move(root)) {
     while (root_.size() > 1 && root_.back() == '/') root_.pop_back();
@@ -770,7 +756,6 @@ std::unique_ptr<FileImport> FileStore::begin_import(const std::string& path, std
     if (store_internal::safe_path(root_, path) != StoreStatus::Missing) { error = "destination_exists_or_unsafe"; return {}; }
     if (!resource_parents(root_, path)) { error = "parent_creation_or_sync_failed"; return {}; }
     const auto temporary = path + ".import.tmp";
-    // Callers serialize the entire import lifetime, so an existing staging file is abandoned.
     if (remove_import_staging(root_, path, error) != StoreStatus::Ok) return {};
     const int fd = open_no_follow(root_ + "/" + temporary, O_WRONLY | O_CREAT | O_EXCL);
     if (fd < 0) { error = "staging_create_failed"; return {}; }
@@ -968,16 +953,12 @@ BookmarkList FileStore::load_bookmarks(const std::string& book_path, const std::
         return result;
     }
     if (main_digest && backup && (result.status == StoreStatus::Ok || result.status == StoreStatus::IdentityMismatch)) {
-        // A newer firmware's backup would be replaced by the next commit; leave both slots untouched.
         if (decode_bookmarks(*backup, book_id, content_revision).status == StoreStatus::UnsupportedVersion) {
             result = BookmarkList{};
             result.status = StoreStatus::UnsupportedVersion;
             result.detail = path + ".bak: unsupported bookmark schema_version";
         }
     } else if (!main_digest && backup) {
-        // The main slot is absent only between backup publication and main publication, or
-        // after manual deletion. A backup that cannot be used blocks changes, so it is never
-        // superseded before the user inspects it.
         result = decode_bookmarks(*backup, book_id, content_revision);
         result.recovered_backup = result.status == StoreStatus::Ok;
         result.detail = result.recovered_backup ? "recovered committed backup: " + path + ".bak"
@@ -1002,14 +983,11 @@ StoreStatus FileStore::save_bookmarks(const std::string& book_path, const std::s
     if (safe != StoreStatus::Ok) return safe;
     const auto directory = book_path + ".picopage";
     const auto path = directory + "/bookmarks.json";
-    // A slot is archived when it does not describe the current content; a backup that
-    // matches it, or that cannot be parsed, stays for commit_file to supersede.
     const auto foreign = [&](const std::optional<std::string>& slot) {
         return slot && decode_bookmarks(*slot, book_id, content_revision).status == StoreStatus::IdentityMismatch;
     };
     std::optional<std::string> main;
     bool archive_backup = false;
-    // The backup is released before the main slot is read, so only one slot buffer is held.
     {
         std::optional<std::string> backup;
         auto status = read_slot(root_, path + ".bak", backup);
@@ -1020,7 +998,6 @@ StoreStatus FileStore::save_bookmarks(const std::string& book_path, const std::s
     auto status = read_slot(root_, path, main);
     if (status != StoreStatus::Ok) return status;
     if (digest(main) != loaded.source) return StoreStatus::ExternalChange;
-    // commit_file compares the current main slot with these bytes once more before replacing it.
     auto expected = std::move(main);
     auto remaining_backup = loaded.backup_source;
     if (loaded.status == StoreStatus::IdentityMismatch) {
@@ -1050,7 +1027,6 @@ StoreStatus FileStore::save_bookmarks(const std::string& book_path, const std::s
     result.bookmarks = bookmarks;
     result.next_sequence = next_sequence;
     result.source = digest(bytes);
-    // commit_file keeps the replaced main slot as the backup; without one the old backup remains.
     result.backup_source = expected ? digest(expected) : remaining_backup;
     committed = std::move(result);
     return StoreStatus::Ok;
@@ -1110,7 +1086,6 @@ StoreStatus FileStore::manage_book(const BookSnapshot& snapshot, bool delete_ori
     cJSON_free(printed);
     const auto path = snapshot.path + ".picopage/progress.json";
     std::string error;
-    // Publish the cleared backup first so a missing main slot cannot recover an old position.
     auto committed = store_internal::commit_file(root_, path + ".bak", snapshot.backup, bytes, progress_limit, error, true);
     if (committed != StoreStatus::Ok) return committed;
     return store_internal::commit_file(root_, path, snapshot.progress, bytes, progress_limit, error, true);
@@ -1165,8 +1140,7 @@ StorageUsage FileStore::storage_usage(const std::function<bool()>& stop) const {
 
 bool FileStore::card_space(std::uint64_t& total, std::uint64_t& available) const {
 #ifdef ESP_PLATFORM
-    // The first call after mounting reads the free-cluster count from the FAT32 FSInfo sector;
-    // FatFs scans the whole allocation table only when that sector holds no valid count.
+    // FatFs loads the FAT32 free-cluster count at mount; f_getfree scans the FAT if the count is invalid.
     return esp_vfs_fat_info(root_.c_str(), &total, &available) == ESP_OK;
 #else
     struct statvfs info {};
@@ -1372,8 +1346,6 @@ bool FileStore::needs_onboarding() const {
                             "PicoPage/data/last-book.txt", "PicoPage/data/last-book.txt.bak",
                             "PicoPage/data/recent-books.txt", "PicoPage/data/recent-books.txt.bak"})
         if (exists_or_unknown(path)) return false;
-    // Without global settings the only configured library root is Books. A bounded
-    // metadata walk also recognizes moved books that retain only their sidecars.
     const auto safety = store_internal::safe_path(root_, "Books");
     if (safety != StoreStatus::Ok && safety != StoreStatus::Missing) return false;
     unsigned remaining = 2000;
@@ -1641,4 +1613,4 @@ StoreStatus FileStore::save_lock_screen(const std::string& name) const {
         status == StoreStatus::Ok ? std::optional<std::string>(previous) : std::nullopt,
         name + "\n", 256, error);
 }
-}  // namespace pico_page
+}

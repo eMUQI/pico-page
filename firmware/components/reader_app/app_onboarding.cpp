@@ -4,7 +4,6 @@
 namespace pico_page {
 
 namespace {
-// Practice pages are drawn with the built-in face, so every character must be in its subset.
 constexpr const char* kPracticePages[] = {
     "清晨，窗外下起了小雨。她把椅子挪到窗边，翻开那本读了一半的书。雨声很轻，纸上的字也显得安静。",
     "读到一半，她停下来，想起前面某一章的情节。往回翻几页，答案就在那里，和记忆里的稍有不同。",
@@ -14,12 +13,11 @@ constexpr int kPracticePageCount = sizeof(kPracticePages) / sizeof(kPracticePage
 constexpr const char* kToolPurposes[] = {
     "跳到任意章节。", "调整字号、行距、边距和字体。", "与 KOReader 同步阅读位置。", "设置多久全刷一次屏幕。", "立即全刷，清除残影。",
 };
-} // namespace
+}
 
 void ReaderApp::Impl::start_onboarding(bool from_help) {
     onboarding_from_help = from_help;
     onboarding_step = OnboardingStep::Welcome;
-    // The guide must not depend on the card's fonts or an open book's typeface.
     ui.open_fallback();
     draw_onboarding();
 }
@@ -42,7 +40,6 @@ void ReaderApp::Impl::finish_onboarding() {
             auto values = snapshot.config.settings;
             values.onboarding_done = true;
             std::string detail;
-            // Failed commits remain incomplete, but never trap the user in the guide.
             if (store.apply_settings(snapshot, values, false, detail) == StoreStatus::Ok)
                 settings.onboarding_done = true;
         }
@@ -145,7 +142,6 @@ void ReaderApp::Impl::draw_practice(const std::string& finish) {
     title_lines(hint, 36, 184, 612, 26, false, 2, 3);
     canvas.line(0, 264, 683, 264, 1, 2);
     wrapped("\u3000\u3000" + std::string(kPracticePages[onboarding_page]), 36, 304, 612, 30);
-    // Region guides teach the reading layout until both turns and the toolbar have been tried.
     if (onboarding_task <= OnboardingTask::OpenTools && !onboarding_tools_open) {
         const int edges[] = {0, 205, 479, 684};
         const char* names[] = {"‹ 上一页", "工具栏", "下一页 ›"};
@@ -157,7 +153,6 @@ void ReaderApp::Impl::draw_practice(const std::string& finish) {
     }
     canvas.line(0, 1064, 683, 1064, 1, 3);
     const bool last = onboarding_page + 1 == kPracticePageCount;
-    // The open toolbar covers the footer, so its controls are not drawn or registered.
     if (onboarding_tools_open) draw_toolbar();
     else if (onboarding_task == OnboardingTask::Done) button(OnboardingNext, "下一步", 36, 1088, 612, 96, true, 30, true);
     else {
@@ -184,7 +179,6 @@ void ReaderApp::Impl::onboarding_input(const AppInput& input) {
     } else if (hit_id == OnboardingNext) {
         onboarding_step = OnboardingStep::Tools;
     } else if (onboarding_tools_open) {
-        // Like the reading toolbar, keys other than K2 do nothing while it is open.
         if (!input.touch || (!hit_id && input.y < 104) || (hit_id && hit_id == onboarding_tool)) return;
         onboarding_tool = hit_id;
         if (!hit_id) {
@@ -192,7 +186,6 @@ void ReaderApp::Impl::onboarding_input(const AppInput& input) {
             if (onboarding_task == OnboardingTask::CloseTools) onboarding_task = OnboardingTask::Done;
         }
     } else {
-        // The same three regions as a reading page, below the top bar.
         auto turn = action;
         if (input.touch && input.y >= 104)
             turn = input.x < 205 ? Action::PreviousPage : input.x >= 479 ? Action::NextPage : Action::OpenTools;
@@ -200,7 +193,6 @@ void ReaderApp::Impl::onboarding_input(const AppInput& input) {
             onboarding_tools_open = true;
             if (onboarding_task == OnboardingTask::OpenTools) onboarding_task = OnboardingTask::CloseTools;
         } else if (turn == Action::NextPage) {
-            // Turning past the last page leaves the practice, so keys alone can finish the guide.
             if (onboarding_page + 1 == kPracticePageCount) onboarding_step = OnboardingStep::Tools;
             else ++onboarding_page;
             if (onboarding_task == OnboardingTask::Next) onboarding_task = OnboardingTask::Previous;
@@ -211,4 +203,4 @@ void ReaderApp::Impl::onboarding_input(const AppInput& input) {
     }
     draw_onboarding(); overlay();
 }
-} // namespace pico_page
+}

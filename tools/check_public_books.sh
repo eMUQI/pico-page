@@ -8,7 +8,6 @@ fi
 build=${PICO_PAGE_HOST_BUILD:-build/host}
 cmake --build "$build" --target reader_document reader_graphics -j 4
 mkdir -p .local/public-books
-# The libraries contain the production parser and renderer; the probe does not use a second EPUB engine.
 ${CXX:-c++} -std=c++17 -Wall -Wextra -Werror \
     -I firmware/components/reader_document/include \
     -I firmware/components/reader_core/include \

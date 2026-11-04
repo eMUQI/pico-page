@@ -6,7 +6,6 @@ const steps = ["安装前确认", "连接并写入", "放入书和字体", "开�
 const recovery = "找不到串口，或选择串口后无法连接、烧录时，请先唤醒设备并保持 USB 连接。仍无法连接时，在开机状态下快速短按电源键两次（间隔不超过 1.2 秒），再按住电源键至少 3 秒，进入烧录模式。松开后，重新点击「连接设备」并选择串口。";
 ---
 <Site title="安装固件 · Pico Page" description="在电脑版 Chrome 或 Edge 中，用 USB 线把 Pico Page 安装到 Read Pico，再放入书和字体。" current="install">
-  <!-- TODO: 手动安装方法确定后恢复设计稿中的「完整安装文档与手动安装方法」链接。 -->
         <section class="intro">
           <div>
             <p class="eyebrow">安装固件</p>
@@ -168,8 +167,6 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
           </aside>
         </div>
   <script>
-      // Installs the full-flash image over Web Serial. The serial protocol comes from esptool-js,
-      // fetched when the visitor connects.
       const card = document.querySelector(".flash[data-url]");
       if (card) {
         const { url, version, sha256 } = card.dataset;
@@ -212,7 +209,6 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
         }
 
         function diagnosticInfo(code, stage, error, details = {}) {
-          // Version and request identifiers locate the resource without sharing its download URL.
           return Object.entries({
             "诊断格式": "Pico Page installer v1",
             "错误码": code,
@@ -261,9 +257,7 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
           await loader.writeReg(0x600080b0, 0).catch(() => {});
         }
 
-        // Attempts to leave download mode and free the port. The result reports command and
-        // cleanup success, not an observed firmware boot; reloading can free an unclosed port.
-        async function release() {
+        async function restartAndReleasePort() {
           let clean = true;
           if (loader?.chip?.CHIP_NAME === "ESP32-S3") {
             // The restart removes the USB serial port, so closing it afterwards may fail.
@@ -284,7 +278,7 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
           try {
             port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] });
           } catch {
-            return; // The visitor closed the chooser.
+            return;
           }
           const buttonLabel = button.textContent;
           button.disabled = true;
@@ -299,8 +293,6 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
             // data would survive the installation.
             if (!loader.IS_STUB) throw new Error("The flasher stub is not running");
             let refusal = "";
-            // Read Pico is an ESP32-S3 with 16 MiB of flash. Other boards match this too, so the
-            // visitor confirms the device before installing.
             if (loader.chip.CHIP_NAME !== "ESP32-S3" || (await loader.detectFlashSize()) !== "16MB") {
               refusal = "连接的设备不是 Read Pico，没有写入任何内容。";
             } else {
@@ -314,14 +306,14 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
               }
             }
             if (refusal) {
-              await release();
+              await restartAndReleasePort();
               show("idle", refusal);
             } else {
               show("connected");
             }
           } catch (error) {
             console.error(error);
-            await release();
+            await restartAndReleasePort();
             showFailure({
               title: "未能连接设备",
               message: "请关闭占用串口的其他程序或浏览器标签，再试一次。本次尚未擦除或写入设备闪存。",
@@ -415,7 +407,7 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
               },
             });
             progress("正在发送重启指令");
-            show("done", (await release()) ? "" : "固件已写入并通过校验，但设备可能没有自动重启。请按住电源键约 10 秒强制关机，松开后再按住 1 秒以上开机。");
+            show("done", (await restartAndReleasePort()) ? "" : "固件已写入并通过校验，但设备可能没有自动重启。请按住电源键约 10 秒强制关机，松开后再按住 1 秒以上开机。");
             window.dispatchEvent(new CustomEvent("pico-page:analytics", { detail: "install_success" }));
           } catch (error) {
             window.dispatchEvent(new CustomEvent("pico-page:analytics", { detail: "install_failure" }));
@@ -424,7 +416,7 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
             details["已进入擦写流程"] = erasing ? "是" : "否";
             const diagnostic = diagnosticInfo(code, stage, error, details);
             progress("正在释放连接");
-            await release();
+            await restartAndReleasePort();
             showFailure({
               title: erasing ? "安装未完成" : title,
               message: erasing ? "请保持供电，重新连接后再安装一次。" : `${failure}本次尚未擦除或写入设备闪存。`,
@@ -439,7 +431,7 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
         el("install").addEventListener("click", install);
         el("confirm").addEventListener("change", () => (el("install").disabled = !el("confirm").checked));
         el("disconnect").addEventListener("click", async () => {
-          show("idle", (await release()) ? "" : "串口没有正常释放，设备可能仍在下载模式。请按住电源键约 10 秒强制关机，松开后再按住 1 秒以上开机；无法再次连接时，刷新本页。");
+          show("idle", (await restartAndReleasePort()) ? "" : "串口没有正常释放，设备可能仍在下载模式。请按住电源键约 10 秒强制关机，松开后再按住 1 秒以上开机；无法再次连接时，刷新本页。");
         });
         // A connected device runs the flasher stub until it is reset, and closing the page cannot
         // reset it. The browser asks before leaving while connected or writing.
@@ -454,7 +446,6 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
   </script>
 </Site>
 <style is:global>
-  /* Introduction and step tracker */
   .intro {
     display: flex;
     flex-wrap: wrap;
@@ -523,7 +514,6 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
     color: var(--bg);
   }
 
-  /* Steps */
   .layout {
     display: flex;
     flex-wrap: wrap;
@@ -573,7 +563,6 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
     grid-template-columns: 22px minmax(0, 1fr);
   }
 
-  /* Installer */
   .flash {
     margin-top: 20px;
     border: 1px solid var(--ink);
@@ -775,7 +764,6 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
     }
   }
 
-  /* Card layout and font download */
   .tree {
     margin-top: 14px;
     border: 1px solid var(--line);
@@ -831,7 +819,6 @@ const recovery = "找不到串口，或选择串口后无法连接、烧录时�
     background: var(--ink);
   }
 
-  /* Sidebar */
   aside {
     flex: 0 1 340px;
     display: grid;

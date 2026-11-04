@@ -1,4 +1,3 @@
-"""Publication boundary checks for the restricted SSH firmware receiver."""
 import io
 import json
 from pathlib import Path
@@ -42,7 +41,6 @@ class DeployFirmwareTest(unittest.TestCase):
                 for name, data, _ in entries:
                     self.assertEqual((root / name).read_bytes(), data)
                     self.assertEqual((root / name).stat().st_mode & 0o777, 0o640)
-            # A different, internally valid image with the same version must not replace any file.
             changed = self.entries(image(size=8192))
             with self.assertRaisesRegex(ValueError, 'cannot be overwritten'):
                 deploy_firmware.publish(archive(changed), root)

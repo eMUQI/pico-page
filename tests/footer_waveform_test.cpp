@@ -28,11 +28,9 @@ void verify(const EpdWaveform& waveform, int white_tick) {
                 assert(action == (phase == white_tick ? 2 : 0));
             for (int x = 1088; x < 1216; ++x) {
                 const int allowed = (mask[(x - 1088) / 4] >> (2 * (x % 4))) & 3;
-                // The aligned prefix before the footer must retain its original drive.
                 const int expected = x < 1128 || from != to || pair == 0xFF ? action : 0;
                 assert((action & allowed) == expected);
             }
-            // Overlay retains the BSP white maintenance without driving unchanged nonwhite pixels.
             const int overlay_action = (overlay[phase * 64 + to * 4 + from / 4] >> (6 - 2 * (from % 4))) & 3;
             assert(overlay_action == (to == from && to != 15 ? 0 : action));
         }

@@ -10,23 +10,16 @@ using platform::Event;
 using platform::EventKind;
 using platform::EventPhase;
 
-/**
- * Contact time from which a touch is a long press. The value is a starting point for
- * the capacitive panel and has to be confirmed on the device.
- */
 inline constexpr std::int64_t kLongPressUs = 600 * 1000;
 
-/** Gesture distances are portrait pixels and duration is microseconds; confirm on the device. */
 inline constexpr int kSwipeMinPx = 60;
 inline constexpr std::int64_t kSwipeMaxUs = 700 * 1000;
 inline constexpr int kLongPressSlopPx = 28;
-/** Integer approximation of tan(60 degrees), limiting deviation from horizontal to 30 degrees. */
 inline constexpr int kSwipeAngleRatio = 173;
 inline constexpr int kSwipeAngleScale = 100;
 
 enum class ReleasedGesture { Tap, Previous, Next, Ignore };
 
-/** Classifies a released touch using endpoint displacement, without changing contact ownership. */
 inline ReleasedGesture released_gesture(const Event& begin, const Event& end) {
     if (begin.kind != EventKind::Touch || end.kind != EventKind::Touch ||
         begin.phase != EventPhase::Begin || end.phase != EventPhase::End ||
@@ -86,4 +79,4 @@ private:
     std::uint64_t frame_ = 0;
 };
 
-} // namespace pico_page::input
+}

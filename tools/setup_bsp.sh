@@ -11,7 +11,6 @@ if [ ! -d "$bsp_source" ]; then
     git -C "$bsp_source" remote add origin https://github.com/MindReset/read_pico_firmware.git
 fi
 
-# A new checkout, or one left at an earlier pin, is moved to the pinned revision.
 if [ "$(git -C "$bsp_source" rev-parse --verify HEAD 2>/dev/null || true)" != "$bsp_revision" ]; then
     if [ "$(git -C "$bsp_source" remote get-url origin)" != "https://github.com/MindReset/read_pico_firmware.git" ]; then
         printf '%s\n' "Cannot update a BSP checkout with an unexpected origin." >&2

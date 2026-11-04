@@ -19,7 +19,6 @@ struct Config {
 
 /** Read only PicoPage/sync.toml. Diagnostics never contain credentials or source lines. */
 bool load_config(const std::string& card_root, Config& config, std::string& error);
-/** True when every field satisfies the limits load_config enforces. */
 bool valid_config(const Config& config);
 std::string account_scope(const Config& config);
 
@@ -118,10 +117,10 @@ bool map_upload_position(EpubDocument& document, const Anchor& anchor, int dom_v
  * another position of the same item without loading the chapter.
  */
 struct PartPosition {
-    std::uint32_t part = 0;          // Chapter part that holds the position.
+    std::uint32_t part = 0;
     std::uint32_t offset = 0;        // Unicode scalar index within that part.
     std::uint32_t part_scalars = 0;  // Length of that part in Unicode scalars.
-    bool last_part = true;           // False when a later part of the item holds more text.
+    bool last_part = true;
 };
 
 /** As to_xpointer in reverse. place, when given, receives where the anchor lies in its chapter. */
@@ -129,4 +128,4 @@ bool from_xpointer(EpubDocument& document, const std::string& xpointer, int dom_
                    Anchor& anchor, std::string& error, const std::function<bool()>& stop = {},
                    PartPosition* place = nullptr);
 
-}  // namespace pico_page::sync
+}

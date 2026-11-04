@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Resolve the product version and identify unpublished builds."""
 from pathlib import Path
 import re
 import subprocess

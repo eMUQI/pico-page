@@ -6,13 +6,11 @@ void ReaderApp::Impl::error(const std::string &text_in, const std::string &retry
     reset_dictionary_contact();
     sleep_wait_footer.reset();
     sleep_wait_restore_pending = false;
-    // Repainting an error must retain the destination captured when it first appeared.
     if (view != View::Error) error_onboarding_help = view == View::Onboarding && onboarding_from_help;
     error_origin = origin_for(view);
     image_viewing = false;
     viewer_original.reset();
     image_contrast_level = 0;
-    // The argument may alias message, which is assigned below.
     const std::string detail = text_in;
 #ifdef ESP_PLATFORM
     ESP_LOGW("reader_app", "Error shown: %s", detail.c_str());
@@ -20,7 +18,6 @@ void ReaderApp::Impl::error(const std::string &text_in, const std::string &retry
     abandon_content();
     if (drawing_error) return;
     drawing_error = true;
-    // The page offers a save retry only for a failed commit, not for one still pending.
     if (card_available && session.needs_save() && !save_failed)
         persist();
     cancel_sync();
@@ -59,7 +56,6 @@ void ReaderApp::Impl::error(const std::string &text_in, const std::string &retry
         if (!body.empty()) y += wrapped(body, 36, y, 612, 28) + 28;
         if (!retry.empty()) wrapped(retry, 36, y, 612, 24, true, 3);
     }
-    // Two actions share the row with the recommended one on the right; one action fills it.
     const auto leave = return_label(error_origin);
     const bool second = unsaved || !retry_path.empty();
     button(Back, leave, 24, 1080, second ? 306 : 636, 96, !second);
@@ -68,7 +64,6 @@ void ReaderApp::Impl::error(const std::string &text_in, const std::string &retry
     drawing_error = false;
     if (!display.busy()) overlay();
 }
-
 
 void ReaderApp::Impl::back() {
     if (view == View::Dictionary) {
@@ -83,7 +78,6 @@ void ReaderApp::Impl::back() {
         const auto field = entry.field;
         entry = {};
         if (field == TextEntry::Field::WifiPassword && join_manual) {
-            // The name stays so that the first step can be corrected.
             join_draft.password.clear();
             open_entry(TextEntry::Field::WifiName, join_draft.ssid);
             return;
@@ -97,7 +91,6 @@ void ReaderApp::Impl::back() {
     }
     if (view == View::Update) {
         if (update_page == UpdatePage::Notes) { update_page = notes_return; draw_update(); overlay(); return; }
-        // The other pages end through their own buttons.
         if (update_page != UpdatePage::Home && update_page != UpdatePage::Failed) return;
         update_page = UpdatePage::Home; update_notice.clear();
         draw_settings(); overlay(); return;
@@ -106,10 +99,9 @@ void ReaderApp::Impl::back() {
         if (portal_live) { draw_portal(); overlay(); return; }
         if (wifi_worker && wifi_kind == WifiOperation::Kind::Clock) network::release(wifi_hold);
         if (wifi_page == WifiPage::Joining || wifi_page == WifiPage::JoinFailed || wifi_page == WifiPage::Joined)
-            return;  // These pages end through their own buttons.
-        if (wifi_page != wifi_root) {
+            return;
+        if (wifi_page != wifi_entry_page) {
             if (wifi_page == WifiPage::Add) {
-                // A scan in progress is abandoned; its late result carries a stale ID.
                 network::release(wifi_hold);
                 if (wifi_worker && wifi_kind == WifiOperation::Kind::Scan) { wifi_worker = 0; wifi_request.reset(); }
             }
@@ -117,7 +109,7 @@ void ReaderApp::Impl::back() {
                       : wifi_page == WifiPage::Forget ? WifiPage::Detail : WifiPage::Home;
             draw_wifi(); overlay(); return;
         }
-        wifi_page = wifi_root = WifiPage::Home;
+        wifi_page = wifi_entry_page = WifiPage::Home;
         if (std::exchange(wifi_from_sync, false)) { draw_sync(); overlay(); return; }
         if (std::exchange(wifi_from_transfer, false)) { draw_import(); overlay(); return; }
     }
@@ -182,7 +174,6 @@ void ReaderApp::Impl::back() {
     overlay();
 }
 
-
 void ReaderApp::Impl::wifi_control(int id) {
     const auto index = [&](int base) { return static_cast<std::size_t>(id - base); };
     std::string detail;
@@ -229,8 +220,7 @@ void ReaderApp::Impl::wifi_control(int id) {
     case WifiManage: wifi_page = WifiPage::Saved; wifi_notice.clear(); break;
     case WifiModeOpen: wifi_page = WifiPage::Mode; wifi_notice.clear(); break;
     case WifiModeAuto:
-        // Without a pinned name the file already selects automatic connection.
-        wifi_notice = wifi_target.empty() || provision::save_selected_network(root, "", detail)
+        wifi_notice = pinned_wifi_ssid.empty() || provision::save_selected_network(root, "", detail)
             ? "" : "连接方式未保存，请检查 TF 卡。";
         break;
     case WifiAdd:
@@ -254,16 +244,14 @@ void ReaderApp::Impl::wifi_control(int id) {
         if (wifi_worker || network::live(manual_hold) || wifi_online()) wifi_notice = "请先断开 Wi-Fi，再忘记网络。";
         else if (!provision::save_network_edit(root, {wifi_choice, ""}, true, 0, detail)) wifi_notice = "忘记网络失败，请检查 TF 卡。";
         else {
-            wifi_notice = wifi_choice == wifi_target ? "网络已忘记，连接方式已改回自动。" : "网络已忘记。";
+            wifi_notice = wifi_choice == pinned_wifi_ssid ? "网络已忘记，连接方式已改回自动。" : "网络已忘记。";
             wifi_choice.clear();
             wifi_page = WifiPage::Saved;
         }
         break;
     case WifiJoinCancel:
-        // The worker stops at its next cancellation check; its result carries a stale ID.
         network::release(wifi_hold);
         wifi_worker = 0; wifi_request.reset();
-        // Every flow with a password page returns to it with its draft, also when the password is empty.
         if (!join_open) { open_entry(TextEntry::Field::WifiPassword, join_draft.password); return; }
         leave_join(join_origin);
         break;
@@ -281,7 +269,6 @@ void ReaderApp::Impl::wifi_control(int id) {
     }
     case SyncOnceAuto: check_sync(true); return;
     case SyncStay: {
-        // The reading header keeps its reminder until the next check or another book.
         const auto reminder = remote_anchor;
         cancel_sync();
         remote_anchor = reminder;
@@ -315,7 +302,6 @@ void ReaderApp::Impl::wifi_control(int id) {
     }
     draw_wifi(); overlay();
 }
-
 
 void ReaderApp::Impl::control(int id) {
     if (id == DictionaryOpen) { open_dictionary_settings(); return; }
@@ -352,11 +338,9 @@ void ReaderApp::Impl::control(int id) {
         return;
     if (id == WifiSettings || (id == WifiModeOpen && view == View::Sync)) {
         wifi_from_sync = view == View::Sync;
-        // The network page reached from the library stays on the way back to the library.
         wifi_from_transfer = view == View::Import && !import_from_settings;
         if (!portal_live) cancel_sync();
-        // The sync panel's network row opens the connection mode directly.
-        wifi_page = wifi_root = id == WifiModeOpen ? WifiPage::Mode : WifiPage::Home;
+        wifi_page = wifi_entry_page = id == WifiModeOpen ? WifiPage::Mode : WifiPage::Home;
         wifi_choice.clear();
         draw_wifi(); overlay(); return;
     }
@@ -372,9 +356,8 @@ void ReaderApp::Impl::control(int id) {
     if ((id == WifiUpload || id == UsbStart) && view == View::Library) import_from_settings = false;
     if (id == WifiUpload || id == WifiUploadStation) {
         if (!wifi_enabled()) {
-            // The network page states that Wi-Fi is off and leads back to the library.
             if (view == View::Library) { draw_import(); overlay(); return; }
-            wifi_page = wifi_root = WifiPage::Home; draw_wifi(); overlay(); return;
+            wifi_page = wifi_entry_page = WifiPage::Home; draw_wifi(); overlay(); return;
         }
         ++portal_generation;
         portal_requested = true;
@@ -558,7 +541,6 @@ void ReaderApp::Impl::control(int id) {
         if (view != View::Contents) return;
         contents_bookmarks = id == ContentsBookmarks;
         if (contents_bookmarks) {
-            // Opens on the screen holding the first bookmark at or after the visible page.
             const auto present = page_bookmarks();
             bookmark_page = present.empty() ? 0 : present.front() / bookmarks_per_screen;
         } else toc_locate_current = true;
@@ -881,11 +863,11 @@ void ReaderApp::Impl::control(int id) {
         } else if (view == View::WifiSettings) {
             if (wifi_page != WifiPage::Add) return;
             if (id == Prev && wifi_add_page) --wifi_add_page;
-            else if (id == Next) ++wifi_add_page;  // draw_wifi clamps to the last screen.
+            else if (id == Next) ++wifi_add_page;
             draw_wifi();
         } else if (view == View::Contents && contents_bookmarks) {
             if (id == Prev && bookmark_page) --bookmark_page;
-            else if (id == Next) ++bookmark_page;  // draw_bookmarks clamps to the last screen.
+            else if (id == Next) ++bookmark_page;
             draw_contents();
         } else if (view == View::Contents) {
             if (id == Prev && toc_page)
@@ -905,8 +887,7 @@ void ReaderApp::Impl::control(int id) {
         {
             auto at = std::find(fonts.begin(), fonts.end(), draft.font);
             if (at == fonts.end()) {
-                // One extra entry keeps a missing configured font visible after the scan's 256 files.
-                if (fonts.size() < 257) fonts.push_back(draft.font);
+                if (fonts.size() < kMaxFontChoices) fonts.push_back(draft.font);
                 else fonts.back() = draft.font;
                 at = fonts.end() - 1;
             }
@@ -982,11 +963,9 @@ void ReaderApp::Impl::control(int id) {
     overlay();
 }
 
-
 void ReaderApp::Impl::input(const AppInput &input) {
     const bool accepted = router.accept(input.event);
     if (dictionary_contact_input(input, accepted)) return;
-    // Key taps change the entry model only, so they are kept while a frame is in flight.
     if (accepted && view == View::TextEntry && key_input(input)) return;
     if (!accepted || display.busy() || view == View::Sleeping || view == View::PowerOff)
         return;
@@ -1052,12 +1031,10 @@ void ReaderApp::Impl::input(const AppInput &input) {
         const bool turn_key = action == Action::PreviousPage || action == Action::NextPage;
         if (view != View::Reading || !turned || (!turn_touch && !turn_key))
             return;
-        // Links are not followed: the contact was aimed at the page that has been replaced.
         turn(turn_touch ? input.x >= 479 : action == Action::NextPage);
         return;
     }
     turned = false;
-    // A notice lasts until the input after the one that showed it; K2 only repaints the page.
     if (view != View::Import && view != View::WifiSettings && view != View::Portal &&
         (input.touch || input.event.input != Input::K2) && std::exchange(notice_shown, false)) {
         message.clear(); cover_notice.clear();
@@ -1114,14 +1091,12 @@ void ReaderApp::Impl::input(const AppInput &input) {
         } else {
             for (const auto &hit : hits)
                 if (hit.contains(input.x, input.y)) {
-                    // A power choice requires the whole sampled contact to stay in its button.
                     if (view == View::PowerMenu && input.touch_bounds) {
                         const auto& bounds = *input.touch_bounds;
                         if (!hit.contains(bounds.min_x, bounds.min_y) ||
                             !hit.contains(bounds.max_x, bounds.max_y)) return;
                     }
                     int id = hit.id;
-                    // A long press on a book in the library opens its details instead of the book.
                     if (input.long_press && view == View::Library && id == Tools) id = ResumeDetails;
                     if (input.long_press && view == View::Library && id >= EntryBase && id < TocBase &&
                         !entries[static_cast<std::size_t>(id - EntryBase)].directory)
@@ -1144,5 +1119,4 @@ void ReaderApp::Impl::input(const AppInput &input) {
         back();
 }
 
-
-} // namespace pico_page
+}

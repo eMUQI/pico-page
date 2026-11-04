@@ -1,5 +1,3 @@
-"""Checks that setup_network.py writes what the firmware parsers accept and refuses the rest."""
-
 import os
 from pathlib import Path
 import sys
@@ -10,7 +8,6 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import setup_network as tool
 
-# sync_test.cpp loads the card written here with the firmware parser and expects these values.
 USERNAME = '读者 "a\\b"'
 PASSWORD = "correct horse 电池"
 
@@ -33,7 +30,6 @@ class SetupNetworkTest(unittest.TestCase):
         self.assertIn('selected_ssid="home" # target', edited)
         edited = tool.edited_wifi_toml(edited, "home", "new-password")
         self.assertEqual(tomllib.loads(edited)["selected_ssid"], "home")
-        # A file without the field connects automatically, and an edit must not pin a network.
         automatic = source.replace('selected_ssid="home" # target\n', '')
         self.assertNotIn("selected_ssid", tomllib.loads(tool.edited_wifi_toml(automatic, "phone", "password")))
         self.assertNotIn("selected_ssid", tomllib.loads(tool.edited_wifi_toml(automatic, "home", "new-password")))

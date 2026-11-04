@@ -20,4 +20,4 @@ private:
     bool consumed_ = false, cancel_short_ = false;
 };
 
-} // namespace pico_page::platform
+}

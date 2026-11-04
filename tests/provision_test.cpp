@@ -24,7 +24,6 @@ int main() {
     const FileStore store(root);
     std::string error, problem;
 
-    // The written files are read back by the parsers the firmware uses; schema 1 is migrated.
     std::vector<provision::SavedWifi> loaded;
     assert(provision::load_networks(root, loaded, error) && loaded.empty());
     const provision::WifiCredentials wifi{"家 \"2.4G\"\\", "p\"a\\ss 密码"};
@@ -51,7 +50,6 @@ int main() {
            configured.userkey == account.userkey && configured.device_id == account.device_id &&
            configured.dom_version == account.dom_version);
 
-    // At most five networks with distinct names; adding a saved name replaces its password.
     for (const char* name : {"n3", "n4", "n5"}) assert(provision::add_network(saved, {name, "password"}, now));
     assert(saved.size() == provision::saved_limit && !provision::add_network(saved, {"n6", "password"}, now));
     assert(provision::add_network(saved, {"office", "new-password"}, now + day) && saved.size() == 5 &&
@@ -65,7 +63,6 @@ int main() {
     assert(provision::record_connection(saved, "office", now + day + 60) &&
            provision::last_network(saved)->ssid == "office" && saved.back().last_connected == now + day);
     assert(provision::record_connection(saved, "n3", now + 2 * day) && provision::last_network(saved)->ssid == "n3");
-    // A time recorded under a clock that was later set back is replaced.
     assert(provision::record_connection(saved, "n3", now) && saved.back().last_connected == now);
     assert(!provision::record_connection(saved, "n3", now + 60));
     std::vector<provision::SavedWifi> cold{{{"old", ""}, now}};
@@ -75,7 +72,6 @@ int main() {
     assert(store.save_private("network.toml", provision::network_toml(cold), error) == StoreStatus::Ok);
     assert(provision::load_networks(root, loaded, error) && provision::last_network(loaded)->ssid == "old");
 
-    // Automatic connection updates retain comments, formatting and each table's note.
     const auto network_file = card / "PicoPage/network.toml";
     const std::string annotated = "# configured by the reader\nschema_version = 2 # keep\n\n"
                                   "# home note\n[[wifi]] # home\nssid = 'home'\npassword = 'password1'\n"
@@ -92,7 +88,6 @@ int main() {
     assert(provision::save_connection(root, "office", 100, error));
     assert(provision::load_networks(root, loaded, error) && provision::last_network(loaded)->ssid == "office" &&
            read(network_file).find("# office note") != std::string::npos);
-    // Phone-side edits retain comments on untouched entries and replace only the chosen value.
     assert(store.save_private("network.toml", annotated, error) == StoreStatus::Ok);
     assert(provision::save_network_edit(root, {"home", "new-password"}, false, now + day, error));
     edited = read(network_file);
@@ -129,14 +124,12 @@ int main() {
     assert(provision::save_network_edit(root, {"first", ""}, false, 0, error));
     assert(provision::load_networks(root, loaded, error) && loaded.size() == 1 && loaded[0].ssid == "first");
 
-    // A hotspot can be saved while absent; saving does not invent a connection timestamp.
     const auto account_bytes = read(card / "PicoPage/sync.toml");
     assert(provision::save_network_edit(root, {"phone-hotspot", "password1"}, false, 0, error));
     assert(provision::load_networks(root, loaded, error) && loaded.size() == 2 &&
            loaded.back().ssid == "phone-hotspot" && loaded.back().password == "password1" &&
            loaded.back().last_connected == 0);
     assert(read(network_file).find("last_connected") == std::string::npos);
-    // Adding networks leaves the connection automatic; only an explicit choice pins one.
     std::optional<provision::SavedWifi> selected;
     assert(provision::load_selected_network(root, selected, error) && !selected);
     assert(read(network_file).find("selected_ssid") == std::string::npos);
@@ -144,14 +137,12 @@ int main() {
     assert(provision::load_selected_network(root, selected, error) && selected && selected->ssid == "phone-hotspot");
     assert(read(card / "PicoPage/sync.toml") == account_bytes);
 
-    // A pinned network survives connection history, additions and stronger alternatives.
     assert(provision::save_connection(root, "first", now, error));
     assert(provision::load_selected_network(root, selected, error) && selected->ssid == "phone-hotspot");
     assert(provision::save_network_edit(root, {"stronger", "password2"}, false, 0, error));
     assert(provision::load_selected_network(root, selected, error) && selected->ssid == "phone-hotspot");
     const auto pinned = read(network_file);
     assert(!provision::save_selected_network(root, "not-saved", error) && read(network_file) == pinned);
-    // Forgetting the pinned network returns to automatic connection, and later edits keep it.
     assert(provision::save_network_edit(root, {"phone-hotspot", ""}, true, 0, error));
     assert(provision::load_selected_network(root, selected, error) && !selected);
     assert(provision::save_network_edit(root, {"phone-hotspot", "password1"}, false, 0, error));
@@ -160,28 +151,23 @@ int main() {
     assert(provision::save_selected_network(root, "first", error));
     assert(provision::save_network_edit(root, {"phone-hotspot", "password1"}, false, 0, error));
     assert(provision::load_selected_network(root, selected, error) && selected->ssid == "first");
-    // An empty name selects automatic connection again without touching the entries.
     assert(provision::save_selected_network(root, "", error));
     assert(provision::load_selected_network(root, selected, error) && !selected);
     assert(provision::load_networks(root, loaded, error) && loaded.size() == 3);
 
-    // A file without a selection is automatic, also after a connection reorders its entries.
     assert(store.save_private("network.toml", annotated, error) == StoreStatus::Ok);
     assert(provision::load_selected_network(root, selected, error) && !selected);
     assert(provision::save_connection(root, "home", now + day, error));
     assert(provision::load_selected_network(root, selected, error) && !selected);
     assert(provision::save_selected_network(root, "home", error));
     assert(read(network_file).find("# office note") != std::string::npos);
-    // A pinned name that is no longer saved falls back to automatic connection.
     assert(store.save_private("network.toml", "selected_ssid = \"gone\"\nschema_version=2\n[[wifi]]\nssid=\"home\"\npassword=\"password\"\n", error) == StoreStatus::Ok);
     assert(provision::load_selected_network(root, selected, error) && !selected);
-    // Adding a network with that leftover name must not pin it.
     assert(provision::save_network_edit(root, {"gone", "password3"}, false, 0, error));
     assert(provision::load_selected_network(root, selected, error) && !selected);
     assert(provision::load_networks(root, loaded, error) && loaded.size() == 2);
     assert(store.save_private("network.toml", pinned, error) == StoreStatus::Ok);
 
-    // Automatic connection tries the saved networks in range, strongest first, each once.
     const std::vector<provision::WifiCredentials> known{{"home", "password"}, {"office", "password2"}, {"phone", ""}};
     auto order = provision::connection_order(known, {{"cafe", -30, true}, {"phone", -45, true}, {"home", -60, false},
                                                      {"phone", -70, true}});
@@ -193,7 +179,6 @@ int main() {
     assert(provision::password_rejected(15) && provision::password_rejected(202) && !provision::password_rejected(201) &&
            !provision::password_rejected(8));
 
-    // Request completion retains a business transaction; decision timeout never drops a manual hold.
     network::Holds holds;
     auto transaction = std::make_shared<std::atomic_bool>(false);
     holds.await_decision(transaction, 100);
@@ -206,16 +191,16 @@ int main() {
     assert(!network::live(transaction) && network::live(manual) && holds.retained());
     auto next = std::make_shared<std::atomic_bool>(false);
     holds.await_decision(next, 1000);
-    network::release(transaction); // A late cancellation belongs only to the old session.
+    network::release(transaction);
     assert(network::live(next));
     network::release(manual);
     assert(holds.retained());
     network::release(next);
     assert(!holds.retained());
     holds.manual = std::make_shared<std::atomic_bool>(false);
-    holds.manual_suspended = true; // AP closure retains intent without restarting STA.
+    holds.manual_suspended = true;
     assert(!holds.retained() && network::live(holds.manual));
-    holds.stop(); // Sleep also discards the suspended intent.
+    holds.stop();
     assert(!holds.retained() && !network::live(holds.manual));
     network::Holds reboot;
     assert(!reboot.retained());
@@ -225,7 +210,6 @@ int main() {
     idle.update(false, 0);
     assert(!idle.expired(idle_limit - 1, idle_limit));
     assert(idle.expired(idle_limit, idle_limit));
-    // A complete short /check or upload between two worker polls resets the deadline.
     idle.update(true, idle_limit - 100'000);
     idle.update(false, idle_limit - 50'000);
     assert(!idle.expired(idle_limit + 100'000, idle_limit));
@@ -237,7 +221,6 @@ int main() {
     assert(!idle.expired(5 * idle_limit - 1, idle_limit));
     assert(idle.expired(5 * idle_limit, idle_limit));
 
-    // A failed offline edit preserves both files and can be retried after storage recovers.
     const auto before_failed_save = read(network_file);
     fs::create_directory(card / "PicoPage/network.toml.tmp");
     assert(!provision::save_network_edit(root, {"phone-hotspot", "password2"}, false, 0, error));
@@ -249,7 +232,6 @@ int main() {
     assert(provision::load_networks(root, loaded, error) && loaded.back().password == "password3" &&
            loaded.back().last_connected == now);
 
-    // Replacing a credential file leaves no copy of the previous secret behind.
     assert(store.save_private("network.toml", provision::network_toml({{{"next", ""}, 0}}), error) == StoreStatus::Ok);
     assert(provision::load_networks(root, loaded, error) && loaded.size() == 1 && loaded[0].ssid == "next");
     assert(store.save_private("network.toml", provision::network_toml({}), error) == StoreStatus::Ok);
@@ -264,7 +246,6 @@ int main() {
     assert(store.save_private("sync.toml", std::string(8193, 'x'), error) != StoreStatus::Ok);
     assert(sync::load_config(root, configured, error));
 
-    // Hand-written files outside the accepted shape are refused without echoing their contents.
     const std::string entry = "[[wifi]]\nssid = \"net\"\npassword = \"hunter2-long\"\n";
     std::string six = "schema_version = 2\n";
     for (int i = 0; i < 6; ++i) six += "[[wifi]]\nssid = \"net" + std::to_string(i) + "\"\npassword = \"hunter2-long\"\n";

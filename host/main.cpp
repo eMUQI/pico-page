@@ -160,13 +160,11 @@ struct Host {
                       << "\n";
             if (!okay)
                 return false;
-            // The synchronous desktop preview saves after presentation without the firmware dwell delay.
             if (!app.pending_frame() && app.save_due())
                 app.save_progress();
         }
         return true;
     }
-    // The preview has no radio: a scan lists sample names, every connection is refused.
     void answer_wifi(const WifiOperation& wifi) {
         if (wifi.kind == WifiOperation::Kind::Clock) {
             app.complete_wifi(wifi.id, {}, "桌面预览不校准设备时间，请在真机操作。", LinkFailure::Other);
@@ -177,7 +175,6 @@ struct Host {
             app.complete_wifi(wifi.id, {{"Preview-2.4", -48, false}, {"Preview-Open", -67, true}}, "");
         else app.complete_wifi(wifi.id, {}, "桌面预览不操作设备 Wi-Fi，请在真机连接。", LinkFailure::Other);
     }
-    // The preview has no update source and no firmware slot: every check or download is refused.
     void answer_update() {
         const auto update = app.take_update_request();
         if (!update) return;
@@ -203,8 +200,6 @@ struct Host {
                 network = std::async(std::launch::async, perform, std::move(*request));
         }
     }
-    // The desktop preview has no radio. It shows the session pages with placeholder access
-    // values and never reports a saved or failed submission or an uploaded book.
     bool poll_portal() {
         const auto action = app.take_portal_action();
         if (action == PortalAction::Upload || action == PortalAction::UploadStation) {
@@ -223,10 +218,8 @@ struct Host {
         ++sequence;
         app.input({{sequence, Phase::Begin, key}, touch, x, y, false, hold});
         app.input({{sequence, Phase::End, key}, touch, x, y, false, hold});
-        // Keyboard taps are drawn by the next idle poll, as in the device loop.
         if (app.keyboard_visible()) app.poll_background();
         if (!flush()) return false;
-        // Scripts have no event loop, so a Wi-Fi request is answered right after its page is shown.
         if (const auto wifi = app.take_wifi_request()) answer_wifi(*wifi);
         if (!flush()) return false;
         answer_update();
@@ -290,7 +283,6 @@ struct Host {
             return app.open_book(path) && flush();
         }
         if (command == "count") {
-            // Finishes whole-book page counting, which the device spreads over idle time.
             while (app.background_due())
                 app.background_step();
             return true;
@@ -305,7 +297,7 @@ struct Host {
         return false;
     }
 };
-} // namespace
+}
 int main(int argc, char **argv) {
     std::string root = ".local/card", book, script;
     bool headless = false;

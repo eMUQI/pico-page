@@ -50,7 +50,6 @@ int main() {
     range.parse_content_range("bytes 4096-8191/8192");
     assert(!range.valid);
 
-    // Refuse truncated ranges and foreign representations even if Content-Length matches.
     for (const char* value : {"bytes 0-4095/8192", "bytes 4096-8190/8192", "bytes 4096-8191/8193"}) {
         FirmwareRange response;
         response.parse_content_range(value);

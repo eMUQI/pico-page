@@ -1,12 +1,10 @@
 CONFIG_IDF_TARGET="esp32s3"
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
-# Board PSRAM mode follows the upstream sdkconfig.ci.
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_USE_MALLOC=y
-# Document nodes and font data leave internal RAM available for tasks and DMA.
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=0
 CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
 CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
@@ -17,32 +15,23 @@ CONFIG_COMPILER_OPTIMIZATION_PERF=y
 CONFIG_FREERTOS_HZ=1000
 CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_API_ENCODING_UTF_8=y
-# Glyph loads seek backwards within large font files opened read-only.
+# ESP-IDF FatFs enables fast seeks only on read-only handles.
 CONFIG_FATFS_USE_FASTSEEK=y
 CONFIG_FATFS_USE_LABEL=y
-# The platform holds a maximum-frequency lock while active and releases it when idle.
 CONFIG_PM_ENABLE=y
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
-# The update host sends a chain that ends in GTS Root R4 cross-signed by GlobalSign Root CA.
-# The bundle holds GTS Root R4 but not the cross-signing root; without this option the bundle
-# only looks up the issuer of the last certificate received and rejects the chain.
+# ESP-IDF needs cross-signed verification to match a bundled root presented
+# as a cross-signed intermediate when the issuer of that intermediate is absent.
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y
-# The main internal heap cannot hold a TLS session next to the resident Wi-Fi driver.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
-# Keep a full TLS record and in-flight data within the TCP receive window.
 CONFIG_LWIP_TCP_WND_DEFAULT=32768
 CONFIG_LWIP_TCP_RECVMBOX_SIZE=25
 
-# Matches the layout read from the device. The table itself is never flashed; verify the device
-# layout before any installation.
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.build.csv"
-# The device bootloader returns to the previous slot when an updated image restarts before
-# confirming itself; with this option the application marks an activated slot for that check.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
-# USB storage is initialized only by the explicit settings action.
 CONFIG_TINYUSB_MSC_ENABLED=y
 CONFIG_TINYUSB_MSC_BUFSIZE=4096

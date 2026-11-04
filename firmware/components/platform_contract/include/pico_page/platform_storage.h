@@ -25,4 +25,4 @@ bool start_usb_storage(std::string& error);
 /** Stops new USB I/O, waits for synchronous writes, and disconnects before restart. */
 bool stop_usb_storage(std::string& error);
 
-} // namespace pico_page::platform
+}

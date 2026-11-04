@@ -26,7 +26,6 @@ struct LookupRange { char32_t first, last; };
 constexpr LookupRange kLookupRanges[] = {
 #include "third_party/unicode/lookup_ranges.inc"
 };
-// Unicode categories avoid treating unlisted scripts as separators or block punctuation as letters.
 bool unit_at(std::u32string_view text, Selection visible, std::size_t at) {
     const auto c = text[at];
     if (word_at(text, visible, at)) return true;
@@ -82,7 +81,6 @@ void forms(std::vector<Candidate>& out, Selection range, const std::string& word
     add(out, range, std::move(upper), inflection);
 }
 void inflections(std::vector<Candidate>& out, Selection range, const std::string& word) {
-    // These are lookup candidates, not asserted lemmas. Every result requires an index hit.
     if (ends(word, "'s")) forms(out, range, word.substr(0, word.size() - 2), true);
     if (word.size() > 3 && ends(word, "ies")) forms(out, range, word.substr(0, word.size() - 3) + 'y', true);
     if (word.size() > 3 && ends(word, "ied")) forms(out, range, word.substr(0, word.size() - 3) + 'y', true);
@@ -98,7 +96,7 @@ void inflections(std::vector<Candidate>& out, Selection range, const std::string
             forms(out, range, stem.substr(0, stem.size() - 1), true);
     }
 }
-}  // namespace
+}
 
 Result initial_selection(std::u32string_view text, Selection visible, std::size_t hit, Selection& selection) {
     selection = {};
@@ -192,4 +190,4 @@ Result adjust_selection(std::u32string_view text, Selection visible, SelectionEd
     return {};
 }
 
-}  // namespace pico_page::dictionary
+}

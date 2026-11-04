@@ -119,7 +119,6 @@ int main(int argc, char** argv) {
     assert(ContentJob::prepare_worker() == Failure::None);
     assert(ContentJob::prepare_worker() == Failure::None && creations == 1 && allocations == 1);
 
-    // Reuse must not require another contiguous stack, even when task creation would fail.
     internal_largest = 1024; internal_free = 40 * 1024; fail_task = true;
     ContentJob::Request request;
     request.kind = ContentJob::Kind::MapUpload;
@@ -237,7 +236,7 @@ int main(int argc, char** argv) {
         std::ofstream(root / "LockScreens/02-good.png", std::ios::binary).write(
             reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
         const auto before_failure = pico_page::graphics::image_decode_count();
-        fail_calloc_on = 2; // Decoder creation succeeds; its scanline allocation fails.
+        fail_calloc_on = 2;
         ContentJob exhausted_custom(custom); assert(exhausted_custom.start()); finish(exhausted_custom);
         assert(fail_calloc_on == 0 && failed_callocs == 1);
         assert(!exhausted_custom.result.image && !exhausted_custom.result.cache_finished && exhausted_custom.result.retryable_failure());
@@ -271,7 +270,6 @@ int main(int argc, char** argv) {
         assert(!expired_custom.result.image && expired_custom.result.retryable_failure());
         assert(expired_custom.result.failure_kind == pico_page::ContentFailureKind::TimedOut);
         assert(pico_page::graphics::image_decode_count() == before_cold + 1);
-        // A job past its deadline still records the presented image before it returns.
         custom.lock_screen_shown = "01-good.png";
         ContentJob cursor_commit(custom); assert(cursor_commit.start()); finish(cursor_commit);
         assert(cursor_commit.result.cursor_saved && !cursor_commit.result.image);
@@ -280,7 +278,7 @@ int main(int argc, char** argv) {
 
         constexpr std::size_t cover_bytes = 684U * 1040U / 2;
         for (const bool fragmented : {false, true}) {
-            psram_free = fragmented ? 4 * 1024 * 1024 : ContentJob::image_room - 1;
+            psram_free = fragmented ? 4 * 1024 * 1024 : ContentJob::cold_image_memory_required_bytes - 1;
             psram_largest = fragmented ? cover_bytes - 1 : 3 * 1024 * 1024;
             ContentJob deferred(cover); assert(deferred.start()); finish(deferred);
             assert(!deferred.result.cache_finished && !deferred.result.image && !fs::exists(cache));
@@ -305,7 +303,6 @@ int main(int argc, char** argv) {
         fs::rename(root / "hidden.epub", cover.path);
         fs::create_directories(cache.parent_path());
         fs::create_directory(cache.string() + ".tmp");
-        // A small cover fits even when neither the old total nor contiguous 2 MiB gate is met.
         psram_free = 2 * 1024 * 1024; psram_largest = 1024 * 1024;
         ContentJob unwritable(cover); assert(unwritable.start()); finish(unwritable);
         assert(!unwritable.result.cache_finished && !fs::exists(cache));
@@ -343,7 +340,6 @@ int main(int argc, char** argv) {
             psram_free = psram_largest = 512 * 1024;
             ContentJob too_small(image); assert(too_small.start()); finish(too_small);
             assert(!too_small.result.image && !too_small.result.error.empty());
-            // Enough for the cached pixels, below the room a cold decode requires.
             psram_free = 1280 * 1024; psram_largest = 512 * 1024;
             for (const auto& invalid : {valid.substr(1), std::string(valid.size(), 'x')}) {
                 assert(store.save_cache(image.cache_name, invalid) == pico_page::StoreStatus::Ok);
@@ -353,8 +349,7 @@ int main(int argc, char** argv) {
             fs::remove(root / "PicoPage/cache" / image.cache_name);
             ContentJob cold(image); assert(cold.start()); finish(cold);
             assert(!cold.result.image && cold.result.error == "Image preparation memory unavailable");
-            // With that room the decode is admitted whatever the encoded size limit; the missing book then fails it.
-            psram_free = ContentJob::image_room;
+            psram_free = ContentJob::cold_image_memory_required_bytes;
             ContentJob admitted(image); assert(admitted.start()); finish(admitted);
             assert(!admitted.result.error.empty() && admitted.result.error != "Image preparation memory unavailable");
             assert(pico_page::graphics::image_decode_count() == decodes);
@@ -387,7 +382,7 @@ int main(int argc, char** argv) {
         std::string preserved;
         const auto gif_decodes = pico_page::graphics::image_decode_count();
         for (const bool fragmented : {false, true}) {
-            psram_free = fragmented ? 4 * 1024 * 1024 : ContentJob::image_room - 1;
+            psram_free = fragmented ? 4 * 1024 * 1024 : ContentJob::cold_image_memory_required_bytes - 1;
             psram_largest = fragmented ? cover_bytes - 1 : 3 * 1024 * 1024;
             ContentJob deferred_gif(cover); assert(deferred_gif.start()); finish(deferred_gif);
             assert(!deferred_gif.result.cache_finished && !deferred_gif.result.image);
@@ -519,7 +514,6 @@ int main(int argc, char** argv) {
         query.relative_path = "../main.ifo";
         ContentJob unsafe(query); assert(unsafe.start()); finish(unsafe);
         assert(unsafe.result.dictionary_status.status == dict::Status::InvalidFormat);
-        // One search opens each source once; a bad IDX tail is fully prepared once per session.
         const auto copy_dictionary = [&](const char* fixture, const char* name) {
             for (const auto* suffix : {".ifo", ".idx", ".dict.dz"})
                 fs::copy_file(fs::path(argv[2]) / (std::string(fixture) + suffix),
@@ -549,14 +543,12 @@ int main(int argc, char** argv) {
         assert(found.dictionary_status && found.dictionary_match->word == "中");
         assert(found.dictionary_source == 1 && found.dictionary_partial);
         assert(found.dictionary_failed_sources.size() == 1 && found.dictionary_failed_sources[0].id == "tail.ifo");
-        // A later lookup in the same session reuses the definitive failure.
         found = search();
         assert(found.dictionary_status && found.dictionary_source == 1 && found.dictionary_partial);
 #ifdef PICO_PAGE_WRAP_CALLOC_TEST
         assert(preparation_attempts == 1U);
 #endif
         assert(query.dictionary_session->preparation_failures.size() == 1);
-        // Explicit retry re-reads the source and observes a repair.
         copy_dictionary("query-short", "tail");
         found = search(); assert(found.dictionary_source == 1 && found.dictionary_partial);
         query.dictionary_retry = true;
@@ -568,7 +560,6 @@ int main(int argc, char** argv) {
 #ifdef PICO_PAGE_WRAP_CALLOC_TEST
         counted_dictionary.clear();
 #endif
-        // Longer candidates win across sources; equal candidates keep the earlier source.
         copy_dictionary("han-short", "first"); copy_dictionary("han-long", "second");
         copy_dictionary("han-long", "third");
         query.dictionary_sources = {"first.ifo", "second.ifo", "third.ifo"};
@@ -577,7 +568,6 @@ int main(int argc, char** argv) {
         assert(found.dictionary_fields[0].text == "long match" && !found.dictionary_partial);
         query.dictionary_sources = {"second.ifo", "first.ifo"};
         found = search(); assert(found.dictionary_source == 0 && found.dictionary_match->word == "中文");
-        // Navigation stops at the first usable source and skips broken, missing and empty sources.
         const auto ranked_session = query.dictionary_session;
         query.dictionary_session = std::make_shared<pico_page::DictionarySession>();
         query.dictionary_navigation = 1;
@@ -599,7 +589,6 @@ int main(int argc, char** argv) {
         query.dictionary_sources.assign(33, "first.ifo");
         found = search(); assert(found.dictionary_status.status == dict::Status::ResourceLimit);
         query.dictionary_session = ranked_session; query.dictionary_candidates = han;
-        // An unreadable longer entry still lets a shorter candidate in the same source match.
         copy_dictionary("han-broken", "broken");
         query.dictionary_sources = {"broken.ifo"};
         found = search();
@@ -614,7 +603,6 @@ int main(int argc, char** argv) {
         found = search();
         assert(found.dictionary_status.status == dict::Status::NotFound && !found.dictionary_partial && found.error.empty());
         query.dictionary_sources.clear(); query.dictionary_candidates = {{{0, 1}, "中", false}};
-        // Temporary source I/O and individual entry errors are not remembered.
         copy_dictionary("query-short", "temporary");
         fs::rename(dictionaries / "temporary.dict.dz", dictionaries / "held.dict.dz");
         query.relative_path = "temporary.ifo";
@@ -646,7 +634,6 @@ int main(int argc, char** argv) {
         ContentJob unsupported(query); assert(unsupported.start()); finish(unsupported);
         assert(unsupported.result.dictionary_status.status == dict::Status::Unsupported);
         assert(query.dictionary_session->preparation_failures.size() == 1);
-        // Explicit preparation is not answered from the remembered failure.
         query.kind = ContentJob::Kind::DictionaryPrepare;
         ContentJob prepare_unsupported(query); assert(prepare_unsupported.start()); finish(prepare_unsupported);
         assert(prepare_unsupported.result.dictionary_status.status == dict::Status::Unsupported);
@@ -688,7 +675,6 @@ int main(int argc, char** argv) {
         for (std::size_t i = 0; i < actual.size(); ++i)
             assert(actual[i].scalar == expected[i].scalar && actual[i].x == expected[i].x &&
                    actual[i].baseline == expected[i].baseline && actual[i].bold == expected[i].bold);
-        // Reflow starts at the same decoded text, while the prefix remains reachable.
         const auto anchor = page_two.result.dictionary_current.scalars;
         assert(anchor > 0);
         layout.dictionary_reflow = true; layout.dictionary_seek_pages = 0;

@@ -11,8 +11,6 @@ bool printable(const std::string& value) {
     return std::none_of(value.begin(), value.end(), [](unsigned char c) { return c < 0x20 || c == 0x7f; });
 }
 
-// The validated values contain no control characters, so only these two need escaping in a
-// TOML basic string.
 std::string quoted(const std::string& value) {
     std::string out = "\"";
     for (const char c : value) {
@@ -46,7 +44,6 @@ bool only_keys(toml_datum_t table, std::initializer_list<const char*> keys) {
     return true;
 }
 
-/** Reads one [wifi] table; with_time accepts the schema 2 connection time. */
 bool read_entry(toml_datum_t table, bool with_time, SavedWifi& entry) {
     const auto ssid = toml_get(table, "ssid");
     const auto password = toml_get(table, "password");
@@ -124,7 +121,6 @@ std::size_t leading_comments(const std::string& source, std::size_t header) {
     return begin;
 }
 
-/** Moves a connected table while retaining each table's source text and attached comments. */
 bool edit_connection_source(const std::string& source, const std::vector<SavedWifi>& desired,
                             std::string& output) {
     if (desired.empty()) return false;
@@ -218,7 +214,6 @@ bool same_networks(const std::string& source, const std::vector<SavedWifi>& desi
     return true;
 }
 
-/** Replaces one basic or literal TOML string without changing its surrounding text. */
 bool replace_string_value(std::string& source, toml_datum_t value, const std::string& replacement) {
     const auto line = line_offset(source, value.lineno);
     if (value.colno < 1 || line == std::string::npos) return false;
@@ -239,7 +234,6 @@ bool replace_string_value(std::string& source, toml_datum_t value, const std::st
     return true;
 }
 
-/** Preserves existing tables and comments when a phone form changes one network. */
 bool edit_network_source(const std::string& source, bool missing, const WifiCredentials& wifi,
                          bool remove, std::int64_t now, std::string& output, std::string& error) {
     std::vector<SavedWifi> current;
@@ -306,7 +300,6 @@ bool edit_network_source(const std::string& source, bool missing, const WifiCred
     return edited;
 }
 
-/** The pinned network name; empty, also for a missing key, selects automatic connection. */
 std::string selected_name(const std::string& source) {
     auto parsed = toml_parse(source.data(), static_cast<int>(source.size()));
     const auto value = toml_get(parsed.toptab, "selected_ssid");
@@ -319,7 +312,6 @@ bool select_source(std::string& source, const std::string& ssid) {
     const auto value = toml_get(parsed.toptab, "selected_ssid");
     bool okay = parsed.ok;
     if (okay && value.type == TOML_UNKNOWN && ssid.empty()) {
-        // Automatic connection needs no key.
     } else if (okay && value.type == TOML_UNKNOWN) {
         const auto schema = toml_get(parsed.toptab, "schema_version");
         const auto line = line_offset(source, schema.lineno);
@@ -332,7 +324,7 @@ bool select_source(std::string& source, const std::string& ssid) {
     return okay && source.size() <= 4096;
 }
 
-}  // namespace
+}
 
 bool valid_wifi(const WifiCredentials& credentials) {
     const auto& password = credentials.password;
@@ -468,8 +460,6 @@ bool save_network_edit(const std::string& card_root, const WifiCredentials& wifi
     std::vector<SavedWifi> original;
     if (status != StoreStatus::Missing && !parse_network_bytes(source, original, error)) return false;
     auto target = selected_name(source);
-    // Forgetting the pinned network returns to automatic connection; adding never pins. A name
-    // left behind by a hand edit already means automatic and must not pin a network added later.
     if ((remove && target == wifi.ssid) ||
         std::none_of(original.begin(), original.end(), [&](const SavedWifi& entry) { return entry.ssid == target; }))
         target.clear();
@@ -507,7 +497,6 @@ bool remove_network(std::vector<SavedWifi>& saved, const std::string& ssid) {
 std::vector<WifiCredentials> connection_order(const std::vector<WifiCredentials>& saved,
                                               const std::vector<NearbyWifi>& nearby) {
     std::vector<WifiCredentials> order;
-    // nearby is strongest first, so the scan order is the attempt order.
     for (const auto& found : nearby) {
         const auto named = [&](const WifiCredentials& wifi) { return wifi.ssid == found.ssid; };
         const auto entry = std::find_if(saved.begin(), saved.end(), named);
@@ -531,7 +520,6 @@ std::string wifi_problem(const std::string& ssid, WifiFailure failure, int reaso
     case WifiFailure::NoClock: return "已连接" + name + "，但没有取得网络时间。请确认这个网络可以上网。";
     case WifiFailure::Rejected: break;
     }
-    // The driver reason stays in the device log.
     if (network_absent(reason))
         return "找不到名为" + name + "的网络。设备只支持 2.4 GHz Wi-Fi。";
     if (password_rejected(reason))
@@ -551,4 +539,4 @@ std::string wifi_qr(const WifiCredentials& access) {
     return "WIFI:T:WPA;S:" + escaped(access.ssid) + ";P:" + escaped(access.password) + ";;";
 }
 
-}  // namespace pico_page::provision
+}

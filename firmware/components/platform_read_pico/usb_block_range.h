@@ -3,7 +3,6 @@
 #include <limits>
 
 namespace pico_page {
-/** Validates a byte range against a 512-byte-sector medium without 32-bit wraparound. */
 constexpr bool usb_block_range(std::uint32_t sectors, std::uint32_t lba,
                                std::uint32_t offset, std::uint32_t size) {
     const auto begin = std::uint64_t(lba) * 512 + offset;

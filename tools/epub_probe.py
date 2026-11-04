@@ -32,7 +32,7 @@ INLINE = {"span", "em", "strong", "b", "i", "a", "sup", "sub", "br", "hr", "img"
 
 
 class EpubError(ValueError):
-    """The file is malformed, unsafe, over budget or outside the supported subset."""
+    pass
 
 
 class BoundedTree(ET.TreeBuilder):
@@ -57,7 +57,6 @@ class BoundedTree(ET.TreeBuilder):
 
 
 def partial_md5(data: bytes) -> str:
-    """Return KOReader's sampled digest; this is not a strong content identity."""
     digest = hashlib.md5(usedforsecurity=False)
     # LuaJIT's 32-bit lshift(1024, -2) yields zero for the first sample.
     for offset in [0] + [1024 * 4 ** i for i in range(11)]:
@@ -69,7 +68,6 @@ def partial_md5(data: bytes) -> str:
 
 
 def resource_path(base: str, href: str) -> str:
-    """Resolve a local EPUB URI and reject archive escapes and external resources."""
     parsed = urlsplit(href)
     path = unquote(parsed.path, errors="strict")
     if parsed.scheme or parsed.netloc or parsed.query or path.startswith("/") or "\\" in path or "\x00" in path:
@@ -219,7 +217,6 @@ def chapter_text(archive: zipfile.ZipFile, href: str) -> dict:
 
 
 def source_at(chapter: dict, scalar_offset: int) -> dict | None:
-    """Map an output scalar to decoded XML text; generated block breaks return None."""
     if not 0 <= scalar_offset < len(chapter["text"]):
         raise EpubError("chapter scalar offset out of range")
     for run in chapter["source_map"]:
@@ -231,7 +228,6 @@ def source_at(chapter: dict, scalar_offset: int) -> dict | None:
 
 
 def probe(path: Path, spine_index: int = 0) -> dict:
-    """Read a bounded snapshot, identify the original ZIP and parse one spine item."""
     with path.open("rb") as source:
         data = source.read(MAX_ARCHIVE + 1)
     if len(data) > MAX_ARCHIVE:

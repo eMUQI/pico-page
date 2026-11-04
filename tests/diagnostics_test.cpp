@@ -36,7 +36,6 @@ int main() {
     assert(!recorder.pop(event) && state.queued == 0 && state.sequence == 0);
     static_assert(sizeof(Recorder) < 512, "Performance must not allocate trace storage");
 #endif
-    // Unfinished operations remain visible, independent of ring overflow.
 #ifdef CONFIG_PICO_PAGE_TRACE_EVENTS
     assert(recorder.snapshot().metrics[1].active == 70);
 #endif

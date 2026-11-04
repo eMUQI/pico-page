@@ -36,7 +36,6 @@ void restored(SleepIo& io) {
     assert(io.resume() == ESP_OK && calls == count);
 }
 int gpio_step(int phase, int pin) {
-    // Neither PMU wake GPIO41, touch IRQ43, nor the I2C bus may be pulled down.
     assert(pin != 41 && pin != 43 && pin != 39 && pin != 40);
     gpio_pins[phase].insert(pin);
     return step("gpio" + std::to_string(phase));
@@ -67,7 +66,7 @@ esp_err_t fca9555_set_output(fca9555_handle_t handle, int port, std::uint8_t val
 esp_err_t fca9555_set_config(fca9555_handle_t handle, int port, std::uint8_t value) {
     assert(handle == device && (port == 0 || port == 1));
     if (port == 0) {
-        assert((value & 0x60) == 0x60); // PGOOD and card detect stay inputs.
+        assert((value & 0x60) == 0x60);
         if (!(value & 4)) assert(!(output & 4));
     }
     const auto result = step("config" + std::to_string(port));
@@ -84,11 +83,10 @@ esp_err_t cst836u_set_mode(cst836u_handle_t handle, int mode) {
     return result;
 }
 esp_err_t cst836u_wake(cst836u_handle_t handle) {
-    // The BSP touch reset modifies Port0 using its runtime output cache.
     assert(handle == device && (output & ~0x80) == (original_output & ~0x80) && config == original_config);
     const auto result = step("touch_wake");
     if (result == ESP_OK) { asleep = false; output = original_output; }
-    else if (apply_on_error) output &= ~0x80; // Failed reset may leave TP_RST asserted.
+    else if (apply_on_error) output &= ~0x80;
     return result;
 }
 esp_err_t gpio_sleep_set_direction(gpio_num_t pin, int value) {
@@ -112,10 +110,8 @@ int main() {
         const auto suspend_calls = calls;
         assert(io.suspend(device, !host_off) == ESP_ERR_INVALID_STATE && calls == suspend_calls);
         restored(io);
-        // Repeat with the same instance after wake, and after an aborted attempt.
         assert(io.suspend(device, host_off) == ESP_OK); restored(io);
 
-        // Fail every suspension step, both before and after a write takes effect.
         for (int failure = 0; failure < suspend_calls; ++failure) {
             for (const bool applied : {false, true}) {
                 reset(); SleepIo failing;
@@ -125,8 +121,6 @@ int main() {
                 assert(failing.suspend(device, host_off) == ESP_OK); restored(failing);
             }
         }
-        // Fail each restore write and the touch reset. A retry must use the saved
-        // running snapshot rather than taking the parked registers as its baseline.
         for (int failure = 0; failure < 5; ++failure) {
             for (const bool applied : {false, true}) {
                 reset(); SleepIo failing;
@@ -141,8 +135,6 @@ int main() {
     reset(); SleepIo io;
     sd_busy = true;
     assert(io.suspend(device, false) == ESP_ERR_NOT_FINISHED && calls == 0 && !io.pending());
-    // Terminal power-off retains the existing policy after a TF release failure;
-    // unlike light sleep, it does not switch TF CLK to its sleep configuration.
     assert(io.suspend(device, true) == ESP_OK && gpio_pins[0].empty()); restored(io);
     reset();
     rails_on = true;

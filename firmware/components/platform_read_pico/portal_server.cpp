@@ -29,7 +29,7 @@ std::string upload_token, upload_path;
 std::atomic_bool resolver_running{false};
 std::atomic_bool upload_stopping{true};
 SemaphoreHandle_t resolver_stopped = nullptr;
-std::uint32_t portal_address = 0;  // Network byte order.
+std::uint32_t portal_address = 0;
 
 std::string header(httpd_req_t* request, const char* name, std::size_t limit) {
     const auto size = httpd_req_get_hdr_value_len(request, name);
@@ -45,7 +45,6 @@ int hex(char c) {
     if (c >= 'A' && c <= 'F') return c - 'A' + 10;
     return -1;
 }
-/** A JavaScript string literal that stays inert inside an HTML script element. */
 std::string script_string(const std::string& value) {
     std::string out = "\"";
     for (const char c : value) {
@@ -60,11 +59,6 @@ std::string script_string(const std::string& value) {
     return out + '"';
 }
 
-/**
- * Rejection statuses the transfer page tells apart: 400, 409, 413 and 415 concern only the
- * file named in the request, so the page continues with the next file; any other status stops
- * the batch.
- */
 struct Refusal {
     const char* status;
     const char* message;
@@ -84,7 +78,6 @@ constexpr Refusal interrupted{"500 Internal Server Error", "接收中断或超�
 constexpr Refusal write_failed{"507 Insufficient Storage", "写入失败，请检查 TF 卡空间。"};
 constexpr Refusal commit_failed{"500 Internal Server Error", "保存或校验失败，请在设备上核对后重试。已有同名文件不会被覆盖。"};
 
-/** Where an upload goes, chosen by its lower-case extension; the page lists the same kinds. */
 struct Kind {
     const char* extension;
     const char* directory;
@@ -169,7 +162,6 @@ esp_err_t upload(httpd_req_t* request) {
     std::string error;
     const FileStore store(upload_session.root);
     if (std::strcmp(kind->directory, "LockScreens/") == 0) {
-        // One image over the listing limit would make the device refuse the whole folder.
         std::vector<std::string> images;
         const auto listed = store.lock_screen_files(images, [cancelled] { return cancelled && cancelled->load(); });
         if (cancelled && cancelled->load()) return fail(closed);
@@ -191,8 +183,6 @@ esp_err_t upload(httpd_req_t* request) {
              static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
     char block[2048];
     while (transaction->received() < request->content_len) {
-        // Not reading lets TCP flow control hold the sender for the duration of a panel update.
-        // A stalled sender holds the gate for at most recv_wait_timeout, after which the upload fails.
         while (!presentation_gate.try_network()) {
             if (cancelled && cancelled->load()) return fail(closed);
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -231,7 +221,6 @@ esp_err_t transfer_page(httpd_req_t* request) {
     return httpd_resp_send(request, page.data(), page.size());
 }
 
-// On a joined network the page is reachable only through the address on the device screen.
 esp_err_t address_required(httpd_req_t* request, httpd_err_code_t) {
     static constexpr char page[] =
         "<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\">"
@@ -250,15 +239,9 @@ esp_err_t address_required(httpd_req_t* request, httpd_err_code_t) {
 esp_err_t redirect(httpd_req_t* request, httpd_err_code_t) {
     httpd_resp_set_status(request, "303 See Other");
     httpd_resp_set_hdr(request, "Location", "http://192.168.4.1/");
-    // iOS ignores a redirect without a body.
     return httpd_resp_send(request, "Pico Page", HTTPD_RESP_USE_STRLEN);
 }
 
-/**
- * Answers every DNS A query with the access point address, so that a probe for any host name
- * reaches the setup page. Other query types get an empty answer. The receive timeout bounds
- * how long a stop request waits.
- */
 void resolver(void*) {
     const int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     sockaddr_in local{};
@@ -302,16 +285,12 @@ void resolver(void*) {
     vTaskDelete(nullptr);
 }
 
-/** Starts the HTTP server with the given handlers; access_point adds the name service. */
 bool start_server(const std::vector<httpd_uri_t>& handlers, httpd_err_handler_func_t missing, bool access_point,
                   std::string& error) {
-    // Redirected probes arrive for paths the server does not have; those are expected.
     esp_log_level_set("httpd_uri", ESP_LOG_ERROR);
     esp_log_level_set("httpd_txrx", ESP_LOG_ERROR);
     esp_log_level_set("httpd_parse", ESP_LOG_ERROR);
     httpd_config_t configuration = HTTPD_DEFAULT_CONFIG();
-    // The handler assembles the page with std::string calls; the default 4 KiB stack leaves
-    // little margin for that call depth.
     configuration.stack_size = 8192;
     configuration.max_open_sockets = 3;
     configuration.max_uri_handlers = 3;
@@ -328,8 +307,6 @@ bool start_server(const std::vector<httpd_uri_t>& handlers, httpd_err_handler_fu
     }
     error.clear();
     if (!access_point) return true;
-    // Without the name service the page still answers at its address; only the automatic
-    // sign-in prompt is lost, so a failure here does not fail the session.
     esp_netif_ip_info_t address{};
     auto* access = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
     if (access && esp_netif_get_ip_info(access, &address) == ESP_OK &&
@@ -344,7 +321,7 @@ bool start_server(const std::vector<httpd_uri_t>& handlers, httpd_err_handler_fu
     }
     return true;
 }
-} // namespace
+}
 
 bool start_upload_server(const UploadServer& session, std::string& error) {
     stop_portal_server();
@@ -382,8 +359,7 @@ void stop_portal_server() {
     while (server) {
         const auto result = httpd_stop(server);
         if (result == ESP_OK) { server = nullptr; break; }
-        // A failed stop leaves handlers able to access the caller's session and mutex.
-        // Keep both the handle and borrowed resources alive until the SDK confirms exit.
+        // A failed SDK stop leaves handlers able to access the caller's session and mutex.
         if (!reported) ESP_LOGE("pico_portal", "Server stop failed, retaining session and retrying: %s", esp_err_to_name(result));
         reported = true;
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -393,4 +369,4 @@ void stop_portal_server() {
     upload_path.clear();
 }
 
-} // namespace pico_page::platform
+}

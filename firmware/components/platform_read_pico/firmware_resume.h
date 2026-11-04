@@ -7,7 +7,6 @@
 
 namespace pico_page::platform {
 
-// A response belongs to one HTTP request. Duplicate or malformed ranges remain invalid.
 struct FirmwareRange {
     std::uint32_t first = 0, last = 0, size = 0;
     bool present = false, valid = false;
@@ -37,7 +36,6 @@ struct FirmwareRange {
                 value.empty() && first <= last && last < size;
     }
 
-    // A zero length denotes an unknown/chunked body; the caller still checks the final byte count and digest.
     bool accepts(int status, std::int64_t length, std::uint32_t offset, std::uint32_t expected_size) const {
         if (offset >= expected_size || length < 0 || (length > 0 && length != expected_size - offset)) return false;
         if (!offset) return status == 200 && !present;
@@ -45,7 +43,6 @@ struct FirmwareRange {
     }
 };
 
-// One operation shares a reconnect budget and an absolute monotonic deadline, including probe and erasure.
 class FirmwareRecovery {
 public:
     static constexpr std::int64_t idle_us = 30'000'000;
@@ -67,4 +64,4 @@ private:
     unsigned reconnects_ = 0;
 };
 
-} // namespace pico_page::platform
+}

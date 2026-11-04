@@ -28,7 +28,8 @@ struct Event {
  * A held input never repeats. Read failures cancel an active touch sequence.
  * Sampling continues while the application task is blocked, except during flash exclusion
  * or sleep. Sampling cadence and controller synchronization belong to the provider.
- * Events are returned here in order with their sample time.
+ * Queued touch and auxiliary-key events carry their sample time. Power and card events
+ * take priority over queued input and have no sample timestamp. False leaves event empty.
  */
 bool poll(Event& event, std::string& error);
 
@@ -42,4 +43,4 @@ void wait_for_input(std::uint32_t timeout_ms);
 /** True when the next waiting touch or key event was sampled before time_us. */
 bool input_waiting_before(std::int64_t time_us);
 
-} // namespace pico_page::platform
+}

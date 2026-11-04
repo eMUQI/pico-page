@@ -1,4 +1,3 @@
-"""Verify that COS publication preserves immutable images and does not bypass a closed bucket."""
 import io
 import json
 from pathlib import Path

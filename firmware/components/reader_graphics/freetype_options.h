@@ -1,7 +1,6 @@
 #pragma once
 #include <freetype/config/ftoption.h>
 
-/* Card fonts are uncompressed outline files; external image/codecs are unused. */
 #undef FT_CONFIG_OPTION_USE_ZLIB
 #undef FT_CONFIG_OPTION_USE_BZIP2
 #undef FT_CONFIG_OPTION_USE_PNG

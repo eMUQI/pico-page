@@ -44,10 +44,11 @@ std::int64_t transfer_activity = 0;
 std::uint32_t reply_failures = 0;
 std::int64_t reply_deadline_us = 0;
 
-// A complete metrics or trace response shares one 20 ms transport budget.
-struct ExportBudget {
-    ExportBudget() { reply_deadline_us = esp_timer_get_time() + 20000; }
-    ~ExportBudget() { reply_deadline_us = 0; }
+constexpr std::int64_t diagnostic_export_budget_us = 20'000;
+
+struct DiagnosticExportBudget {
+    DiagnosticExportBudget() { reply_deadline_us = esp_timer_get_time() + diagnostic_export_budget_us; }
+    ~DiagnosticExportBudget() { reply_deadline_us = 0; }
 };
 
 void send_line(TickType_t wait, const char *format, std::va_list arguments) {
@@ -73,7 +74,6 @@ void reply(const char *format, ...) {
 
 void notify(const char *format, ...) __attribute__((format(printf, 1, 2)));
 void notify(const char *format, ...) {
-    // Unsolicited diagnostics must not stall input or progress saving when no host reads USB.
     std::va_list arguments;
     va_start(arguments, format);
     send_line(0, format, arguments);
@@ -176,7 +176,6 @@ void status(std::uint32_t id, const ReaderApp &app, bool card_available) {
     const auto battery = platform::battery();
     const auto crc = esp_rom_crc32_le(0, pixels.data(), pixels.size());
     const auto revision = app.saved_record() ? app.saved_record()->local_revision : 0;
-    // Identity of the saved source position without printing the resource path or any text.
     std::uint32_t anchor = 0;
     if (const auto &record = app.saved_record()) {
         const auto &position = record->anchor;
@@ -285,7 +284,7 @@ void list(std::uint32_t id, const char *root, std::string_view arguments) {
 
 #ifdef CONFIG_PICO_PAGE_PERF_METRICS
 void metrics(std::uint32_t id) {
-    ExportBudget budget;
+    DiagnosticExportBudget budget;
     const auto snapshot = diagnostics::snapshot();
     for (unsigned i = 0; i < snapshot.metrics.size(); ++i) {
         const auto& m = snapshot.metrics[i];
@@ -302,9 +301,8 @@ void metrics(std::uint32_t id) {
 #endif
 #ifdef CONFIG_PICO_PAGE_TRACE_EVENTS
 void trace(std::uint32_t id) {
-    ExportBudget budget;
+    DiagnosticExportBudget budget;
     diagnostics::Event event;
-    // Bounded response; export runs on the console owner, outside recorder critical sections.
     for (unsigned i = 0; i < 8 && diagnostics::pop(event); ++i) {
         reply("PP %lu ENTRY seq=%llu time_us=%llu op=%llu duration_us=%llu task=%lu kind=%u begin=%d result=%u "
               "session=%llu layout=%llu frame=%llu request=%llu detail=%lu\n",
@@ -551,7 +549,6 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
         event.event.phase = Phase::End;
         app.input(event);
     } else if (word == "press" || word == "release") {
-        // A continuous contact as from the touch sampler: press begins a long press, release ends it.
         static std::uint64_t contact = 0;
         std::string_view first, second, extra;
         AppInput event{{0, word == "press" ? Phase::Begin : Phase::End, Input::TouchCenter}, true, 0, 0, false, word == "press"};
@@ -563,7 +560,6 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
             return;
         }
         if (word == "press") {
-            // The router still owns an unreleased contact; replacing it would strand that sequence.
             if (contact) { error(id, "contact_active"); return; }
             if (sequence == std::numeric_limits<std::uint64_t>::max()) { error(id, "sequence_exhausted"); return; }
             contact = ++sequence;
@@ -577,7 +573,7 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
     }
     reply("PP %lu OK accepted pending=%d\n", static_cast<unsigned long>(id), !!app.pending_frame());
 }
-} // namespace
+}
 
 bool initialize(std::string &error_message) {
     error_message.clear();
@@ -639,19 +635,20 @@ bool poll(ReaderApp &app, const char *card_root, std::uint64_t &input_sequence,
                 transfer.reset();
                 error(0, "invalid_or_oversized_line");
             }
-            bool activity = false;
+            bool resets_idle_timer = false;
             if (!discard && used) {
-                std::string_view request(line.data(), used), word;
-                token(request, word); // PP
-                token(request, word); // request ID
-                token(request, word); // command
-                activity = word != "status" && word != "metrics" && word != "trace" && word != "trace_start" && word != "trace_stop" &&
-                           word != "screen" && word != "ls" && word != "file" && word != "file_head";
+                std::string_view request(line.data(), used), header_field, command;
+                token(request, header_field);
+                token(request, header_field);
+                token(request, command);
+                resets_idle_timer = command != "status" && command != "metrics" && command != "trace" &&
+                                    command != "trace_start" && command != "trace_stop" && command != "screen" &&
+                                    command != "ls" && command != "file" && command != "file_head";
                 execute(app, card_root, input_sequence, actions_allowed, input_allowed);
             }
             used = 0;
             discard = false;
-            return activity;
+            return resets_idle_timer;
         }
         if (static_cast<unsigned char>(ch) < 0x20 || ch == 0x7f || used == line.size())
             discard = true;
@@ -676,7 +673,7 @@ void frame_completed(const Frame &frame, bool success) {
           static_cast<unsigned long long>(frame_number), success, static_cast<int>(frame.purpose),
           frame.refresh == RefreshIntent::FullClean);
 }
-} // namespace pico_page::console
+}
 #else
 namespace pico_page::console {
 bool initialize(std::string &error) {
@@ -691,5 +688,5 @@ void frame_completed(const Frame &, bool) {}
 bool transfer_active() {
     return false;
 }
-} // namespace pico_page::console
+}
 #endif

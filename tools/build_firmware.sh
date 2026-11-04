@@ -7,7 +7,6 @@ mode=${1:-}
 case "$mode" in
     "") ;;
     release|performance|diagnostic|stages)
-        # Separate generated config and build tree; never reuse a developer's sdkconfig.
         mkdir -p "$repo_root/build/firmware-$mode"
         ;;
     *) printf '%s\n' "Usage: $0 [release|performance|diagnostic|stages]" >&2; exit 2 ;;

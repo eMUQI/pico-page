@@ -13,7 +13,6 @@ namespace {
 constexpr std::size_t limit = 2U * 1024 * 1024;
 constexpr char version[] = "content-reading-v4";
 bool room(std::size_t bytes) {
-    // The document allocator keeps its existing reserve in addition to this allocation.
     const bool admitted = bytes <= limit && chapter_memory_available(bytes + 64);
 #if defined(ESP_PLATFORM) && defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
     if (!admitted) ESP_LOGI("chapter_cache", "budget_rejected bytes=%u free=%u largest=%u",
@@ -62,7 +61,6 @@ struct Reader {
     bool flag() { const auto n = word(); if (n > 1) okay = false; return n != 0; }
     Anchor anchor() { Anchor a; a.resource = str(); a.node = str(); a.offset = word(); return a; }
     bool range(std::uint32_t begin, std::uint32_t end, std::size_t size) {
-        // A stripped trailing paragraph separator can leave a block end one past text.size().
         return begin <= end && end <= size + 1;
     }
 };
@@ -189,7 +187,6 @@ bool load(const FileStore& store, const EpubDocument& doc, std::size_t index, st
 void save_missing(const FileStore& store, const EpubDocument& doc, std::size_t index,
                   const Chapter& chapter, const std::function<bool()>& stop) {
     std::unique_ptr<CacheReader> reader;
-    // Presence only suppresses an optional write; every later cache read validates the payload.
     if (store.open_cache(key(doc.metadata().book_id, index, chapter.part), limit, reader) == StoreStatus::Ok) return;
     save(store, doc, index, chapter, stop);
 }
@@ -268,7 +265,6 @@ bool find_content(const FileStore& store, EpubDocument& doc, std::size_t index, 
     }
     const auto select = [&](const Chapter& completed) {
         const bool selected = match(completed);
-        // Restore searches need the prefix parts to reach a cached target without reparsing.
         if (deferred && !selected && completed.part >= cached_prefix && detail == ChapterLoad::Reading && !(stop && stop()))
             save(store, doc, index, completed, stop);
         return selected;
@@ -279,4 +275,4 @@ bool find_content(const FileStore& store, EpubDocument& doc, std::size_t index, 
     if (loaded && deferred && detail == ChapterLoad::Reading) *deferred = prepare(doc, index, chapter, stop);
     return loaded;
 }
-} // namespace pico_page
+}

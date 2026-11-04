@@ -18,11 +18,10 @@
  
 --- a/src/render.c
 +++ b/src/render.c
-@@ -42,6 +42,15 @@
+@@ -42,6 +42,14 @@
      } while (0)
  
  static RenderContext_t render_context;
-+/* Pico Page: bounded row-phase override adapted from kiikoread; single display owner. */
 +static const uint8_t* const* page_phase_luts;
 +static const int8_t* page_line_phase;
 +static unsigned page_phase_count;
@@ -34,7 +33,7 @@
  
  void epd_push_pixels(EpdRect area, short time, int color) {
      render_context.area = area;
-@@ -244,6 +253,12 @@
+@@ -244,6 +252,12 @@
          return EPD_DRAW_LOOKUP_NOT_IMPLEMENTED;
      }
  
@@ -47,7 +46,7 @@
      render_context.area = area;
      render_context.crop_to = crop_to;
      render_context.waveform_range = waveform_range;
-@@ -292,6 +307,10 @@
+@@ -292,6 +306,10 @@
      );
  
      lcd_do_update(&render_context);
@@ -60,11 +59,10 @@
          ESP_LOGE("epdiy", "underrun invalid=%u empty=%u short=%u first_empty=%d phase=%d consumed=%d total=%d prepared=%d",
 --- a/src/output_common/render_context.h
 +++ b/src/output_common/render_context.h
-@@ -67,6 +67,10 @@
+@@ -67,6 +67,9 @@
  
      /// LUT lookup function. Must not be NULL.
      lut_func_t lut_lookup_func;
-+    /* Pico Page: immutable row-phase data borrowed for one synchronous draw. */
 +    const uint8_t* const* phase_luts;
 +    const int8_t* line_phase;
 +    unsigned phase_count;
@@ -73,12 +71,11 @@
  
 --- a/src/output_lcd/render_lcd.c
 +++ b/src/output_lcd/render_lcd.c
-@@ -276,7 +276,16 @@
+@@ -276,7 +276,15 @@
              buf = lq_current(lq);
          }
  
 -        ctx->lut_lookup_func(lp, buf, ctx->conversion_lut, ctx->display_width);
-+        /* Pico Page: inactive bands remain undriven; active rows use their own GL16 phase. */
 +        if (ctx->phase_luts && ctx->line_phase && l < ctx->display_height) {
 +            const int phase = ctx->line_phase[l];
 +            if (phase < 0 || (unsigned)phase >= ctx->phase_count)

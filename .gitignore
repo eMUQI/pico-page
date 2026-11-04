@@ -1,4 +1,3 @@
-# Build products and local experiments
 build/
 .pio/
 __pycache__/
@@ -6,30 +5,22 @@ __pycache__/
 .DS_Store
 .vscode/
 .idea/
-# ESP-IDF generated/local files: pin intentional defaults and dependency locks separately
 firmware/sdkconfig
 firmware/sdkconfig.old
 firmware/managed_components/
-# Personal media, credentials, flash backups, device traces
 local/
 private/
 .local/
-# Temporary captures; documentation images belong in docs/images/.
 artifacts/
 .env
 .env.*
 !.env.example
 *.flash-backup.bin
-# Test fixtures should be synthetic/licensed; do not globally ignore all EPUB or BIN.
-# Do not ignore dependencies.lock or third-party source/license records by default.
 
-# Per-device network and synchronization credentials
 **/network.toml
 **/sync.toml
 
-# Website build output
 /web/node_modules/
 /web/dist/
-# Fetched from the newest release by the website build; never committed.
 /web/public/firmware/
 /web/.astro/

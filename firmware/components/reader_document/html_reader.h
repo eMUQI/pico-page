@@ -8,10 +8,6 @@
 #include <vector>
 
 namespace pico_page {
-/** Converts explicitly declared HTML body resources into bounded, balanced XML tokens.
- * Package and navigation XML bypass this adapter. The output has local anchor semantics;
- * HTML tree repair does not establish a compatible KOReader source tree.
- */
 class HtmlReader {
 public:
     explicit HtmlReader(std::size_t prefix_bytes = 0) : prefix_remaining_(prefix_bytes) {}
@@ -37,7 +33,6 @@ public:
             const auto count = std::min(prefix_remaining_, pending_.size());
             const auto prefix = pending_.substr(0, count);
             pending_.erase(0, count); prefix_remaining_ -= count;
-            // Previously completed XML events retain their original tree and text-node boundaries.
             if (!emit(prefix)) return false;
         }
         if (prefix_remaining_) return !final || fail("Truncated HTML source prefix");
@@ -210,7 +205,6 @@ private:
                 content = value.substr(text, at - text);
                 if (quote) { if (at == value.size()) return fail("Unterminated HTML attribute"); ++at; }
             }
-            // The XML callback applies the image URI policy to the decoded attribute value.
             const auto value_limit = name == "img" && attribute == "src" ? kTokenLimit : 8192;
             if (attribute.size() > 2048 || content.size() > value_limit || attributes.size() >= 64) return fail("HTML attribute limit exceeded");
             if (attribute.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789:_-") == std::string::npos && attributes.insert(attribute).second)
@@ -227,4 +221,4 @@ private:
         return true;
     }
 };
-} // namespace pico_page
+}

@@ -228,7 +228,6 @@ int main(int argc, char** argv) {
         assert(indexed.open(directory + "zip-index-paths.epub", error));
         assert(indexed.spine().size() == 4);
 #ifdef PICO_PAGE_WRAP_CALLOC_TEST
-        // This fixture has seven ZIP members; each index record is two uint32_t values.
         fail_zip_index = true;
         assert(!indexed.open(directory + "zip-index-paths.epub", error));
         assert(!fail_zip_index && error == "ZIP index allocation failed" && indexed.spine().empty());
@@ -310,7 +309,6 @@ int main(int argc, char** argv) {
         for (std::size_t i = 0; i < large.spine().size(); ++i)
             assert(reversed.spine()[i].resource == large.spine()[i].resource && reversed.spine()[i].bytes == large.spine()[i].bytes);
         assert(reversed.load_chapter(2999, last, error) && last.text == U"正文 2999");
-        // The last cancellation checks occur while reading the final NCX chunks.
         EpubDocument cancelled;
         unsigned cancelling_checks = 0;
         assert(checks > 4 && !cancelled.open(path, error, [&] { return ++cancelling_checks == checks - 2; }));
@@ -377,8 +375,6 @@ int main(int argc, char** argv) {
     assert(!second.offset_for(non_bmp, note));
     assert(!book.load_chapter(2, second, error) && second.text.empty());
     {
-        // A parse that would leave too little free memory stops with the memory error and
-        // releases the chapter; the same load succeeds once memory is available again.
         static std::size_t allowance;
         allowance = 100;
         set_chapter_memory_probe([](std::size_t bytes) { return bytes <= allowance; });
@@ -396,9 +392,6 @@ int main(int argc, char** argv) {
         assert(book.load_chapter(0, limited, error) && limited.text == first.text);
     }
     {
-        // A long chapter is read in parts that end at block boundaries. Joined, the parts give
-        // the whole text; every scalar keeps its source anchor, and a part can be found by an
-        // anchor or a fragment inside it.
         const std::string fixture = argv[1];
         EpubDocument long_book;
         assert(long_book.open(fixture.substr(0, fixture.rfind('/') + 1) + "multi-part.epub", error));
@@ -415,7 +408,6 @@ int main(int argc, char** argv) {
             Chapter piece;
             do {
                 assert(long_book.load_chapter(0, piece, error, detail, count) && piece.part == count && !piece.split_node);
-                // A part closes at the block that reaches the threshold; its final separator is dropped.
                 assert(piece.text.size() + 1 >= kChapterPartScalars || piece.last_part);
                 assert(piece.text.size() < kChapterPartScalars + 64 && piece.text.back() != U'\n');
                 if (detail == ChapterLoad::Mapping) assert(piece.source_nodes.size() == piece.runs.size());
@@ -455,7 +447,6 @@ int main(int argc, char** argv) {
         }));
         assert(found.part == 2 && found.fragment_offset("late", offset) && found.text.compare(offset, 6, U"第4500段") == 0);
         assert(!long_book.find_chapter_part(0, found, error, ChapterLoad::Reading, [](const Chapter&) { return false; }));
-        // A single block longer than a part is divided inside the block.
         EpubDocument block_book;
         assert(block_book.open(argv[3], error));
         assert(block_book.load_chapter(1, found, error, ChapterLoad::Reading) && found.split_node && !found.last_part);
@@ -463,8 +454,6 @@ int main(int argc, char** argv) {
         assert(block_book.load_chapter(1, middle, error, ChapterLoad::Reading, kLastChapterPart) && middle.part == 1 && middle.split_node);
         assert(found.text.size() + middle.text.size() == 200001);
     }
-    // A layout-only load fails or succeeds like a full load and paginates identically: the same
-    // text, blocks, images and run boundaries, with no source strings kept.
     for (int argument = 1; argument < argc; ++argument) {
         EpubDocument source;
         if (!source.open(argv[argument], error)) continue;
@@ -473,7 +462,6 @@ int main(int argc, char** argv) {
             std::string full_error, layout_error;
             const bool loaded = source.load_chapter(index, full, full_error);
             assert(source.load_chapter(index, layout, layout_error, ChapterLoad::Layout) == loaded && layout_error == full_error);
-            // A reading load differs from a full one only in the mapping data it leaves empty.
             Chapter reading;
             std::string reading_error;
             assert(source.load_chapter(index, reading, reading_error, ChapterLoad::Reading) == loaded && reading_error == full_error);
@@ -525,7 +513,6 @@ int main(int argc, char** argv) {
         assert(styled.load_chapter(0, first, error));
         assert(first.text.find(U"正文保留 内联") != std::u32string::npos);
         assert(first.text.find(U"[图片：示例图片]") != std::u32string::npos);
-        // An image is reported as a placeholder warning and stays inside the mapping profile.
         assert(!first.warnings.empty() && first.plain_dom);
         const auto image = static_cast<std::uint32_t>(first.text.find(U"[图片：示例图片]"));
         Anchor element;
@@ -645,8 +632,6 @@ int main(int argc, char** argv) {
                                           [&](const Chapter& part) { std::uint32_t offset = 0; return part.offset_for(saved, offset); }));
         assert(restored.part == 1);
         {
-            // A character that crosses the last 48 KiB boundary belongs to the preceding part,
-            // which is then the final one; no empty part follows it.
             const auto path = directory + "boundary.txt";
             std::ofstream(path, std::ios::binary) << std::string(kTxtPartBytes - 2, 'a') << "\xf0\x9f\x98\x80";
             EpubDocument crossing;
@@ -797,7 +782,6 @@ int main(int argc, char** argv) {
             if (part.last_part) break;
         }
         assert(fallback_scalars == std::u32string(U"连续解析保留正文与源位置。\n").size() * 12000);
-        // The integrated API falls back on bounded-stream rejection without changing valid text.
         Chapter ordinary;
         assert(large_token.load_chapter(0, ordinary, error, ChapterLoad::Reading, 1));
         assert(large_token.load_chapter(0, part, error, ChapterLoad::Reading, 1, {}, {}, true));

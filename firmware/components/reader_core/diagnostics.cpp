@@ -97,5 +97,5 @@ bool pop(Event& event) { Lock lock; return recorder.pop(event); }
 void start() { Lock lock; recorder.start(); }
 void stop() { Lock lock; recorder.stop(); }
 #endif
-} // namespace pico_page::diagnostics
+}
 #endif

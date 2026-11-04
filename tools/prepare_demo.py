@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Prepare a local demonstration card without overwriting existing user files."""
 import sys
 from pathlib import Path
 

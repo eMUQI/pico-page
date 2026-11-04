@@ -9,7 +9,6 @@ from make_epub_fixture import fixture_entries, write_fixture
 
 
 def large_epub_entries(chapters: int) -> dict[str, str | bytes]:
-    """Original 100-chapter volumes; one parent plus 100 child entries per volume."""
     assert chapters in (300, 3000)
     large = {name: value for name, value in fixture_entries().items()
              if name in ("mimetype", "META-INF/container.xml")}
@@ -27,7 +26,6 @@ def large_epub_entries(chapters: int) -> dict[str, str | bytes]:
             large[f'EPUB/chapter{chapter}.xhtml'] = (
                 f'<html xmlns="http://www.w3.org/1999/xhtml"><body><p id="body">正文 {chapter}</p></body></html>')
         points.append('</navPoint>')
-    # The spine precedes the manifest to exercise order-independent OPF collection.
     large['EPUB/package.opf'] = '<package><spine>' + spine + '</spine><manifest>' + manifest + '</manifest></package>'
     large['EPUB/toc.ncx'] = '<ncx><navMap>' + ''.join(points) + '</navMap></ncx>'
     return large
@@ -187,7 +185,6 @@ def generate(directory: Path) -> None:
     damaged.write_bytes(damaged.read_bytes().replace(b"application/epub+zip", b"application/epub+ziX", 1))
     with zipfile.ZipFile(directory / "valid.epub") as archive:
         central = archive.start_dir
-    # Mark the first entry (mimetype) as a DOS directory while retaining its nonzero size.
     data = bytearray((directory / "valid.epub").read_bytes())
     struct.pack_into("<I", data, central + 38, 0x10)
     (directory / "mimetype-directory.epub").write_bytes(data)
@@ -298,7 +295,6 @@ def generate(directory: Path) -> None:
     nul_names["EPUB/Chapter.xhtml!bad"] = nul_names.pop("EPUB/Chapter.xhtml")
     nul_path = directory / "zip-index-nul.epub"
     write_fixture(nul_path, nul_names)
-    # Preserve ZIP name lengths while inserting NUL into both local and central headers.
     nul_path.write_bytes(nul_path.read_bytes().replace(b"EPUB/Chapter.xhtml!bad", b"EPUB/Chapter.xhtml\x00bad"))
     (directory / "malformed.epub").write_bytes(b"This is not a ZIP archive.")
     entries = fixture_entries()
@@ -372,28 +368,21 @@ def generate(directory: Path) -> None:
     write_fixture(directory / "complex-svg-cover.epub", entries)
     entries["EPUB/chapter1.xhtml"] = '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>图片前的正文。</p><img src="cover.png" alt="真实图片"/><p>图片后的正文。</p><img src="missing.png" alt="缺失图片"/><p>末尾正文。</p></body></html>'
     write_fixture(directory / "image-flow.epub", entries)
-    # 2000 blocks of 30 scalars each, separator included, end the first part exactly at its
-    # limit, so the image after them is the first content of the second part.
     boundary = dict(entries)
     boundary["EPUB/chapter1.xhtml"] = ('<html xmlns="http://www.w3.org/1999/xhtml"><body>' + "".join(
         f"<p>{number:04d}这一段文字用于把第一个分段正好填满到分段上限为止。</p>" for number in range(2000)) +
         '<img src="cover.png" alt="分段首图"/><p>图片之后的正文。</p></body></html>')
     write_fixture(directory / "part-boundary-image.epub", boundary)
-    # CSS that removes elements from the layout: the first chapter hides its image, the second
-    # only changes how its image is displayed.
     hidden = dict(entries)
     hidden["EPUB/chapter1.xhtml"] = ('<html xmlns="http://www.w3.org/1999/xhtml"><body><p>隐藏图片之前的正文。</p>'
                                      '<img src="cover.png" alt="隐藏图片" style="display:none"/><p>隐藏图片之后的正文。</p></body></html>')
     hidden["EPUB/chapter2.xhtml"] = ('<html xmlns="http://www.w3.org/1999/xhtml"><body><p>块级图片之前的正文。</p>'
                                      '<img src="cover.png" alt="块级图片" style="display: block"/><p>块级图片之后的正文。</p></body></html>')
     write_fixture(directory / "hidden-image.epub", hidden)
-    # A table keeps its whole chapter outside the exact KOReader position mapping.
     table = fixture_entries()
     table["EPUB/chapter1.xhtml"] = ('<html xmlns="http://www.w3.org/1999/xhtml"><body><p>表格之前的正文。</p>'
                                     '<table><tr><td>单元格</td></tr></table><p>表格之后的正文。</p></body></html>')
     write_fixture(directory / "table-chapter.epub", table)
-    # Image and rule placements for the KOReader position mapping; the reference engine check
-    # reads the same file. Block containers mix images with paragraphs and bare text on purpose.
     placements = dict(entries)
     placements["EPUB/chapter1.xhtml"] = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><title>图片</title></head><body>
 <h1>图片与正文</h1>
@@ -443,7 +432,6 @@ def generate(directory: Path) -> None:
     entries["EPUB/chapter1.xhtml"] = entries["EPUB/chapter1.xhtml"].replace("<p>第0段", '<p><a href="#late">后段</a>第0段', 1)
     write_fixture(directory / "multi-part-link.epub", entries)
 
-    # Mixed event boundaries exercise resumable XML, including text split inside one callback.
     streaming = fixture_entries()
     streaming["EPUB/chapter1.xhtml"] = ('<html><body><p>' +
         ('甲😀 &amp; &#x4e59;\r\n' * 30000) + '</p>' + ''.join(

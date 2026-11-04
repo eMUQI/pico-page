@@ -16,14 +16,13 @@ DEFAULT_TEXT = (
     "：，。！？（）【】《》、；—…“”‘’「」·－＋←→↑↓％"
 )
 FONTS = ROOT / "firmware/components/reader_graphics/fonts"
-# Body-text symbols outside the character lists. Code points the source font lacks are skipped.
 SYMBOL_RANGES = (
-    (0x00A0, 0x017F),  # Latin-1 Supplement and Latin Extended-A
-    (0x01CD, 0x01DC),  # Pinyin tone vowels
-    (0x2000, 0x206F),  # General Punctuation
-    (0x2460, 0x2473),  # Circled numbers used as note markers
-    (0x3000, 0x303F),  # CJK Symbols and Punctuation
-    (0xFF00, 0xFFEF),  # Halfwidth and Fullwidth Forms
+    (0x00A0, 0x017F),
+    (0x01CD, 0x01DC),
+    (0x2000, 0x206F),
+    (0x2460, 0x2473),
+    (0x3000, 0x303F),
+    (0xFF00, 0xFFEF),
 )
 
 
@@ -39,7 +38,6 @@ def main():
         raise ValueError("common_characters.txt must hold exactly 3,500 distinct characters")
     text += common
     for path in args.strings:
-        # C++ identifiers and syntax add only ASCII, which the subset already holds.
         text += path.read_text(encoding="utf-8")
     font = TTFont(args.font, recalcTimestamp=False)
     requested = set(map(ord, text)) - set(range(32))
@@ -50,7 +48,6 @@ def main():
     requested |= {c for first, last in SYMBOL_RANGES for c in range(first, last + 1)} & available
     options = subset.Options()
     options.layout_features = []
-    # Characters outside the subset must draw as a visible box, not as blank space.
     options.notdef_outline = True
     options.name_IDs = [0, 1, 2, 3, 4, 5, 6, 13, 14]
     options.name_legacy = True
