@@ -61,6 +61,7 @@
 | 了解结构和设计取舍 | [架构](development/architecture.md) · [产品决定](planning/decisions.md) · [调研参考](planning/references.md) |
 | 修改固件或共享组件 | [仓库规则](../AGENTS.md) · [嵌入式开发规则](development/embedded-development.md) · [验收清单](development/acceptance.md) |
 | 定位具体实现 | [文档解析](development/document-runtime.md) · [字体与分页](development/graphics-runtime.md) · [图片](development/image-runtime.md) · [存储](development/store-implementation.md) · [界面](development/ui-implementation.md) · [平台](development/platform-runtime.md) |
+| EPUB 原书样式原型 | [支持契约与接入建议](development/css-style-prototype.md) · [调研与测量边界](development/baselines/2026-11-04-css-prototype.md) |
 | 样本与兼容探针 | [公开 EPUB](development/public-books.md) · [EPUB/KOSync 探针](development/epub-kosync-probe.md) |
 | 设备诊断 | [诊断接口](development/console-runtime.md) · [诊断工作台](development/diagnostic-workbench.md) |
 | 周期性版本测试与历史对比 | [测试基准](development/testing-baselines.md) |
