@@ -31,15 +31,20 @@ struct Measurement {
     int64_t phase_start = 0, last_check = 0, last_yield = 0, max_gap_us = 0;
     int64_t parse_us = 0, match_us = 0, cascade_us = 0;
     size_t minimum_largest_internal = SIZE_MAX, minimum_largest_psram = SIZE_MAX;
-    void sample(int64_t now) {
+    void check_interval(int64_t now) {
         if (last_check) max_gap_us = std::max(max_gap_us, now - last_check);
+        last_check = now;
+    }
+    void sample_resources(int64_t now) {
         minimum_largest_internal = std::min(minimum_largest_internal, heap_caps_get_largest_free_block(internal_caps));
         minimum_largest_psram = std::min(minimum_largest_psram, heap_caps_get_largest_free_block(psram_caps));
         if (now - last_yield >= 2000) { vTaskDelay(1); last_yield = esp_timer_get_time(); }
-        last_check = now;
     }
     static bool checkpoint(void* opaque) {
-        static_cast<Measurement*>(opaque)->sample(esp_timer_get_time());
+        auto& self = *static_cast<Measurement*>(opaque);
+        const auto now = esp_timer_get_time();
+        self.check_interval(now);
+        self.sample_resources(now);
         return false;
     }
     static void changed(void* opaque, Phase next) {
@@ -49,7 +54,7 @@ struct Measurement {
         if (self.phase == Phase::Parse) self.parse_us += elapsed;
         if (self.phase == Phase::Match) self.match_us += elapsed;
         if (self.phase == Phase::Cascade) self.cascade_us += elapsed;
-        self.sample(now);
+        self.sample_resources(now);
         self.phase = next;
         self.phase_start = esp_timer_get_time();
     }
@@ -76,9 +81,12 @@ void run(void*) {
                 std::printf("CSS_BENCH heap_monitor_failed\n"); vTaskDelete(nullptr);
             }
             Measurement measurement;
-            measurement.sample(esp_timer_get_time());
+            measurement.sample_resources(esp_timer_get_time());
+            const auto internal_before = heap_caps_get_free_size(internal_caps);
+            const auto psram_before = heap_caps_get_free_size(psram_caps);
             const Checkpoint checkpoint{Measurement::checkpoint, &measurement, Measurement::changed};
             const auto allocation_start = esp_timer_get_time();
+            measurement.check_interval(allocation_start);
             StyleSheet sheet;
             const auto allocation_us = esp_timer_get_time() - allocation_start;
             const auto parsed = sheet.append(input.css, checkpoint);
@@ -89,13 +97,15 @@ void run(void*) {
                 computed = sheet.compute(nodes[i], parent < 0 ? nullptr : &styles[parent], {}, input.elements[i].inline_style, budget, styles[i], checkpoint);
                 if (computed != Result::Complete) break;
             }
+            measurement.check_interval(esp_timer_get_time());
             const auto internal_low = heap_caps_get_minimum_free_size(internal_caps);
             const auto psram_low = heap_caps_get_minimum_free_size(psram_caps);
             heap_caps_monitor_local_minimum_free_size_stop();
-            std::printf("CSS_BENCH sample=%u repeat=%u bytes=%u elements=%u parse_result=%u compute_result=%u work=%lu allocated_bytes=%u internal_low_bytes=%u psram_low_bytes=%u internal_largest_low_bytes=%u psram_largest_low_bytes=%u stack_low_bytes=%u\n",
+            std::printf("CSS_BENCH sample=%u repeat=%u bytes=%u elements=%u parse_result=%u compute_result=%u work=%lu allocated_bytes=%u internal_before_bytes=%u psram_before_bytes=%u internal_low_bytes=%u psram_low_bytes=%u internal_largest_low_bytes=%u psram_largest_low_bytes=%u stack_low_bytes=%u\n",
                 static_cast<unsigned>(sample), repeat, static_cast<unsigned>(input.css.size()), static_cast<unsigned>(input.count),
                 static_cast<unsigned>(parsed), static_cast<unsigned>(computed), static_cast<unsigned long>(budget.work),
-                static_cast<unsigned>(sheet.report().allocated_bytes), static_cast<unsigned>(internal_low), static_cast<unsigned>(psram_low),
+                static_cast<unsigned>(sheet.report().allocated_bytes), static_cast<unsigned>(internal_before),
+                static_cast<unsigned>(psram_before), static_cast<unsigned>(internal_low), static_cast<unsigned>(psram_low),
                 static_cast<unsigned>(measurement.minimum_largest_internal), static_cast<unsigned>(measurement.minimum_largest_psram),
                 static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
             metric("css_allocate", allocation_us); metric("css_parse", measurement.parse_us);
@@ -109,6 +119,8 @@ void run(void*) {
 }
 } // namespace
 extern "C" void app_main() {
+    // Allow the host to reopen the console after the application reset.
+    vTaskDelay(pdMS_TO_TICKS(3000));
     if (xTaskCreate(run, "css_bench", content_stack_bytes, nullptr, 1, nullptr) != pdPASS)
         std::printf("CSS_BENCH task_create_failed\n");
 }
