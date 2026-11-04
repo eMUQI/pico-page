@@ -78,7 +78,7 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
     }
     if (!(book ? allowed_fields(table, {"schema_version", "reader", "display"}, "", diagnostic)
                : allowed_fields(table, {"schema_version", "reader", "display", "library", "power", "network", "dictionary", "onboarding"}, "", diagnostic)) ||
-        !allowed_fields(toml_get(table, "reader"), {"font", "font_weight", "font_size_px", "line_height", "margin_x_px", "paragraph_gap_lines", "indent_chars", "original_epub"}, "reader", diagnostic) ||
+        !allowed_fields(toml_get(table, "reader"), {"font", "font_weight", "font_size_px", "line_height", "margin_x_px", "paragraph_gap_lines", "indent_chars", "fullscreen_reading", "original_epub"}, "reader", diagnostic) ||
         !allowed_fields(toml_get(table, "display"), {"refresh_preset", "balanced_full_refresh_pages", "fast_full_refresh_pages"}, "display", diagnostic) ||
         !allowed_fields(toml_get(table, "library"), {"roots", "view", "sort", "folders"}, "library", diagnostic) ||
         !allowed_fields(toml_get(table, "dictionary"), {"enabled"}, "dictionary", diagnostic) ||
@@ -97,6 +97,14 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
         diagnostic.detail = "expected light, regular, medium or bold";
         if (!string_value(value, settings.font_weight) ||
             (settings.font_weight != "light" && settings.font_weight != "regular" && settings.font_weight != "medium" && settings.font_weight != "bold")) return false;
+    }
+
+    value = toml_seek(table, "reader.fullscreen_reading");
+    if (value.type != TOML_UNKNOWN) {
+        diagnostic.field = "reader.fullscreen_reading";
+        diagnostic.detail = "expected a boolean";
+        if (value.type != TOML_BOOLEAN) return false;
+        settings.fullscreen_reading = value.u.boolean;
     }
 
     value = toml_seek(table, "reader.original_epub");
@@ -297,6 +305,7 @@ SettingValues setting_values(const ReaderSettings& values, bool global = false) 
             {"reader.margin_x_px", std::to_string(values.margin_x_px)},
             {"reader.paragraph_gap_lines", number(values.paragraph_gap_lines)},
             {"reader.indent_chars", std::to_string(values.indent_chars)},
+            {"reader.fullscreen_reading", values.fullscreen_reading ? "true" : "false"},
             {"display.refresh_preset", quoted(values.refresh_preset)},
             {"display.balanced_full_refresh_pages", std::to_string(values.balanced_full_refresh_pages)},
             {"display.fast_full_refresh_pages", std::to_string(values.fast_full_refresh_pages)}};

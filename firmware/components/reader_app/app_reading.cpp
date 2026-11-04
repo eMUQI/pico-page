@@ -101,6 +101,12 @@ bool ReaderApp::Impl::finish_open(const std::string& path, ContentJob::Result* l
 }
 
 void ReaderApp::Impl::footer() {
+    if (settings.fullscreen_reading) {
+        canvas.fill_rect(0, fullscreen_notice_top, 684, 1216 - fullscreen_notice_top, 15);
+        const auto& status = notice();
+        if (!status.empty()) text(status, 36, top_for_middle(ui, 18, 1204), 18, 612, 3);
+        return;
+    }
     canvas.fill_rect(0, footer_top, 684, 88, 15);
     text(notice().empty() && footer_position == reading_footer::Position::ChapterName ? body : ui,
          notice().empty() ? footer_position_text() : message, 36, 1156, 24, 476, 3);
@@ -259,7 +265,7 @@ void ReaderApp::Impl::count_pages(const std::function<bool()>& stop) {
         ContentJob::Request request;
         request.root = root; request.path = root + "/" + book_path;
         request.font = body_font_path();
-        request.identity = document.metadata(); request.layout = layout(settings);
+        request.identity = document.metadata(); request.layout = reading_layout(settings);
         request.book_index = verified_reader_index();
         request.generation = counting_generation; request.chapter = counting_index;
         request.part = counting_part; request.offset = counting_offset;
@@ -299,7 +305,7 @@ void ReaderApp::Impl::count_pages(const std::function<bool()>& stop) {
         return;
     }
     const Chapter &source = in_place ? chapter : counting_chapter;
-    const auto spec = layout(settings);
+    const auto spec = reading_layout(settings);
     if (source.author_style_fallback) { pages_failed = true; return; }
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(15);
     do {
@@ -386,10 +392,10 @@ bool ReaderApp::Impl::draw_page_content(const graphics::Page& planned, const gra
 
 bool ReaderApp::Impl::render_body(std::size_t start) {
     const StageTimer timer{"body_draw"};
-    const auto spec = layout(settings, link_return ? 144 : 64);
+    const auto spec = reading_layout(settings, link_return.has_value());
     if (body_reusable(start, spec)) {
         canvas = *body_canvas;
-        const bool marked = bookmarked(page.start, page.end);
+        const bool marked = !settings.fullscreen_reading && bookmarked(page.start, page.end);
         if (body_bookmarked != marked) {
             canvas.fill_rect(bookmark_cell_left + 38, 0, 24, 44, 15);
             if (marked) bookmark_ribbon(bookmark_cell_left + 50, 0, 44, true);
@@ -467,17 +473,18 @@ bool ReaderApp::Impl::render_body(std::size_t start) {
         canvas.line(0, 102, 683, 102, 1, 3);
         links.push_back({0, 0, 684, 104, LinkReturn});
     }
-    if (bookmarked(page.start, page.end)) bookmark_ribbon(bookmark_cell_left + 50, 0, 44, true);
+    const bool marked = !settings.fullscreen_reading && bookmarked(page.start, page.end);
+    if (marked) bookmark_ribbon(bookmark_cell_left + 50, 0, 44, true);
     if (body_cache_room()) {
         body_canvas = canvas; body_spec = spec; body_links = links;
-        body_bookmarked = bookmarked(page.start, page.end);
+        body_bookmarked = marked;
     }
     else clear_body_cache();
     return true;
 }
 
 bool ReaderApp::Impl::show_page(std::size_t start, bool reverse_page_effect) {
-    const auto spec = layout(settings, link_return ? 144 : 64);
+    const auto spec = reading_layout(settings, link_return.has_value());
     const bool reused = body_reusable(start, spec);
     const bool hit = next_page && next_bitmap && next_page->start == readable_offset(start) && same_layout(next_spec, spec);
     const StageTimer timer{hit ? "body_prepare_hit" : reused ? "body_prepare_reuse" : "body_prepare_miss", 0};

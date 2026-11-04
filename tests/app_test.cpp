@@ -235,7 +235,7 @@ struct Driver {
     }
     void close() {
         if (app.view() == View::Tools) tap(342, 500);
-        else if (app.view() == View::Typography) tap(628, 628);
+        else if (app.view() == View::Typography) tap(628, 552);
         else if (app.view() == View::Contents) tap(628, 322);
         else if (app.view() == View::Refresh) tap(628, 474);
         else if (app.view() == View::Sync) {
@@ -829,7 +829,7 @@ static void original_epub_test(const fs::path& root, const fs::path& fixtures, c
         assert(app.view() == View::Typography);
     };
     preview();
-    driver.tap(628, 628); driver.present();
+    driver.close(); driver.present();
     assert(app.saved_record() == saved && !store.load_settings(book).settings.original_epub);
     preview();
     driver.tap(500, 1140); driver.present(); driver.complete_content();
@@ -874,6 +874,66 @@ static void original_epub_test(const fs::path& root, const fs::path& fixtures, c
     preview();
     driver.tap(500, 1140); driver.present();
     assert(!store.load_settings(book).settings.original_epub && app.saved_record()->anchor == saved->anchor);
+}
+
+static void fullscreen_reading_test(const fs::path& root, const fs::path& font) {
+    const std::string book = "Books/sample.txt";
+    std::string text;
+    for (int i = 0; i < 100; ++i)
+        text += "The morning light came over the rooftops. Along the river, the streets were beginning to stir.\n";
+    write(root / book, text);
+    fs::create_directories(root / "Fonts");
+    fs::copy_file(font, root / "Fonts/LXGWWenKai-Regular.ttf");
+    FileStore store(root.string());
+    Anchor position;
+    const auto contains_ink = [](const ReaderApp& app, int top, int bottom) {
+        for (int y = top; y < bottom; ++y)
+            for (int x = 36; x < 648; ++x)
+                if (app.canvas().pixel(x, y) < 15) return true;
+        return false;
+    };
+    {
+        ReaderApp app(root.string(), "fullscreen", true, true);
+        Driver driver{app};
+        assert(app.initialize()); driver.present();
+        opened(app, book); driver.present(); driver.complete_content();
+        driver.key(Input::K3); driver.present();
+        position = app.saved_record()->anchor;
+        const auto ordinary = app.canvas().pixels();
+        assert(!contains_ink(app, 24, 64) && !contains_ink(app, 1128, 1156));
+        driver.typography(); driver.tap(600, 724); driver.present();
+        driver.close(); driver.present();
+        assert(app.canvas().pixels() == ordinary && app.saved_record()->anchor == position);
+        assert(!store.load_settings(book).settings.fullscreen_reading);
+        driver.typography(); driver.tap(600, 724); driver.present();
+        driver.tap(500, 1140); driver.present(); driver.complete_content();
+        assert(app.view() == View::Reading && app.saved_record()->anchor == position);
+        assert(store.load_settings(book).settings.fullscreen_reading && !store.load_settings().settings.fullscreen_reading);
+        assert(contains_ink(app, 24, 64) && contains_ink(app, 1128, 1156));
+        const auto fullscreen = app.canvas().pixels();
+        app.set_battery(75, true);
+        assert(!app.pending_frame() && app.canvas().pixels() == fullscreen);
+        assert(app.begin_sleep()); driver.present();
+        assert(app.canvas().pixels() != fullscreen);
+        app.cancel_sleep(); driver.present();
+        assert(app.canvas().pixels() == fullscreen && app.saved_record()->anchor == position);
+        driver.tap(650, 1168); driver.present();
+        assert(app.view() == View::Reading && app.saved_record()->anchor != position);
+        driver.tap(34, 1168); driver.present();
+        assert(app.saved_record()->anchor == position && app.canvas().pixels() == fullscreen);
+    }
+    {
+        ReaderApp app(root.string(), "fullscreen", true, true);
+        Driver driver{app};
+        assert(app.initialize()); driver.present();
+        opened(app, book); driver.present(); driver.complete_content();
+        assert(app.saved_record()->anchor == position && contains_ink(app, 1128, 1156));
+        driver.typography(); driver.tap(480, 724); driver.present();
+        driver.tap(500, 1140); driver.present(); driver.complete_content();
+        assert(app.view() == View::Reading && app.saved_record()->anchor == position);
+        assert(!store.load_settings(book).settings.fullscreen_reading);
+        assert(!contains_ink(app, 24, 64) && !contains_ink(app, 1128, 1156));
+    }
 }
 
 static void font_picker_test(const fs::path& root, const fs::path& fixtures, const fs::path& font, bool async) {
@@ -4001,6 +4061,7 @@ int main(int argc, char** argv) {
     content_font_test(card / "ContentFontSync", fixtures, argv[2], false);
     content_font_test(card / "ContentFontAsync", fixtures, argv[2], true);
     original_epub_test(card / "OriginalEpub", fixtures, argv[2]);
+    fullscreen_reading_test(card / "FullscreenReading", argv[2]);
     font_picker_test(card / "FontPickerSync", fixtures, argv[2], false);
     font_picker_test(card / "FontPickerAsync", fixtures, argv[2], true);
     font_picker_image_test(card / "FontPickerImage", fixtures, argv[2]);

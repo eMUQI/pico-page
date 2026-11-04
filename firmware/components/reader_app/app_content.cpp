@@ -67,7 +67,7 @@ void ReaderApp::Impl::prepare_next(const std::function<bool()>& stop) {
             return;
         }
 #endif
-        next_spec = layout(settings, link_return ? 144 : 64);
+        next_spec = reading_layout(settings, link_return.has_value());
         auto planned = plan_page(chapter, start, next_spec, true, stop);
         if (planned.error == "Layout cancelled") return;
         const auto bytes = planned.glyphs.capacity() * sizeof(graphics::PositionedGlyph) +
@@ -225,7 +225,7 @@ bool ReaderApp::Impl::begin_image(std::size_t start, const graphics::Page& plann
     request.book_index = verified_reader_index();
     request.preview = preview;
     request.progressive = progressive;
-    request.layout = preview ? layout(draft, 64, typography_preview_bottom()) : layout(settings, link_return ? 144 : 64);
+    request.layout = preview ? layout(draft, reading_top(draft), typography_preview_bottom()) : reading_layout(settings, link_return.has_value());
     request.page = planned;
     request.image_resource = planned.images.front().resource;
     if (!preview || !request.layout.original_epub)
@@ -273,7 +273,7 @@ bool ReaderApp::Impl::begin_chapter(std::size_t index, std::uint32_t part, Conte
     request.chapter_session = chapter_session;
     request.root = root; request.path = root + "/" + book_path; request.identity = document.metadata();
     request.book_index = verified_reader_index();
-    request.font = body_font_path(); request.layout = layout(settings, link_return ? 144 : 64);
+    request.font = body_font_path(); request.layout = reading_layout(settings, link_return.has_value());
     request.chapter = index; request.part = part; request.offset = position;
     if (index < document.spine().size()) request.chapter_resource = document.spine()[index].resource;
     for (const auto& candidate : {std::make_pair(current_cache, current_write), std::make_pair(recent_cache, recent_write)})
@@ -321,7 +321,7 @@ void ReaderApp::Impl::complete_inline_image(const ContentJob& job) {
     if (view != View::Reading || image_viewing || request.generation != foreground_generation ||
         request.identity.book_id != document.metadata().book_id || request.chapter != chapter_index ||
         request.part != chapter.part || request.offset != page.start ||
-        !same_layout(request.layout, layout(settings, link_return ? 144 : 64))) return;
+        !same_layout(request.layout, reading_layout(settings, link_return.has_value()))) return;
     body_images_pending = false;
     PP_DIAGNOSTIC(const auto patch = diagnostics::begin(diagnostics::Kind::ImagePatch,
         {request.diagnostic_session, request.diagnostic_layout, ui_sequence + 1,

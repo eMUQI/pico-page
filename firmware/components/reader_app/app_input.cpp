@@ -911,6 +911,13 @@ void ReaderApp::Impl::control(int id) {
         book_scope = false;
         apply_typography();
         return;
+    case FullscreenOff:
+    case FullscreenOn:
+        if (draft.fullscreen_reading == (id == FullscreenOn)) return;
+        draft.fullscreen_reading = id == FullscreenOn;
+        reset_overrides = false;
+        draw_typography();
+        break;
     case EpubLayoutMode:
         change_epub_layout();
         if (content_loading) return;
@@ -1035,10 +1042,10 @@ void ReaderApp::Impl::input(const AppInput &input) {
     }
     const bool preserve_prefetch = view == View::Reading &&
         ((!input.touch && (input.event.input == Input::K3 || input.event.input == Input::Next || input.event.input == Input::K2)) ||
-         (input.touch && input.x >= 479 && input.y < footer_top));
+         (input.touch && input.x >= 479 && input.y < reading_touch_bottom()));
     if (!preserve_prefetch) clear_prefetch();
     if (input.queued) {
-        const bool turn_touch = input.touch && input.y < footer_top && (input.x < 205 || input.x >= 479);
+        const bool turn_touch = input.touch && input.y < reading_touch_bottom() && (input.x < 205 || input.x >= 479);
         const auto action = input.touch ? Action::None : map_input(context(), input.event.input);
         const bool turn_key = action == Action::PreviousPage || action == Action::NextPage;
         if (view != View::Reading || !turned || (!turn_touch && !turn_key))
@@ -1053,7 +1060,7 @@ void ReaderApp::Impl::input(const AppInput &input) {
     }
     if (input.touch) {
         if (view == View::Reading) {
-            if (input.y >= footer_top) {
+            if (!settings.fullscreen_reading && input.y >= footer_top) {
                 const bool device = input.x >= reading_footer::device_left;
                 if (input.touch_bounds &&
                     (input.touch_bounds->min_y < footer_top ||

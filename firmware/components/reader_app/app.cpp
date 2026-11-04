@@ -47,7 +47,8 @@ void ReaderApp::Impl::apply_typography() {
         return;
     }
     const auto effective = store.load_settings(book_path).settings;
-    const bool layout_changed = effective.original_epub != settings.original_epub || effective.font != settings.font ||
+    const bool layout_changed = effective.original_epub != settings.original_epub ||
+        effective.fullscreen_reading != settings.fullscreen_reading || effective.font != settings.font ||
         effective.font_weight != settings.font_weight ||
         effective.font_size_px != settings.font_size_px ||
         effective.line_height != settings.line_height ||
@@ -137,7 +138,8 @@ bool ReaderApp::open_book(const std::string &path) {
 void ReaderApp::set_battery(std::optional<int> percent, bool charging, bool allow_refresh) {
     impl_->battery_percent = percent && *percent >= 0 && *percent <= 100 ? percent : std::nullopt;
     impl_->battery_charging = charging;
-    if (allow_refresh && impl_->footer_charging != charging && impl_->view == View::Reading &&
+    if (allow_refresh && !impl_->settings.fullscreen_reading && impl_->footer_charging != charging &&
+        impl_->view == View::Reading &&
         impl_->footer_device == reading_footer::Device::Battery &&
         !impl_->display.busy() && !impl_->content_loading && !impl_->image_viewing &&
         !impl_->sleep_wait_footer && !impl_->sleep_wait_restore_pending && !impl_->sleep_destination_captured) {
@@ -168,7 +170,8 @@ void ReaderApp::input(const AppInput &event) {
 }
 bool ReaderApp::can_long_press_at(int x, int y) const {
     if (impl_->image_at(x, y)) return true;
-    if (impl_->view == View::Reading && !impl_->image_viewing && graphics::text_hit(impl_->page, x, y)) return true;
+    if (impl_->view == View::Reading && !impl_->image_viewing && y < impl_->reading_touch_bottom() &&
+        graphics::text_hit(impl_->page, x, y)) return true;
     return impl_->view == View::Library && std::any_of(impl_->hits.begin(), impl_->hits.end(), [&](const auto& hit) {
         return hit.contains(x, y) && (hit.id == Tools || (hit.id >= EntryBase && hit.id < TocBase &&
                !impl_->entries[static_cast<std::size_t>(hit.id - EntryBase)].directory));
@@ -272,6 +275,7 @@ const std::optional<ReadingRecord> &ReaderApp::saved_record() const {
 bool ReaderApp::fast_page_updates() const {
     return impl_->settings.refresh_preset == "fast";
 }
+bool ReaderApp::has_reading_footer() const { return !impl_->settings.fullscreen_reading; }
 PageEffect ReaderApp::page_effect() const { return impl_->page_effect; }
 void ReaderApp::set_page_effect(PageEffect effect) {
     impl_->page_effect = effect;
@@ -872,7 +876,7 @@ void ReaderApp::poll_background(bool cancel) {
         if (impl_->view == View::Reading) impl_->footer();
         else if (impl_->view == View::Library) impl_->footer_bar(impl_->notice(), impl_->library_page, impl_->library_pages());
         else impl_->footer_bar(impl_->notice());
-        const int top = impl_->view == View::Reading ? footer_top : Impl::footer_zone;
+        const int top = impl_->view == View::Reading ? impl_->reading_status_top() : Impl::footer_zone;
         impl_->display.present({{"ui", 0, 0, ++impl_->ui_sequence}, {}, FramePurpose::Overlay,
             RefreshIntent::Content, RefreshRegion{0, top, 684, 1216 - top}});
     }

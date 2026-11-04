@@ -95,6 +95,7 @@ struct ReaderSettings {
     int margin_x_px = 36;
     double paragraph_gap_lines = 0;
     int indent_chars = 2;
+    bool fullscreen_reading = false;
     bool original_epub = false;  // Single-book EPUB override.
     std::string refresh_preset = "balanced";
     int balanced_full_refresh_pages = 25;

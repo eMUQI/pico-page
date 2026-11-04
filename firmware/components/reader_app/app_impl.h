@@ -36,6 +36,8 @@ namespace pico_page {
 namespace app_detail {
 using graphics::decode_utf8;
 inline constexpr int footer_top = 1128, toolbar_top = 1080;
+inline constexpr int fullscreen_margin_y_px = 24;
+inline constexpr int fullscreen_notice_top = 1216 - fullscreen_margin_y_px + 2;
 inline constexpr std::size_t kSleepWaitFooterBytes = 342U * (1216U - footer_top);
 inline constexpr char kProjectHome[] = "picopage.wulu.zone";
 inline constexpr int viewer_left = 24, viewer_top = 104, viewer_width = 636, viewer_height = 1088;
@@ -94,6 +96,8 @@ enum Control {
     Gap,
     Indent,
     Defaults,
+    FullscreenOff,
+    FullscreenOn,
     EpubLayoutMode,
     RefreshClear,
     RefreshBalanced,
@@ -153,7 +157,7 @@ enum Control {
     BookmarkToggle,
     ContentsToc,
     ContentsBookmarks,
-    EntryBase = 100,
+    EntryBase = 128,
     TocBase = 1000,
     TocToggleBase = 10000,
     LinkBase = 20000,
@@ -897,7 +901,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         viewer_original.reset();
         image_viewing = false; image_contrast_level = 0;
         view = View::Reading;
-        if (body_canvas && body_bookmarked != bookmarked(page.start, page.end) && render_body(offset)) { overlay(); return; }
+        if (body_canvas && !settings.fullscreen_reading && body_bookmarked != bookmarked(page.start, page.end) && render_body(offset)) { overlay(); return; }
         if (body_canvas) canvas = *body_canvas;
         links = body_links;
         overlay();
@@ -905,7 +909,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     void draw_image_viewer(bool full = false);
     const graphics::ImageBox* image_at(int x, int y) const {
         if (view != View::Reading || image_viewing || content_loading || display.busy() ||
-            pending || !card_available || usb_prepared || y >= footer_top)
+            pending || !card_available || usb_prepared || y >= reading_touch_bottom())
             return nullptr;
         for (const auto& link : links)
             if (link.contains(x, y)) return nullptr;
@@ -938,9 +942,9 @@ struct ReaderApp::Impl final : DisplayBackend {
             return;
         }
         body_canvas = canvas;
-        body_spec = layout(settings, link_return ? 144 : 64);
+        body_spec = reading_layout(settings, link_return.has_value());
         body_links = links;
-        body_bookmarked = bookmarked(page.start, page.end);
+        body_bookmarked = !settings.fullscreen_reading && bookmarked(page.start, page.end);
         abandon_content();
         release_counting(); clear_prefetch(); make_room_for_cold_image();
         ContentJob::Request request;
@@ -1234,7 +1238,8 @@ struct ReaderApp::Impl final : DisplayBackend {
                     bool bold = false, int max_rows = 2, std::uint8_t gray = 1, bool draw = true);
     bool typography_changed() const {
         const auto &applied = edit_snapshot.config.settings;
-        return reset_overrides || draft.original_epub != applied.original_epub || draft.font != applied.font || draft.font_weight != applied.font_weight || draft.font_size_px != applied.font_size_px ||
+        return reset_overrides || draft.original_epub != applied.original_epub ||
+            draft.fullscreen_reading != applied.fullscreen_reading || draft.font != applied.font || draft.font_weight != applied.font_weight || draft.font_size_px != applied.font_size_px ||
             draft.line_height != applied.line_height || draft.margin_x_px != applied.margin_x_px ||
             draft.paragraph_gap_lines != applied.paragraph_gap_lines || draft.indent_chars != applied.indent_chars;
     }
@@ -1349,7 +1354,8 @@ struct ReaderApp::Impl final : DisplayBackend {
     void reading_header(bool panel = false);
     static constexpr int bookmark_cell_left = 584;
     static constexpr int panel_strip = 56;
-    static constexpr int preview_bottom = 656 - panel_strip;
+    static constexpr int typography_tabs_top = 580;
+    static constexpr int typography_strip_top = typography_tabs_top - panel_strip;
     void tabs(int top, int active) {
         const int ids[] = {Contents, Typography, Sync, Refresh};
         const char *names[] = {"目录", "排版", "同步", "刷新模式"};
@@ -1394,7 +1400,14 @@ struct ReaderApp::Impl final : DisplayBackend {
         deferred = std::move(work);
         overlay();
     }
-    graphics::LayoutSpec layout(const ReaderSettings &cfg, int top = 64, int bottom = footer_top) {
+    int reading_touch_bottom() const { return settings.fullscreen_reading ? 1216 : footer_top; }
+    int reading_status_top() const { return settings.fullscreen_reading ? fullscreen_notice_top : footer_top; }
+    static int reading_top(const ReaderSettings& cfg) { return cfg.fullscreen_reading ? fullscreen_margin_y_px : 64; }
+    graphics::LayoutSpec reading_layout(const ReaderSettings& cfg, bool return_bar = false) {
+        const int bottom = cfg.fullscreen_reading ? 1216 - fullscreen_margin_y_px : footer_top;
+        return layout(cfg, return_bar ? 144 : reading_top(cfg), bottom);
+    }
+    graphics::LayoutSpec layout(const ReaderSettings &cfg, int top, int bottom) {
         graphics::LayoutSpec spec;
         spec.left = cfg.margin_x_px;
         spec.top = top;
@@ -1777,7 +1790,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             pages_cache_disabled = true;
             return;
         }
-        const auto spec = layout(settings);
+        const auto spec = reading_layout(settings);
         char name[32], geometry[160];
         std::snprintf(name, sizeof(name), "%s/%016llx", spec.original_epub ? "pages-original" : "pages", path_hash(book_path));
         std::snprintf(geometry, sizeof(geometry), "%lld %lld\n%lld %lld\n%d %d %d %d %d %d %d %d %zu\n",
@@ -1981,7 +1994,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     bool paginate(std::size_t limit, std::size_t &previous) {
         if (const auto cached = previous_page(limit)) { previous = *cached; return true; }
-        const auto spec = layout(settings, link_return ? 144 : 64);
+        const auto spec = reading_layout(settings, link_return.has_value());
         std::size_t start = 0;
         previous = 0;
         while (start < limit) {
@@ -2101,7 +2114,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     void draw_bookmarks(int list_top);
     void draw_contents();
-    int typography_preview_bottom() const { return font_picker_open ? 500 : preview_bottom; }
+    int typography_preview_bottom() const { return font_picker_open ? 500 : typography_strip_top; }
     void draw_font_picker();
     void cancel_font_picker() {
         abandon_content();

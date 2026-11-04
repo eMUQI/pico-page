@@ -170,7 +170,7 @@ void ReaderApp::Impl::draw_typography(bool prepare_images) {
     hits.clear();
     canvas.clear();
     load_fonts(&draft);
-    const auto spec = layout(draft, 64, typography_preview_bottom());
+    const auto spec = layout(draft, reading_top(draft), typography_preview_bottom());
     const bool mode_changed = draft.original_epub != settings.original_epub;
     const bool preview_ready = !mode_changed || typography_preview.has_value();
     const Chapter& source = typography_preview && mode_changed ? typography_preview->chapter : chapter;
@@ -202,10 +202,13 @@ void ReaderApp::Impl::draw_typography(bool prepare_images) {
         return;
     }
     const bool changed = typography_changed();
-    tabs(656, Typography);
-    canvas.fill_rect(24, 605, 636, 44, 15);
-    text(changed ? "预览 · 尚未应用" : "当前排版 · 此书", 36, 614, 24, 432, 3);
-    text(changed ? "放弃修改" : "收起", changed ? 540 : 600, 614, 24, 120);
+    tabs(typography_tabs_top, Typography);
+    canvas.fill_rect(24, typography_strip_top + 5, 636, 44, 15);
+    text(changed ? "预览 · 尚未应用" : "当前排版 · 此书", 36, typography_strip_top + 14, 24, 432, 3);
+    text(changed ? "放弃修改" : "收起", changed ? 540 : 600, typography_strip_top + 14, 24, 120);
+    text("全屏阅读", 36, 704, 28);
+    button(FullscreenOff, "关", 420, 688, 120, 72, !draft.fullscreen_reading);
+    button(FullscreenOn, "开", 540, 688, 120, 72, draft.fullscreen_reading);
     const std::array<int, 8> ids{{FontChoice, FontWeight, FontSize, LineHeight, Margin, Gap, Indent, Defaults}};
     auto name = [](int id) -> std::string {
         switch (id) {
@@ -269,10 +272,10 @@ void ReaderApp::Impl::draw_typography(bool prepare_images) {
     if (!font_fallback && !weight_unavailable && changed && mode_preview_valid) button(Apply, "应用到此书", 348, 1088, 312, 96, true);
     else disabled_button(font_fallback || weight_unavailable || !mode_preview_valid ? "无法应用" : "已应用", 348, 1088, 312, 96);
     if (preview_ready && spec.original_epub && source.author_style_fallback)
-        note("原书样式不可用，本段使用基本排版", preview_bottom - 40);
+        note("原书样式不可用，本段使用基本排版", typography_strip_top - 40);
     if (font_fallback || weight_unavailable) {
-        canvas.fill_rect(24, preview_bottom - 70, 636, 58, 15);
-        note(weight_unavailable && !font_fallback ? kWeightUnavailableNotice : "所选字体不可用，预览使用替代字体。", preview_bottom - 60);
+        canvas.fill_rect(24, typography_strip_top - 70, 636, 58, 15);
+        note(weight_unavailable && !font_fallback ? kWeightUnavailableNotice : "所选字体不可用，预览使用替代字体。", typography_strip_top - 60);
     }
 }
 

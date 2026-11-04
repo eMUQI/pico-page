@@ -165,7 +165,7 @@ bool ReaderApp::Impl::dictionary_contact_input(const AppInput& input, bool accep
     if (!dictionary_contact || dictionary_contact != input.event.sequence) return true;
     if (view != View::Dictionary) { reset_dictionary_contact(); return true; }
     if (input.event.phase == Phase::Move || input.event.phase == Phase::End) {
-        if (input.x >= 0 && input.x < 684 && input.y >= 0 && input.y < footer_top) {
+        if (input.x >= 0 && input.x < 684 && input.y >= 0 && input.y < reading_touch_bottom()) {
             const auto hit = graphics::text_hit(page, input.x + dictionary_drag_dx, input.y + dictionary_drag_dy, true);
             if (hit) {
                 const dictionary::Selection selection{std::min(dictionary_contact_anchor.begin, *hit),
@@ -301,10 +301,16 @@ void ReaderApp::Impl::draw_dictionary() {
             for (int x = box.x; x < box.x + box.width; ++x) canvas.pixel(x, y, 15 - canvas.pixel(x, y));
     const auto bounds = dictionary_bounds(dictionary_full);
     const int top = bounds.first, bottom = bounds.second, height = bottom - top;
+    const bool selection_controls_above = settings.fullscreen_reading && !boxes.empty() &&
+        boxes.back().y + boxes.back().height + 36 > footer_top;
+    const int selection_controls_top = selection_controls_above ? 0 : footer_top;
     if (!boxes.empty()) {
         const auto handle = [&](const graphics::SelectionBox& box, bool start) {
             const int x = std::clamp(start ? box.x : box.x + box.width, 22, 662);
-            const int y = std::clamp(start ? box.y - 12 : box.y + box.height + 12, 22, footer_top - 24);
+            const int handle_top = dictionary_selecting && selection_controls_above ? 110 : 22;
+            const int handle_bottom = dictionary_selecting && !selection_controls_above ?
+                footer_top : reading_touch_bottom();
+            const int y = std::clamp(start ? box.y - 12 : box.y + box.height + 12, handle_top, handle_bottom - 24);
             if (!dictionary_selecting && y + 22 >= top && y - 22 < bottom) return;
             canvas.line(x, start ? box.y + 2 : box.y + box.height - 2, x, y, 0, 2);
             for (int dy = -8; dy <= 8; ++dy)
@@ -315,10 +321,10 @@ void ReaderApp::Impl::draw_dictionary() {
         handle(boxes.front(), true); handle(boxes.back(), false);
     }
     if (dictionary_selecting) {
-        canvas.fill_rect(0, footer_top, 684, 1216 - footer_top, 15);
-        text(dictionary_notice.empty() ? "拖动端点，松手查词" : dictionary_notice, 24, footer_top + 8, 21, 636, 3);
-        if (!dictionary_contact) button(DictionaryRetry, "查词", 24, footer_top + 40, 306, 44, false, 23);
-        button(DictionaryClose, "取消", 354, footer_top + 40, 306, 44, false, 23);
+        canvas.fill_rect(0, selection_controls_top, 684, 1216 - footer_top, 15);
+        text(dictionary_notice.empty() ? "拖动端点，松手查词" : dictionary_notice, 24, selection_controls_top + 8, 21, 636, 3);
+        if (!dictionary_contact) button(DictionaryRetry, "查词", 24, selection_controls_top + 40, 306, 44, false, 23);
+        button(DictionaryClose, "取消", 354, selection_controls_top + 40, 306, 44, false, 23);
         return;
     }
     canvas.fill_rect(0, top, 684, height, 15); canvas.line(0, top, 683, top, 1, 2);

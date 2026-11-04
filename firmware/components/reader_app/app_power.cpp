@@ -28,10 +28,12 @@ void ReaderApp::Impl::prepare_custom_sleep(bool sleeping) {
         }
 #endif
         request.lock_background = std::make_shared<graphics::Canvas>(canvas);
-        if (view == View::Reading)
-            request.lock_background->fill_rect(0, footer_top, 684, 1216 - footer_top, 15);
-        else if (sleep_wait_footer && view == sleep_wait_view)
+        if (sleep_wait_footer && view == sleep_wait_view)
             std::memcpy(request.lock_background->data() + 342 * footer_top, sleep_wait_footer.get(), kSleepWaitFooterBytes);
+        if (view == View::Reading) {
+            const int top = reading_status_top();
+            request.lock_background->fill_rect(0, top, 684, 1216 - top, 15);
+        }
     }
     counting_job = std::make_unique<ContentJob>(std::move(request));
     if (!counting_job->start()) {

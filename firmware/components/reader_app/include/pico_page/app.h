@@ -198,6 +198,7 @@ class ReaderApp {
     const std::optional<ReadingRecord> &saved_record() const;
     /** True when the fast refresh preset selects the shorter page-update waveform. */
     bool fast_page_updates() const;
+    bool has_reading_footer() const;
     /** Volatile experimental selection; shared by the UI and diagnostic console. */
     PageEffect page_effect() const;
     /** Selects an effect without saving configuration; redraws an open selection page. */
