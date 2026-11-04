@@ -61,6 +61,8 @@ find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
 add_test(NAME architecture COMMAND ${CMAKE_COMMAND} -E env "PICO_PAGE_CMAKE=${CMAKE_COMMAND}"
     ${Python3_EXECUTABLE} -m unittest discover
     -s ${CMAKE_CURRENT_SOURCE_DIR}/tests -p test_architecture.py -v)
+add_test(NAME css_survey COMMAND ${Python3_EXECUTABLE} -m unittest discover
+    -s ${CMAKE_CURRENT_SOURCE_DIR}/tests -p test_css_survey.py -v)
 add_test(NAME epub_probe COMMAND ${Python3_EXECUTABLE} -m unittest discover
     -s ${CMAKE_CURRENT_SOURCE_DIR}/tests -p test_epub_probe.py -v)
 set(tool_card ${CMAKE_BINARY_DIR}/setup-network-card)
@@ -69,6 +71,17 @@ add_test(NAME setup_network COMMAND ${CMAKE_COMMAND} -E env PICO_PAGE_TOOL_CARD=
 set_tests_properties(setup_network PROPERTIES FIXTURES_SETUP tool_card)
 
 add_subdirectory(firmware/components/reader_document)
+add_executable(css_test tests/css_test.cpp)
+target_link_libraries(css_test PRIVATE reader_document)
+target_include_directories(css_test PRIVATE firmware/components/reader_document)
+target_compile_options(css_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME css COMMAND css_test)
+add_executable(css_probe EXCLUDE_FROM_ALL tools/css_probe.cpp)
+target_link_libraries(css_probe PRIVATE reader_document)
+target_include_directories(css_probe PRIVATE firmware/components/reader_document)
+target_compile_options(css_probe PRIVATE -Wall -Wextra -Werror)
+
+
 add_subdirectory(firmware/components/reader_dictionary)
 set(dictionary_fixtures ${CMAKE_CURRENT_BINARY_DIR}/dictionary-fixtures)
 add_custom_target(dictionary_fixtures_target
