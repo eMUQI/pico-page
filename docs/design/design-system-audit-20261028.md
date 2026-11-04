@@ -55,7 +55,7 @@
 
 ### A3 · 中：按钮式选择器仍用黑底表示状态
 
-`firmware/components/reader_app/app_power.cpp:45–48,53,65` 用黑底分别表示当前休眠样式、叠加开关开启和「保存设置」。自定义图片且开启叠加时，一页同时有三处黑底，其含义并不相同。本次 [电源设置截图](../../artifacts/design-system-audit-20261028/power-settings.png) 已确认。`app_impl.h:2941–2942` 的锁屏图片选择也使用同类表达。
+`firmware/components/reader_app/app_power.cpp:45–48,53,65` 用黑底分别表示当前休眠样式、叠加开关开启和「保存设置」。自定义图片且开启叠加时，一页同时有三处黑底，其含义并不相同。本次 [电源设置截图](../images/design-system-audit-20261028/power-settings.png) 已确认。`app_impl.h:2941–2942` 的锁屏图片选择也使用同类表达。
 
 这超出已知清单仅点名的 `choice()` 外框／标签迁移。需按 D46 补充选择器状态方案，避免只改通用单选行后仍保留旧语义；不能把所有选中黑底都替换为不可用样式。
 
@@ -117,16 +117,16 @@
 
 | 页面 | 本次截图 |
 |---|---|
-| 书库 | [library.png](../../artifacts/design-system-audit-20261028/library.png) |
-| 设置 | [settings.png](../../artifacts/design-system-audit-20261028/settings.png) |
-| 阅读设置 | [reading-settings.png](../../artifacts/design-system-audit-20261028/reading-settings.png) |
-| 阅读工具 | [tools.png](../../artifacts/design-system-audit-20261028/tools.png) |
-| 排版 | [typography.png](../../artifacts/design-system-audit-20261028/typography.png) |
-| 字体选择 | [font-picker.png](../../artifacts/design-system-audit-20261028/font-picker.png) |
-| 电源设置 | [power-settings.png](../../artifacts/design-system-audit-20261028/power-settings.png) |
-| 传输首页 | [transfer.png](../../artifacts/design-system-audit-20261028/transfer.png) |
+| 书库 | [library.png](../images/design-system-audit-20261028/library.png) |
+| 设置 | [settings.png](../images/design-system-audit-20261028/settings.png) |
+| 阅读设置 | [reading-settings.png](../images/design-system-audit-20261028/reading-settings.png) |
+| 阅读工具 | [tools.png](../images/design-system-audit-20261028/tools.png) |
+| 排版 | [typography.png](../images/design-system-audit-20261028/typography.png) |
+| 字体选择 | [font-picker.png](../images/design-system-audit-20261028/font-picker.png) |
+| 电源设置 | [power-settings.png](../images/design-system-audit-20261028/power-settings.png) |
+| 传输首页 | [transfer.png](../images/design-system-audit-20261028/transfer.png) |
 
-截图、字体及程序摘要见同目录 `provenance.json`。配置、构建和捕获日志、两份捕获脚本位于 `.local/design-system-audit-20261028/`；截图位于默认忽略的 `artifacts/`，后续提交审计记录时须同时保留所引用证据。本次没有修改生产代码，未新增测试，未运行完整 CTest、sanitizer、固件构建或设备操作。
+本文引用的合成截图已保存在 `docs/images/`，字体、程序摘要、配置与捕获日志保留在本地私有证据中。本次没有修改生产代码，未新增测试，未运行完整 CTest、sanitizer、固件构建或设备操作。
 
 待验范围：所有未截图的异常／忙碌状态、长标题与最大内容、不同字体、实际近黑白／快速刷新可辨认性、触摸命中与误触、面板残影。8 张 host 帧不是全状态视觉验收，也不代表真机响应或可靠保存已通过。
 
@@ -146,11 +146,11 @@
 | A6、A7 | 书库设置提示使用 y 1120 起的统一页脚；保存失败文案压缩为「视图未保存，仍用『列表／卡片』。请检查 TF 卡。」以完整显示；传书网页引号统一。 | 不改变保存结果或设置生效语义；传书网页仅源文件核对。 |
 | A3、S1–S6 | 保留记录。 | 尚未修改相关设计规则、静态预览或官网。 |
 
-前后画面保存在 `artifacts/design-system-implementation-20261028/{before,after}/`，包含同一合成内容和配置的 10 组界面。另补充保存失败电源页、书库设置保存失败、检测进行中及 Wi-Fi／互联网／服务器失败共 6 张画面；未连接真实网络、读取私人书籍或触发设备关机。代表性结果：[排版](../../artifacts/design-system-implementation-20261028/after/typography.png)、[字体选择](../../artifacts/design-system-implementation-20261028/after/font-picker.png)、[刷新模式](../../artifacts/design-system-implementation-20261028/after/refresh.png)、[保存失败电源页](../../artifacts/design-system-implementation-20261028/after/power-save-failed.png)、[检测失败](../../artifacts/design-system-implementation-20261028/after/check-server-failed.png)、[书库保存失败](../../artifacts/design-system-implementation-20261028/after/library-save-failed.png)。字体选择上方 500 px 的正文在修改前、修改后及独立重跑中像素一致。
+原前后画面使用同一合成内容和配置，完整过程素材保留在私有存档；本文引用的代表画面保存在 `docs/images/`。另补充保存失败电源页、书库设置保存失败、检测进行中及 Wi-Fi／互联网／服务器失败共 6 张画面；未连接真实网络、读取私人书籍或触发设备关机。代表性结果：[排版](../images/design-system-implementation-20261028/after/typography.png)、[字体选择](../images/design-system-implementation-20261028/after/font-picker.png)、[刷新模式](../images/design-system-implementation-20261028/after/refresh.png)、[保存失败电源页](../images/design-system-implementation-20261028/after/power-save-failed.png)、[检测失败](../images/design-system-implementation-20261028/after/check-server-failed.png)、[书库保存失败](../images/design-system-implementation-20261028/after/library-save-failed.png)。字体选择上方 500 px 的正文在修改前、修改后及独立重跑中像素一致。
 
-Debug host 构建与完整 CTest 31/31 通过；最终精简失败文案后补跑 app 回归与标准固件构建。临时故障注入程序复用现有测试辅助，通过公开 API 生成失败状态并检查安全返回，不加入长期测试集。命令、日志和脚本在 `.local/design-system-implementation-20261028/`，源码差异、程序与截图摘要在证据目录 `provenance.json`。当前批次未运行 sanitizer，未测近黑白／快速档实体画面、真实触控、动态内存或输入至面板耗时；这些限制不因 host 截图和构建通过而关闭。具体结果见[开发记录](../development-status.md)。
+Debug host 构建与完整 CTest 31/31 通过；最终精简失败文案后补跑 app 回归与标准固件构建。临时故障注入程序复用现有测试辅助，通过公开 API 生成失败状态并检查安全返回，不加入长期测试集。命令、日志和脚本在 `.local/design-system-implementation-20261028/`，源码差异、程序与截图摘要保存在本地私有证据中。当前批次未运行 sanitizer，未测近黑白／快速档实体画面、真实触控、动态内存或输入至面板耗时；这些限制不因 host 截图和构建通过而关闭。具体结果见[开发记录](../development-status.md)。
 
-PR 随附上述审计及实施 PNG、来源摘要和三组[排版](../../artifacts/design-system-implementation-20261028/comparisons/typography-comparison.png)／[字体选择](../../artifacts/design-system-implementation-20261028/comparisons/font-picker-comparison.png)／[刷新模式](../../artifacts/design-system-implementation-20261028/comparisons/refresh-comparison.png)对比图；对比图仅裁取同一区域并并排标注，未修改界面像素。BMP、合成卡、字体、临时程序与日志保留本地。
+PR 随附上述审计及实施 PNG、来源摘要和三组[排版](../images/design-system-implementation-20261028/comparisons/typography-comparison.png)／[字体选择](../images/design-system-implementation-20261028/comparisons/font-picker-comparison.png)／[刷新模式](../images/design-system-implementation-20261028/comparisons/refresh-comparison.png)对比图；对比图仅裁取同一区域并并排标注，未修改界面像素。BMP、合成卡、字体、临时程序与日志保留本地。
 
 ## 书库顶部局部调整
 
@@ -158,9 +158,9 @@ PR 随附上述审计及实施 PNG、来源摘要和三组[排版](../../artifac
 
 此项推进 A2 中的书库控件，不改变前述首批实施时的历史记录。对比与满屏、长书名、混合文件夹、继续阅读、卡片网格和历史损坏回退画面位于本地 `artifacts/library-header-20261028/`；候选尚未追加到 PR，真机视觉与触控待验收。
 
-用户审阅后选择保留辅助工具的紧凑层级：最新候选恢复 60 px 可见高度和 22 px 标签，上下留白改为各 14 px，触控区单独扩至 88 px；列表恢复 126 px 行高，内容相对基线下移 12 px。无阅读记录时隐藏「其他书籍」的修正保留。最新截图位于本地 `artifacts/library-header-compact-20261028/`，此前 88 px 可见按钮方案仅保留作对比。
+用户审阅后选择保留辅助工具的紧凑层级：最新候选恢复 60 px 可见高度和 22 px 标签，上下留白改为各 14 px，触控区单独扩至 88 px；列表恢复 126 px 行高，内容相对基线下移 12 px。无阅读记录时隐藏「其他书籍」的修正保留。本文引用的最新对比图位于 `docs/images/library-header-compact-20261028/`，此前 88 px 可见按钮方案仅保留作对比。
 
-PR 补充紧凑书库的[顶部三版对比](../../artifacts/library-header-compact-20261028/comparison-top.png)、[完整屏幕前后对比](../../artifacts/library-header-compact-20261028/comparison-full.png)和[满屏检查](../../artifacts/library-header-compact-20261028/checks.png)。同时根据 review 恢复因电量或活动暂缓安装时的可点击更新按钮外框；真正不可用控件仍不画框，不注册热区。
+PR 补充紧凑书库的[顶部三版对比](../images/library-header-compact-20261028/comparison-top.png)、[完整屏幕前后对比](../images/library-header-compact-20261028/comparison-full.png)和[满屏检查](../images/library-header-compact-20261028/checks.png)。同时根据 review 恢复因电量或活动暂缓安装时的可点击更新按钮外框；真正不可用控件仍不画框，不注册热区。
 
 ## 规则澄清跟进
 

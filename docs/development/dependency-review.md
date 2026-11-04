@@ -17,7 +17,7 @@
 | 文楷 / Noto Sans SC | 官方发布与官方仓库 | 固定 SHA-256，见 graphics-runtime | OFL 1.1；随附两份许可证 | Noto 子集改名 Pico Page Fallback | 全字体在 .local，内置子集纳入组件 |
 | Unihan `kTGH`（《通用规范汉字表》一级字） | unicode.org Unicode 17.0.0 `Unihan.zip` | SHA-256 `f7a48b2b…4b5e`，见 graphics-runtime | Unicode License v3；只取 3,500 个字符的清单 | 按序号提取为文本 | 清单纳入 reader_graphics，决定内置字体的字符范围 |
 | 内置中文子集的做法 | 0x1abin/crossmux（本地检出） | `3fb809f6ceeb753a7c40fef86dee7c9d40eabdf3` | 只参考做法，未复制代码、字表或字体 | 无 | CrossMux 内嵌 8/10/12pt 点阵，覆盖约 3,500 个高频字；本项目内嵌一份矢量子集 |
-| GB18030 解码表 | `tools/generate_gb18030_table.py` 查询 CPython 标准库的 `gb18030` 编解码器 | CPython 3.14.7（Homebrew 构建，构建信息不含源码 commit）；生成结果 SHA-256 `5efc9c50…8bbb` | CPython 为 PSF-2.0；只取编解码器的输出值，未复制 CPython 源码或其表格文本；详见下方 | 双字节区压缩为 23,940 项数组，四字节区合并为 207 个连续区间 | 生成结果纳入 reader_document；发布义务待项目许可证确定时一并确认 |
+| GB18030 解码表 | `tools/generate_gb18030_table.py` 查询 CPython 标准库的 `gb18030` 编解码器 | CPython 3.14.7（Homebrew 构建，构建信息不含源码 commit）；生成结果 SHA-256 `5efc9c50…8bbb` | CPython 为 PSF-2.0；只取编解码器的输出值，未复制 CPython 源码或其表格文本；详见下方 | 双字节区压缩为 23,940 项数组，四字节区合并为 207 个连续区间 | 生成结果纳入 reader_document；生成表的分发声明仍须在发布前核对 |
 | CREngine 对照工具 | koreader/crengine | `f4a8be93255a439db4777d00f0bc53316acabebd` | GPL-2.0；链接工具仅用于本地验证 | 无引擎源码修改 | 不纳入固件/host 阅读程序；映射工具与来源记录单列 |
 | SDL2 / OpenSSL / libcurl | 本机现有开发库 | 构建日志记录已解析版本 | zlib / Apache-2.0 / curl license，各自动态链接 | 无 | 仅 host；未复制库源码 |
 | esp_tinyusb / TinyUSB | Espressif Component Registry | 2.4.0 / 0.21.0~1；component hash 见 dependencies.lock | Apache-2.0 / MIT；已读组件 LICENSE；依赖 ESP-IDF | 不修改上游文件；构建排除便利存储层，接入同步 SDMMC 回调 | 仅开启 MSC；分发时保留许可证、版权和适用 NOTICE |
@@ -40,6 +40,12 @@ GB18030 解码表的来源与复核（2026-10-07）：`firmware/components/reade
 本机全新 host 编译会产生 cJSON 上游 `sprintf` 的 macOS 弃用警告；未修改上游源码掩盖警告。ASan/UBSan 检查无运行时错误，不能据此代替上游安全维护或最终分发审核。
 
 每项应记录：仓库 URL、实际下载路径、完整 commit、许可证文件路径、传递依赖、移植补丁、允许分发方式、尚未确认的问题。不能将思想借鉴、源码复制、静态链接、配套工具调用视为完全相同的义务。许可范围不明时先实现无关的自主核心与测试，隔离实验；不要因此伪造「已审核」，也不必停掉全部开发。发布前完成法律/许可核对，本表不提供针对具体许可的法律结论。
+
+## 公开分发核对（2026-11-04）
+
+维护者在本次开源整理中确认，官方允许使用水波纹实现，并要求原样保留。此记录依据维护者提供的确认，未附新的上游公开声明；源码、调度、epdiy 补丁及对应测试均保持原样，保留原 Apache-2.0／LGPL-3.0-or-later 声明与来源。
+
+项目总许可证已明确为 GPL-3.0-or-later 及 ESP-IDF 二进制库链接许可；下方历史记录中的「项目许可证待定」只描述当时状态。第三方组件继续保留各自许可，不能用项目 GPL 替代。公开前仍需逐组件核对固件对应源码与安装资料、FreeType 附加声明、字体与 Unicode 数据声明，以及设计工具导出资料的适用条款；步骤见[公开发布检查](publication.md)。网站查词图已改用合成正文和合成词典条目，移除授权未确认的真实词典释义截图。未确认事项不写成已完成审核。
 
 ## 2026-10-06 · 功能实现前的来源核对
 

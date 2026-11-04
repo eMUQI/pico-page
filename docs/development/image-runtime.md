@@ -24,4 +24,4 @@ PNG 使用固定 commit 的 MIT `pngle`，复用已审查的 miniz；JPEG 使用
 
 自定义锁屏由内容 worker 准备，与普通正文图片的读取和提交路径不同；文件、透明缓存、冷／热合成资源、取消与回退规则统一见[平台说明](platform-runtime.md#自定义锁屏)，页面和预览规则见[UI 说明](ui-implementation.md#自定义锁屏)。不把早期整层解码的分配量用于当前流式锁屏路径。
 
-图片及锁屏的验收场景见[验收矩阵](acceptance.md)，当前结果见[开发状态](../development-status.md)。早期 host 测量、字体子集计数和被后续流式实现替代的透明层分配方式保留在[图片历史快照](../archive/image-runtime-20261025.md)，不作为当前测试数量或设备峰值。
+图片及锁屏的验收场景见[验收矩阵](acceptance.md)，当前结果见[开发状态](../development-status.md)。历史 host 测量和早期透明层分配方式不作为当前测试数量或设备峰值。

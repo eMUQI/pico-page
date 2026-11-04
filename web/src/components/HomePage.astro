@@ -8,7 +8,7 @@ const screens = [
   { id: "reading", title: "正文", description: "按键或轻点屏幕两侧翻页，底部随时查看阅读进度。", alt: "示例书籍正文，底部显示页码和电量" },
   { id: "tools", title: "阅读工具", description: "轻点正文中部，打开目录、排版、同步、刷新模式和全刷。", alt: "正文上的阅读工具，包含目录、排版、同步、刷新模式和全刷入口" },
   { id: "typography", title: "排版", description: "字体、字重、字号、行距等设置，先看预览，再应用到这本书。", alt: "示例书籍的排版面板，字号改为 40 px，尚未应用" },
-  { id: "dictionary", title: "查词", description: "长按正文选词，释义显示在当前页。可调整选区、切换词典。", alt: "英文正文中选中 fortune，下方面板显示朗道英汉字典 5.0 的音标和中文释义" },
+  { id: "dictionary", title: "查词", description: "长按正文选词，释义显示在当前页。可调整选区、切换词典。", alt: "合成正文中选中 omega，下方面板显示合成词典条目" },
   { id: "sync", title: "位置接续", description: "检查远端位置后，选择继续阅读的位置；上传前确认。", alt: "示例书籍的同步面板，分别显示本机与远端阅读位置" },
   { id: "sleep", title: "休眠", description: "封面、正文、简洁屏保或自己的锁屏图片。", alt: "休眠画面，显示示例书籍封面和已保存的阅读进度" },
 ];
@@ -145,8 +145,8 @@ const dictionaries = [
         <p class="footnote">本站不提供词典文件，也无法确认第三方文件的授权，请自行核实。可以在 <a href="https://stardict.uber.space/zh_CN/index.html" target="_blank" rel="noopener">StarDict 第三方目录 ↗</a> 查找，也可以使用自己的 StarDict 词典。</p>
       </div>
       <figure class="dictionary-screen">
-        <img src="/assets/screens/dictionary.webp" width="684" height="1216" alt="英文正文中选中 fortune，下方面板显示朗道英汉字典 5.0 的音标和中文释义，底部可调整选区、切换词典和翻页" loading="lazy" decoding="async">
-        <figcaption class="note">设备截图</figcaption>
+        <img src="/assets/screens/dictionary.webp" width="684" height="1216" alt="合成正文中选中 omega，下方面板显示合成词典条目，底部可调整选区、切换词典和翻页" loading="lazy" decoding="async">
+        <figcaption class="note">固件界面预览 · 合成正文与词条</figcaption>
       </figure>
     </div>
     <div class="dictionary-setup">
@@ -221,7 +221,7 @@ const dictionaries = [
         </li>
       ))}
     </ol>
-    <p class="note">固件界面预览 · 演示数据 · 查词图为设备截图</p>
+    <p class="note">固件界面预览 · 演示数据 · 非设备实拍</p>
     <dl id="devices" class="specs">
       <div><dt>屏幕</dt><dd>4.7 英寸 · 684 × 1216</dd></div>
       <div><dt>灰阶</dt><dd>16 级</dd></div>

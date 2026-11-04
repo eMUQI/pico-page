@@ -14,9 +14,8 @@
 | `docs/development-status.md` | 当前实现、未验收项和批次记录，供维护者与 agent 共用 | 当前摘要只在状态变化时更新；每批记录对应命令、结果和未测项 |
 | `docs/releases/` | 面向用户的版本说明 | 按版本维护，官网和设备更新清单读取同一来源 |
 | `docs/design/` | [设计系统](design/system/README.md)、当前设计说明及原始 PNG／HTML，供设计、开发与 agent 查阅 | 原件不修改；视觉规范以设计系统为准，当前交互以开发目录的 UI 说明为准 |
-| `docs/archive/` | 旧设计、计划和验证记录 | 只供追溯，不跟随代码更新；迁移时只修正必要链接并注明来源 |
 | `firmware/`、`host/`、`tests/`、`web/` 的 README | 对应子项目的构建、测试或部署入口 | 操作命令就近维护，跨模块规则用链接 |
-| `examples/`、`artifacts/`、组件 `third_party/` | 配置示例、截图证据、依赖来源与许可 | 示例随格式核对；证据按批次保留；许可随依赖变更 |
+| `examples/`、`docs/images/`、组件 `third_party/` | 配置示例、合成画面、依赖来源与许可 | 示例随格式核对；只保留文档引用的画面；许可随依赖变更 |
 
 官网使用说明仍在 `web/src/pages/docs.astro`，安装说明在 `web/src/pages/install.astro`；设备内置帮助仍在 `firmware/components/reader_app/help_content.h`。它们和仓库使用指南分别维护，本次目录整理没有合并内容来源；用户操作或限制改变时核对受影响的说明。
 
@@ -34,7 +33,7 @@
 | 解析、排版、图片、同步、平台机制 | 对应 `docs/development/*-runtime.md` | 锁屏准备与 OTA 协议在平台文档；路线图只引用实现 |
 | 构建、测试入口与依赖 | 子项目 README、[环境](development/environment.md)、[依赖审查](development/dependency-review.md) | 测试总数查 `ctest -N`；实际命令输出只记当次结果 |
 | 验收场景与数值目标 | [验收矩阵](development/acceptance.md) | 保留可执行的预期结果；不维护另一份当前通过清单 |
-| 合并、发布、测试及性能实测结果 | [开发状态](development-status.md)，设备明细在[设备记录](development/device-validation.md) | 路线图、计划和入口引用状态，不重复维护提交号与通过数量 |
+| 合并、发布、测试及性能实测结果 | [开发状态](development-status.md)，公开测量见[测试基准](development/testing-baselines.md) | 路线图、计划和入口引用状态，不重复维护提交号与通过数量 |
 | 未来功能与依赖 | [路线图](planning/roadmap.md)及专题计划 | 已落地的详细规则转入实现文档；旧方案留归档 |
 
 内部重构且行为、接口与约束不变时，不改用户指南；只更新确实失效的技术说明和当次开发记录。性能优化记录实测条件与结果，不改写成未经验证的产品能力。历史证据和已发布版本说明不因当前实现改变而重写。
@@ -69,6 +68,6 @@
 
 ## 状态与历史资料
 
-[开发状态](development-status.md)集中列出当前实现、待验收项与新批次；详细历史通过[归档导航](archive/README.md)按原日期追溯；[设备检查记录](development/device-validation.md)记录特定设备的操作；[验收清单](development/acceptance.md)定义应验证的行为。测试通过、构建成功、发布和真机验收是不同状态，不能互相替代。
+[开发状态](development-status.md)集中列出当前实现、待验收项与新批次；[测试基准](development/testing-baselines.md)规定公开实测口径；[验收清单](development/acceptance.md)定义应验证的行为。测试通过、构建成功、发布和真机验收是不同状态，不能互相替代。
 
-[里程碑](planning/milestones.md)与[词典计划](planning/dictionary-plan.md)用于阶段规划，[原始设计](design/README.md)和[归档](archive/README.md)用于追溯。历史中的路径、分区、命令和授权仅适用于当次记录，不能直接作为当前安装或开发步骤。现行需求冲突按 [AGENTS.md](../AGENTS.md) 中的资料优先级处理。
+[里程碑](planning/milestones.md)与[词典计划](planning/dictionary-plan.md)用于阶段规划，[原始设计](design/README.md)用于追溯视觉基线。历史中的路径、分区、命令和授权不能直接作为当前安装或开发步骤。现行需求冲突按 [AGENTS.md](../AGENTS.md) 中的资料优先级处理。仓库与部署迁移见[公开发布检查](development/publication.md)。

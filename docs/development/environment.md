@@ -1,6 +1,6 @@
 # 开发环境
 
-本文维护工具链定位、构建与检查方法及已知环境限制。具体批次的命令、产物和验收结果见[开发状态](../development-status.md)，设备实测见[设备检查记录](device-validation.md)。整理前的主机版本、镜像摘要、早期分区与写入记录保存在[环境历史快照](../archive/environment-20261025.md)，不作为当前机器状态或操作授权。
+本文维护工具链定位、构建与检查方法及已知环境限制。具体批次的命令、产物和验收结果见[开发状态](../development-status.md)，公开实测报告见[测试基准](testing-baselines.md)。历史设备操作与主机记录不作为当前机器状态或操作授权。
 
 ## 工具链与依赖定位
 
@@ -14,7 +14,7 @@ eim --log-file .local/eim.log --do-not-track true list
 eim --log-file .local/eim.log --do-not-track true run "idf.py --version" v6.1
 ```
 
-激活后检查 `$IDF_PATH` 对应检出的 commit、已跟踪差异和未跟踪文件，并记录实际 Python、CMake、Ninja 与交叉编译器版本。EIM 日志放到忽略目录 `.local/`。2026-10-06 的 macOS 环境存在 IDF 链接脚本修改和额外 requirements 文件，具体内容见[历史工具链记录](../archive/environment-20261025.md#本机工具链)；使用同一安装时须重新核对，不能将历史成功结果描述为干净官方工具链的本次验证。
+激活后检查 `$IDF_PATH` 对应检出的 commit、已跟踪差异和未跟踪文件，并记录实际 Python、CMake、Ninja 与交叉编译器版本。EIM 日志放到忽略目录 `.local/`。已有安装可能包含本地修改；构建前须核对，不能将历史成功结果描述为干净官方工具链的本次验证。
 
 BSP 的完整 commit 由 `boards/read_pico/bsp-revision.txt` 唯一指定，`tools/setup_bsp.sh` 和板级 CMake 共用；来源、补丁与许可见 [BSP 审查](bsp-review.md)。`boards/read_pico/board.cmake` 通过 `COMPONENTS` 选择 `main` 与 `platform_read_pico`，由 ESP-IDF 展开依赖；它选择 ESP32-S3、准备 BSP 构建副本、绑定运行时端口的链接并配置 TinyUSB 源文件，默认选项位于同目录的 `sdkconfig.defaults`，补丁位于 `patches/`。`profile.cmake` 由固件和 host 入口共同选择，生成契约的 `build_profile.h`，提供更新板名、渠道与槽大小。构建后核对实际生成的 sdkconfig，不能用 defaults 的改动代替生效配置验证。
 
@@ -65,9 +65,9 @@ ctest --test-dir build/sanitized --output-on-failure
 
 ASan/UBSan 通过不等于已检查内存泄漏。须核对实际编译器与运行时的 LSan 支持；既有 macOS AppleClang 21 记录报过 `AddressSanitizer: detect_leaks is not supported on this platform`，不能据此概括所有 macOS 工具链。上述 macOS 命令仅记录 ASan/UBSan 结果；具备 LSan 的工具链应显式使用 `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1`。现有 Linux CI 使用独立 Clang sanitizer 构建并保留这些选项，不通过关闭泄漏检查冒充完整通过。
 
-CTest 日志位于 `build/host/Testing/Temporary/LastTest.log` 与 `build/sanitized/Testing/Temporary/LastTest.log`。核对实际注册项目和条件依赖，分别记录 macOS 本机与 Linux CI 结果。历史 Homebrew 动态库链接曾产生系统版本警告，本机运行通过不证明其他 macOS 版本兼容。历史编译警告及测试数量保存在[环境快照](../archive/environment-20261025.md#host-与交接检查)，本次结果以实际命令输出为准。
+CTest 日志位于 `build/host/Testing/Temporary/LastTest.log` 与 `build/sanitized/Testing/Temporary/LastTest.log`。核对实际注册项目和条件依赖，分别记录 macOS 本机与 Linux CI 结果。历史 Homebrew 动态库链接曾产生系统版本警告，本机运行通过不证明其他 macOS 版本兼容。本次编译警告、测试数量及结果以实际命令输出为准。
 
-`python3 tools/check_handoff.py` 只检查交接资料，不能替代 C++ 测试、固件构建或真机验证。每批结果与未测范围记录在[开发状态](../development-status.md)。
+`python3 tools/check_handoff.py` 只检查公开文档与示例，不能替代 C++ 测试、固件构建或真机验证。每批结果与未测范围记录在[开发状态](../development-status.md)。
 
 ## 桌面预览与位置映射复核
 
@@ -89,20 +89,11 @@ python3 tools/check_koreader_mapping.py
 
 网站、发布说明、OTA 清单脚本及网站或共用路径脚本的改动执行 PR 网站构建与发布固件校验。分支 push 不单独触发工作流；main 仅在上述网站输入变更时构建并部署，发布 Release 和手动部署入口保留。host 合并后不自动重跑，直接推送 main 的代码需要手动补验；合并前应验证包含当前目标分支变更的结果。PR 新提交取消旧检查，正式部署继续串行并保留下载源比较及线上读回检查。COS 返回 403 时，仅允许候选清单与全部镜像均同官网现有副本逐字节一致的页面更新，并明确告警；新固件、内容变化、其他错误及认证发布失败仍阻止部署，不自动恢复桶权限。部署前通过共用路径脚本直接比较构建提交与最新 main 的网站输入：网站输入变化才让位给替代运行，只有文档或固件代码变化时仍完成当前部署；读取比较结果失败时停止部署。
 
-两个工作流通过 `[self-hosted, linux, x64, pico-page]` 路由至本仓库专用的 `homelab` runner；当前主机为 Ubuntu 26.04 x86_64，以独立普通用户运行，不授予 sudo 或 Docker 管理权限。单个 runner 串行领取任务，离线时任务排队，不自动回退至 GitHub 托管机器。host 超时为 20 分钟，网站超时为 25 分钟（包含固件上传及完整公网读回）。工作流不执行 apt、不修改主机包源；host 检查 CMake、C++、Clang、ccache 及 pkg-config 依赖，网站检查 gh 和 curl，缺少依赖时失败。
+两个工作流继续通过 `[self-hosted, linux, x64, pico-page]` 使用现有私有 runner；是否切换到 GitHub 托管环境及切换时机另行决定，不作为本次整理或发布的前置条件。runner 串行领取任务，离线时排队，不自动回退。host 超时为 20 分钟，网站超时为 25 分钟（包含固件上传及完整公网读回）。系统依赖由管理员预先准备，工作流不执行 apt 或 sudo；host 检查 CMake、C++、Clang、ccache 及 pkg-config 依赖，网站检查 gh 和 curl，缺少依赖时失败。
 
-管理员在 Ubuntu 主机上预先安装系统依赖，不能在 runner 用户中执行：
+host 和 COS 发布继续通过 `actions/setup-python@v5` 使用 Python 3.12，不替换系统 Python。host 正文相关检查和网站构建均显式准备 Node 24，防止缺少 Node 时条件测试未注册。COS 依赖安装在本任务 `RUNNER_TEMP/pico-page-cos` 虚拟环境中，不写入系统 Python。
 
-```sh
-sudo apt-get update
-sudo apt-get install -y build-essential cmake clang libclang-rt-dev ccache pkg-config \
-  libsdl2-dev libssl-dev libcurl4-openssl-dev python3 python3-venv \
-  git gh curl ca-certificates tar gzip unzip
-```
-
-host 和 COS 发布继续通过 `actions/setup-python@v5` 使用 Python 3.12；runner 用户须能写入 `RUNNER_TOOL_CACHE`，Python 发行包须匹配 Ubuntu 版本，来源见 [actions/python-versions](https://github.com/actions/python-versions/blob/main/versions-manifest.json)。不替换系统 Python。host 正文相关检查和网站构建均显式准备 Node 24，防止新机器缺少 Node 时条件测试未注册。COS 依赖安装在本任务 `RUNNER_TEMP/pico-page-cos` 虚拟环境中，不写入系统 Python 或共享工具缓存中的 Python 环境。
-
-两个工作流均显式启用 checkout 清理，移除上次任务留下的未跟踪及忽略文件，再恢复所需缓存，避免复用旧构建目录、网站产物或下载的固件。缓存不保存构建结果；长期运行的 runner 不视为每次新建的隔离环境。runner 仍可访问主机允许的网络服务，专用用户不能代替内网访问控制。
+两个工作流均显式启用 checkout 清理，再恢复所需缓存；缓存不保存构建结果、测试结果、网站产物或下载的发布固件。持久运行的私有 runner 不等同于每次新建的隔离环境。
 
 Debug 保持原优化配置；CI sanitizer 使用 Debug 配置及 `-O1 -g`，保留断言、事件跟踪和原有 sanitizer 选项。两种构建通过 CMake compiler launcher 共用 ccache，编译器内容和编译参数参与命中判断，单份本地缓存上限为 256 MiB。缓存只影响编译，完整 CTest 每次仍执行。字体与 FreeType 仅缓存下载输入，`setup_fonts.py` 每次重新核对摘要并按需解包，不缓存测试结果或构建目录。新增缓存使用 GitHub 官方 `actions/cache@v5`，不提高仓库的缓存付费容量上限。
 

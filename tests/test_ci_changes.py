@@ -21,7 +21,7 @@ class CiChangesTest(unittest.TestCase):
             (['web/src/pages/index.astro', '.github/workflows/web.yml'], False, True),
             (['firmware/components/reader_app/app.cpp', 'docs/development-status.md'], True, False),
             (['host/main.cpp', 'tests/app_test.cpp', 'CMakeLists.txt'], True, False),
-            (['.github/workflows/host.yml', 'examples/settings.toml', 'handoff-manifest.json'], True, False),
+            (['.github/workflows/host.yml', 'examples/settings.toml', 'tools/check_handoff.py'], True, False),
             (['tools/ota_manifest.py'], True, True),
             (['tools/deploy_firmware.py'], True, True),
             (['tools/publish_cos.py', 'tools/cos-requirements.txt'], True, True),

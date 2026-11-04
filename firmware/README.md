@@ -32,7 +32,7 @@ Read Pico BSP 固定在 `.local/read_pico_firmware`，版本由 [`boards/read_pi
 - **仅更新应用**：只适用于已核对分区与本项目兼容的设备。写入前读回实际分区表和 otadata，确认当前启动槽与目标偏移；联网更新后设备可能从 `ota_1` 启动。不要直接执行构建日志中的默认烧录命令，也不要复用历史设备记录的偏移。
 - **校准**：不得改写工厂 VCOM/PMU 校准；VCOM 读取失败时保持面板关闭。整片闪存安装不包含 PMU 中的校准数据。
 
-安装与联网更新的验收范围见[验收清单](../docs/development/acceptance.md)和[开发状态](../docs/development-status.md)。[设备检查记录](../docs/development/device-validation.md)只描述对应设备和当次操作，不是其他设备的通用写入指南。
+安装与联网更新的验收范围见[验收清单](../docs/development/acceptance.md)和[开发状态](../docs/development-status.md)。实际分区与写入偏移必须在目标设备核对，历史设备记录不是通用写入指南。
 
 ## 开发与验证
 

@@ -61,9 +61,9 @@ ESP-IDF 锁为 v6.1 commit `fff9895c82d744c7237be8847347bdd1b07c6643`，本机�
 
 ## 分区与发布待办
 
-上游 `partitions_16M.csv` 是单 factory 应用加数据区，没有 OTA 双槽。这只说明所锁源码的分区安排，不说明用户设备当前分区。Pico Page 没有复制该 CSV；本地单应用分区仅用于构建。现已读回设备为两个 4 MiB OTA 槽，与上游及本地 CSV 均不同；当前启动槽和完整备份仍未核验，见 device-validation.md。
+上游 `partitions_16M.csv` 是单 factory 应用加数据区，没有 OTA 双槽。这只说明所锁源码的分区安排，不说明用户设备当前分区。Pico Page 没有复制该 CSV；当前全量安装使用 `firmware/partitions.build.csv` 的双 OTA 分区表，包含两个 4 MiB 应用槽。安装步骤见[固件开发指南](../../firmware/README.md#硬件与写入边界)，不能据源码推断设备实际分区或当前启动槽。
 
-未来分发 Apache-2.0 组件时应附完整许可、保留版权和适用 NOTICE，并标明修改。分发包含 epdiy 的静态链接固件时，应按 LGPL-3.0 第 4 节准备 LGPL/GPL 文本、库来源与修改记录、可重新链接所需源码或对象及必要安装信息；不能只放一个上游链接就宣称完成义务。本项目整体许可证仍待决定，本轮只在本地构建。条款依据：[Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0)、[LGPL-3.0-or-later 文本](https://spdx.org/licenses/LGPL-3.0-or-later.html)。
+分发 Apache-2.0 组件时应附完整许可、保留版权和适用 NOTICE，并标明修改。分发包含 epdiy 的静态链接固件时，应按 LGPL-3.0 第 4 节准备 LGPL/GPL 文本、库来源与修改记录、可重新链接所需源码或对象及必要安装信息；不能只放一个上游链接就宣称完成义务。本项目整体许可已确定，见[许可说明](../../LICENSING.md)，第三方组件的独立声明与分发核对仍须保留。条款依据：[Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0)、[LGPL-3.0-or-later 文本](https://spdx.org/licenses/LGPL-3.0-or-later.html)。
 
 ## EPD 欠载诊断适配（2026-10-09）
 

@@ -96,4 +96,5 @@ jobs:
       - name: Compiler cache statistics
         if: always() && steps.dependencies.outcome == 'success'
         run: ccache --show-stats
+      - run: python3 -m unittest discover -s tests -p test_check_handoff.py -v
       - run: python3 tools/check_handoff.py
