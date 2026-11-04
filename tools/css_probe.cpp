@@ -11,7 +11,7 @@ int main(int argc, char** argv) {
         const auto start = std::chrono::steady_clock::now();
         const auto seconds = std::stoi(argv[2]);
         std::mt19937 random(108);
-        const std::string seed = "p.x > div, #a{font-size:1.2em;margin:2% 3px!important}@media print{p{display:none}}";
+        const std::string seed = "p.x > div, #a{font-size:1.2em;margin:2% 3px!important}@media print{p{display:none}}p{unknown:url(art/*)}";
         uint64_t runs = 0;
         do {
             std::string input = seed;

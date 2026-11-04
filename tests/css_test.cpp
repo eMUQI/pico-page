@@ -138,6 +138,31 @@ int main() {
         assert(near(style(newlines, {"p", "", ""}).font_px, 27));
     }
     {
+        StyleSheet urls;
+        ComputedStyle parent;
+        parent.font_px = 32; parent.bold = true; parent.hidden = true;
+        WorkBudget budget;
+        ComputedStyle result;
+        assert(urls.compute({"p", "", ""}, &parent, {}, std::string(4097, ' '), budget, result) == Result::InvalidInput);
+        assert(near(result.font_px, 32) && result.bold && result.hidden);
+        Context context; context.minimum_font_px = 24;
+        assert(near(style(urls, {"p", "", ""}, nullptr, {}, context).font_px, 24));
+        parent.font_px = 20;
+        const auto inherited = style(urls, {"p", "", ""}, &parent, {}, context);
+        assert(near(inherited.font_px, 24) && near(inherited.line_height_px, 28.8f));
+        assert(urls.append("p{unknown:url(art/*);font-size:23px} div{unknown:url(a\\)b);font-size:24px} span{unknown:url(\"}/*\");font-size:25px} em{unknown:url(a b);font-size:26px} strong{unknown:u\\72l(art/*);font-size:27px} b{unknown:url(data:text/x,;}{);font-size:28px}") == Result::Complete);
+        assert(near(style(urls, {"p", "", ""}).font_px, 23));
+        assert(near(style(urls, {"div", "", ""}).font_px, 24));
+        assert(near(style(urls, {"span", "", ""}).font_px, 25));
+        assert(near(style(urls, {"em", "", ""}).font_px, 26));
+        assert(near(style(urls, {"strong", "", ""}).font_px, 27));
+        assert(near(style(urls, {"b", "", ""}).font_px, 28));
+        unsigned calls = 0;
+        Checkpoint stop{[](void* value) { return ++*static_cast<unsigned*>(value) >= 2; }, &calls};
+        assert(urls.append("p{unknown:url(" + std::string(1000, ' ') + "\"x\");font-size:99px}", stop) == Result::Cancelled);
+        assert(near(style(urls, {"p", "", ""}).font_px, 23));
+    }
+    {
         fail_array_allocation = true;
         StyleSheet unavailable;
         fail_array_allocation = false;

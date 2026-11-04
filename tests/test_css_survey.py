@@ -1,6 +1,7 @@
 """Original EPUB fixtures verify CSS association and private-output naming."""
 import importlib.util
 import json
+from itertools import islice
 from pathlib import Path
 import tempfile
 import unittest
@@ -12,6 +13,11 @@ spec.loader.exec_module(survey)
 
 
 class CssSurveyTest(unittest.TestCase):
+    def test_trailing_escape_always_advances(self):
+        result = list(islice(survey.tokens('p{}\\'), 8))
+        self.assertEqual(len(result), 4)
+        self.assertEqual(result[-1], ('\\', '\\'))
+
     def test_associated_styles_only(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

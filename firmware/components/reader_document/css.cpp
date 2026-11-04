@@ -80,7 +80,7 @@ bool decode(std::string_view raw, Text& output) {
     }
     return true;
 }
-enum class Kind : uint8_t { End, Space, Ident, Number, Dimension, Percent, String, Bad, Delimiter };
+enum class Kind : uint8_t { End, Space, Ident, Number, Dimension, Percent, String, Url, Bad, Delimiter };
 struct Token {
     Kind kind = Kind::End;
     char delimiter = 0;
@@ -161,6 +161,18 @@ public:
         } else if (starts_ident()) {
             token.kind = Kind::Ident;
             token.raw = consume_name();
+            if (keyword(token, "url") && peek() == '(') {
+                size_t lookahead = position_ + 1;
+                while (lookahead < source_.size() && space(source_[lookahead])) {
+                    ++lookahead;
+                    if (lookahead % 256 == 0) check();
+                    if (result != Result::Complete) return {};
+                }
+                if (lookahead == source_.size() || (source_[lookahead] != '\'' && source_[lookahead] != '"')) {
+                    token.kind = consume_url() ? Kind::Url : Kind::Bad;
+                    token.raw = source_.substr(begin, position_ - begin);
+                }
+            }
             return bounded(token);
         } else {
             token.kind = Kind::Delimiter;
@@ -195,21 +207,41 @@ private:
         if (peek() == '.') return digit(peek(1));
         return (peek() == '+' || peek() == '-') && (digit(peek(1)) || (peek(1) == '.' && digit(peek(2))));
     }
+    void consume_escape() {
+        advance();
+        unsigned count = 0;
+        while (position_ < source_.size() && count < 6 && hex(peek()) >= 0) { advance(); ++count; }
+        if (count && position_ < source_.size() && space(peek())) {
+            const char whitespace = peek();
+            advance();
+            if (whitespace == '\r' && peek() == '\n') advance();
+        } else if (!count) advance();
+    }
+    bool consume_url() {
+        advance();
+        while (position_ < source_.size() && space(peek())) advance();
+        bool valid = true;
+        while (position_ < source_.size()) {
+            const unsigned char c = peek();
+            if (c == ')') { advance(); break; }
+            if (c == '\\' && escape()) { consume_escape(); continue; }
+            if (valid && space(static_cast<char>(c))) {
+                while (position_ < source_.size() && space(peek())) advance();
+                if (position_ < source_.size() && peek() != ')') valid = false;
+                continue;
+            }
+            if (c == '\'' || c == '"' || c == '(' || c == '\\' || (c && c < 32) || c == 127) valid = false;
+            // CSS URL tokens contain comment markers and block delimiters as ordinary data.
+            advance();
+        }
+        return valid;
+    }
     std::string_view consume_name() {
         const size_t start = position_;
         while (position_ < source_.size()) {
             if (name_char(peek())) advance();
-            else if (escape()) {
-                advance();
-                unsigned count = 0;
-                while (position_ < source_.size() && count < 6 && hex(peek()) >= 0) { advance(); ++count; }
-                if (count && position_ < source_.size() && space(peek())) {
-                    const char whitespace = peek();
-                    advance();
-                    if (whitespace == '\r' && peek() == '\n') advance();
-                }
-                else if (!count) advance();
-            } else break;
+            else if (escape()) consume_escape();
+            else break;
         }
         return source_.substr(start, position_ - start);
     }
@@ -399,6 +431,7 @@ ComputedStyle base_style(const ComputedStyle* parent, const Context& context) {
         result.line_height_px = parent->line_height_px; result.indent_px = parent->indent_px;
         result.bold = parent->bold; result.italic = parent->italic; result.align = parent->align; result.hidden = parent->hidden;
     }
+    result.font_px = std::clamp(result.font_px, context.minimum_font_px, context.maximum_font_px);
     if (result.line_height_factor >= 0) result.line_height_px = result.font_px * result.line_height_factor;
     return result;
 }
@@ -703,8 +736,9 @@ Result StyleSheet::compute(const Element& element, const ComputedStyle* parent, 
     const float fields[] = {context.initial_font_px, context.root_font_px, context.containing_width_px,
                             context.minimum_font_px, context.maximum_font_px};
     for (const auto value : fields) if (!std::isfinite(value) || value <= 0 || value > 16384) return Result::InvalidInput;
-    if (context.minimum_font_px > context.maximum_font_px || inline_style.size() > 4096) return Result::InvalidInput;
+    if (context.minimum_font_px > context.maximum_font_px) return Result::InvalidInput;
     output = base_style(parent, context);
+    if (inline_style.size() > 4096) return Result::InvalidInput;
     if (!impl_) return Result::NoMemory;
     if (impl_->ready == Result::NoMemory || impl_->ready == Result::InvalidInput) return impl_->ready;
     if (budget.styles >= budget.maximum_styles) return Result::Limit;

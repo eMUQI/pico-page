@@ -71,7 +71,7 @@ def tokens(source, whitespace=False):
             while i < len(source) and (source[i].isalpha() or source[i] == '%'):
                 i += 1
             yield 'dimension' if end != i else 'number', source[start:i]
-        elif c.isalnum() or c in '_-\\' or ord(c) >= 128:
+        elif c.isalnum() or c in '_-' or (c == '\\' and i + 1 < len(source)) or ord(c) >= 128:
             start = i
             while i < len(source):
                 c = source[i]

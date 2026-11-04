@@ -78,7 +78,8 @@ public:
     /**
      * Compute one element using its already computed parent (nullptr for root).
      * inline_style is a declaration list, bounded by 4096 bytes and the same token limits.
-     * On failure, output is the initial/inherited style, without partially matched rules.
+     * With a valid context, failure returns the initial/inherited style without partial matches.
+     * Invalid context returns a default-constructed output.
      * Work/styles budgets are cumulative; invalid context or excessive ancestry is rejected.
      * No allocations occur during compute. The owner must keep all borrowed views valid.
      */
