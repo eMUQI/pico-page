@@ -6,6 +6,7 @@
 
 | 日期与源码 | 记录 | 范围 |
 |---|---|---|
+| 2026-11-04 · CSS 原型，实测基于 `25b003d` | [匿名报告](baselines/2026-11-04-css-prototype.md) · [结构化结果](baselines/2026-11-04-css-prototype.json) | 22 本 EPUB 调研、23 组独立 CSS 测量和三本实书的阅读内存及跨章恢复 |
 | 2026-11-04 · `0.5.1/2b0e98d` 与 `main/6429f79` 同代码诊断构建 | [报告](baselines/2026-11-04-v051-main-performance.md) · [结构化结果](baselines/2026-11-04-v051-main-performance.json) | 同机三组合成样本的开书、普通与跨章翻页对照；保留预取状态差异、长等待和未测范围 |
 
 更早的实书基准与设备过程记录保留在私有存档，不随公开源码分发，不因移出公开目录改写其原始结果。
@@ -23,6 +24,8 @@
 公开报告与 JSON 放在本目录的 `baselines/`；原始字节、逐次操作、截图、安装副本、工具脚本和敏感条件放在 `.local/<基准标识>/`。公开结果不得依赖私有文件才能理解结论，私有证据不得因下一轮测试而覆盖。
 
 结构化结果按 `schema_version` 解析。当前公开的 2026-11-04 专项采用 v4，`kind=targeted_version_performance_comparison`；`runs` 保留逐轮采集判定及完整分布，`comparison` 记录共同指标组，`findings`、`conditions`、`restoration` 分别维护异常、比较条件及恢复结果。设备备份路径、摘要和写入偏移不进入公开报告。它不表示完整套件或其他验收项已经执行；仅一侧出现的预取命中组仍保留在该轮分布中。
+
+CSS 原型专项采用 v5，`kind=css_prototype_target_measurement`。`benchmark` 按匿名样本保存分位数、工作量及能力堆观测值，`reading` 记录正文内存和跨章恢复汇总。
 
 ## 可重复的测试顺序
 
