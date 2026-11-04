@@ -2,7 +2,7 @@
   "schema_version": 4,
   "kind": "targeted_version_performance_comparison",
   "date": "2026-11-04",
-  "schema_notes": "Targeted version comparison. runs contains per-run analyses and complete derived distributions; comparison contains shared metric groups. This is not the full-suite v3 reading/library/network schema.",
+  "schema_notes": "Targeted version comparison. runs contains per-run analyses and complete derived distributions; comparison contains shared metric groups. This is not the full-suite v3 reading/library/network schema. Device backup path, backup digest and write offset are retained only in private evidence.",
   "baseline": {
     "schema": 1,
     "source_commit": "2b0e98dee990250ac5fdbe16258c679166b956a6",
@@ -3012,10 +3012,6 @@
     }
   ],
   "restoration": {
-    "image": ".local/version-perf-20261104/images/current-release/pico_page.bin",
-    "sha256": "b28fe902b46c12132fc78539fca687e784ba462685991589956c3dd848d9c81e",
-    "bytes": 3949216,
-    "app_offset": "0x410000",
     "independent_verify": true,
     "metadata_unchanged": true,
     "otadata_unchanged": true,

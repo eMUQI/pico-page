@@ -1,6 +1,6 @@
 # 界面实现说明
 
-本文按当前页面和交互说明视觉基线、状态与失败处理；产品取舍以[当前决定](../planning/decisions.md)为准，发布及验收状态见[开发状态](../development-status.md)。原始 PNG／HTML 不修改；已被替代的手机配网、旧设置布局和逐批设计差异见[整理前快照](../archive/ui-implementation-20261024.md)。
+本文按当前页面和交互说明视觉基线、状态与失败处理；产品取舍以[当前决定](../planning/decisions.md)为准，发布及验收状态见[开发状态](../development-status.md)。原始 PNG／HTML 不修改；现行行为以本文和产品决定为准。
 
 ## 视觉与共通反馈
 
@@ -177,7 +177,7 @@ S00 为欢迎、阅读练习、工具栏说明三屏，新增 `View::Onboarding`
 
 ### 关于
 
-显示产品名、运行时版本与硬件、作者、官网及 224 px 二维码，以及 epdiy 和字体许可说明；设置中版本和硬件只在本页显示。项目主页为 picopage.wulu.zone，源码公开与总许可证状态按发布事实维护，不沿用原稿占位值。
+显示产品名、运行时版本与硬件、作者、官网及 224 px 二维码，以及 epdiy 和字体许可说明；设置中版本和硬件只在本页显示。项目主页为 picopage.wulu.zone，关于页显示「GPL-3.0+ · 含 ESP-IDF 链接许可」。网站的源码与完整许可入口在源码公开后添加，避免链接到尚未公开的仓库。
 
 ## Wi-Fi、键盘与同步
 
@@ -351,7 +351,7 @@ EPUB／TXT 当前页文字长按后先显示选区，持续接触可跨行拖动
 
 页面按相关正常、忙碌、失败、空／未知状态核对真实绘制和热区，标明字体、画布、提交与来源；原始 PNG／HTML 只作视觉基线。布局完成、像素准备、面板完成及进度保存分别验证。截图不替代波形、残影、功耗、TF 掉电或实际 KOReader 往返；专项见[验收矩阵](acceptance.md)。
 
-D48 按钮表的状态稿见[选区调整稿](../../artifacts/dictionary-range-draft-20261028/states-overview.png)，实际 host 渲染见[下方面板](../../artifacts/dictionary-range-20261028/dictionary-panel.png)、[上方面板](../../artifacts/dictionary-range-20261028/dictionary-panel-top.png)、[调整后未收录](../../artifacts/dictionary-range-20261028/dictionary-range-shorter.png)与[全屏](../../artifacts/dictionary-range-20261028/dictionary-expanded.png)；此前「轻量工具行」的渲染见[面板](../../artifacts/dictionary-results-20261027/dictionary-panel.png)；早期词典合成画面见[面板](../../artifacts/dictionary-ui-20261024/dictionary-panel.png)、[展开](../../artifacts/dictionary-ui-20261024/dictionary-expanded.png)、[圆形端点](../../artifacts/dictionary-ui-20261024/dictionary-selection.png)和[来源列表](../../artifacts/dictionary-ui-20261024/dictionary-sources.png)；设计约束见[词典优化说明](../design/dictionary-ui-refinement.md)。其他批次截图路径、原稿差异、旧规则与验证状态完整保留在[历史 UI 说明](../archive/ui-implementation-20261024.md)，不得据旧章节恢复已删除功能。
+D48 按钮表的实际 host 渲染见[下方面板](../images/dictionary-range-20261028/dictionary-panel.png)、[上方面板](../images/dictionary-range-20261028/dictionary-panel-top.png)、[调整后未收录](../images/dictionary-range-20261028/dictionary-range-shorter.png)与[全屏](../images/dictionary-range-20261028/dictionary-expanded.png)；此前「轻量工具行」的渲染见[面板](../images/dictionary-results-20261027/dictionary-panel.png)；早期词典合成画面见[面板](../images/dictionary-ui-20261024/dictionary-panel.png)、[展开](../images/dictionary-ui-20261024/dictionary-expanded.png)、[圆形端点](../images/dictionary-ui-20261024/dictionary-selection.png)和[来源列表](../images/dictionary-ui-20261024/dictionary-sources.png)；设计约束见[词典优化说明](../design/dictionary-ui-refinement.md)。以上画面使用合成内容；不得据旧画面恢复已删除功能。
 
 
 ## TXT 目录

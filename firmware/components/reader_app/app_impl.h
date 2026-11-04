@@ -2938,7 +2938,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         canvas.line(24, 876, 660, 876, 1, 2);
         value_row(0, "epdiy 显示驱动", "", "LGPL-3.0-or-later", 876, 64);
         value_row(0, "内置正文字体", "", "OFL 1.1", 940, 64);
-        text("源码整理中，敬请期待。", 36, 1036, 22, 612, 3);
+        text("GPL-3.0+ · 含 ESP-IDF 链接许可", 36, 1036, 22, 612, 3);
         footer_bar(notice());
     }
     void help_regions(int x, int y, int width, int height) {

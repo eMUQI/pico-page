@@ -18,7 +18,7 @@ sh tools/check_public_books.sh .local/card/Fonts/LXGWWenKai-Regular.ttf \
   .local/public-books/lu-xun-aq-25332.epub .local/public-books/lu-xun-nahan-27166.epub
 ```
 
-随后实际桌面应用打开《阿Ｑ正傳》，完成翻页、K2 全刷、工具面板、模拟睡眠和重开恢复。`.local/lu-xun-resume.log` 显示恢复后修订号为 6；K2 和模拟唤醒均不增加修订号。`artifacts/runtime/lu-xun-reading.png` 是真实 App 渲染输出，不能替代设备成像证据。
+随后实际桌面应用打开《阿Ｑ正傳》，完成翻页、K2 全刷、工具面板、模拟睡眠和重开恢复。`.local/lu-xun-resume.log` 显示恢复后修订号为 6；K2 和模拟唤醒均不增加修订号。当次 App 渲染输出保留在私有存档，不能替代设备成像证据。
 
 ## 精确同步对照
 

@@ -14,6 +14,7 @@ firmware/managed_components/
 local/
 private/
 .local/
+# Temporary captures; documentation images belong in docs/images/.
 artifacts/
 .env
 .env.*
