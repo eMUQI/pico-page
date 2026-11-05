@@ -368,6 +368,11 @@ ContentJob::StartFailure ContentJob::prepare_worker() {
 #endif
 bool ContentJob::start() {
     if (started_) return false;
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+    ESP_LOGI("reader_perf", "content_request job=%p kind=%u generation=%llu chapter=%u part=%u target=%u prefetch=%d",
+        static_cast<void*>(this), static_cast<unsigned>(request.kind), static_cast<unsigned long long>(request.generation),
+        static_cast<unsigned>(request.chapter), request.part, static_cast<unsigned>(request.target), request.chapter_prefetch);
+#endif
     PP_DIAGNOSTIC(
         measurement_ = diagnostics::begin(diagnostics::Kind::Content,
             {request.diagnostic_session, request.diagnostic_layout, 0, request.generation,
@@ -440,6 +445,27 @@ void ContentJob::execute() {
 #else
 void ContentJob::run() {
 #endif
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+    struct WorkerMeasurement {
+        ContentJob& job;
+        std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+        ~WorkerMeasurement() {
+            const auto us = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - started).count();
+            const bool cancelled = job.cancelled_.load(std::memory_order_relaxed);
+            const bool failed = !job.result.error.empty() || !job.result.failed_images.empty() ||
+                (job.request.kind == Kind::SaveProgress && job.result.progress.status != StoreStatus::Ok) ||
+                (job.request.kind == Kind::SaveBookmarks && job.result.bookmark_status != StoreStatus::Ok) ||
+                (job.request.kind == Kind::ClearCache && job.result.clear_cache_status != StoreStatus::Ok);
+            ESP_LOGI("reader_perf", "stage=content_worker us=%lld min_us=0 job=%p kind=%u generation=%llu outcome=%s chapter=%u part=%u scalars=%u retained_hit=%d cache_committed=%d",
+                static_cast<long long>(us), static_cast<void*>(&job), static_cast<unsigned>(job.request.kind),
+                static_cast<unsigned long long>(job.request.generation),
+                cancelled ? "cancelled" : failed ? "failed" : "complete",
+                static_cast<unsigned>(job.result.chapter_index), job.result.chapter.part,
+                static_cast<unsigned>(job.result.chapter.text.size()), job.result.retained_cache_hit, job.result.cache_finished);
+        }
+    } measurement{*this};
+#endif
     struct FinishChapterSession {
         ContentJob& job;
         ~FinishChapterSession() {
@@ -468,7 +494,7 @@ void ContentJob::run() {
         return;
     }
     if (request.kind == Kind::SaveProgress) {
-        const StageTimer timer{"progress_commit"};
+        const StageTimer timer{"progress_commit", 0};
         FileStore store(request.root);
         if (request.record) result.progress = store.save_progress(request.relative_path, *request.record);
         if (request.save_last_book && result.progress.status == StoreStatus::Ok)

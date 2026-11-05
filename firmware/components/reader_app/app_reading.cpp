@@ -337,7 +337,7 @@ void ReaderApp::Impl::count_pages(const std::function<bool()>& stop) {
 
 bool ReaderApp::Impl::draw_page_content(const graphics::Page& planned, const graphics::LayoutSpec& spec, bool progressive,
                                          const graphics::AuthorFonts* fonts) {
-    const StageTimer timer{"page_draw"};
+    const StageTimer timer{"page_draw", 0};
     if (!planned.images.empty()) {
         if (image_prepared) {
             if (prepared_image && prepared_image_error.empty()) canvas = *prepared_image;

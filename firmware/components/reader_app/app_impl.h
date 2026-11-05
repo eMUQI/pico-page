@@ -1081,7 +1081,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         auto request = session.request_save();
         if (!request)
             return !session.needs_save() && bookmark_stored;
-        const StageTimer timer{"progress_commit"};
+        const StageTimer timer{"progress_commit", 0};
         const auto result = store.save_progress(book_path, request->record);
         const bool okay =
             result.status == StoreStatus::Ok && result.record && *result.record == request->record;
@@ -1702,7 +1702,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         return settings.original_epub && !txt_name(book_path) ? ChapterLoad::Original : ChapterLoad::Reading;
     }
     bool load_chapter(std::size_t index, std::uint32_t part = 0) {
-        const StageTimer timer{"chapter_reading"};
+        const StageTimer timer{"chapter_reading", 0};
         return load_with(index, [&](Chapter &loaded, std::string &detail) {
             return load_content(store, document, index, loaded, detail, reading_detail(), part);
         });
@@ -1753,7 +1753,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     }
     graphics::Page plan_page(const Chapter &source, std::size_t start, const graphics::LayoutSpec& spec,
                              bool collect = true, const std::function<bool()>& stop = {}) {
-        const StageTimer timer{"page_layout"};
+        const StageTimer timer{"page_layout", 0};
         return plan_content(body, source, start, spec, collect, stop, &fonts_for(source));
     }
     const graphics::AuthorFonts& fonts_for(const Chapter& source) const {

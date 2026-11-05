@@ -15,10 +15,46 @@
 #include FT_MODULE_H
 #include "esp_heap_caps.h"
 #endif
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+#include "esp_log.h"
+#include "esp_timer.h"
+#endif
 
 #include "fallback_font.h"
 
 namespace pico_page::graphics {
+
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+namespace {
+struct PageRenderTiming;
+thread_local PageRenderTiming* page_render_timing = nullptr;
+
+struct PageRenderTiming {
+    explicit PageRenderTiming(std::size_t glyphs)
+        : previous(page_render_timing), start_us(esp_timer_get_time()), glyphs(glyphs) {
+        page_render_timing = this;
+    }
+
+    ~PageRenderTiming() {
+        const auto elapsed_us = esp_timer_get_time() - start_us;
+        page_render_timing = previous;
+        ESP_LOGI("reader_perf", "stage=page_render us=%lld min_us=0 glyph_prepare_us=%lld glyph_blend_us=%lld glyph_calls=%u glyphs=%u success=%d cancelled=%d",
+            static_cast<long long>(elapsed_us), static_cast<long long>(glyph_prepare_us),
+            static_cast<long long>(glyph_blend_us), static_cast<unsigned>(glyph_calls),
+            static_cast<unsigned>(glyphs), success, cancelled);
+    }
+
+    PageRenderTiming* previous;
+    std::int64_t start_us;
+    std::int64_t glyph_prepare_us = 0;
+    std::int64_t glyph_blend_us = 0;
+    std::size_t glyph_calls = 0;
+    std::size_t glyphs;
+    bool success = false;
+    bool cancelled = false;
+};
+}
+#endif
 
 struct Font::Stream {
     FT_StreamRec record{};
@@ -381,8 +417,22 @@ bool Font::warm(char32_t scalar, bool bold, bool italic) {
 }
 
 bool Font::draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8_t gray, bool bold, bool italic) {
-    if (!warm(scalar, bold, italic)) return false;
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+    auto* const timing = page_render_timing;
+    const auto preparation_start_us = timing ? esp_timer_get_time() : 0;
+#endif
+    const bool prepared = warm(scalar, bold, italic);
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+    if (timing) {
+        timing->glyph_prepare_us += esp_timer_get_time() - preparation_start_us;
+        ++timing->glyph_calls;
+    }
+#endif
+    if (!prepared) return false;
     if (scalar == U'\n' || scalar == U'\r' || scalar == U'\t') return true;
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+    const auto blend_start_us = timing ? esp_timer_get_time() : 0;
+#endif
     const auto& glyph = glyphs_.at(glyph_key(scalar, bold, italic));
     for (unsigned row = 0; row < glyph.rows; ++row) {
         const auto* bytes = glyph.coverage.data() + static_cast<std::size_t>(row) * glyph.width;
@@ -396,6 +446,9 @@ bool Font::draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8
                 (old * (255 - coverage) + (gray & 15) * coverage + 127) / 255));
         }
     }
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+    if (timing) timing->glyph_blend_us += esp_timer_get_time() - blend_start_us;
+#endif
     return true;
 }
 
@@ -588,10 +641,18 @@ std::vector<SelectionBox> selection_boxes(const Page& page, std::size_t begin, s
 
 bool render_page(Canvas& canvas, Font& font, const Page& page, std::uint8_t gray, const std::function<bool()>& stop,
                  const AuthorFonts* fonts) {
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+    PageRenderTiming timing{page.glyphs.size()};
+#endif
     const AuthorFontIo input{fonts};
     if (!page.error.empty() || !font.set_pixel_size(page.font_px)) return false;
     for (const auto& glyph : page.glyphs) {
-        if (stop && stop()) return false;
+        if (stop && stop()) {
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+            timing.cancelled = true;
+#endif
+            return false;
+        }
         auto& face = font_for_slot(font, fonts, glyph.font_slot);
         if ((glyph.font_slot && &face == &font) ||
             (face.pixel_size() != glyph.font_px && !face.set_pixel_size(glyph.font_px)) ||
@@ -599,7 +660,11 @@ bool render_page(Canvas& canvas, Font& font, const Page& page, std::uint8_t gray
         if (glyph.underline && glyph.advance > 0)
             canvas.fill_rect(glyph.x, glyph.baseline + 2, glyph.advance, 1, gray);
     }
-    return font.pixel_size() == page.font_px || font.set_pixel_size(page.font_px);
+    const bool rendered = font.pixel_size() == page.font_px || font.set_pixel_size(page.font_px);
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+    timing.success = rendered;
+#endif
+    return rendered;
 }
 
 std::u32string decode_utf8(std::string_view text) {

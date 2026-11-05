@@ -56,7 +56,7 @@ std::size_t chapter_result_bytes(const ContentJob& job) {
 
 void ReaderApp::Impl::prepare_next(const std::function<bool()>& stop) {
     if (stop && stop()) return;
-    const StageTimer timer{"next_page_prepare"};
+    const StageTimer timer{"next_page_prepare", 0};
     if (!next_page) {
         const auto start = readable_offset(page.end);
         if (start >= chapter.text.size()) { prefetch_done = true; return; }
@@ -89,18 +89,21 @@ void ReaderApp::Impl::prepare_next(const std::function<bool()>& stop) {
     if (!body.set_pixel_size(next_page->font_px)) { next_page.reset(); prefetch_done = true; return; }
     const graphics::AuthorFontIo input{&author_fonts};
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(15);
-    while (warm_cursor < next_page->glyphs.size()) {
-        if ((stop && stop()) || std::chrono::steady_clock::now() >= deadline) return;
-        const auto& glyph = next_page->glyphs[warm_cursor];
-        auto& face = graphics::font_for_slot(body, &author_fonts, glyph.font_slot);
-        if ((face.pixel_size() != glyph.font_px && !face.set_pixel_size(glyph.font_px)) ||
-            !face.warm(glyph.scalar, glyph.bold, glyph.italic)) {
-            next_page.reset(); prefetch_done = true; return;
+    {
+        const StageTimer timer{"next_page_glyph_prepare", 0};
+        while (warm_cursor < next_page->glyphs.size()) {
+            if ((stop && stop()) || std::chrono::steady_clock::now() >= deadline) return;
+            const auto& glyph = next_page->glyphs[warm_cursor];
+            auto& face = graphics::font_for_slot(body, &author_fonts, glyph.font_slot);
+            if ((face.pixel_size() != glyph.font_px && !face.set_pixel_size(glyph.font_px)) ||
+                !face.warm(glyph.scalar, glyph.bold, glyph.italic)) {
+                next_page.reset(); prefetch_done = true; return;
+            }
+            ++warm_cursor;
         }
-        ++warm_cursor;
     }
     if (!next_bitmap && body_cache_room()) {
-        const StageTimer timer{"next_page_bitmap"};
+        const StageTimer timer{"next_page_bitmap", 0};
         auto bitmap = std::make_unique<graphics::Canvas>();
         if (graphics::render_page(*bitmap, body, *next_page, 1, stop, &author_fonts)) next_bitmap = std::move(bitmap);
         else if (stop && stop()) return;

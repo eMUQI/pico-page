@@ -28,7 +28,7 @@ if(ESP_PLATFORM)
     idf_component_register(SRCS graphics.cpp ${image_sources} ${ft_sources}
         INCLUDE_DIRS include
         PRIV_INCLUDE_DIRS "${ft_source}/include" "." "${CMAKE_CURRENT_BINARY_DIR}" ${image_includes}
-        REQUIRES reader_document freertos)
+        REQUIRES reader_document freertos esp_timer)
     set(graphics_target ${COMPONENT_LIB})
 else()
     add_library(reader_graphics graphics.cpp ${image_sources} ${ft_sources})

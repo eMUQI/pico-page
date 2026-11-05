@@ -294,10 +294,13 @@ bool load_content_cache(const FileStore& store, const std::string& book_id, cons
     if (book_id.empty() || resource.empty() || (stop && stop())) return false;
     const StageTimer timer{"content_cache_read", 0};
     std::string bytes;
-    const bool available = retained ? content_cache_matches(*retained, book_id, index, part, original) :
+    const auto status = retained ? (content_cache_matches(*retained, book_id, index, part, original) ? StoreStatus::Ok : StoreStatus::Missing) :
         store.load_cache(key(book_id, index, part, original), limit, bytes,
-                         [](std::size_t size) { return room(size + 1); }) == StoreStatus::Ok;
-    const bool hit = available && decode(retained ? retained->bytes : bytes, book_id, resource, part, chapter, stop, original);
+                         [](std::size_t size) { return room(size + 1); });
+    const bool hit = status == StoreStatus::Ok && decode(retained ? retained->bytes : bytes, book_id, resource, part, chapter, stop, original);
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+    const auto payload_bytes = retained ? retained->bytes.size() : bytes.size();
+#endif
     if (hit && loaded && !retained)
         *loaded = {key(book_id, index, chapter.part, original),
                    chapter.last_part ? key(book_id, index, kLastChapterPart, original) : "",
@@ -305,6 +308,11 @@ bool load_content_cache(const FileStore& store, const std::string& book_id, cons
 #if defined(ESP_PLATFORM) && defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
     ESP_LOGI("chapter_cache", "read=%s chapter=%u part=%u retained=%d original=%d", hit ? "hit" : "miss",
         static_cast<unsigned>(index), static_cast<unsigned>(part), retained != nullptr, original);
+#endif
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+    ESP_LOGI("reader_perf", "cache_read_result chapter=%u part=%u retained=%d status=%u decoded=%d bytes=%u",
+        static_cast<unsigned>(index), static_cast<unsigned>(part), retained != nullptr,
+        static_cast<unsigned>(status), hit, static_cast<unsigned>(payload_bytes));
 #endif
     return hit;
 }
