@@ -6,6 +6,7 @@
 
 | 日期与源码 | 记录 | 范围 |
 |---|---|---|
+| 2026-11-05 · `main/66b437a` | [#104 复验报告](baselines/2026-11-05-watchdog-retest.md) · [结构化结果](baselines/2026-11-05-watchdog-retest.json) | 同机轮询及封面任务配对；保留未复现、压力回收与图片封面等未覆盖条件 |
 | 2026-11-04 · CSS 原型，实测基于 `25b003d` | [匿名报告](baselines/2026-11-04-css-prototype.md) · [结构化结果](baselines/2026-11-04-css-prototype.json) | 22 本 EPUB 调研、23 组独立 CSS 测量和三本实书的阅读内存及跨章恢复 |
 | 2026-11-04 · `0.5.1/2b0e98d` 与 `main/6429f79` 同代码诊断构建 | [报告](baselines/2026-11-04-v051-main-performance.md) · [结构化结果](baselines/2026-11-04-v051-main-performance.json) | 同机三组合成样本的开书、普通与跨章翻页对照；保留预取状态差异、长等待和未测范围 |
 

@@ -1,0 +1,537 @@
+{
+  "schema_version": 1,
+  "kind": "watchdog_targeted_device_retest",
+  "source_commit": "66b437ac9222ddd1af8d984f20f927cbaa38d83b",
+  "date": "2026-11-05",
+  "verdict": "not_reproduced_in_observed_conditions",
+  "conditions": {
+    "hardware": "Read Pico ESP32-S3 rev0.2, 8MiB PSRAM, USB power",
+    "tf": "same mounted card; model and aging unmeasured",
+    "font_px": 46,
+    "target_frames": "body purpose=0, clean=0; driver notification, not optical measurement",
+    "network": "no network or account operation; radio disable not independently checked",
+    "watchdog_timeout_s": 5,
+    "idle_checks": [
+      0,
+      1
+    ],
+    "watchdog_panic": false,
+    "openocd": false,
+    "idf_commit": "fff9895c82d744c7237be8847347bdd1b07c6643",
+    "idf_existing_changes": [
+      "linker script modification",
+      "generated requirements file"
+    ],
+    "bsp_commit": "5f3406deec33304de8801046db583dec7c49e55b",
+    "polling": "response then 100ms while waiting for target body frame; off applies only to that interval; preparation and save waits still query status",
+    "probe_statistics": "cumulative values through last retained summary; actual cutoffs and missing tail durations recorded per probe; max_us is observed wall time, not full-run maximum or non-yield CPU time",
+    "probe_logging_incomplete": true,
+    "matrix_first_open": "new equal-length copy; ZIP entry contents identical, comment and path differ; shared font cache remains; active/idle applies to first open only; reopen waits for cover idle"
+  },
+  "synthetic_fixture": {
+    "zip_entries": 3004,
+    "spine_items": 3000,
+    "toc_entries": {
+      "EPUB/toc.ncx": 3030
+    },
+    "embedded_image_files": [],
+    "bytes": 647831,
+    "sha256": "9c42294dcefebd0826f0f95cc55d8289953a5bb19c73f84e01fd110f463822be"
+  },
+  "builds": {
+    "baseline": {
+      "schema": 1,
+      "source_commit": "66b437ac9222ddd1af8d984f20f927cbaa38d83b",
+      "source_dirty": false,
+      "source_sha256": "ef708632a42655ca542626ba1ea3ea4b54f9dd7871cce90da8f3ed2bdb643dd8",
+      "version": "0.5.1+g66b437a",
+      "build_mode": "diagnostic",
+      "artifacts_sha256": {
+        "pico_page.bin": "7cea64737be3e13b4196cc2d83a6a14fd7a23fb678361cd88c26a20304541815",
+        "pico_page.elf": "75f43e69e8727c58a0c52d7410c114ac19168bf7f49b3971955f0d4b19861201",
+        "sdkconfig": "cde51ff9981f3cb80e9bbfe7ffe7411a01c989c820f01222dd11241f5b1c7bd3"
+      }
+    },
+    "probes-final": {
+      "schema": 1,
+      "source_commit": "66b437ac9222ddd1af8d984f20f927cbaa38d83b",
+      "source_dirty": true,
+      "source_sha256": "9aacf3bb0cdfbb9994d3328e501a79d496d635342bd0e0aac92429d7af79d33d",
+      "version": "0.5.1+g66b437a.dirty",
+      "build_mode": "stages",
+      "artifacts_sha256": {
+        "pico_page.bin": "a74ce2b5167369c6597b6b9c157f5c7bb6ac9c2ebaf82385ab48f2ebe2b9a3fd",
+        "pico_page.elf": "a8229f7c22edb3026023fc42d1ae45ea4cbb84c3ffd22a57bfa943aedecfcdc4",
+        "sdkconfig": "c66ed17d7aa261b3d88130b05ac090dcca04187ca38ef3f564c662ddc446304c"
+      }
+    }
+  },
+  "runs": {
+    "baseline-idle": {
+      "groups": {
+        "synthetic/idle/False/open": {
+          "n": 5,
+          "p50": 5232781,
+          "p95": 5512577,
+          "p99": 5512577,
+          "max": 5512577,
+          "min": 5184502
+        },
+        "synthetic/idle/False/forward": {
+          "n": 5,
+          "p50": 800075,
+          "p95": 1160458,
+          "p99": 1160458,
+          "max": 1160458,
+          "min": 797486
+        },
+        "synthetic/idle/False/back": {
+          "n": 5,
+          "p50": 659677,
+          "p95": 984514,
+          "p99": 984514,
+          "max": 984514,
+          "min": 650163
+        },
+        "synthetic/idle/True/open": {
+          "n": 5,
+          "p50": 6063562,
+          "p95": 6076185,
+          "p99": 6076185,
+          "max": 6076185,
+          "min": 5894008
+        },
+        "synthetic/idle/True/forward": {
+          "n": 5,
+          "p50": 829105,
+          "p95": 845741,
+          "p99": 845741,
+          "max": 845741,
+          "min": 827127
+        },
+        "synthetic/idle/True/back": {
+          "n": 5,
+          "p50": 657376,
+          "p95": 671240,
+          "p99": 671240,
+          "max": 671240,
+          "min": 651785
+        },
+        "real_a/idle/False/open": {
+          "n": 5,
+          "p50": 1865012,
+          "p95": 1928172,
+          "p99": 1928172,
+          "max": 1928172,
+          "min": 1843316
+        },
+        "real_a/idle/False/forward": {
+          "n": 5,
+          "p50": 1066905,
+          "p95": 3707898,
+          "p99": 3707898,
+          "max": 3707898,
+          "min": 1045138
+        },
+        "real_a/idle/False/back": {
+          "n": 5,
+          "p50": 649348,
+          "p95": 662260,
+          "p99": 662260,
+          "max": 662260,
+          "min": 642224
+        },
+        "real_a/idle/True/open": {
+          "n": 5,
+          "p50": 1963459,
+          "p95": 2014069,
+          "p99": 2014069,
+          "max": 2014069,
+          "min": 1947931
+        },
+        "real_a/idle/True/forward": {
+          "n": 5,
+          "p50": 1059806,
+          "p95": 1106598,
+          "p99": 1106598,
+          "max": 1106598,
+          "min": 1058307
+        },
+        "real_a/idle/True/back": {
+          "n": 5,
+          "p50": 657590,
+          "p95": 662326,
+          "p99": 662326,
+          "max": 662326,
+          "min": 636149
+        },
+        "real_b/idle/False/open": {
+          "n": 5,
+          "p50": 1906791,
+          "p95": 1959528,
+          "p99": 1959528,
+          "max": 1959528,
+          "min": 1890955
+        },
+        "real_b/idle/False/forward": {
+          "n": 5,
+          "p50": 821705,
+          "p95": 1604083,
+          "p99": 1604083,
+          "max": 1604083,
+          "min": 802751
+        },
+        "real_b/idle/False/back": {
+          "n": 5,
+          "p50": 639702,
+          "p95": 679526,
+          "p99": 679526,
+          "max": 679526,
+          "min": 628442
+        },
+        "real_b/idle/True/open": {
+          "n": 5,
+          "p50": 1984198,
+          "p95": 2014291,
+          "p99": 2014291,
+          "max": 2014291,
+          "min": 1954004
+        },
+        "real_b/idle/True/forward": {
+          "n": 5,
+          "p50": 861451,
+          "p95": 907710,
+          "p99": 907710,
+          "max": 907710,
+          "min": 849135
+        },
+        "real_b/idle/True/back": {
+          "n": 5,
+          "p50": 641384,
+          "p95": 660337,
+          "p99": 660337,
+          "max": 660337,
+          "min": 631374
+        }
+      },
+      "counts": {
+        "task_watchdog": 0,
+        "interrupt_watchdog": 0,
+        "panic": 0,
+        "abort": 0,
+        "frames": 90
+      },
+      "probes": {},
+      "minimum_bytes": {
+        "internal": 80303,
+        "largest_internal": 32768,
+        "psram": 2052564,
+        "largest_psram": 1769472,
+        "stack_bytes": 5700,
+        "input_stack_bytes": 2640
+      },
+      "status_rtt_us": {
+        "n": 2023,
+        "p50": 42481,
+        "p95": 566032,
+        "p99": 1630263,
+        "max": 1658171,
+        "min": 23361
+      },
+      "input_overflows": 0,
+      "tx_failures": 0,
+      "result": {
+        "status": "pass",
+        "samples": 90,
+        "gaps": [],
+        "failure": null
+      },
+      "final_log_device_ms": 670822
+    },
+    "matrix": {
+      "groups": {
+        "synthetic/active/False/first_copy_open": {
+          "n": 5,
+          "p50": 6120554,
+          "p95": 6478313,
+          "p99": 6478313,
+          "max": 6478313,
+          "min": 5935580
+        },
+        "synthetic/active/False/forward": {
+          "n": 5,
+          "p50": 1122341,
+          "p95": 1177715,
+          "p99": 1177715,
+          "max": 1177715,
+          "min": 1115819
+        },
+        "synthetic/active/False/back": {
+          "n": 5,
+          "p50": 993200,
+          "p95": 1032494,
+          "p99": 1032494,
+          "max": 1032494,
+          "min": 991253
+        },
+        "synthetic/active/False/reopen_after_cover_idle": {
+          "n": 5,
+          "p50": 5839880,
+          "p95": 5876222,
+          "p99": 5876222,
+          "max": 5876222,
+          "min": 5678826
+        },
+        "synthetic/idle/True/first_copy_open": {
+          "n": 5,
+          "p50": 7090864,
+          "p95": 7137470,
+          "p99": 7137470,
+          "max": 7137470,
+          "min": 6982465
+        },
+        "synthetic/idle/True/forward": {
+          "n": 5,
+          "p50": 1249381,
+          "p95": 1285126,
+          "p99": 1285126,
+          "max": 1285126,
+          "min": 1241873
+        },
+        "synthetic/idle/True/back": {
+          "n": 5,
+          "p50": 1103950,
+          "p95": 1190329,
+          "p99": 1190329,
+          "max": 1190329,
+          "min": 1078080
+        },
+        "synthetic/idle/True/reopen_after_cover_idle": {
+          "n": 5,
+          "p50": 6833464,
+          "p95": 6868992,
+          "p99": 6868992,
+          "max": 6868992,
+          "min": 6656198
+        },
+        "synthetic/active/True/first_copy_open": {
+          "n": 5,
+          "p50": 7178624,
+          "p95": 7554167,
+          "p99": 7554167,
+          "max": 7554167,
+          "min": 7052997
+        },
+        "synthetic/active/True/forward": {
+          "n": 5,
+          "p50": 1252516,
+          "p95": 1272570,
+          "p99": 1272570,
+          "max": 1272570,
+          "min": 1196790
+        },
+        "synthetic/active/True/back": {
+          "n": 5,
+          "p50": 1096326,
+          "p95": 1101127,
+          "p99": 1101127,
+          "max": 1101127,
+          "min": 1077703
+        },
+        "synthetic/active/True/reopen_after_cover_idle": {
+          "n": 5,
+          "p50": 6844639,
+          "p95": 6896683,
+          "p99": 6896683,
+          "max": 6896683,
+          "min": 6705226
+        },
+        "synthetic/idle/False/first_copy_open": {
+          "n": 5,
+          "p50": 6101164,
+          "p95": 6129215,
+          "p99": 6129215,
+          "max": 6129215,
+          "min": 6084950
+        },
+        "synthetic/idle/False/forward": {
+          "n": 5,
+          "p50": 1146086,
+          "p95": 1185021,
+          "p99": 1185021,
+          "max": 1185021,
+          "min": 1116410
+        },
+        "synthetic/idle/False/back": {
+          "n": 5,
+          "p50": 1010989,
+          "p95": 1018405,
+          "p99": 1018405,
+          "max": 1018405,
+          "min": 970474
+        },
+        "synthetic/idle/False/reopen_after_cover_idle": {
+          "n": 5,
+          "p50": 5830996,
+          "p95": 5858989,
+          "p99": 5858989,
+          "max": 5858989,
+          "min": 5804332
+        }
+      },
+      "counts": {
+        "task_watchdog": 0,
+        "interrupt_watchdog": 0,
+        "panic": 0,
+        "abort": 0,
+        "frames": 80
+      },
+      "probes": {
+        "watchdog_status_crc": {
+          "max_us": 46746,
+          "calls": 3109,
+          "total_us": 83952472,
+          "last_log_device_ms": 936311,
+          "unreported_tail_ms": 12
+        },
+        "watchdog_status_cache": {
+          "max_us": 7650,
+          "calls": 3109,
+          "total_us": 2236651,
+          "last_log_device_ms": 936314,
+          "unreported_tail_ms": 9
+        },
+        "watchdog_status_largest_psram": {
+          "max_us": 12477,
+          "calls": 2946,
+          "total_us": 19491594,
+          "last_log_device_ms": 877209,
+          "unreported_tail_ms": 59114
+        },
+        "watchdog_status_largest_internal": {
+          "max_us": 1163,
+          "calls": 3108,
+          "total_us": 341952,
+          "last_log_device_ms": 934272,
+          "unreported_tail_ms": 2051
+        },
+        "watchdog_status_heap": {
+          "max_us": 19646,
+          "calls": 3108,
+          "total_us": 22068640,
+          "last_log_device_ms": 934273,
+          "unreported_tail_ms": 2050
+        },
+        "watchdog_status": {
+          "max_us": 76270,
+          "calls": 3109,
+          "total_us": 117199846,
+          "last_log_device_ms": 936323,
+          "unreported_tail_ms": 0
+        },
+        "watchdog_pressure": {
+          "max_us": 7554,
+          "calls": 2374,
+          "total_us": 14320178,
+          "last_log_device_ms": 535481,
+          "unreported_tail_ms": 400842
+        },
+        "watchdog_reclaim": {
+          "max_us": 9731,
+          "calls": 3863,
+          "total_us": 25608566,
+          "last_log_device_ms": 879898,
+          "unreported_tail_ms": 56425
+        }
+      },
+      "minimum_bytes": {
+        "internal": 86159,
+        "largest_internal": 38912,
+        "psram": 1621276,
+        "largest_psram": 950272,
+        "stack_bytes": 5316,
+        "input_stack_bytes": 2624
+      },
+      "status_rtt_us": {
+        "n": 3109,
+        "p50": 49312,
+        "p95": 528546,
+        "p99": 1637710,
+        "max": 1660570,
+        "min": 29287
+      },
+      "input_overflows": 0,
+      "tx_failures": 0,
+      "result": {
+        "status": "pass",
+        "samples": 80,
+        "gaps": [],
+        "failure": null
+      },
+      "final_log_device_ms": 936323
+    }
+  },
+  "cover_cancellation": {
+    "verified_overlaps": 10,
+    "cancelled_ends": 10,
+    "dispatch_to_cover_function_exit_us": [
+      3907,
+      4550,
+      4737,
+      75095,
+      12711,
+      4515,
+      4207,
+      271949,
+      4515,
+      4607
+    ]
+  },
+  "correctness": {
+    "forward_anchor_changed": 50,
+    "back_anchor_restored": 50,
+    "reopen_anchor_preserved": 20,
+    "saved_body_frames": 170,
+    "unexpected_reboot_seen": false
+  },
+  "restoration": {
+    "reading_anchor_revision_font_crc_equal": true,
+    "original_release_restored": true,
+    "independent_image_verification": true,
+    "metadata_unchanged": true,
+    "otadata_unchanged": true,
+    "vcom_loaded": true,
+    "card_mounted": true,
+    "test_copies_retained": true
+  },
+  "not_covered": [
+    "reopen deep in the historical large real book and a large retained page index",
+    "cache eviction under real memory pressure",
+    "real image-cover decode in cover matrix",
+    "slow or aged TF",
+    "forced EIO/OOM or heap lock contention",
+    "long duration reading",
+    "per-core maximum idle gap",
+    "physical touch latency or optical results",
+    "power-loss reliability",
+    "network accounts or actual KOReader round trip"
+  ],
+  "cache_pressure": {
+    "baseline-idle": {
+      "observed_evictions": 0,
+      "status_samples_over_budget_or_below_admission_threshold": 0
+    },
+    "matrix": {
+      "observed_evictions": 0,
+      "status_samples_over_budget_or_below_admission_threshold": 0
+    }
+  },
+  "implementation_change": "temporary probes removed; no firmware behavior change retained",
+  "issue_disposition": "close_as_not_reproduced",
+  "closure": {
+    "state_reason": "not_planned",
+    "basis": "Maintainer requested ending this investigation after no reproduction on the observed current-main paths.",
+    "confirmed_fix": false,
+    "reopen_when": "A current-build reproducer or watchdog log is available, especially for the untested pressure or image-cover paths."
+  }
+}
