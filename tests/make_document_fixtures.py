@@ -59,6 +59,14 @@ def generate(directory: Path) -> None:
             (directory / (encoding + "-" + name + ".txt")).write_bytes(data)
     (directory / "gb18030.txt").write_bytes(("甲" * 24575 + "😀\ue587" + "乙" * 500 + "\r\n末尾").encode("gb18030"))
     write_fixture(directory / "valid.epub")
+    fragments = fixture_entries()
+    fragments["EPUB/chapter1.xhtml"] = ('<html xmlns="http://www.w3.org/1999/xhtml"><body>'
+        '<p id="z">甲</p><p id="a">乙</p><p>' + 'x' * 60000 +
+        '</p><p>分段</p><p id="z">丙</p></body></html>')
+    fragments["EPUB/chapter2.xhtml"] = ('<html xmlns="http://www.w3.org/1999/xhtml"><body>' +
+        ''.join(f'<p id="target{ordinal}">甲</p>' for ordinal in range(2048, 0, -1)) +
+        '<p id="target1024">重复</p></body></html>')
+    write_fixture(directory / "fragment-index.epub", fragments)
     html = {name.replace("chapter1.xhtml", "chapter1.html"):
             value.replace("chapter1.xhtml", "chapter1.html") if isinstance(value, str) else value
             for name, value in fixture_entries().items()}

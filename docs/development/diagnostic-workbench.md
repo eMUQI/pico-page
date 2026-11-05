@@ -24,6 +24,10 @@ sh tools/build_firmware.sh diagnostic
 
 已审计并编译保护主循环的输入、分发、帧完成、页数统计、Wi-Fi 阶段和网络任务资源明细，以及同步映射、HTTP 结果明细。内容 worker 的每次完成资源输出已移除，创建失败的资源证据保留为 WARN。`StageTimer` 和 ZIP 读/解析/checkpoint 的旧计时只在 `CONFIG_PICO_PAGE_LEGACY_PERF_LOG` 下执行。该兼容开关默认关闭，依赖诊断控制台且不能与 PERF_METRICS 同开；保留 `tools/summarize_reader_perf.py` 对旧日志的使用方式。没有关闭全局 ESP-IDF 日志，启动信息和 WARN/ERROR 仍保留。本次没有证据证明旧日志导致了卡顿。
 
+`stages` 构建的 `chapter_sequential_read` 记录每次顺序分段读取的墙钟耗时，包括 ZIP 迭代器读取与解压 `zip_read_inflate_us`、XML 推进 `xml_us` 和迭代循环内的内存准入检查 `memory_check_us`。三个字段为分段内累计值。`chapter_worker` 和 `chapter_prefetch_worker` 分别计量前台章节任务与预取任务。`content_pause` 记录内容任务在取消检查点等待恢复的区间。暂停、顺序读取和子阶段可能包含在同一任务墙钟中，应结合日志时间戳与目标帧关联。
+
+顺序读取还用 ESP Timer 在同一条日志中记录 XML 回调的累计耗时。`callback_memory_us` 和 `callback_memory_calls` 对应回调调用 `require_memory_room` 的耗时和次数。`callback_text_us` 覆盖字符回调中的 UTF-8 解码、空白处理和正文追加。`callback_anchor_us` 覆盖元素路径、源文本节点、文本区间及段落记录。`callback_markup_us` 记录元素开始和结束回调的其余工作。这些字段扣除了已单列的嵌套区间，均包含在 `xml_us` 内。剩余墙钟仍包含 Expat、回调转发及阶段内的调度等待。计时只在 `stages` 构建启用。比较性能时，以关闭回调细分的同条件样本核对计时开销。
+
 ## OTA 分阶段计时
 
 启用 `CONFIG_PICO_PAGE_PERF_METRICS` 时，下载任务输出 `pico_ota_perf` 的 `start`、每 5% 的 `progress` 和终态 `end`，显示所有者另外输出逐帧 `frame`。计时使用 `esp_timer_get_time()`，字段以 `_us` 结尾的值均为单调微秒；这些串口输出位于聚合记录器的临界区之外。关闭开关时不读取时钟或输出日志，不改变正式发布配置。

@@ -14,14 +14,17 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <map>
-#include <set>
 #include <utility>
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+#include "esp_timer.h"
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "psa/crypto.h"
@@ -677,7 +680,43 @@ struct AuthorLayoutState {
     }
 };
 
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+struct ChapterCallbackTiming {
+    enum class Phase { Other, Memory, Text, Anchors, Markup, Count };
+    static constexpr auto phase_count = static_cast<std::size_t>(Phase::Count);
+    std::array<std::int64_t, phase_count> elapsed_us{};
+    std::array<unsigned, phase_count> calls{};
+    std::int64_t started_us = 0;
+    Phase active = Phase::Other;
+
+    Phase switch_to(Phase phase) {
+        const auto now_us = esp_timer_get_time();
+        if (active != Phase::Other) elapsed_us[static_cast<std::size_t>(active)] += now_us - started_us;
+        started_us = now_us;
+        return std::exchange(active, phase);
+    }
+
+    long long microseconds(Phase phase) const {
+        return elapsed_us[static_cast<std::size_t>(phase)];
+    }
+
+    struct Scope {
+        ChapterCallbackTiming* timing;
+        Phase previous = Phase::Other;
+        Scope(ChapterCallbackTiming* value, Phase phase) : timing(value) {
+            if (!timing) return;
+            ++timing->calls[static_cast<std::size_t>(phase)];
+            previous = timing->switch_to(phase);
+        }
+        ~Scope() { if (timing) timing->switch_to(previous); }
+    };
+};
+#endif
+
 struct ChapterParser {
+    static constexpr std::size_t kFragmentLimit = 2048;
+    static constexpr auto kFragmentIndexBytes = kFragmentLimit * sizeof(std::uint16_t);
+
     struct Frame {
         std::string name, path;
         std::map<std::string, unsigned> children;
@@ -704,6 +743,7 @@ struct ChapterParser {
     bool split_pending = false, captured = false, resumable = false;
     Xml xml;
     std::vector<Frame> frames;
+    std::unique_ptr<std::uint16_t, decltype(&std::free)> fragment_ordinals{nullptr, &std::free};
     std::uint32_t block_start = 0, source_count = 0;
     std::size_t retained_metadata_bytes = 0;
     std::size_t css_bytes = 0;
@@ -715,6 +755,9 @@ struct ChapterParser {
     BlockKind block_kind = BlockKind::Paragraph;
     AuthorLayoutState* author = nullptr;
     css::ComputedStyle block_style, pending_space_style;
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+    ChapterCallbackTiming* callback_timing = nullptr;
+#endif
 
     std::uint16_t retain_style(const css::ComputedStyle& style) {
         auto& styles = chapter.author_styles;
@@ -753,6 +796,9 @@ struct ChapterParser {
         xml.complex_markup = [this]() { if (!frames.empty() && frames.back().body) chapter.plain_dom = false; };
     }
     bool require_memory_room(std::size_t bytes) {
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+        const ChapterCallbackTiming::Scope timing{callback_timing, ChapterCallbackTiming::Phase::Memory};
+#endif
         if (memory_room(bytes)) return true;
         xml.stop(kChapterMemoryError, ContentFailureKind::OutOfMemory);
         return false;
@@ -761,6 +807,36 @@ struct ChapterParser {
         if (chapter.text.size() == chapter.text.capacity() &&
             !require_memory_room(2 * sizeof(char32_t) * std::max<std::size_t>(chapter.text.capacity(), 16))) return false;
         chapter.text.push_back(cp);
+        return true;
+    }
+    bool record_fragment(std::string id) {
+        auto& fragments = chapter.fragments;
+        if (fragments.empty() && !fragment_ordinals) {
+#ifdef ESP_PLATFORM
+            fragment_ordinals.reset(static_cast<std::uint16_t*>(heap_caps_malloc(kFragmentIndexBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)));
+#else
+            fragment_ordinals.reset(static_cast<std::uint16_t*>(std::malloc(kFragmentIndexBytes)));
+#endif
+        }
+        auto* ordinal_end = fragment_ordinals ? fragment_ordinals.get() + fragments.size() : nullptr;
+        std::uint16_t* position = nullptr;
+        bool duplicate;
+        if (fragment_ordinals) {
+            position = std::lower_bound(fragment_ordinals.get(), ordinal_end, id,
+                [&](std::uint16_t ordinal, const std::string& key) { return fragments[ordinal].id < key; });
+            duplicate = position != ordinal_end && fragments[*position].id == id;
+        } else {
+            duplicate = std::any_of(fragments.begin(), fragments.end(), [&](const auto& fragment) { return fragment.id == id; });
+        }
+        if (duplicate) { xml.stop("Duplicate XHTML fragment id"); return false; }
+        retained_metadata_bytes += id.size();
+        const auto fragment_count = fragments.size();
+        if (fragment_count >= kFragmentLimit || retained_metadata_bytes > 512 * 1024) { xml.stop("Chapter fragment limit exceeded"); return false; }
+        fragments.push_back({std::move(id), static_cast<std::uint32_t>(chapter.text.size())});
+        if (position) {
+            std::move_backward(position, ordinal_end, ordinal_end + 1);
+            *position = static_cast<std::uint16_t>(fragment_count);
+        }
         return true;
     }
     bool retain_css(const std::string& css) {
@@ -859,7 +935,12 @@ struct ChapterParser {
         const auto end = static_cast<std::uint32_t>(chapter.text.size());
         if (end > block_start) {
             const std::uint16_t style = author ? retain_style(block_style) : 0;
-            chapter.blocks.push_back({block_start, end, block_kind, style});
+            {
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+                const ChapterCallbackTiming::Scope timing{callback_timing, ChapterCallbackTiming::Phase::Anchors};
+#endif
+                chapter.blocks.push_back({block_start, end, block_kind, style});
+            }
             append_text_scalar(U'\n');
         }
         block_start = static_cast<std::uint32_t>(chapter.text.size());
@@ -869,6 +950,9 @@ struct ChapterParser {
         if ((split_pending || hard_full()) && !next_part()) return;
         const auto begin = static_cast<std::uint32_t>(chapter.text.size());
         if (!append_text_scalar(cp) || !source) return;
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+        const ChapterCallbackTiming::Scope timing{callback_timing, ChapterCallbackTiming::Phase::Anchors};
+#endif
         if (!chapter.runs.empty()) {
             auto& last = chapter.runs.back();
             const auto& node = keep_anchors ? last.source.node : last_run_node;
@@ -896,6 +980,9 @@ struct ChapterParser {
         return true;
     }
     void start(const std::string& name, const char** attrs) {
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+        const ChapterCallbackTiming::Scope callback{callback_timing, ChapterCallbackTiming::Phase::Markup};
+#endif
         const auto simple_image_style = [](const char** attributes) {
             for (const auto* property : {"transform", "style", "opacity", "filter", "mask", "clip-path"})
                 if (!attr_view(attributes, property).empty()) return false;
@@ -906,14 +993,27 @@ struct ChapterParser {
         };
         if (!require_memory_room(0)) return;
         if (xml.html) { chapter.plain_dom = false; warn(chapter, "HTML body uses repaired local source anchors"); }
-        static const std::set<std::string> plain_elements = {"html", "head", "title", "meta", "link", "style", "body", "h1", "h2", "h3", "h4", "h5", "h6", "p", "div", "section", "article", "aside", "header", "footer", "nav", "blockquote", "span", "em", "strong", "b", "i", "u", "s", "a", "ul", "ol", "li", "br", "code", "small", "sub", "sup", "mark", "abbr", "cite", "q", "del", "ins", "img", "hr"};
-        if (!plain_elements.count(name) || xml.foreign_namespace || !attr(attrs, "space").empty()) chapter.plain_dom = false;
+        static constexpr std::string_view plain_elements[] = {
+            "a", "abbr", "article", "aside", "b", "blockquote", "body", "br", "cite", "code",
+            "del", "div", "em", "footer", "h1", "h2", "h3", "h4", "h5", "h6",
+            "head", "header", "hr", "html", "i", "img", "ins", "li", "link", "mark",
+            "meta", "nav", "ol", "p", "q", "s", "section", "small", "span", "strong",
+            "style", "sub", "sup", "title", "u", "ul"
+        };
+        if (chapter.plain_dom && (xml.foreign_namespace || !attr_view(attrs, "space").empty() ||
+            !std::binary_search(std::begin(plain_elements), std::end(plain_elements), std::string_view{name})))
+            chapter.plain_dom = false;
         Frame frame; frame.name = name;
-        if (!frames.empty()) {
-            auto& parent = frames.back(); parent.in_text = false; parent.has_child = true;
-            frame.path = parent.path + '/' + name + '[' + std::to_string(++parent.children[name]) + ']';
-            frame.hidden = parent.hidden; frame.body = parent.body; frame.pre = parent.pre;
-        } else frame.path = '/' + name + "[1]";
+        {
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+            const ChapterCallbackTiming::Scope timing{callback_timing, ChapterCallbackTiming::Phase::Anchors};
+#endif
+            if (!frames.empty()) {
+                auto& parent = frames.back(); parent.in_text = false; parent.has_child = true;
+                frame.path = parent.path + '/' + name + '[' + std::to_string(++parent.children[name]) + ']';
+                frame.hidden = parent.hidden; frame.body = parent.body; frame.pre = parent.pre;
+            } else frame.path = '/' + name + "[1]";
+        }
         if (frame.path.size() > kMaxPath) { xml.stop("Source path length limit exceeded"); return; }
         for (auto& ancestor : frames) if (ancestor.name == "svg" && ancestor.image < chapter.images.size()) {
             const bool direct = &ancestor == &frames.back();
@@ -977,12 +1077,7 @@ struct ChapterParser {
             }
             if (name == "td" || name == "th") { if (!chapter.text.empty() && chapter.text.back() != U'\n') append(U'\t', nullptr); warn(chapter, "Tables are rendered as text rows"); }
             auto id = attr(attrs, "id");
-            if (!id.empty()) {
-                if (std::any_of(chapter.fragments.begin(), chapter.fragments.end(), [&](const auto& f) { return f.id == id; })) { xml.stop("Duplicate XHTML fragment id"); return; }
-                retained_metadata_bytes += id.size();
-                if (chapter.fragments.size() >= 2048 || retained_metadata_bytes > 512 * 1024) { xml.stop("Chapter fragment limit exceeded"); return; }
-                chapter.fragments.push_back({id, static_cast<std::uint32_t>(chapter.text.size())});
-            }
+            if (!id.empty() && !record_fragment(std::move(id))) return;
             if (name == "a" && !attr(attrs, "href").empty()) {
                 DocumentLink link; link.begin = static_cast<std::uint32_t>(chapter.text.size());
                 auto href = attr(attrs, "href");
@@ -1021,6 +1116,9 @@ struct ChapterParser {
         frames.push_back(std::move(frame));
     }
     void end() {
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+        const ChapterCallbackTiming::Scope callback{callback_timing, ChapterCallbackTiming::Phase::Markup};
+#endif
         if (frames.empty()) return;
         auto frame = std::move(frames.back()); frames.pop_back();
         if (frame.name == "svg" && frame.image < chapter.images.size() && (!frame.simple_svg || frame.svg_images != 1)) chapter.images[frame.image].resource.clear();
@@ -1046,6 +1144,9 @@ struct ChapterParser {
     }
     void characters(const char* bytes, std::size_t size) {
         if (frames.empty() || !require_memory_room(0)) return;
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+        const ChapterCallbackTiming::Scope timing{callback_timing, ChapterCallbackTiming::Phase::Text};
+#endif
         auto& frame = frames.back();
         if (frame.css != std::numeric_limits<std::size_t>::max()) {
             if (size <= kMaxCssBytes - css_bytes) {
@@ -1082,6 +1183,9 @@ struct ChapterParser {
             return;
         }
         if (new_node || frame.source_node == std::numeric_limits<std::size_t>::max()) {
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+            const ChapterCallbackTiming::Scope anchor_timing{callback_timing, ChapterCallbackTiming::Phase::Anchors};
+#endif
             if (new_node) frame.node = frame.path + "/text()[" + std::to_string(frame.text_index) + ']';
             retained_metadata_bytes += frame.node.size();
             if (part_source_nodes >= 8192 || retained_metadata_bytes > 512 * 1024) { xml.stop("Chapter source node limit exceeded"); return; }
@@ -1095,7 +1199,12 @@ struct ChapterParser {
             if (size > raw.capacity() && !require_memory_room(sizeof(char32_t) * std::max(2 * raw.capacity(), size))) return;
             raw += scalars;
         }
-        Anchor source{chapter.resource, frame.node, 0};
+        auto source = [&] {
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+            const ChapterCallbackTiming::Scope anchor_timing{callback_timing, ChapterCallbackTiming::Phase::Anchors};
+#endif
+            return Anchor{chapter.resource, frame.node, 0};
+        }();
         const auto* style = author ? &author->ancestors[frames.size() - 1].style : nullptr;
         for (auto cp : scalars) {
             source.offset = frame.source_offset++;
@@ -1137,6 +1246,41 @@ struct ZipTiming {
     void checkpoint() {}
 #endif
 };
+
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+struct ChapterStreamTiming {
+    ZipTiming::Clock::time_point started = ZipTiming::Clock::now();
+    std::int64_t zip_read_inflate_us = 0, xml_us = 0, memory_check_us = 0;
+    ChapterCallbackTiming callbacks;
+
+    template <typename Operation>
+    static auto measure(std::int64_t& elapsed_us, Operation operation) {
+        const auto start = ZipTiming::Clock::now();
+        const auto result = operation();
+        elapsed_us += ZipTiming::elapsed(start);
+        return result;
+    }
+
+    template <typename Operation>
+    bool measure_xml(ChapterParser& parser, Operation operation) {
+        struct ActiveCallbacks {
+            ChapterParser& parser;
+            ~ActiveCallbacks() { parser.callback_timing = nullptr; }
+        } active{parser};
+        parser.callback_timing = &callbacks;
+        return measure(xml_us, operation);
+    }
+
+    ~ChapterStreamTiming() {
+        using Phase = ChapterCallbackTiming::Phase;
+        ESP_LOGI("reader_perf", "stage=chapter_sequential_read us=%lld min_us=0 zip_read_inflate_us=%lld xml_us=%lld memory_check_us=%lld callback_memory_us=%lld callback_memory_calls=%u callback_text_us=%lld callback_anchor_us=%lld callback_markup_us=%lld",
+            static_cast<long long>(ZipTiming::elapsed(started)), static_cast<long long>(zip_read_inflate_us),
+            static_cast<long long>(xml_us), static_cast<long long>(memory_check_us),
+            callbacks.microseconds(Phase::Memory), callbacks.calls[static_cast<std::size_t>(Phase::Memory)],
+            callbacks.microseconds(Phase::Text), callbacks.microseconds(Phase::Anchors), callbacks.microseconds(Phase::Markup));
+    }
+};
+#endif
 }
 
 struct ChapterStream {
@@ -1957,6 +2101,7 @@ std::size_t EpubDocument::retained_bytes() const {
     const auto& stream = *owner.chapter_stream;
     const auto& parser = stream.parser;
     bytes += sizeof(ChapterStream) + parser.frames.capacity() * sizeof(ChapterParser::Frame) + parser.xml.error.capacity();
+    if (parser.fragment_ordinals) bytes += ChapterParser::kFragmentIndexBytes;
     if (parser.xml.html) bytes += parser.xml.html->retained_bytes();
     for (const auto& frame : parser.frames) {
         bytes += frame.name.capacity() + frame.path.capacity() + frame.node.capacity() + frame.background.capacity();
@@ -1986,6 +2131,9 @@ std::unique_ptr<EpubDocument> EpubDocument::detach_reader() {
 void EpubDocument::reset_chapter_stream() { impl_->chapter_stream.reset(); }
 bool EpubDocument::read_next_chapter_part(std::size_t index, Chapter& chapter, std::string& error,
                                           const std::function<bool()>& stop) {
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+    ChapterStreamTiming timing;
+#endif
     release(chapter); error.clear();
     auto& owner = *impl_;
     const auto abort = [&](const std::string& message) {
@@ -2034,9 +2182,19 @@ bool EpubDocument::read_next_chapter_part(std::size_t index, Chapter& chapter, s
         }
 #endif
         if (stop && stop()) return abort(kChapterCancelled);
-        if (!memory_room(0)) return abort(kChapterMemoryError);
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+        const bool has_room = timing.measure(timing.memory_check_us, [] { return memory_room(0); });
+#else
+        const bool has_room = memory_room(0);
+#endif
+        if (!has_room) return abort(kChapterMemoryError);
         if (parser.xml.suspended) {
-            if (!parser.xml.resume()) return abort(parser.xml.error);
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+            const bool resumed = timing.measure_xml(parser, [&] { return parser.xml.resume(); });
+#else
+            const bool resumed = parser.xml.resume();
+#endif
+            if (!resumed) return abort(parser.xml.error);
             continue;
         }
         if (stream.input_finished) {
@@ -2047,11 +2205,21 @@ bool EpubDocument::read_next_chapter_part(std::size_t index, Chapter& chapter, s
             parser.capture(true);
             break;
         }
-        const auto size = mz_zip_reader_extract_iter_read(stream.iterator, stream.input.data(), stream.input.size());
+        const auto read = [&] { return mz_zip_reader_extract_iter_read(stream.iterator, stream.input.data(), stream.input.size()); };
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+        const auto size = timing.measure(timing.zip_read_inflate_us, read);
+#else
+        const auto size = read();
+#endif
         if (stream.iterator->status < 0) return abort("Invalid compressed EPUB stream");
         if (size) {
             const auto before = parser.xml.bytes;
-            const bool parsed = parser.xml.feed(stream.input.data(), size, false);
+            const auto feed = [&] { return parser.xml.feed(stream.input.data(), size, false); };
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+            const bool parsed = timing.measure_xml(parser, feed);
+#else
+            const bool parsed = feed();
+#endif
             owner.xml_feed_bytes += parser.xml.bytes - before;
             if (!parsed) return abort(parser.xml.error);
             continue;
@@ -2060,7 +2228,13 @@ bool EpubDocument::read_next_chapter_part(std::size_t index, Chapter& chapter, s
         const bool valid = mz_zip_reader_extract_iter_free(std::exchange(stream.iterator, nullptr));
         if (!valid) return abort("Invalid EPUB stream length or CRC");
         stream.input_finished = true;
-        if (!parser.xml.feed("", 0, true)) return abort(parser.xml.error);
+        const auto finish = [&] { return parser.xml.feed("", 0, true); };
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+        const bool finished = timing.measure_xml(parser, finish);
+#else
+        const bool finished = finish();
+#endif
+        if (!finished) return abort(parser.xml.error);
     }
     if (stop && stop()) return abort(kChapterCancelled);
     chapter = std::move(stream.ready);

@@ -1213,9 +1213,15 @@ void ContentJob::open_book() {
     }
 }
 bool ContentJob::checkpoint() {
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+    std::optional<StageTimer> pause_timer;
+#endif
     while (!cancelled_.load(std::memory_order_relaxed)) {
         const auto generation = pause_generation_.load(std::memory_order_acquire);
         if (!(generation & 1U)) break;
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+        if (!pause_timer) pause_timer.emplace("content_pause", 0);
+#endif
         paused_generation_.store(generation, std::memory_order_release);
 #ifdef ESP_PLATFORM
         vTaskDelay(1);
@@ -1226,6 +1232,7 @@ bool ContentJob::checkpoint() {
     return cancelled_.load(std::memory_order_relaxed);
 }
 void ContentJob::load_chapter() {
+    const StageTimer timer{request.chapter_prefetch ? "chapter_prefetch_worker" : "chapter_worker", 0};
     const auto stop = [this] { return checkpoint(); };
     EpubDocument local;
     auto& document = request.chapter_session ? request.chapter_session->document : local;

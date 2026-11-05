@@ -87,6 +87,23 @@ int main(int argc, char** argv) {
         const std::string fixture = argv[1];
         const auto directory = fixture.substr(0, fixture.rfind('/') + 1);
         {
+            EpubDocument fragment_book;
+            Chapter first_part, second_part;
+            assert(fragment_book.open(directory + "fragment-index.epub", error));
+            assert(fragment_book.load_chapter(0, first_part, error, ChapterLoad::Reading, 0, {}, {}, true));
+            assert(!first_part.last_part && first_part.fragments.size() == 2);
+            assert(first_part.fragments[0].id == "z" && first_part.fragments[0].offset == 0);
+            assert(first_part.fragments[1].id == "a" && first_part.fragments[1].offset == 2);
+            assert(fragment_book.load_chapter(0, second_part, error, ChapterLoad::Reading, 1, {}, {}, true));
+            assert(second_part.last_part && second_part.fragments.size() == 1 && second_part.fragments[0].id == "z");
+            assert(second_part.text[second_part.fragments[0].offset] == U'丙');
+            for (const bool sequential : {false, true}) {
+                Chapter duplicate;
+                assert(!fragment_book.load_chapter(1, duplicate, error, ChapterLoad::Reading, 0, {}, {}, sequential));
+                assert(error.rfind("Duplicate XHTML fragment id", 0) == 0 && duplicate.fragments.empty());
+            }
+        }
+        {
             EpubDocument html;
             Chapter chapter;
             assert(html.open(directory + "html-body.epub", error));

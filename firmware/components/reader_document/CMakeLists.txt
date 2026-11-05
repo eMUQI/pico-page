@@ -5,7 +5,8 @@ set(document_definitions MINIZ_NO_DEFLATE_APIS
     MINIZ_NO_ZLIB_APIS MINIZ_NO_ZLIB_COMPATIBLE_NAMES MINIZ_NO_STDIO MINIZ_NO_TIME)
 if(ESP_PLATFORM)
     idf_component_register(SRCS ${document_sources} INCLUDE_DIRS include
-        PRIV_INCLUDE_DIRS ${document_private_includes} REQUIRES reader_core mbedtls esp_hw_support)
+        PRIV_INCLUDE_DIRS ${document_private_includes} REQUIRES reader_core mbedtls esp_hw_support
+        PRIV_REQUIRES esp_timer)
     target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_17)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE ${document_definitions})
     # ESP32-S3 ROM miniz uses an incompatible decompressor layout. PNG shares this API.

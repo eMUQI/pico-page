@@ -10,8 +10,10 @@
 namespace pico_page {
 /** Inclusive stage duration; nested stages must not be added to their parent duration. */
 struct StageTimer {
+    explicit StageTimer(const char* stage, std::int64_t min_us = 20'000) : stage(stage), min_us(min_us) {}
+
     const char* stage;
-    std::int64_t min_us = 20'000;
+    std::int64_t min_us;
 #ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
     std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
 #endif
