@@ -28,6 +28,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_LIST_DIR}/patches/read-pico-sd-release.patch"
     "${CMAKE_CURRENT_LIST_DIR}/patches/epdiy-underrun-diagnostics.patch"
     "${CMAKE_CURRENT_LIST_DIR}/patches/epdiy-row-phases.patch"
+    "${CMAKE_CURRENT_LIST_DIR}/patches/epdiy-feed-start.patch"
     "${CMAKE_CURRENT_LIST_DIR}/patches/epdiy-footer-hold.patch"
     "${CMAKE_CURRENT_LIST_DIR}/patches/epdiy-unchanged-pixels.h"
     "${CMAKE_CURRENT_LIST_DIR}/patches/read-pico-rtc-response.patch"
@@ -62,6 +63,12 @@ execute_process(COMMAND git apply --unsafe-paths
     WORKING_DIRECTORY "${READ_PICO_ADAPTED}/epdiy" RESULT_VARIABLE row_patch_result)
 if(NOT row_patch_result EQUAL 0)
     message(FATAL_ERROR "Cannot apply EPD row-phase patch")
+endif()
+execute_process(COMMAND git apply --unsafe-paths
+    "${CMAKE_CURRENT_LIST_DIR}/patches/epdiy-feed-start.patch"
+    WORKING_DIRECTORY "${READ_PICO_ADAPTED}/epdiy" RESULT_VARIABLE feed_start_patch_result)
+if(NOT feed_start_patch_result EQUAL 0)
+    message(FATAL_ERROR "Cannot apply EPD feeder start barrier patch")
 endif()
 list(APPEND EXTRA_COMPONENT_DIRS "${READ_PICO_ADAPTED}/epdiy")
 file(COPY "${CMAKE_CURRENT_LIST_DIR}/patches/epdiy-unchanged-pixels.h"

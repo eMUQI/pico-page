@@ -86,3 +86,10 @@ ESP-IDF 锁为 v6.1 commit `fff9895c82d744c7237be8847347bdd1b07c6643`，本机�
 保留 BSP 锁定 `5f3406deec33304de8801046db583dec7c49e55b` 及原有五个构建补丁。`platform_read_pico/sleep_io.cpp` 参考上游 [read_pico_board.c](https://github.com/MindReset/read_pico_firmware/blob/a2a63a6a2c606540be72156a6567392d948d65fc/components/read_pico/read_pico_board.c) 的睡眠引脚、MODE／Port1 停放与关机 CW_INT 设置；来源 commit 为 `a2a63a6a2c606540be72156a6567392d948d65fc`，原组件 Apache-2.0，保留版权与许可标识，沿用平台目录完整 LICENSE。另加 `read-pico-sd-busy.patch`，在 `state_lock` 内读取 BSP 的 `probe_state`，仅暴露探卡／挂载／卸载是否进行中；不代表应用文件工作已停止，也不预约卡所有权。浅睡在此状态为忙时拒绝交接，拔卡不能把忙状态掩盖。该补丁不改变原有五个补丁或原件；同为 Apache-2.0。没有引入官方 main 应用、CPU 私有休眠接口、音频或默认锁屏策略。
 
 本项目通过原有 GPIO、FCA9555 及 CST836U 公开接口实现：停放前读取运行寄存器快照，恢复时先释放 CW_INT，再恢复输出；全部扩展器恢复完成后才复位触摸。与上游不同，任一步写入或恢复失败都保留可重试状态，既有采样锁排除 BSP 输出缓存与直接寄存器写入交错。未修改 VCOM、波形、校准或 PMU 协议。适配和资源边界见 [运行时说明](platform-runtime.md#睡眠-gpio-与外设恢复)，实测状态见开发记录。
+
+
+## 2026-11-05 · LCD 双供数任务启动屏障
+
+继续锁定 `5f3406deec33304de8801046db583dec7c49e55b`。`epdiy-feed-start.patch` 在欠载诊断与逐行相位补丁后应用到构建副本，只修改 `src/render.c`、`src/output_common/render_context.h` 和 `src/output_lcd/render_lcd.c`。下载原件、组件 tree SHA 和版本锁不变，不引入新依赖。保留 LGPL-3.0-or-later 及原有分发义务；补丁为本项目实现，FreeRTOS 已是现有 BSP 依赖。
+
+每个 LCD 相位先让两个供数任务通过静态 `xEventGroupSync()` 汇合，再沿用原预填阈值生产与开扫。同步点位于错误早退前；父任务原有的双 `feed_done` 汇合防止下一相位提前进入。事件组在创建任务前初始化，在删除两个任务后删除并清空 handle。单生产者清屏不经过该屏障。目标静态上下文增加 40 字节，不增加堆缓冲或任务，不修改队列、优先级、波形和供电时序。新增等待沿用原任务完成依赖，不提供严格墙钟上限；自然故障、复验和未测项见[复测记录](baselines/2026-11-05-https-display-gate.md#后续复现与本地修复)。

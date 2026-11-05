@@ -1,0 +1,30 @@
+--- a/src/render.c
++++ b/src/render.c
+@@ -452,2 +452,4 @@
+     render_context.frame_done = xSemaphoreCreateBinary();
++    render_context.feed_phase_barrier = xEventGroupCreateStatic(&render_context.feed_phase_barrier_storage);
++    if (render_context.feed_phase_barrier == NULL) abort();
+
+@@ -514,2 +516,4 @@
+
++    vEventGroupDelete(render_context.feed_phase_barrier);
++    render_context.feed_phase_barrier = NULL;
+     epd_control_reg_deinit();
+--- a/src/output_common/render_context.h
++++ b/src/output_common/render_context.h
+@@ -3,2 +3,3 @@
+ #include <freertos/FreeRTOS.h>
++#include <freertos/event_groups.h>
+ #include <freertos/semphr.h>
+@@ -35,2 +36,4 @@
+
++    StaticEventGroup_t feed_phase_barrier_storage;
++    EventGroupHandle_t feed_phase_barrier;
+     TaskHandle_t feed_tasks[NUM_RENDER_THREADS];
+--- a/src/output_lcd/render_lcd.c
++++ b/src/output_lcd/render_lcd.c
+@@ -211,2 +211,4 @@
+     assert(ctx->lut_lookup_func != NULL);
++    xEventGroupSync(ctx->feed_phase_barrier, (EventBits_t)1U << thread_id,
++                    ((EventBits_t)1U << NUM_RENDER_THREADS) - 1U, portMAX_DELAY);
+     uint8_t* input_line = ctx->feed_line_buffers[thread_id];
