@@ -13,7 +13,7 @@ namespace pico_page {
 namespace {
 constexpr std::size_t limit = 2U * 1024 * 1024;
 constexpr char version[] = "content-reading-v4";
-constexpr char original_version[] = "content-original-v2";
+constexpr char original_version[] = "content-original-v3";
 const char* revision(bool original) { return original ? original_version : version; }
 bool room(std::size_t bytes) {
     const bool admitted = bytes <= limit && chapter_memory_available(bytes + 64);
@@ -102,7 +102,7 @@ void encode_author(Writer& w, const Chapter& chapter, const std::function<bool()
                             style.width_px, style.max_width_px}) w.real(value);
         for (auto value : style.margin_px) w.real(value);
         for (auto value : style.padding_px) w.real(value);
-        w.word(style.box_percentages); w.word(style.font_families); w.word(style.margin_auto);
+        w.word(style.box_percentages); w.word(style.font_families); w.word(style.margin_auto); w.word(style.bleed);
         w.word(static_cast<unsigned>(style.display)); w.word(static_cast<unsigned>(style.align));
         w.word(static_cast<unsigned>(style.break_before)); w.word(static_cast<unsigned>(style.break_after));
         w.word(static_cast<unsigned>(style.break_inside));
@@ -131,6 +131,7 @@ bool decode_author(Reader& r, Chapter& chapter, const std::function<bool()>& sto
         for (auto slots = style.font_families; slots; slots >>= 4)
             if (!(slots & 15) || (slots & 15) > fonts) return false;
         style.margin_auto = r.bounded(15);
+        style.bleed = r.bounded(15);
         style.display = static_cast<css::Display>(r.bounded(static_cast<unsigned>(css::Display::None)));
         style.align = static_cast<css::Align>(r.bounded(static_cast<unsigned>(css::Align::Justify)));
         style.break_before = static_cast<css::Break>(r.bounded(static_cast<unsigned>(css::Break::Avoid)));
@@ -165,7 +166,8 @@ void encode(Writer& w, const EpubDocument& doc, const Chapter& c, bool original,
     w.word(static_cast<std::uint32_t>(c.links.size()));
     for (const auto& l : c.links) { if (stop && stop()) return; w.word(l.begin); w.word(l.end); w.str(l.resource); w.str(l.fragment); w.word(l.external); }
     w.word(static_cast<std::uint32_t>(c.images.size()));
-    for (const auto& i : c.images) { if (stop && stop()) return; w.word(i.begin); w.word(i.end); w.str(i.resource); w.str(i.alt); w.anchor(i.source); }
+    for (const auto& i : c.images) { if (stop && stop()) return; w.word(i.begin); w.word(i.end); w.str(i.resource); w.str(i.alt); w.anchor(i.source);
+        if (original) { w.word(i.width); w.word(i.height); } }
     w.word(static_cast<std::uint32_t>(c.warnings.size()));
     for (const auto& warning : c.warnings) { if (stop && stop()) return; w.str(warning); }
 }
@@ -256,6 +258,7 @@ bool decode(std::string_view bytes, const std::string& book_id, const std::strin
     for (std::uint32_t j = 0; j < n; ++j) {
         if (j % 256 == 0 && stop && stop()) return false;
         DocumentImage i; i.begin = r.word(); i.end = r.word(); i.resource = r.str(); i.alt = r.str(); i.source = r.anchor();
+        if (original) { i.width = static_cast<std::uint16_t>(r.bounded(0xffff)); i.height = static_cast<std::uint16_t>(r.bounded(0xffff)); }
         if (!r.range(i.begin, i.end, v.text.size()) || i.source.resource != v.resource) return false;
         v.images.push_back(std::move(i));
     }

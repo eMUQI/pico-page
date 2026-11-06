@@ -499,7 +499,7 @@ Page layout_page(Font& font, std::u32string_view text, std::size_t start, const 
         return 0;
     };
     struct Line {
-        int width = 0, ascender = 0, descender = 0, height = 0, spaces = 0;
+        int width = 0, ascender = 0, descender = 0, height = 0, spaces = 0, font_px = 0;
     };
     const auto glyph_style = [&](std::size_t index) {
         return styles ? styles->at(index) : GlyphStyle{spec.font_px, spec.line_height};
@@ -539,6 +539,7 @@ Page layout_page(Font& font, std::u32string_view text, std::size_t start, const 
             line.ascender = std::max(line.ascender, glyph_metrics.ascender + (format.bold ? 2 : 0));
             line.descender = std::max(line.descender, glyph_metrics.descender + (format.underline ? 2 : 0));
             line.height = std::max(line.height, format.line_height);
+            line.font_px = std::max(line.font_px, format.font_px);
             line.spaces += text[end] == U' ';
             ++end;
             if (end < text.size() && break_after(text[end - 1], text[end])) { last_break = end; saved_break = line; }
@@ -552,7 +553,7 @@ Page layout_page(Font& font, std::u32string_view text, std::size_t start, const 
             line.ascender = metrics.ascender;
             line.descender = metrics.descender;
         }
-        const int height = std::max(line.height, line.ascender + line.descender);
+        const int height = std::max(line.height, styles ? line.font_px : line.ascender + line.descender);
         if (top + height > spec.top + spec.height) break;
         const int baseline = top + (height - line.ascender - line.descender) / 2 + line.ascender;
         const int remaining = std::max(0, spec.width - line.width);

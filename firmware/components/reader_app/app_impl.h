@@ -327,7 +327,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         return a.left == b.left && a.top == b.top && a.width == b.width && a.height == b.height &&
                a.font_px == b.font_px && a.line_height == b.line_height &&
                a.indent_chars == b.indent_chars && a.paragraph_gap == b.paragraph_gap &&
-               a.original_epub == b.original_epub;
+               a.original_epub == b.original_epub && a.bleed_to_screen_top == b.bleed_to_screen_top;
     }
     static bool body_cache_room() {
 #ifdef ESP_PLATFORM
@@ -1405,7 +1405,9 @@ struct ReaderApp::Impl final : DisplayBackend {
     static int reading_top(const ReaderSettings& cfg) { return cfg.fullscreen_reading ? fullscreen_margin_y_px : 64; }
     graphics::LayoutSpec reading_layout(const ReaderSettings& cfg, bool return_bar = false) {
         const int bottom = cfg.fullscreen_reading ? 1216 - fullscreen_margin_y_px : footer_top;
-        return layout(cfg, return_bar ? 144 : reading_top(cfg), bottom);
+        auto spec = layout(cfg, return_bar ? 144 : reading_top(cfg), bottom);
+        spec.bleed_to_screen_top = cfg.fullscreen_reading && !return_bar;
+        return spec;
     }
     graphics::LayoutSpec layout(const ReaderSettings &cfg, int top, int bottom) {
         graphics::LayoutSpec spec;
@@ -1793,13 +1795,13 @@ struct ReaderApp::Impl final : DisplayBackend {
         const auto spec = reading_layout(settings);
         char name[32], geometry[160];
         std::snprintf(name, sizeof(name), "%s/%016llx", spec.original_epub ? "pages-original" : "pages", path_hash(book_path));
-        std::snprintf(geometry, sizeof(geometry), "%lld %lld\n%lld %lld\n%d %d %d %d %d %d %d %d %zu\n",
+        std::snprintf(geometry, sizeof(geometry), "%lld %lld\n%lld %lld\n%d %d %d %d %d %d %d %d %d %zu\n",
                       static_cast<long long>(book.st_size), static_cast<long long>(book.st_mtime),
                       static_cast<long long>(font.st_size), static_cast<long long>(font.st_mtime),
                       spec.left, spec.top, spec.width, spec.height, spec.font_px, spec.line_height,
-                      spec.indent_chars, spec.paragraph_gap, spine.size());
+                      spec.indent_chars, spec.paragraph_gap, spec.bleed_to_screen_top, spine.size());
         pages_name = name;
-        const auto revision = spec.original_epub ? ":original-pagination-v2\n" : ":pagination-v5\n";
+        const auto revision = spec.original_epub ? ":original-pagination-v3\n" : ":pagination-v5\n";
         pages_header = std::string("PPPAGES3\n") + revision_for(book_path, document.metadata()) + revision + book_path + "\n" + font_file + "\n" + geometry +
             document.metadata().book_id + "\n" + font_identity + "\n";
         if (async_content) { pages_cache_pending = true; return; }

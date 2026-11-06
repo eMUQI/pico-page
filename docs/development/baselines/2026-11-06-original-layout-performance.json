@@ -1,0 +1,558 @@
+{
+  "schema": 1,
+  "date": "2026-11-06",
+  "scope": "single-device Diagnostic A/B of the original-layout and page-bottom changes; one warm and one measured round per firmware; command-to-driver-frame timing, no optical or energy verdict",
+  "builds": {
+    "baseline": {
+      "commit": "584c232",
+      "version": "0.5.1+g584c232",
+      "app_bytes": 4074960,
+      "source_sha256_prefix": "3772da58d102",
+      "app_sha256_prefix": "25fda4a3012a"
+    },
+    "candidate": {
+      "commit": "3a0c0f6",
+      "version": "0.5.1+g3a0c0f6",
+      "app_bytes": 4081952,
+      "source_sha256_prefix": "6a6beac64cf6",
+      "app_sha256_prefix": "990bdb3f248c"
+    },
+    "sdkconfig": "identical effective sdkconfig; ESP-IDF 6.1.0, BSP 5f3406de, Diagnostic mode"
+  },
+  "conditions": {
+    "hardware": "Read Pico ESP32-S3 v0.2, 16 MiB Flash, 8 MiB PSRAM; same unit as the 2026-11-04 comparison (anonymous RP-A)",
+    "install": "partition table and otadata read back before each write; only the active ota_1 application slot written, hash verified, otadata unchanged",
+    "power": "USB",
+    "tf": "same card, no card-cache reset; synthetic books already present from 2026-11-04",
+    "books": {
+      "large-300.epub": "e86af1060c359d2d40dc40cbc265ec7c18e00aab277e6e198c9062d1cf42bba5",
+      "large-3000.epub": "9c42294dcefebd0826f0f95cc55d8289953a5bb19c73f84e01fd110f463822be",
+      "long-chapters.epub": "feef2633be14dc1f2c502038cadca7a8f05eab116cbec8a3a677788a57ecf4bc"
+    },
+    "layout": "38 px, existing per-book settings (custom layout); the page-bottom spread applies, original-layout code paths do not",
+    "workload": "per book: one preparation open, 5 reopens, K2, 30 forward and 30 back turns; saved anchor checked at start, after reopens and after the round trip",
+    "order": "baseline warm, baseline measured, candidate warm, candidate measured; 195 target frames per round, all matched to Frame trace with zero frame failures",
+    "timing": "host monotonic clock from serial command to the target body-frame completion notice; includes serial and scheduling overhead"
+  },
+  "measured_round": [
+    {
+      "book": "large-300.epub",
+      "operation": "back",
+      "frame": "full",
+      "n": [
+        1,
+        1
+      ],
+      "base": [
+        1703.345,
+        1703.345,
+        1703.345
+      ],
+      "candidate": [
+        1702.019,
+        1702.019,
+        1702.019
+      ],
+      "p50_change_percent": -0.08
+    },
+    {
+      "book": "large-300.epub",
+      "operation": "back",
+      "frame": "partial",
+      "n": [
+        29,
+        29
+      ],
+      "base": [
+        554.393,
+        563.049,
+        563.589
+      ],
+      "candidate": [
+        554.122,
+        562.292,
+        562.594
+      ],
+      "p50_change_percent": -0.05
+    },
+    {
+      "book": "large-300.epub",
+      "operation": "forward",
+      "frame": "partial",
+      "n": [
+        30,
+        30
+      ],
+      "base": [
+        555.738,
+        564.25,
+        564.588
+      ],
+      "candidate": [
+        554.36,
+        562.317,
+        562.573
+      ],
+      "p50_change_percent": -0.25
+    },
+    {
+      "book": "large-300.epub",
+      "operation": "open",
+      "frame": "open",
+      "n": [
+        5,
+        5
+      ],
+      "base": [
+        1815.841,
+        1872.407,
+        1872.407
+      ],
+      "candidate": [
+        1825.643,
+        1841.816,
+        1841.816
+      ],
+      "p50_change_percent": 0.54
+    },
+    {
+      "book": "large-3000.epub",
+      "operation": "back",
+      "frame": "full",
+      "n": [
+        1,
+        1
+      ],
+      "base": [
+        1672.17,
+        1672.17,
+        1672.17
+      ],
+      "candidate": [
+        1670.389,
+        1670.389,
+        1670.389
+      ],
+      "p50_change_percent": -0.11
+    },
+    {
+      "book": "large-3000.epub",
+      "operation": "back",
+      "frame": "partial",
+      "n": [
+        29,
+        29
+      ],
+      "base": [
+        573.689,
+        617.319,
+        1099.597
+      ],
+      "candidate": [
+        572.106,
+        593.781,
+        1092.801
+      ],
+      "p50_change_percent": -0.28
+    },
+    {
+      "book": "large-3000.epub",
+      "operation": "forward",
+      "frame": "partial",
+      "n": [
+        30,
+        30
+      ],
+      "base": [
+        579.038,
+        602.904,
+        1068.91
+      ],
+      "candidate": [
+        578.834,
+        601.06,
+        1082.852
+      ],
+      "p50_change_percent": -0.04
+    },
+    {
+      "book": "large-3000.epub",
+      "operation": "open",
+      "frame": "open",
+      "n": [
+        5,
+        5
+      ],
+      "base": [
+        5419.789,
+        5565.691,
+        5565.691
+      ],
+      "candidate": [
+        5221.942,
+        5505.708,
+        5505.708
+      ],
+      "p50_change_percent": -3.65
+    },
+    {
+      "book": "long-chapters.epub",
+      "operation": "back",
+      "frame": "full",
+      "n": [
+        1,
+        1
+      ],
+      "base": [
+        1721.246,
+        1721.246,
+        1721.246
+      ],
+      "candidate": [
+        1739.604,
+        1739.604,
+        1739.604
+      ],
+      "p50_change_percent": 1.07
+    },
+    {
+      "book": "long-chapters.epub",
+      "operation": "back",
+      "frame": "partial",
+      "n": [
+        29,
+        29
+      ],
+      "base": [
+        595.912,
+        596.939,
+        596.993
+      ],
+      "candidate": [
+        601.408,
+        602.618,
+        602.713
+      ],
+      "p50_change_percent": 0.92
+    },
+    {
+      "book": "long-chapters.epub",
+      "operation": "forward",
+      "frame": "partial",
+      "n": [
+        30,
+        30
+      ],
+      "base": [
+        595.837,
+        596.887,
+        660.407
+      ],
+      "candidate": [
+        601.999,
+        602.536,
+        680.25
+      ],
+      "p50_change_percent": 1.03
+    },
+    {
+      "book": "long-chapters.epub",
+      "operation": "open",
+      "frame": "open",
+      "n": [
+        5,
+        5
+      ],
+      "base": [
+        1584.825,
+        1588.861,
+        1588.861
+      ],
+      "candidate": [
+        1583.583,
+        1585.697,
+        1585.697
+      ],
+      "p50_change_percent": -0.08
+    }
+  ],
+  "warm_round": [
+    {
+      "book": "large-300.epub",
+      "operation": "back",
+      "frame": "full",
+      "n": [
+        1,
+        1
+      ],
+      "base": [
+        1707.864,
+        1707.864,
+        1707.864
+      ],
+      "candidate": [
+        1701.814,
+        1701.814,
+        1701.814
+      ],
+      "p50_change_percent": -0.35
+    },
+    {
+      "book": "large-300.epub",
+      "operation": "back",
+      "frame": "partial",
+      "n": [
+        29,
+        29
+      ],
+      "base": [
+        554.678,
+        563.002,
+        563.473
+      ],
+      "candidate": [
+        553.985,
+        562.741,
+        562.865
+      ],
+      "p50_change_percent": -0.12
+    },
+    {
+      "book": "large-300.epub",
+      "operation": "forward",
+      "frame": "partial",
+      "n": [
+        30,
+        30
+      ],
+      "base": [
+        555.91,
+        564.033,
+        564.636
+      ],
+      "candidate": [
+        554.63,
+        563.619,
+        569.15
+      ],
+      "p50_change_percent": -0.23
+    },
+    {
+      "book": "large-300.epub",
+      "operation": "open",
+      "frame": "open",
+      "n": [
+        5,
+        5
+      ],
+      "base": [
+        1821.635,
+        1855.538,
+        1855.538
+      ],
+      "candidate": [
+        1728.844,
+        1819.763,
+        1819.763
+      ],
+      "p50_change_percent": -5.09
+    },
+    {
+      "book": "large-3000.epub",
+      "operation": "back",
+      "frame": "full",
+      "n": [
+        1,
+        1
+      ],
+      "base": [
+        1671.914,
+        1671.914,
+        1671.914
+      ],
+      "candidate": [
+        1687.284,
+        1687.284,
+        1687.284
+      ],
+      "p50_change_percent": 0.92
+    },
+    {
+      "book": "large-3000.epub",
+      "operation": "back",
+      "frame": "partial",
+      "n": [
+        29,
+        29
+      ],
+      "base": [
+        573.406,
+        597.284,
+        1094.101
+      ],
+      "candidate": [
+        572.178,
+        597.037,
+        1099.979
+      ],
+      "p50_change_percent": -0.21
+    },
+    {
+      "book": "large-3000.epub",
+      "operation": "forward",
+      "frame": "partial",
+      "n": [
+        30,
+        30
+      ],
+      "base": [
+        578.837,
+        602.531,
+        1079.762
+      ],
+      "candidate": [
+        578.245,
+        593.503,
+        1082.974
+      ],
+      "p50_change_percent": -0.1
+    },
+    {
+      "book": "large-3000.epub",
+      "operation": "open",
+      "frame": "open",
+      "n": [
+        5,
+        5
+      ],
+      "base": [
+        5471.986,
+        5520.494,
+        5520.494
+      ],
+      "candidate": [
+        5107.826,
+        5159.724,
+        5159.724
+      ],
+      "p50_change_percent": -6.65
+    },
+    {
+      "book": "long-chapters.epub",
+      "operation": "back",
+      "frame": "full",
+      "n": [
+        1,
+        1
+      ],
+      "base": [
+        1723.338,
+        1723.338,
+        1723.338
+      ],
+      "candidate": [
+        1727.358,
+        1727.358,
+        1727.358
+      ],
+      "p50_change_percent": 0.23
+    },
+    {
+      "book": "long-chapters.epub",
+      "operation": "back",
+      "frame": "partial",
+      "n": [
+        29,
+        29
+      ],
+      "base": [
+        596.762,
+        598.104,
+        598.41
+      ],
+      "candidate": [
+        597.414,
+        598.544,
+        598.608
+      ],
+      "p50_change_percent": 0.11
+    },
+    {
+      "book": "long-chapters.epub",
+      "operation": "forward",
+      "frame": "partial",
+      "n": [
+        30,
+        30
+      ],
+      "base": [
+        597.048,
+        604.056,
+        666.798
+      ],
+      "candidate": [
+        596.357,
+        598.484,
+        665.595
+      ],
+      "p50_change_percent": -0.12
+    },
+    {
+      "book": "long-chapters.epub",
+      "operation": "open",
+      "frame": "open",
+      "n": [
+        5,
+        5
+      ],
+      "base": [
+        1606.903,
+        1621.025,
+        1621.025
+      ],
+      "candidate": [
+        1557.842,
+        1578.283,
+        1578.283
+      ],
+      "p50_change_percent": -3.05
+    }
+  ],
+  "resources_minimum_sampled": {
+    "main-final": {
+      "internal": 87719,
+      "largest_internal": 40960,
+      "psram": 3350232,
+      "largest_psram": 1736704,
+      "stack_bytes": 4164,
+      "input_stack_bytes": 2640,
+      "min_heap": 2416236
+    },
+    "candidate-final": {
+      "internal": 87719,
+      "largest_internal": 40960,
+      "psram": 3351944,
+      "largest_psram": 1736704,
+      "stack_bytes": 4260,
+      "input_stack_bytes": 2640,
+      "min_heap": 2419380
+    }
+  },
+  "original_layout_proxy": {
+    "book": "33,403,760-byte real EPUB with 3,884 spine documents, two copies with different digests for cold caches",
+    "metric": "page-index bytes added per second while counting in original layout, standard build, 15 s status sampling",
+    "without_image_size_cache_bytes_per_s": 37.5,
+    "with_image_size_cache_bytes_per_s": 88.0,
+    "window_s": 213,
+    "rounds": 1,
+    "limit": "proxy only; full-book counting time and a same-condition run of the pre-change firmware were not measured"
+  },
+  "unverified": [
+    "cold-cache opens",
+    "full-book page counting completion",
+    "original-layout workloads in the paired benchmark",
+    "optical latency",
+    "current draw",
+    "multi-round variance"
+  ]
+}

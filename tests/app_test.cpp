@@ -741,6 +741,57 @@ static void content_font_test(const fs::path& root, const fs::path& fixtures, co
     }
 }
 
+static void original_layout_test(const fs::path& fixtures, const fs::path& font) {
+    EpubDocument document;
+    Chapter chapter;
+    std::string error;
+    assert(document.open((fixtures / "original-layout.epub").string(), error));
+    assert(document.load_chapter(0, chapter, error, ChapterLoad::Original));
+    graphics::Font body;
+    assert(body.open(font.string()));
+    graphics::LayoutSpec spec;
+    spec.original_epub = true;
+    const auto page = plan_content(body, chapter, 0, spec, true);
+    assert(page.error.empty() && page.images.size() == 2);
+    const auto& banner = page.images.front();
+    assert(banner.x == 0 && banner.width == 684 && banner.y == spec.top && banner.height == 342);
+    const auto line_of = [&](char32_t scalar) -> const graphics::TextLine& {
+        const auto offset = chapter.text.find(scalar);
+        const auto found = std::find_if(page.lines.begin(), page.lines.end(),
+            [&](const auto& line) { return line.start <= offset && offset < line.end; });
+        assert(found != page.lines.end());
+        return *found;
+    };
+    const auto glyph = [&](char32_t scalar) -> const graphics::PositionedGlyph& {
+        const auto found = std::find_if(page.glyphs.begin(), page.glyphs.end(),
+            [&](const auto& item) { return item.scalar == scalar; });
+        assert(found != page.glyphs.end());
+        return *found;
+    };
+    assert(line_of(U'山').top == line_of(U'第').bottom);
+    assert(line_of(U'丙').top == line_of(U'甲').bottom);
+    assert(line_of(U'庚').top == line_of(U'戊').bottom);
+    assert(line_of(U'甲').bottom - line_of(U'甲').top == spec.font_px);
+    assert(glyph(U'甲').x == spec.left + 2 * spec.font_px && glyph(U'丙').x == spec.left);
+    const auto& photo = page.images.back();
+    assert(photo.x == spec.left && photo.width == spec.width && photo.height == spec.width / 2 &&
+           photo.y == line_of(U'庚').bottom);
+    spec.bleed_to_screen_top = true;
+    const auto fullscreen = plan_content(body, chapter, 0, spec, true);
+    assert(fullscreen.images.size() == 2 && fullscreen.images.front().y == 0 && fullscreen.images.front().height == 342);
+    assert(fullscreen.images.back().y == photo.y - spec.top);
+    Chapter long_text;
+    assert(document.load_chapter(1, long_text, error, ChapterLoad::Reading));
+    graphics::LayoutSpec reading;
+    const auto filled = plan_content(body, long_text, 0, reading, true);
+    const auto natural = graphics::layout_page(body, long_text.text, 0, reading, true);
+    assert(filled.error.empty() && filled.end == natural.end && filled.end < long_text.text.size());
+    assert(filled.lines.front().top == natural.lines.front().top);
+    assert(natural.lines.back().bottom < reading.top + reading.height &&
+           filled.lines.back().bottom == reading.top + reading.height);
+    assert(plan_content(body, long_text, 0, reading, false).end == filled.end);
+}
+
 static void original_epub_test(const fs::path& root, const fs::path& fixtures, const fs::path& font) {
     fs::create_directories(root / "Books"); fs::create_directories(root / "Fonts");
     fs::copy_file(fixtures / "font-layout.epub", root / "Books/book.epub");
@@ -760,7 +811,7 @@ static void original_epub_test(const fs::path& root, const fs::path& fixtures, c
         assert(cached.from_disk && restored.text == chapter.text && restored.author_styles == chapter.author_styles);
         assert(restored.author_fonts.size() == chapter.author_fonts.size() &&
                restored.author_fonts.front().crc32 == chapter.author_fonts.front().crc32);
-        const std::string current_revision = "content-original-v2", old_revision = "content-original-v1";
+        const std::string current_revision = "content-original-v3", old_revision = "content-original-v2";
         assert(original_entry.name.find(current_revision) != std::string::npos);
         auto old_name = original_entry.name;
         old_name.replace(old_name.find(current_revision), current_revision.size(), old_revision);
@@ -856,9 +907,9 @@ static void original_epub_test(const fs::path& root, const fs::path& fixtures, c
     const auto pages = root / "PicoPage/cache/pages-original";
     const auto cache = fs::directory_iterator(pages)->path();
     auto old_pages = read(cache);
-    const std::string current_revision = ":original-pagination-v2\n";
+    const std::string current_revision = ":original-pagination-v3\n";
     assert(old_pages.find(current_revision) != std::string::npos);
-    old_pages.replace(old_pages.find(current_revision), current_revision.size(), ":original-pagination-v1\n");
+    old_pages.replace(old_pages.find(current_revision), current_revision.size(), ":original-pagination-v2\n");
     old_pages.resize(old_pages.size() - 32);
     old_pages += md5_hex(old_pages);
     write(cache, old_pages);
@@ -4060,6 +4111,7 @@ int main(int argc, char** argv) {
     layout_review_test(card / "LayoutAsync", fixtures, argv[2], true);
     content_font_test(card / "ContentFontSync", fixtures, argv[2], false);
     content_font_test(card / "ContentFontAsync", fixtures, argv[2], true);
+    original_layout_test(fixtures, argv[2]);
     original_epub_test(card / "OriginalEpub", fixtures, argv[2]);
     fullscreen_reading_test(card / "FullscreenReading", argv[2]);
     font_picker_test(card / "FontPickerSync", fixtures, argv[2], false);
