@@ -1434,24 +1434,31 @@ struct EpubDocument::Impl {
     }
     std::unique_ptr<AuthorLayoutState> prepare_author_styles(std::size_t index, const std::function<bool()>& stop);
     std::unordered_map<std::string, std::pair<std::uint16_t, std::uint16_t>> image_sizes;
-    void read_image_sizes(Chapter& chapter, const std::function<bool()>& stop) {
+    bool read_image_sizes(Chapter& chapter, std::string& error, const std::function<bool()>& stop) {
         const StageTimer timer{"image_header_read", 0};
         for (auto& image : chapter.images) {
-            if (stop && stop()) return;
+            if (stop && stop()) return fail(error, kChapterCancelled);
             if (const auto known = image_sizes.find(image.resource); known != image_sizes.end()) {
                 std::tie(image.width, image.height) = known->second;
                 continue;
             }
             const auto* entry = image.resource.empty() ? nullptr : find_member(image.resource);
-            if (!entry || !memory_room(kImageHeaderBytes + 128U * 1024)) continue;
+            if (entry && !memory_room(kImageHeaderBytes + 128U * 1024))
+                return fail(error, std::string(kChapterMemoryError) + ": " + image.resource);
             struct Header { std::string bytes; std::uint32_t width = 0, height = 0; ImageHeader state = ImageHeader::Incomplete; } header;
-            mz_zip_reader_extract_to_callback(&zip, entry->member,
+            if (entry && !mz_zip_reader_extract_to_callback(&zip, entry->member,
                 [](void* opaque, mz_uint64, const void* data, std::size_t count) -> std::size_t {
                     auto& header = *static_cast<Header*>(opaque);
                     header.bytes.append(static_cast<const char*>(data), std::min(count, kImageHeaderBytes - header.bytes.size()));
                     header.state = image_header_size(header.bytes, header.width, header.height);
                     return header.state == ImageHeader::Incomplete && header.bytes.size() < kImageHeaderBytes ? count : 0;
-                }, &header, 0);
+                }, &header, 0)) {
+                const auto zip_error = mz_zip_get_last_error(&zip);
+                if (zip_error == MZ_ZIP_ALLOC_FAILED)
+                    return fail(error, std::string(kChapterMemoryError) + ": " + image.resource);
+                if (zip_error == MZ_ZIP_FILE_READ_FAILED || zip_error == MZ_ZIP_FILE_SEEK_FAILED)
+                    return fail(error, "Cannot read EPUB image header: " + image.resource);
+            }
             if (header.state == ImageHeader::Found && header.width && header.height &&
                 header.width <= 0xffff && header.height <= 0xffff) {
                 image.width = static_cast<std::uint16_t>(header.width);
@@ -1460,6 +1467,7 @@ struct EpubDocument::Impl {
             if (image_sizes.size() >= kKnownImageSizes) image_sizes.clear();
             image_sizes.emplace(image.resource, std::make_pair(image.width, image.height));
         }
+        return true;
     }
     bool load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
               std::uint32_t wanted, const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop,
@@ -2558,8 +2566,7 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
         }
         if (author && !chapter.author_style_fallback) {
             chapter.author_fonts = std::move(author->fonts);
-            if (chapter.blocks.size() > 1) read_image_sizes(chapter, stop);
-            if (stop && stop()) { pico_page::release(chapter); return fail(error, kChapterCancelled); }
+            if (chapter.blocks.size() > 1 && !read_image_sizes(chapter, error, stop)) { pico_page::release(chapter); return false; }
         }
 #if defined(ESP_PLATFORM) && defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
         if (detail == ChapterLoad::Original)

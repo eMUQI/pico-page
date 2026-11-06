@@ -595,6 +595,13 @@ int main(int argc, char** argv) {
         assert(original.images[0].width == 300 && original.images[0].height == 150);
         assert(original.images[1].width == 400 && original.images[1].height == 200);
         Chapter reloaded;
+        EpubDocument header_memory;
+        assert(header_memory.open(fixture_dir + "original-layout.epub", error));
+        set_chapter_memory_probe([](std::size_t bytes) { return bytes != 64U * 1024 + 128U * 1024; });
+        assert(!header_memory.load_chapter(0, reloaded, error, ChapterLoad::Original));
+        assert(error.rfind(kChapterMemoryError, 0) == 0 && reloaded.text.empty());
+        set_chapter_memory_probe(nullptr);
+        assert(header_memory.load_chapter(0, reloaded, error, ChapterLoad::Original) && reloaded.images[0].width == 300);
         assert(original_layout.load_chapter(0, reloaded, error, ChapterLoad::Original));
         assert(reloaded.images[0].width == 300 && reloaded.images[1].height == 200);
         assert(original.style(block_at(U"[图片：横幅]")->style).bleed == 0b1011);
