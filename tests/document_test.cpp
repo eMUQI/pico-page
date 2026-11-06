@@ -86,7 +86,17 @@ int main(int argc, char** argv) {
     {
         const std::string fixture = argv[1];
         const auto directory = fixture.substr(0, fixture.rfind('/') + 1);
-        {
+        static unsigned fragment_index_denials = 0;
+        for (const bool fragment_index_available : {true, false}) {
+            fragment_index_denials = 0;
+            if (!fragment_index_available) {
+                set_chapter_memory_probe([](std::size_t bytes) {
+                    constexpr std::size_t fragment_index_bytes = 2048 * sizeof(std::uint16_t);
+                    if (bytes != fragment_index_bytes) return true;
+                    ++fragment_index_denials;
+                    return false;
+                });
+            }
             EpubDocument fragment_book;
             Chapter first_part, second_part;
             assert(fragment_book.open(directory + "fragment-index.epub", error));
@@ -102,6 +112,8 @@ int main(int argc, char** argv) {
                 assert(!fragment_book.load_chapter(1, duplicate, error, ChapterLoad::Reading, 0, {}, {}, sequential));
                 assert(error.rfind("Duplicate XHTML fragment id", 0) == 0 && duplicate.fragments.empty());
             }
+            assert(fragment_index_available == (fragment_index_denials == 0));
+            set_chapter_memory_probe(nullptr);
         }
         {
             EpubDocument html;

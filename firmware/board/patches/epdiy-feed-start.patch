@@ -1,11 +1,10 @@
 --- a/src/render.c
 +++ b/src/render.c
-@@ -452,2 +452,4 @@
+@@ -452,2 +452,3 @@
      render_context.frame_done = xSemaphoreCreateBinary();
 +    render_context.feed_phase_barrier = xEventGroupCreateStatic(&render_context.feed_phase_barrier_storage);
-+    if (render_context.feed_phase_barrier == NULL) abort();
 
-@@ -514,2 +516,4 @@
+@@ -514,2 +515,4 @@
 
 +    vEventGroupDelete(render_context.feed_phase_barrier);
 +    render_context.feed_phase_barrier = NULL;

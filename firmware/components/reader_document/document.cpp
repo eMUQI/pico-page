@@ -811,7 +811,7 @@ struct ChapterParser {
     }
     bool record_fragment(std::string id) {
         auto& fragments = chapter.fragments;
-        if (fragments.empty() && !fragment_ordinals) {
+        if (fragments.empty() && !fragment_ordinals && memory_room(kFragmentIndexBytes)) {
 #ifdef ESP_PLATFORM
             fragment_ordinals.reset(static_cast<std::uint16_t*>(heap_caps_malloc(kFragmentIndexBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)));
 #else
