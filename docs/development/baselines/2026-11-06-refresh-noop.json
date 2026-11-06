@@ -1,0 +1,978 @@
+{
+  "schema": 1,
+  "date": "2026-11-06",
+  "scope": "single-device Diagnostic A/B, one full round per firmware; targeted functional checks, no optical or energy verdict",
+  "script_sha256": "815049b4a3c7fe04aa94852d06d3f869bc86d130735a76a74080e0a0e6e491c5",
+  "conditions": {
+    "hardware": "Read Pico ESP32-S3, 16 MiB Flash, 8 MiB PSRAM",
+    "power": "USB",
+    "tf": "Existing mounted TF; manufacturer and capacity not independently recorded",
+    "font_px": 46,
+    "network": "No network or account operations; existing network settings unchanged",
+    "cache": "Same synthetic files; no card-cache reset; opens/counting settled before measured turns",
+    "schedule": "One sequential baseline/candidate round; five samples per repeated case; not alternating full rounds",
+    "normal_warm_samples": "First next/previous pair excluded, eight samples per profile",
+    "same_body_positions": "Different saved source positions, identical canvas CRC; measurements cover present(), not whole reading latency"
+  },
+  "paired_normal_pixels": {
+    "balanced_normal_pixels_match": 10,
+    "fast_normal_pixels_match": 10
+  },
+  "variants": {
+    "baseline": {
+      "source_commit": "49390ffa3e2a2c3c45158c884a6a4ad2abd1863a",
+      "source_sha256": "a428aed330c6aa981e521842b13b29fbea88490783d56a3f920ad73ba5ffc5a4",
+      "bin_sha256": "3217200a5b0e49214887e7fe1bbc93bbf97a46ed58bf5b6a8d4e68ce90092a9f",
+      "image_bytes": 4075264,
+      "sdkconfig_sha256": "cde51ff9981f3cb80e9bbfe7ffe7411a01c989c820f01222dd11241f5b1c7bd3",
+      "groups": {
+        "invalid_controls": {
+          "operations": 40,
+          "submitted": 40,
+          "physical": 40,
+          "timing_us": {
+            "copy_us": {
+              "n": 40,
+              "p50": 52563,
+              "p95": 52722,
+              "p99": 52900,
+              "max": 52900,
+              "min": 52376
+            },
+            "power_us": {
+              "n": 40,
+              "p50": 1194,
+              "p95": 1207,
+              "p99": 1753,
+              "max": 1753,
+              "min": 1175
+            },
+            "draw_us": {
+              "n": 40,
+              "p50": 62489,
+              "p95": 97435,
+              "p99": 97485,
+              "max": 97485,
+              "min": 61916
+            },
+            "present_us": {
+              "n": 40,
+              "p50": 116789,
+              "p95": 151230,
+              "p99": 151237,
+              "max": 151237,
+              "min": 115708
+            }
+          },
+          "minimum_bytes": {
+            "internal": 88619,
+            "largest_internal": 40960,
+            "psram": 3918892,
+            "largest_psram": 3473408,
+            "stack_bytes": 5380,
+            "input_stack_bytes": 2640
+          }
+        },
+        "balanced_same_body": {
+          "operations": 5,
+          "submitted": 5,
+          "physical": 5,
+          "timing_us": {
+            "copy_us": {
+              "n": 5,
+              "p50": 52680,
+              "p95": 52876,
+              "p99": 52876,
+              "max": 52876,
+              "min": 52463
+            },
+            "power_us": {
+              "n": 5,
+              "p50": 1179,
+              "p95": 1209,
+              "p99": 1209,
+              "max": 1209,
+              "min": 1167
+            },
+            "draw_us": {
+              "n": 5,
+              "p50": 474792,
+              "p95": 475258,
+              "p99": 475258,
+              "max": 475258,
+              "min": 474146
+            },
+            "present_us": {
+              "n": 5,
+              "p50": 528753,
+              "p95": 529166,
+              "p99": 529166,
+              "max": 529166,
+              "min": 528293
+            }
+          },
+          "minimum_bytes": {
+            "internal": 88443,
+            "largest_internal": 40960,
+            "psram": 3635796,
+            "largest_psram": 3014656,
+            "stack_bytes": 6420,
+            "input_stack_bytes": 2640
+          }
+        },
+        "fast_same_body": {
+          "operations": 5,
+          "submitted": 5,
+          "physical": 5,
+          "timing_us": {
+            "copy_us": {
+              "n": 5,
+              "p50": 52484,
+              "p95": 52699,
+              "p99": 52699,
+              "max": 52699,
+              "min": 52476
+            },
+            "power_us": {
+              "n": 5,
+              "p50": 1206,
+              "p95": 1211,
+              "p99": 1211,
+              "max": 1211,
+              "min": 1187
+            },
+            "draw_us": {
+              "n": 5,
+              "p50": 66935,
+              "p95": 67152,
+              "p99": 67152,
+              "max": 67152,
+              "min": 66552
+            },
+            "present_us": {
+              "n": 5,
+              "p50": 120728,
+              "p95": 121112,
+              "p99": 121112,
+              "max": 121112,
+              "min": 120344
+            }
+          },
+          "minimum_bytes": {
+            "internal": 88619,
+            "largest_internal": 40960,
+            "psram": 3956388,
+            "largest_psram": 3801088,
+            "stack_bytes": 5380,
+            "input_stack_bytes": 2640
+          }
+        },
+        "ripple_same_body": {
+          "operations": 5,
+          "submitted": 5,
+          "physical": 5,
+          "timing_us": {
+            "copy_us": {
+              "n": 5,
+              "p50": 52685,
+              "p95": 52690,
+              "p99": 52690,
+              "max": 52690,
+              "min": 52679
+            },
+            "power_us": {
+              "n": 5,
+              "p50": 1179,
+              "p95": 1214,
+              "p99": 1214,
+              "max": 1214,
+              "min": 1179
+            },
+            "draw_us": {
+              "n": 5,
+              "p50": 771378,
+              "p95": 771544,
+              "p99": 771544,
+              "max": 771544,
+              "min": 771338
+            },
+            "present_us": {
+              "n": 5,
+              "p50": 825351,
+              "p95": 825541,
+              "p99": 825541,
+              "max": 825541,
+              "min": 825307
+            }
+          },
+          "minimum_bytes": {
+            "internal": 88443,
+            "largest_internal": 40960,
+            "psram": 3597748,
+            "largest_psram": 3473408,
+            "stack_bytes": 6420,
+            "input_stack_bytes": 2640
+          }
+        },
+        "balanced_same_overlay": {
+          "operations": 5,
+          "submitted": 5,
+          "physical": 5,
+          "timing_us": {
+            "copy_us": {
+              "n": 5,
+              "p50": 52561,
+              "p95": 52619,
+              "p99": 52619,
+              "max": 52619,
+              "min": 52382
+            },
+            "power_us": {
+              "n": 5,
+              "p50": 1193,
+              "p95": 1204,
+              "p99": 1204,
+              "max": 1204,
+              "min": 1186
+            },
+            "draw_us": {
+              "n": 5,
+              "p50": 97116,
+              "p95": 97494,
+              "p99": 97494,
+              "max": 97494,
+              "min": 97066
+            },
+            "present_us": {
+              "n": 5,
+              "p50": 150994,
+              "p95": 151190,
+              "p99": 151190,
+              "max": 151190,
+              "min": 150778
+            }
+          },
+          "minimum_bytes": {
+            "internal": 88959,
+            "largest_internal": 40960,
+            "psram": 4695588,
+            "largest_psram": 4587520,
+            "stack_bytes": 6420,
+            "input_stack_bytes": 2640
+          }
+        },
+        "balanced_normal_body_warm": {
+          "operations": 8,
+          "submitted": 8,
+          "physical": 8,
+          "timing_us": {
+            "copy_us": {
+              "n": 8,
+              "p50": 52587,
+              "p95": 52633,
+              "p99": 52633,
+              "max": 52633,
+              "min": 52431
+            },
+            "power_us": {
+              "n": 8,
+              "p50": 1204,
+              "p95": 1278,
+              "p99": 1278,
+              "max": 1278,
+              "min": 1185
+            },
+            "draw_us": {
+              "n": 8,
+              "p50": 486578,
+              "p95": 487223,
+              "p99": 487223,
+              "max": 487223,
+              "min": 486253
+            },
+            "present_us": {
+              "n": 8,
+              "p50": 540479,
+              "p95": 540989,
+              "p99": 540989,
+              "max": 540989,
+              "min": 539997
+            }
+          },
+          "minimum_bytes": {
+            "internal": 88443,
+            "largest_internal": 40960,
+            "psram": 3576444,
+            "largest_psram": 3080192,
+            "stack_bytes": 6420,
+            "input_stack_bytes": 2640
+          }
+        },
+        "fast_same_overlay": {
+          "operations": 5,
+          "submitted": 5,
+          "physical": 5,
+          "timing_us": {
+            "copy_us": {
+              "n": 5,
+              "p50": 52556,
+              "p95": 52575,
+              "p99": 52575,
+              "max": 52575,
+              "min": 52386
+            },
+            "power_us": {
+              "n": 5,
+              "p50": 1201,
+              "p95": 1204,
+              "p99": 1204,
+              "max": 1204,
+              "min": 1196
+            },
+            "draw_us": {
+              "n": 5,
+              "p50": 62217,
+              "p95": 62289,
+              "p99": 62289,
+              "max": 62289,
+              "min": 62003
+            },
+            "present_us": {
+              "n": 5,
+              "p50": 116092,
+              "p95": 116095,
+              "p99": 116095,
+              "max": 116095,
+              "min": 115704
+            }
+          },
+          "minimum_bytes": {
+            "internal": 88619,
+            "largest_internal": 40960,
+            "psram": 3956784,
+            "largest_psram": 3473408,
+            "stack_bytes": 5380,
+            "input_stack_bytes": 2640
+          }
+        },
+        "fast_normal_body_warm": {
+          "operations": 8,
+          "submitted": 8,
+          "physical": 8,
+          "timing_us": {
+            "copy_us": {
+              "n": 8,
+              "p50": 52605,
+              "p95": 52691,
+              "p99": 52691,
+              "max": 52691,
+              "min": 52454
+            },
+            "power_us": {
+              "n": 8,
+              "p50": 1178,
+              "p95": 1209,
+              "p99": 1209,
+              "max": 1209,
+              "min": 1178
+            },
+            "draw_us": {
+              "n": 8,
+              "p50": 381786,
+              "p95": 381862,
+              "p99": 381862,
+              "max": 381862,
+              "min": 381520
+            },
+            "present_us": {
+              "n": 8,
+              "p50": 435754,
+              "p95": 435780,
+              "p99": 435780,
+              "max": 435780,
+              "min": 435294
+            }
+          },
+          "minimum_bytes": {
+            "internal": 88619,
+            "largest_internal": 40960,
+            "psram": 3890444,
+            "largest_psram": 3014656,
+            "stack_bytes": 5380,
+            "input_stack_bytes": 2640
+          }
+        },
+        "K2": {
+          "operations": 11,
+          "submitted": 11,
+          "physical": 11,
+          "timing_us": {
+            "copy_us": {
+              "n": 11,
+              "p50": 52456,
+              "p95": 52493,
+              "p99": 52493,
+              "max": 52493,
+              "min": 52251
+            },
+            "power_us": {
+              "n": 11,
+              "p50": 1188,
+              "p95": 1210,
+              "p99": 1210,
+              "max": 1210,
+              "min": 1182
+            },
+            "draw_us": {
+              "n": 11,
+              "p50": 1525363,
+              "p95": 1525729,
+              "p99": 1525729,
+              "max": 1525729,
+              "min": 1524428
+            },
+            "present_us": {
+              "n": 11,
+              "p50": 1579103,
+              "p95": 1579497,
+              "p99": 1579497,
+              "max": 1579497,
+              "min": 1578036
+            }
+          },
+          "minimum_bytes": {
+            "internal": 88443,
+            "largest_internal": 40960,
+            "psram": 3201276,
+            "largest_psram": 3014656,
+            "stack_bytes": 5380,
+            "input_stack_bytes": 2640
+          }
+        }
+      },
+      "complete_frame_operations": 320,
+      "raw_timing_records": 320,
+      "input_overflows_max": 0,
+      "driver_errors": {
+        "underrun": 0,
+        "display_recovery": 0,
+        "Guru Meditation": 0,
+        "task_wdt": 0,
+        "abort()": 0
+      },
+      "full_capture": {
+        "failures": 1,
+        "unfinished": 1,
+        "command_failures": 2,
+        "gaps": [
+          "operations_unfinished"
+        ],
+        "notes": "Unfinished kind=3/detail=7 LibraryCovers at cutoff in both captures; baseline also has one LibraryCovers failure and two expected missing-file probes before upload; not an overall-clean verdict"
+      },
+      "target_frame_evidence": "All selected frame samples have complete structured Frame start/end and original microsecond timing records; every selected Frame succeeds"
+    },
+    "candidate": {
+      "source_commit": "49390ffa3e2a2c3c45158c884a6a4ad2abd1863a",
+      "source_sha256": "79616f94c9bc667e4e18f0c5281e42fccc585af7620e8f50073d4d9b76899bed",
+      "bin_sha256": "5a67753de3f05e17c57f5d293b8b9e51d939a6804afcabf25310b3189810bf39",
+      "image_bytes": 4074944,
+      "sdkconfig_sha256": "cde51ff9981f3cb80e9bbfe7ffe7411a01c989c820f01222dd11241f5b1c7bd3",
+      "groups": {
+        "invalid_controls": {
+          "operations": 40,
+          "submitted": 0,
+          "physical": 0,
+          "timing_us": {
+            "copy_us": null,
+            "power_us": null,
+            "draw_us": null,
+            "present_us": null
+          },
+          "minimum_bytes": {
+            "internal": 88619,
+            "largest_internal": 40960,
+            "psram": 3917140,
+            "largest_psram": 3080192,
+            "stack_bytes": 5380,
+            "input_stack_bytes": 2640
+          }
+        },
+        "balanced_same_body": {
+          "operations": 5,
+          "submitted": 5,
+          "physical": 0,
+          "timing_us": {
+            "copy_us": {
+              "n": 5,
+              "p50": 65245,
+              "p95": 65636,
+              "p99": 65636,
+              "max": 65636,
+              "min": 65234
+            },
+            "power_us": {
+              "n": 5,
+              "p50": 0,
+              "p95": 0,
+              "p99": 0,
+              "max": 0,
+              "min": 0
+            },
+            "draw_us": {
+              "n": 5,
+              "p50": 0,
+              "p95": 0,
+              "p99": 0,
+              "max": 0,
+              "min": 0
+            },
+            "present_us": {
+              "n": 5,
+              "p50": 65346,
+              "p95": 65732,
+              "p99": 65732,
+              "max": 65732,
+              "min": 65340
+            }
+          },
+          "minimum_bytes": {
+            "internal": 88619,
+            "largest_internal": 40960,
+            "psram": 3992192,
+            "largest_psram": 3080192,
+            "stack_bytes": 5380,
+            "input_stack_bytes": 2640
+          }
+        },
+        "fast_same_body": {
+          "operations": 5,
+          "submitted": 5,
+          "physical": 0,
+          "timing_us": {
+            "copy_us": {
+              "n": 5,
+              "p50": 65429,
+              "p95": 65618,
+              "p99": 65618,
+              "max": 65618,
+              "min": 65216
+            },
+            "power_us": {
+              "n": 5,
+              "p50": 0,
+              "p95": 0,
+              "p99": 0,
+              "max": 0,
+              "min": 0
+            },
+            "draw_us": {
+              "n": 5,
+              "p50": 0,
+              "p95": 0,
+              "p99": 0,
+              "max": 0,
+              "min": 0
+            },
+            "present_us": {
+              "n": 5,
+              "p50": 65529,
+              "p95": 65716,
+              "p99": 65716,
+              "max": 65716,
+              "min": 65318
+            }
+          },
+          "minimum_bytes": {
+            "internal": 88619,
+            "largest_internal": 40960,
+            "psram": 3954964,
+            "largest_psram": 3080192,
+            "stack_bytes": 5380,
+            "input_stack_bytes": 2640
+          }
+        },
+        "ripple_same_body": {
+          "operations": 5,
+          "submitted": 5,
+          "physical": 0,
+          "timing_us": {
+            "copy_us": {
+              "n": 5,
+              "p50": 65437,
+              "p95": 65619,
+              "p99": 65619,
+              "max": 65619,
+              "min": 65216
+            },
+            "power_us": {
+              "n": 5,
+              "p50": 0,
+              "p95": 0,
+              "p99": 0,
+              "max": 0,
+              "min": 0
+            },
+            "draw_us": {
+              "n": 5,
+              "p50": 0,
+              "p95": 0,
+              "p99": 0,
+              "max": 0,
+              "min": 0
+            },
+            "present_us": {
+              "n": 5,
+              "p50": 65531,
+              "p95": 65717,
+              "p99": 65717,
+              "max": 65717,
+              "min": 65316
+            }
+          },
+          "minimum_bytes": {
+            "internal": 88619,
+            "largest_internal": 40960,
+            "psram": 3954156,
+            "largest_psram": 3080192,
+            "stack_bytes": 5380,
+            "input_stack_bytes": 2640
+          }
+        },
+        "balanced_same_overlay": {
+          "operations": 5,
+          "submitted": 5,
+          "physical": 0,
+          "timing_us": {
+            "copy_us": {
+              "n": 5,
+              "p50": 65335,
+              "p95": 65339,
+              "p99": 65339,
+              "max": 65339,
+              "min": 65163
+            },
+            "power_us": {
+              "n": 5,
+              "p50": 0,
+              "p95": 0,
+              "p99": 0,
+              "max": 0,
+              "min": 0
+            },
+            "draw_us": {
+              "n": 5,
+              "p50": 0,
+              "p95": 0,
+              "p99": 0,
+              "max": 0,
+              "min": 0
+            },
+            "present_us": {
+              "n": 5,
+              "p50": 65436,
+              "p95": 65443,
+              "p99": 65443,
+              "max": 65443,
+              "min": 65263
+            }
+          },
+          "minimum_bytes": {
+            "internal": 88707,
+            "largest_internal": 40960,
+            "psram": 4741208,
+            "largest_psram": 4718592,
+            "stack_bytes": 5380,
+            "input_stack_bytes": 2640
+          }
+        },
+        "balanced_normal_body_warm": {
+          "operations": 8,
+          "submitted": 8,
+          "physical": 8,
+          "timing_us": {
+            "copy_us": {
+              "n": 8,
+              "p50": 56838,
+              "p95": 56979,
+              "p99": 56979,
+              "max": 56979,
+              "min": 56589
+            },
+            "power_us": {
+              "n": 8,
+              "p50": 1176,
+              "p95": 1199,
+              "p99": 1199,
+              "max": 1199,
+              "min": 1172
+            },
+            "draw_us": {
+              "n": 8,
+              "p50": 486287,
+              "p95": 487075,
+              "p99": 487075,
+              "max": 487075,
+              "min": 486055
+            },
+            "present_us": {
+              "n": 8,
+              "p50": 544408,
+              "p95": 544992,
+              "p99": 544992,
+              "max": 544992,
+              "min": 544307
+            }
+          },
+          "minimum_bytes": {
+            "internal": 88443,
+            "largest_internal": 40960,
+            "psram": 3552576,
+            "largest_psram": 3080192,
+            "stack_bytes": 5380,
+            "input_stack_bytes": 2640
+          }
+        },
+        "fast_same_overlay": {
+          "operations": 5,
+          "submitted": 5,
+          "physical": 0,
+          "timing_us": {
+            "copy_us": {
+              "n": 5,
+              "p50": 65148,
+              "p95": 65357,
+              "p99": 65357,
+              "max": 65357,
+              "min": 65141
+            },
+            "power_us": {
+              "n": 5,
+              "p50": 0,
+              "p95": 0,
+              "p99": 0,
+              "max": 0,
+              "min": 0
+            },
+            "draw_us": {
+              "n": 5,
+              "p50": 0,
+              "p95": 0,
+              "p99": 0,
+              "max": 0,
+              "min": 0
+            },
+            "present_us": {
+              "n": 5,
+              "p50": 65248,
+              "p95": 65460,
+              "p99": 65460,
+              "max": 65460,
+              "min": 65240
+            }
+          },
+          "minimum_bytes": {
+            "internal": 88619,
+            "largest_internal": 40960,
+            "psram": 3955032,
+            "largest_psram": 3080192,
+            "stack_bytes": 5380,
+            "input_stack_bytes": 2640
+          }
+        },
+        "fast_normal_body_warm": {
+          "operations": 8,
+          "submitted": 8,
+          "physical": 8,
+          "timing_us": {
+            "copy_us": {
+              "n": 8,
+              "p50": 56896,
+              "p95": 57063,
+              "p99": 57063,
+              "max": 57063,
+              "min": 56737
+            },
+            "power_us": {
+              "n": 8,
+              "p50": 1170,
+              "p95": 1195,
+              "p99": 1195,
+              "max": 1195,
+              "min": 1168
+            },
+            "draw_us": {
+              "n": 8,
+              "p50": 381378,
+              "p95": 381721,
+              "p99": 381721,
+              "max": 381721,
+              "min": 381318
+            },
+            "present_us": {
+              "n": 8,
+              "p50": 439690,
+              "p95": 439769,
+              "p99": 439769,
+              "max": 439769,
+              "min": 439649
+            }
+          },
+          "minimum_bytes": {
+            "internal": 88619,
+            "largest_internal": 40960,
+            "psram": 3889056,
+            "largest_psram": 3080192,
+            "stack_bytes": 5380,
+            "input_stack_bytes": 2640
+          }
+        },
+        "K2": {
+          "operations": 11,
+          "submitted": 11,
+          "physical": 11,
+          "timing_us": {
+            "copy_us": {
+              "n": 11,
+              "p50": 55629,
+              "p95": 55874,
+              "p99": 55874,
+              "max": 55874,
+              "min": 55460
+            },
+            "power_us": {
+              "n": 11,
+              "p50": 1180,
+              "p95": 1201,
+              "p99": 1201,
+              "max": 1201,
+              "min": 1161
+            },
+            "draw_us": {
+              "n": 11,
+              "p50": 1524344,
+              "p95": 1525247,
+              "p99": 1525247,
+              "max": 1525247,
+              "min": 1523887
+            },
+            "present_us": {
+              "n": 11,
+              "p50": 1581185,
+              "p95": 1582165,
+              "p99": 1582165,
+              "max": 1582165,
+              "min": 1580676
+            }
+          },
+          "minimum_bytes": {
+            "internal": 88443,
+            "largest_internal": 40960,
+            "psram": 3520432,
+            "largest_psram": 3080192,
+            "stack_bytes": 5380,
+            "input_stack_bytes": 2640
+          }
+        }
+      },
+      "complete_frame_operations": 220,
+      "raw_timing_records": 220,
+      "input_overflows_max": 0,
+      "driver_errors": {
+        "underrun": 0,
+        "display_recovery": 0,
+        "Guru Meditation": 0,
+        "task_wdt": 0,
+        "abort()": 0
+      },
+      "full_capture": {
+        "failures": 0,
+        "unfinished": 1,
+        "command_failures": 0,
+        "gaps": [
+          "operations_unfinished"
+        ],
+        "notes": "Unfinished kind=3/detail=7 LibraryCovers at cutoff in both captures; baseline also has one LibraryCovers failure and two expected missing-file probes before upload; not an overall-clean verdict"
+      },
+      "target_frame_evidence": "All selected frame samples have complete structured Frame start/end and original microsecond timing records; every selected Frame succeeds"
+    }
+  },
+  "standard_k2": {
+    "status": "pass",
+    "scope": "driver_and_app_state_only",
+    "provenance_verified": true,
+    "missing": [],
+    "analysis": {
+      "counts": {
+        "success": 1,
+        "failure": 0,
+        "cancelled": 0,
+        "timeout": 0,
+        "unfinished": 0,
+        "command_failure": 0,
+        "command_timeout": 0,
+        "busy": 0
+      },
+      "gaps": [],
+      "frame_failures": 0
+    },
+    "stable_fields": [
+      "anchor",
+      "revision",
+      "page",
+      "crc32"
+    ],
+    "canvas_bytes": 415872,
+    "first_attempt": "skip: synthetic book was still Loading; retained as a skipped attempt"
+  },
+  "final_device": {
+    "installed_variant": "candidate Diagnostic",
+    "application_offset": "0x410000 (measured on this device only)",
+    "firmware_backup_created": false,
+    "firmware_restored": false,
+    "progress_restored": false,
+    "global_refresh_preset": "balanced",
+    "global_intervals": {
+      "balanced": 20,
+      "fast": 30
+    },
+    "view": "reading",
+    "test_book_page": 1,
+    "saved": true,
+    "serial_released": true
+  },
+  "unverified": [
+    "Optical flashing/ghosting/grayscale",
+    "Panel energy or lifetime",
+    "Physical input timing",
+    "Injected panel/power failures and recovery",
+    "Long-duration stability",
+    "Independent peak heap and standalone memcmp duration"
+  ],
+  "books": {
+    "same.txt": {
+      "sha256": "dc0b94f5c032f26a894d3bcf96281158efbde741daf4d4c76311754ec781892e",
+      "bytes": 34500
+    },
+    "varied.txt": {
+      "sha256": "7339a94d81cf2befbaf88e87b3922b7d73264d0ef074660d650f55747daeeeba",
+      "bytes": 43500
+    }
+  },
+  "followup_static_analysis": {
+    "copy_loop_inlined": true,
+    "baseline_stride_constants_hoisted": [
+      342,
+      -608
+    ],
+    "candidate_constant_loads_per_output_byte": 2,
+    "output_bytes": 415872,
+    "estimated_constant_load_instructions_per_conversion": 831744,
+    "K2_skips_memcmp": true,
+    "K2_copy_p50_us": {
+      "baseline": 52456,
+      "candidate": 55629
+    },
+    "isolated_time_attribution_measured": false,
+    "maintainer_decision": "Accept the observed approximately 4 ms ordinary-copy increase for this PR; defer further copy-loop optimization"
+  }
+}

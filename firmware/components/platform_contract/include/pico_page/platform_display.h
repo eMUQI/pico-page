@@ -17,6 +17,8 @@ DisplayInfo display_info();
  * even x in the low nibble, odd x in the high nibble, 0 black and 15 white.
  * The caller owns packed and keeps it immutable until this function returns.
  * full_clean always drives physical clearing, including for unchanged pixels.
+ * With a valid baseline, an identical frame may complete successfully without
+ * powering or scanning the panel, including when the caller's anchor changes.
  * region limits gray updates in portrait coordinates when the baseline is valid.
  * changed_pixels_only holds equal nonwhite pixels and retains the waveform's
  * white-to-white maintenance during gray updates; clearing

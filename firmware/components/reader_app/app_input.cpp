@@ -672,10 +672,13 @@ void ReaderApp::Impl::control(int id) {
     case PageEffects:
         draw_page_effects();
         break;
-    case EffectOff: case EffectRipple:
-        page_effect = id == EffectOff ? PageEffect::Off : PageEffect::Ripple;
+    case EffectOff: case EffectRipple: {
+        const auto effect = id == EffectOff ? PageEffect::Off : PageEffect::Ripple;
+        if (effect == page_effect) return;
+        page_effect = effect;
         draw_page_effects();
         break;
+    }
     case RefreshAccept:
         apply_refresh(RefreshFast);
         return;
@@ -686,7 +689,9 @@ void ReaderApp::Impl::control(int id) {
     case IntervalLess:
     case IntervalMore: {
         auto &interval = draft.refresh_preset == "fast" ? draft.fast_full_refresh_pages : draft.balanced_full_refresh_pages;
-        interval = std::clamp(interval + (id == IntervalMore ? 1 : -1), 0, 30);
+        const int next_interval = std::clamp(interval + (id == IntervalMore ? 1 : -1), 0, 30);
+        if (next_interval == interval) return;
+        interval = next_interval;
         draw_interval();
         break;
     }

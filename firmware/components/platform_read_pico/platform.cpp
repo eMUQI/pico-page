@@ -666,6 +666,13 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
         return false;
     }
     const bool clear = full_clean || !baseline_valid;
+    set_performance(true);
+    const auto started = esp_timer_get_time();
+    copy_portrait(packed);
+    const bool unchanged = !clear && std::memcmp(display.front_fb, display.back_fb, framebuffer_bytes) == 0;
+    const auto copied = esp_timer_get_time();
+    timing = {copied - started, 0, 0};
+    if (unchanged) return true;
     const EpdWaveform* pixel_table = nullptr;
     if (changed_pixels_only && !clear) {
         pixel_table = page_waveform == PageWaveform::Gray8 ? changed_gray8.prepare(E0470_GRAY8_WAVEFORM)
@@ -675,10 +682,6 @@ bool present(const std::uint8_t* packed, std::size_t size, bool full_clean,
             return failure(error, "Changed-pixel GL16 unavailable", ESP_ERR_INVALID_STATE);
         }
     }
-    set_performance(true);
-    const auto started = esp_timer_get_time();
-    copy_portrait(packed);
-    const auto copied = esp_timer_get_time();
     read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FULL);
     epd_lcd_set_prefill_lines(32);
     epd_poweron();

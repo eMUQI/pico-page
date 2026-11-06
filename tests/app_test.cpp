@@ -4117,12 +4117,18 @@ int main(int argc, char** argv) {
         driver.tap(342, 500); driver.present();
         driver.tap(479, 1140); driver.present(); assert(app.view() == View::Refresh);
         driver.tap(490, 1060); driver.present(); assert(app.view() == View::PageEffects);
-        const PageEffect effects[] = {PageEffect::Off, PageEffect::Ripple};
-        for (unsigned index = 0; index < 2; ++index) {
-            driver.tap(300, 260 + index * 136); driver.present();
-            assert(app.page_effect() == effects[index]);
+        const auto initial_effect_pixels = app.canvas().pixels();
+        driver.tap(300, 260);
+        assert(!app.pending_frame() && app.canvas().pixels() == initial_effect_pixels);
+        for (const auto effect : {PageEffect::Ripple, PageEffect::Off}) {
+            const int y = effect == PageEffect::Off ? 260 : 396;
+            driver.tap(300, y); driver.present();
+            assert(app.page_effect() == effect);
+            const auto pixels = app.canvas().pixels();
+            driver.tap(300, y);
+            assert(!app.pending_frame() && app.canvas().pixels() == pixels);
             driver.refresh();
-            assert(app.view() == View::PageEffects && app.page_effect() == effects[index]);
+            assert(app.view() == View::PageEffects && app.page_effect() == effect);
             assert(app.saved_record() == record && read(config) == before);
         }
         app.set_page_effect(PageEffect::Ripple);
@@ -5972,7 +5978,15 @@ int main(int argc, char** argv) {
             driver.tap(340, 500); driver.present(); driver.tap(480, 1140); driver.present();
             driver.tap(340, 1170); driver.present();
             assert(app.view() == View::RefreshInterval);
-            driver.tap(90, 480); driver.present(); driver.tap(500, 1120); driver.present();
+            const auto pixels = app.canvas().pixels();
+            driver.tap(90, 480);
+            assert(!app.pending_frame() && app.canvas().pixels() == pixels);
+            driver.refresh();
+            driver.tap(600, 480); driver.present();
+            assert(app.canvas().pixels() != pixels);
+            driver.tap(90, 480); driver.present();
+            assert(app.canvas().pixels() == pixels);
+            driver.tap(500, 1120); driver.present();
             const auto saved = FileStore(card.string()).load_settings("Books/book.epub").settings;
             assert(saved.balanced_full_refresh_pages == 0 && saved.fast_full_refresh_pages == 0);
         }
@@ -5986,7 +6000,13 @@ int main(int argc, char** argv) {
         driver.tap(340, 500); driver.present(); driver.tap(480, 1140); driver.present();
         driver.tap(340, 1170); driver.present();
         assert(app.view() == View::RefreshInterval); driver.refresh();
-        driver.tap(600, 480); driver.present(); driver.tap(500, 1120); driver.present();
+        for (int value = 26; value <= 30; ++value) { driver.tap(600, 480); driver.present(); }
+        const auto interval_pixels = app.canvas().pixels();
+        driver.tap(600, 480);
+        assert(!app.pending_frame() && app.canvas().pixels() == interval_pixels);
+        driver.refresh();
+        for (int value = 29; value >= 26; --value) { driver.tap(90, 480); driver.present(); }
+        driver.tap(500, 1120); driver.present();
         assert(FileStore(card.string()).load_settings("Books/book.epub").settings.balanced_full_refresh_pages == 26);
         assert(*app.saved_record() == saved);
         driver.close(); driver.present();
