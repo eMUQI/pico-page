@@ -608,7 +608,7 @@ int main(int argc, char** argv) {
         assert(original.style(block_at(U"[图片：照片]")->style).bleed == 0);
         assert(original_layout.load_chapter(0, first, error, ChapterLoad::Reading));
         assert(first.images.size() == 2 && !first.images[0].width && !first.images[0].height);
-        assert(first.blocks.size() == original.blocks.size() + 2);
+        assert(first.blocks.size() == original.blocks.size() + 3);
         EpubDocument images;
         assert(images.open(fixture_dir + "svg-cover.epub", error) && images.load_chapter(0, first, error));
         assert(first.images.size() == 1 && first.images[0].resource == "EPUB/cover.png");

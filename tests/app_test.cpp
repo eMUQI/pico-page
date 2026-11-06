@@ -770,11 +770,12 @@ static void original_layout_test(const fs::path& fixtures, const fs::path& font)
     };
     assert(line_of(U'山').top == line_of(U'第').bottom);
     assert(line_of(U'丙').top == line_of(U'甲').bottom);
+    assert(line_of(U'庚').top == line_of(U'戊').bottom);
     assert(line_of(U'甲').bottom - line_of(U'甲').top == spec.font_px);
     assert(glyph(U'甲').x == spec.left + 2 * spec.font_px && glyph(U'丙').x == spec.left);
     const auto& photo = page.images.back();
     assert(photo.x == spec.left && photo.width == spec.width && photo.height == spec.width / 2 &&
-           photo.y == line_of(U'丙').bottom);
+           photo.y == line_of(U'庚').bottom);
     spec.bleed_to_screen_top = true;
     const auto fullscreen = plan_content(body, chapter, 0, spec, true);
     assert(fullscreen.images.size() == 2 && fullscreen.images.front().y == 0 && fullscreen.images.front().height == 342);

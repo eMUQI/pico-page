@@ -335,6 +335,7 @@ def generate(directory: Path) -> None:
 <body><div class="logo"><img src="wide.png" alt="横幅"/></div>
 <h2 class="title"><span class="num">第一章</span><br/> 山边小村</h2>
 <p>甲乙 <br/> 丙丁</p>
+<p>戊己<br/><span style="display:none">隐藏</span>庚辛</p>
 <p><img src="photo.jpg" alt="照片"/></p></body></html>'''
     original_layout["EPUB/book.css"] = (
         "div.logo { margin: 0; duokan-bleed: lefttopright; } div.logo img { width: 100%; }"
