@@ -17,6 +17,8 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <tuple>
+#include <unordered_map>
 #include <utility>
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
@@ -653,6 +655,7 @@ struct AuthorLayoutState {
             const auto& inherited = parent->style;
             defaults.font_px = inherited.font_px;
             defaults.font_families = inherited.font_families;
+            defaults.bleed = inherited.bleed;
             defaults.line_height_px = inherited.line_height_px;
             defaults.line_height_factor = inherited.line_height_factor;
             defaults.indent_px = inherited.indent_px;
@@ -1070,7 +1073,10 @@ struct ChapterParser {
             if (style->display != css::Display::None) frame.block = style->display == css::Display::Block;
         }
         if (frame.body && !frame.hidden) {
-            if (frame.block || name == "br") {
+            if (author && name == "br" && !frame.block) {
+                pending_space = false;
+                append(U'\n', nullptr);
+            } else if (frame.block || name == "br") {
                 finish_block();
                 if (!style || frame.block) block_kind = frame.kind;
                 if (style && frame.block) set_block_style(*style);
@@ -1209,7 +1215,7 @@ struct ChapterParser {
         for (auto cp : scalars) {
             source.offset = frame.source_offset++;
             if (!frame.pre && space(cp)) {
-                if (!pending_space && chapter.text.size() > block_start) { pending_space = true; pending_anchor = source; if (style) pending_space_style = *style; }
+                if (!pending_space && chapter.text.size() > block_start && chapter.text.back() != U'\n') { pending_space = true; pending_anchor = source; if (style) pending_space_style = *style; }
                 continue;
             }
             if (pending_space) { append(U' ', &pending_anchor, style ? &pending_space_style : nullptr); pending_space = false; }
@@ -1297,6 +1303,46 @@ struct ChapterStream {
     }
     ~ChapterStream() { if (iterator) mz_zip_reader_extract_iter_free(iterator); }
 };
+
+namespace {
+constexpr std::size_t kImageHeaderBytes = 64U * 1024, kKnownImageSizes = 256;
+enum class ImageHeader { Found, Incomplete, Invalid };
+ImageHeader image_header_size(std::string_view bytes, std::uint32_t& width, std::uint32_t& height) {
+    const auto byte = [&](std::size_t i) { return static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[i])); };
+    const auto big16 = [&](std::size_t i) { return byte(i) << 8 | byte(i + 1); };
+    if (bytes.size() < 10) return ImageHeader::Incomplete;
+    if (bytes.substr(0, 8) == std::string_view("\x89PNG\r\n\x1a\n", 8)) {
+        if (bytes.size() < 24) return ImageHeader::Incomplete;
+        if (bytes.substr(12, 4) != "IHDR") return ImageHeader::Invalid;
+        width = big16(16) << 16 | big16(18);
+        height = big16(20) << 16 | big16(22);
+        return ImageHeader::Found;
+    }
+    if (bytes.substr(0, 6) == "GIF87a" || bytes.substr(0, 6) == "GIF89a") {
+        width = byte(6) | byte(7) << 8;
+        height = byte(8) | byte(9) << 8;
+        return ImageHeader::Found;
+    }
+    if (byte(0) != 0xff || byte(1) != 0xd8) return ImageHeader::Invalid;
+    for (std::size_t at = 2;;) {
+        if (at + 4 > bytes.size()) return ImageHeader::Incomplete;
+        if (byte(at) != 0xff) return ImageHeader::Invalid;
+        const auto marker = byte(at + 1);
+        if (marker == 0xff) { ++at; continue; }
+        if (marker == 0x01 || (marker >= 0xd0 && marker <= 0xd8)) { at += 2; continue; }
+        if (marker == 0xd9 || marker == 0xda) return ImageHeader::Invalid;
+        const auto length = big16(at + 2);
+        if (length < 2) return ImageHeader::Invalid;
+        if (marker >= 0xc0 && marker <= 0xcf && marker != 0xc4 && marker != 0xc8 && marker != 0xcc) {
+            if (at + 9 > bytes.size()) return ImageHeader::Incomplete;
+            height = big16(at + 5);
+            width = big16(at + 7);
+            return ImageHeader::Found;
+        }
+        at += 2 + length;
+    }
+}
+}
 
 struct EpubDocument::BookIndex {
     DocumentMetadata metadata;
@@ -1387,6 +1433,34 @@ struct EpubDocument::Impl {
         return true;
     }
     std::unique_ptr<AuthorLayoutState> prepare_author_styles(std::size_t index, const std::function<bool()>& stop);
+    std::unordered_map<std::string, std::pair<std::uint16_t, std::uint16_t>> image_sizes;
+    void read_image_sizes(Chapter& chapter, const std::function<bool()>& stop) {
+        const StageTimer timer{"image_header_read", 0};
+        for (auto& image : chapter.images) {
+            if (stop && stop()) return;
+            if (const auto known = image_sizes.find(image.resource); known != image_sizes.end()) {
+                std::tie(image.width, image.height) = known->second;
+                continue;
+            }
+            const auto* entry = image.resource.empty() ? nullptr : find_member(image.resource);
+            if (!entry || !memory_room(kImageHeaderBytes + 128U * 1024)) continue;
+            struct Header { std::string bytes; std::uint32_t width = 0, height = 0; ImageHeader state = ImageHeader::Incomplete; } header;
+            mz_zip_reader_extract_to_callback(&zip, entry->member,
+                [](void* opaque, mz_uint64, const void* data, std::size_t count) -> std::size_t {
+                    auto& header = *static_cast<Header*>(opaque);
+                    header.bytes.append(static_cast<const char*>(data), std::min(count, kImageHeaderBytes - header.bytes.size()));
+                    header.state = image_header_size(header.bytes, header.width, header.height);
+                    return header.state == ImageHeader::Incomplete && header.bytes.size() < kImageHeaderBytes ? count : 0;
+                }, &header, 0);
+            if (header.state == ImageHeader::Found && header.width && header.height &&
+                header.width <= 0xffff && header.height <= 0xffff) {
+                image.width = static_cast<std::uint16_t>(header.width);
+                image.height = static_cast<std::uint16_t>(header.height);
+            }
+            if (image_sizes.size() >= kKnownImageSizes) image_sizes.clear();
+            image_sizes.emplace(image.resource, std::make_pair(image.width, image.height));
+        }
+    }
     bool load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
               std::uint32_t wanted, const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop,
               const std::function<void(const Chapter&)>& visit);
@@ -2482,7 +2556,11 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
             std::vector<css::ComputedStyle>().swap(chapter.author_styles);
             chapter.author_style_fallback = true;
         }
-        if (author && !chapter.author_style_fallback) chapter.author_fonts = std::move(author->fonts);
+        if (author && !chapter.author_style_fallback) {
+            chapter.author_fonts = std::move(author->fonts);
+            if (chapter.blocks.size() > 1) read_image_sizes(chapter, stop);
+            if (stop && stop()) { pico_page::release(chapter); return fail(error, kChapterCancelled); }
+        }
 #if defined(ESP_PLATFORM) && defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
         if (detail == ChapterLoad::Original)
             ESP_LOGI("author_css", "part=%u styles=%u fallback=%d psram_min=%u internal_min=%u stack_free=%u",

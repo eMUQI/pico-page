@@ -142,6 +142,7 @@ struct LayoutSpec {
     int indent_chars = 2;
     int paragraph_gap = 0;
     bool original_epub = false;
+    bool bleed_to_screen_top = false;
 };
 
 struct PositionedGlyph {

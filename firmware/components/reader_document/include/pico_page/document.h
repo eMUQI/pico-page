@@ -60,6 +60,8 @@ struct DocumentImage {
     std::uint32_t begin = 0, end = 0;
     std::string resource, alt;
     Anchor source;
+    /** Header pixel size, read only by Original loads; zero when unknown. */
+    std::uint16_t width = 0, height = 0;
 };
 
 /**

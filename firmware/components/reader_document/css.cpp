@@ -297,7 +297,7 @@ template<class T> struct Pool {
 enum class Property : uint8_t {
     FontSize, LineHeight, Indent, MarginTop, MarginRight, MarginBottom, MarginLeft,
     PaddingTop, PaddingRight, PaddingBottom, PaddingLeft, Weight, FontStyle, Align,
-    Display, Visibility, Decoration, BreakBefore, BreakAfter, BreakInside, Width, MaxWidth, FontFamily, Count
+    Display, Visibility, Decoration, BreakBefore, BreakAfter, BreakInside, Width, MaxWidth, FontFamily, Bleed, Count
 };
 constexpr size_t property_count = static_cast<size_t>(Property::Count);
 enum class Unit : uint8_t { Number, Px, Em, Rem, Percent, Pt, Keyword };
@@ -424,6 +424,20 @@ bool family_value(const Token* tokens, std::size_t count, const FontFamilies& fa
     return true;
 }
 
+Value bleed_value(const Token* tokens, std::size_t count) {
+    unsigned sides = 0;
+    for (std::size_t i = 0; i < count; ++i) {
+        if (tokens[i].kind != Kind::Ident) continue;
+        Text name;
+        if (!decode(tokens[i].raw, name)) continue;
+        for (std::size_t j = 0; j < name.size; ++j) name.bytes[j] = lower(name.bytes[j]);
+        const auto view = name.view();
+        constexpr std::string_view side_names[] = {"top", "right", "bottom", "left"};
+        for (unsigned side = 0; side < 4; ++side)
+            if (view.find(side_names[side]) != std::string_view::npos) sides |= 1U << side;
+    }
+    return {static_cast<float>(sides)};
+}
 constexpr std::string_view property_names[] = {
     "font-size", "line-height", "text-indent", "margin-top", "margin-right", "margin-bottom", "margin-left",
     "padding-top", "padding-right", "padding-bottom", "padding-left", "font-weight", "font-style", "text-align",
@@ -487,6 +501,10 @@ size_t declarations(TokenList& list, std::array<Declaration, 4>& output, const F
     if (count < 3 || tokens[0].kind != Kind::Ident || !is(tokens[1], ':')) return 0;
     bool important = false;
     if (count >= 5 && is(tokens[count - 2], '!') && keyword(tokens[count - 1], "important")) { count -= 2; important = true; }
+    if (keyword(tokens[0], "bleed") || keyword(tokens[0], "duokan-bleed") || keyword(tokens[0], "qrbleed")) {
+        output[0] = {bleed_value(tokens.data() + 2, count - 2), Property::Bleed, important};
+        return 1;
+    }
     if (families && keyword(tokens[0], "font-family")) {
         output[0].property = Property::FontFamily;
         output[0].important = important;
@@ -516,14 +534,14 @@ size_t declarations(TokenList& list, std::array<Declaration, 4>& output, const F
 bool inherited(Property property) {
     return property == Property::FontSize || property == Property::LineHeight || property == Property::Indent ||
         property == Property::Weight || property == Property::FontStyle || property == Property::Align ||
-        property == Property::Visibility || property == Property::FontFamily;
+        property == Property::Visibility || property == Property::FontFamily || property == Property::Bleed;
 }
 ComputedStyle base_style(const ComputedStyle* parent, const Context& context) {
     ComputedStyle result;
     result.font_px = context.initial_font_px;
     if (parent) {
         result.font_px = parent->font_px; result.line_height_factor = parent->line_height_factor;
-        result.font_families = parent->font_families;
+        result.font_families = parent->font_families; result.bleed = parent->bleed;
         result.line_height_px = parent->line_height_px; result.indent_px = parent->indent_px;
         result.box_percentages = parent->box_percentages & ComputedStyle::indent_percent;
         result.bold = parent->bold; result.italic = parent->italic; result.align = parent->align; result.hidden = parent->hidden;
@@ -551,6 +569,7 @@ void consider(std::array<Winner, property_count>& winners, const Declaration& de
 Value computed_value(Property property, const ComputedStyle& style) {
     if (property == Property::FontSize) return {style.font_px, Unit::Px};
     if (property == Property::FontFamily) return {static_cast<float>(style.font_families)};
+    if (property == Property::Bleed) return {static_cast<float>(style.bleed)};
     if (property == Property::LineHeight) return style.line_height_factor >= 0 ? Value{style.line_height_factor} : Value{style.line_height_px, Unit::Px};
     const auto box_value = [&](float value, unsigned bit) {
         return Value{value, style.box_percentages & bit ? Unit::Percent : Unit::Px};
@@ -626,6 +645,7 @@ void resolve(const std::array<Winner, property_count>& winners, const ComputedSt
         } else {
             switch (property) {
             case Property::FontFamily: result.font_families = static_cast<std::uint16_t>(value.number); break;
+            case Property::Bleed: result.bleed = static_cast<std::uint8_t>(value.number); break;
             case Property::Weight: result.bold = value.word == Word::Bold; break;
             case Property::FontStyle: result.italic = value.word == Word::Italic; break;
             case Property::Align: result.align = static_cast<Align>(static_cast<unsigned>(value.word) - static_cast<unsigned>(Word::Start)); break;
@@ -793,7 +813,7 @@ bool ComputedStyle::operator==(const ComputedStyle& other) const {
         return std::tie(style.font_px, style.line_height_px, style.line_height_factor, style.indent_px,
             style.margin_px, style.padding_px, style.width_px, style.max_width_px, style.box_percentages, style.display, style.align, style.break_before,
             style.break_after, style.break_inside, style.margin_auto, style.bold, style.italic,
-            style.underline, style.hidden, style.font_families);
+            style.underline, style.hidden, style.font_families, style.bleed);
     };
     return fields(*this) == fields(other);
 }

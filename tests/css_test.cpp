@@ -25,6 +25,14 @@ int main() {
     assert(style(sheet, {"p", "", ""}).align == Align::Center);
 
     {
+        StyleSheet bleed;
+        assert(bleed.append(".a{duokan-bleed:lefttopright} .b{bleed:left top right} .c{qrbleed:bottom}") == Result::Complete);
+        const auto a = style(bleed, {"div", "", "a"});
+        assert(a.bleed == 0b1011 && style(bleed, {"div", "", "b"}).bleed == 0b1011);
+        assert(style(bleed, {"div", "", "c"}).bleed == 0b0100 && style(bleed, {"img", "", ""}, &a).bleed == 0b1011);
+        assert(style(bleed, {"div", "", ""}).bleed == 0);
+    }
+    {
         StyleSheet cascade;
         assert(cascade.append("p{font-size:18px} .x{font-size:22px} #a{font-size:24px} p{font-size:26px!important}") == Result::Complete);
         assert(near(style(cascade, {"p", "a", "x"}, nullptr, "font-size:30px").font_px, 26));

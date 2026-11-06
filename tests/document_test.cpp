@@ -580,6 +580,28 @@ int main(int argc, char** argv) {
         assert(font_layout.load_chapter(0, original, error, ChapterLoad::Original));
         assert(original.author_fonts.size() == 2 && style_at(U"内联").font_families == 1);
         assert(original.author_fonts.front().resource == "EPUB/Fonts/welcome.ttf");
+        EpubDocument original_layout;
+        assert(original_layout.open(fixture_dir + "original-layout.epub", error));
+        assert(original_layout.load_chapter(0, original, error, ChapterLoad::Original));
+        const auto block_at = [&](std::u32string_view text) {
+            const auto offset = original.text.find(text);
+            assert(offset != std::u32string::npos);
+            return std::find_if(original.blocks.begin(), original.blocks.end(),
+                [&](const auto& block) { return block.begin <= offset && offset < block.end; });
+        };
+        assert(original.text.find(U"第一章\n山边小村") != std::u32string::npos && block_at(U"第一章") == block_at(U"山边小村"));
+        assert(original.text.find(U"甲乙\n丙丁") != std::u32string::npos && block_at(U"甲乙") == block_at(U"丙丁"));
+        assert(original.images.size() == 2);
+        assert(original.images[0].width == 300 && original.images[0].height == 150);
+        assert(original.images[1].width == 400 && original.images[1].height == 200);
+        Chapter reloaded;
+        assert(original_layout.load_chapter(0, reloaded, error, ChapterLoad::Original));
+        assert(reloaded.images[0].width == 300 && reloaded.images[1].height == 200);
+        assert(original.style(block_at(U"[图片：横幅]")->style).bleed == 0b1011);
+        assert(original.style(block_at(U"[图片：照片]")->style).bleed == 0);
+        assert(original_layout.load_chapter(0, first, error, ChapterLoad::Reading));
+        assert(first.images.size() == 2 && !first.images[0].width && !first.images[0].height);
+        assert(first.blocks.size() == original.blocks.size() + 2);
         EpubDocument images;
         assert(images.open(fixture_dir + "svg-cover.epub", error) && images.load_chapter(0, first, error));
         assert(first.images.size() == 1 && first.images[0].resource == "EPUB/cover.png");

@@ -21,6 +21,7 @@ struct ComputedStyle {
     Align align = Align::Start;
     Break break_before = Break::Auto, break_after = Break::Auto, break_inside = Break::Auto;
     uint8_t margin_auto = 0;
+    uint8_t bleed = 0;  // Image sides extended to the screen edge, in margin side bit order.
     bool operator==(const ComputedStyle& other) const;
     bool bold = false, italic = false, underline = false, hidden = false;
 };

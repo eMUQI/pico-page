@@ -330,6 +330,22 @@ def generate(directory: Path) -> None:
         "</manifest>", '<item id="embedded-font" href="Fonts/welcome.ttf" media-type="font/ttf"/>'
         '<item id="other-font" href="Fonts/other.otf" media-type="font/otf"/></manifest>')
     write_fixture(directory / "font-layout.epub", font_layout)
+    original_layout = dict(entries)
+    original_layout["EPUB/chapter1.xhtml"] = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><link rel="stylesheet" href="book.css"/></head>
+<body><div class="logo"><img src="wide.png" alt="横幅"/></div>
+<h2 class="title"><span class="num">第一章</span><br/> 山边小村</h2>
+<p>甲乙 <br/> 丙丁</p>
+<p><img src="photo.jpg" alt="照片"/></p></body></html>'''
+    original_layout["EPUB/book.css"] = (
+        "div.logo { margin: 0; duokan-bleed: lefttopright; } div.logo img { width: 100%; }"
+        "h2.title { margin: 0.5em 0 1.8em; text-align: center; line-height: 130%; } h2 .num { font-size: 0.7em; }"
+        "p { margin: 0; text-indent: 2em; line-height: 100%; }")
+    original_layout["EPUB/wide.png"] = (b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR" +
+        (300).to_bytes(4, "big") + (150).to_bytes(4, "big") + b"\x08\x00\x00\x00\x00")
+    original_layout["EPUB/photo.jpg"] = (b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+        b"\xff\xc0\x00\x11\x08" + (200).to_bytes(2, "big") + (400).to_bytes(2, "big") +
+        b"\x03\x01\x22\x00\x02\x11\x01\x03\x11\x01\xff\xd9")
+    write_fixture(directory / "original-layout.epub", original_layout)
     mapping = dict(entries)
     mapping["EPUB/chapter1.xhtml"] = mapping["EPUB/chapter1.xhtml"].replace(
         '<span style="display:none">隐藏</span>', "").replace(

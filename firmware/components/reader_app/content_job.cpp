@@ -122,21 +122,31 @@ graphics::Page plan_author_content(graphics::Font& font, const Chapter& source, 
         const auto* image = image_at(source, cursor);
         if (image) {
             const bool image_only = source.blocks.size() == 1;
-            const auto minimum_width = std::min(32, part.width);
-            int width = part.width;
-            if (style.width_px >= 0) width = css_pixels(length(style.width_px, css::ComputedStyle::width_percent, part.width), 1, minimum_width, width);
-            if (style.max_width_px >= 0) width = css_pixels(length(style.max_width_px, css::ComputedStyle::max_width_percent, part.width), 1, minimum_width, width);
+            const int screen_width = 2 * spec.left + spec.width;
+            const int box_left = style.bleed & (1U << 3) ? 0 : part.left;
+            const int box_width = (style.bleed & (1U << 1) ? screen_width : part.left + part.width) - box_left;
+            const int box_top = !page_started && top == spec.top && spec.bleed_to_screen_top && (style.bleed & 1U) ? 0 : part.top;
+            const int box_height = bottom - box_top;
+            const auto minimum_width = std::min(32, box_width);
+            int width = box_width;
+            if (style.width_px >= 0) width = css_pixels(length(style.width_px, css::ComputedStyle::width_percent, box_width), 1, minimum_width, width);
+            if (style.max_width_px >= 0) width = css_pixels(length(style.max_width_px, css::ComputedStyle::max_width_percent, box_width), 1, minimum_width, width);
             const bool auto_left = style.margin_auto & (1U << 3), auto_right = style.margin_auto & (1U << 1);
-            int x = part.left;
-            if ((auto_left && auto_right) || style.align == css::Align::Center) x += (part.width - width) / 2;
-            else if (auto_left || style.align == css::Align::Right) x += part.width - width;
-            const int full_height = image_only ? std::max(1, spec.height - before - after) : std::min(spec.height / 2, 480);
-            const int height = std::max(32, full_height * width / part.width);
-            if (height > part.height && page_started) break;
-            if (collect) page.images.push_back({image->begin, x, part.top, width,
-                                               std::min(height, part.height), image->resource});
+            int x = box_left;
+            if ((auto_left && auto_right) || style.align == css::Align::Center) x += (box_width - width) / 2;
+            else if (auto_left || style.align == css::Align::Right) x += box_width - width;
+            int height;
+            if (!image_only && image->width && image->height) {
+                height = static_cast<int>(std::max<std::int64_t>(1, std::int64_t{width} * image->height / image->width));
+            } else {
+                const int full_height = image_only ? std::max(1, spec.height - before - after) : std::min(spec.height / 2, 480);
+                height = std::max(32, full_height * width / box_width);
+            }
+            if (height > box_height && page_started) break;
+            if (collect) page.images.push_back({image->begin, x, box_top, width,
+                                               std::min(height, box_height), image->resource});
             page.end = image->end;
-            top = part.top + std::min(height, part.height);
+            top = box_top + std::min(height, box_height);
         } else {
             const auto maximum_font = std::min(part.width / 2, 128);
             part.font_px = css_pixels(style.font_px, scale, 8, maximum_font);
@@ -181,12 +191,43 @@ graphics::Page plan_author_content(graphics::Font& font, const Chapter& source, 
     page.next_top = top;
     return page;
 }
+void spread_bottom_slack(graphics::Page& page, const graphics::LayoutSpec& spec) {
+    if (page.lines.size() < 2) return;
+    int tallest_line = 0, content_bottom = 0;
+    std::vector<int> row_tops;
+    row_tops.reserve(page.lines.size() + page.images.size());
+    for (const auto& line : page.lines) {
+        tallest_line = std::max(tallest_line, line.bottom - line.top);
+        content_bottom = std::max(content_bottom, line.bottom);
+        row_tops.push_back(line.top);
+    }
+    for (const auto& image : page.images) {
+        content_bottom = std::max(content_bottom, image.y + image.height);
+        row_tops.push_back(image.y);
+    }
+    const int slack = spec.top + spec.height - content_bottom;
+    std::sort(row_tops.begin(), row_tops.end());
+    row_tops.erase(std::unique(row_tops.begin(), row_tops.end()), row_tops.end());
+    if (slack <= 0 || slack >= tallest_line || row_tops.size() < 2) return;
+    const auto shift = [&](int top) {
+        const auto row = std::lower_bound(row_tops.begin(), row_tops.end(), top) - row_tops.begin();
+        return static_cast<int>(slack * row / static_cast<std::ptrdiff_t>(row_tops.size() - 1));
+    };
+    for (auto& glyph : page.glyphs) {
+        const auto line = std::upper_bound(page.lines.begin(), page.lines.end(), glyph.index,
+            [](std::size_t index, const graphics::TextLine& item) { return index < item.start; });
+        if (line != page.lines.begin()) glyph.baseline += shift(std::prev(line)->top);
+    }
+    for (auto& line : page.lines) {
+        const int offset = shift(line.top);
+        line.top += offset; line.baseline += offset; line.bottom += offset;
+    }
+    for (auto& image : page.images) image.y += shift(image.y);
+    page.next_top = content_bottom + slack;
 }
-
-graphics::Page plan_content(graphics::Font& font, const Chapter& source, std::size_t start,
-                            const graphics::LayoutSpec& spec, bool collect, const std::function<bool()>& stop,
-                            const graphics::AuthorFonts* fonts) {
-    start = readable_offset(source, start, spec.original_epub);
+graphics::Page plan_page_rows(graphics::Font& font, const Chapter& source, std::size_t start,
+                              const graphics::LayoutSpec& spec, bool collect, const std::function<bool()>& stop,
+                              const graphics::AuthorFonts* fonts) {
     if (spec.original_epub && !source.author_styles.empty()) {
         const graphics::AuthorFontIo input{fonts};
         return plan_author_content(font, source, start, spec, collect, stop, fonts);
@@ -253,6 +294,17 @@ graphics::Page plan_content(graphics::Font& font, const Chapter& source, std::si
         cursor = readable_offset(source, section.end);
     }
     page.next_top = top;
+    return page;
+}
+}
+
+graphics::Page plan_content(graphics::Font& font, const Chapter& source, std::size_t start,
+                            const graphics::LayoutSpec& spec, bool collect, const std::function<bool()>& stop,
+                            const graphics::AuthorFonts* fonts) {
+    start = readable_offset(source, start, spec.original_epub);
+    auto page = plan_page_rows(font, source, start, spec, collect, stop, fonts);
+    if (collect && page.error.empty() && readable_offset(source, page.end, spec.original_epub) < source.text.size())
+        spread_bottom_slack(page, spec);
     return page;
 }
 graphics::AuthorFonts prepare_embedded_fonts(const FileStore& store, EpubDocument& document, const Chapter& chapter,
