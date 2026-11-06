@@ -46,6 +46,14 @@ GB18030 解码表的来源与复核（2026-10-07）：`firmware/components/reade
 
 项目总许可证已明确为 GPL-3.0-or-later 及 ESP-IDF 二进制库链接许可；下方历史记录中的「项目许可证待定」只描述当时状态。第三方组件继续保留各自许可，不能用项目 GPL 替代。公开前仍需逐组件核对固件对应源码与安装资料、FreeType 附加声明、字体与 Unicode 数据声明，以及设计工具导出资料的适用条款；步骤见[公开发布检查](publication.md)。网站查词图已改用合成正文和合成词典条目，移除授权未确认的真实词典释义截图。未确认事项不写成已完成审核。
 
+## 固件 SBOM 组件清单（2026-11-06）
+
+用已有 ESP-IDF 6.1 环境中的 `esp-idf-sbom` 1.3.1，对标准构建的 `firmware/build/project_description.json` 执行 `python -m esp_idf_sbom create --rem-unused --file-tags`，得到 120 个 SPDX 包，覆盖实际链接进应用的项目组件、ESP-IDF 组件、托管组件和工具链运行库。SPDX 原文留在被忽略的本地目录，每次发布应按发布构建重新生成，不复用本次结果。
+
+按文件标签可得出许可的包以 Apache-2.0 为主，另有 MIT、BSD-2-Clause、BSD-3-Clause、ISC、CC0-1.0／Unlicense 等宽松许可，`epdiy` 为 LGPL-3.0-or-later，mbedTLS 为 Apache-2.0 OR GPL-2.0-or-later 双许可。工具未给出结论的包已按许可文件逐个核对：`esp_wifi`、`esp_phy`、`esp_coex` 的二进制库为 Apache-2.0；lwIP 为 BSD-3-Clause；http_parser 为沿用 NGINX 条款的 MIT 式许可；`esp_libc` 的 picolibc／newlib 部分由多份 BSD 式许可组成，以 `COPYING.picolibc` 和 `COPYING.NEWLIB` 为准；micro-ecc 为 BSD-2-Clause，只进入 bootloader，因此只随全量镜像分发。`main`、`platform_contract` 等项目组件缺少 SPDX 文件头，按[许可说明](../../LICENSING.md)为 GPL-3.0-or-later。
+
+据此，二进制发布需要随附各宽松许可要求保留的版权与许可文本、Apache-2.0 组件的许可及其 NOTICE（如有）、FreeType 的 FTL 致谢和字体 OFL；LGPL 的 epdiy 由公开的完整对应源码与构建步骤满足重新链接要求。本次只完成清单与许可核对，尚未生成随固件发布的许可汇编，也未逐包确认 NOTICE 文件是否存在；发布前仍按[公开发布检查](publication.md)处理。
+
 ## EPUB 与 KOSync 上游调研（2026-10-05）
 
 以下版本用于早期探针的来源对照。探针使用 Python 标准库，部分 MD5 依公开采样规则实现。该批未引入下表所列项目的应用代码。实际纳入工程的 Expat、miniz 以及独立链接 CREngine 的验证工具，以本页依赖表为准。
