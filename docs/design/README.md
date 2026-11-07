@@ -2,7 +2,7 @@
 
 用户已决定按这套设计开始开发。视觉稿不重新生成，行为修正按 [UI 实现注意事项](../development/ui-implementation.md)，现行视觉规范见[设计系统](system/README.md)。首先服从 [当前决定](../planning/decisions.md)，不要将原始 README 的旧约定当作更高优先级。
 
-原始包：`Pico阅读固件界面设计.zip`，共 49 个文件。2026-11-07 维护者决定移除其中设计工具导出的 5 份 HTML 和 `support.js`，其余 43 个文件逐字节保留于 `original/`；只有目录位置改变，PNG、Markdown 与 tokens 的内容没有修改。本次未重新渲染图像、未补画缺失页面、未打包字体。
+原始包：`Pico阅读固件界面设计.zip`，共 49 个文件。2026-11-07 移除了其中设计工具导出的 5 份 HTML 和 `support.js`，其余 43 个文件逐字节保留于 `original/`；只有目录位置改变，PNG、Markdown 与 tokens 的内容没有修改。未重新渲染图像、补画缺失页面或打包字体。
 
 | 资料 | 数量/入口 |
 |---|---|

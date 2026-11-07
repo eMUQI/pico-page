@@ -1,6 +1,6 @@
 # KOReader 与 Read Pico 双向接续验收
 
-2026-11-05，在一份原创合成 EPUB 上完成 Read Pico 与官方 macOS KOReader 经现有 HTTPS KOSync 服务的实际往返。两端字号分别为 46 px 和 28 px，跨章接续、回读、重开和无法映射时的进度保护均通过。验收依据为 [SYNC01–SYNC03](../acceptance.md#koreader-与网络)。维护者明确将 [#47](https://github.com/eMUQI/pico-page/issues/47) 的本次关闭范围限定为这组场景，本轮复核已通过。原总清单中的其他专项不作为本轮关闭条件，也不标记为已通过。
+2026-11-05，在一份原创合成 EPUB 上完成 Read Pico 与官方 macOS KOReader 经现有 HTTPS KOSync 服务的实际往返。两端字号分别为 46 px 和 28 px，跨章接续、回读、重开和无法映射时的进度保护均通过。验收依据为 [SYNC01–SYNC03](../acceptance.md#koreader-与网络)。[#47](https://github.com/eMUQI/pico-page/issues/47) 的关闭范围限定为这组场景，复核已通过。原总清单中的其他专项不作为关闭条件，也不标记为已通过。
 
 [结构化证据](2026-11-05-koreader-roundtrip.json)包含两端位置、源锚点、保存修订和状态快照。[原创测试书](2026-11-05-koreader-roundtrip.epub)可用于复验。账户、服务地址、设备身份、Flash 备份和原始日志留在私有证据目录，不随报告发布。
 
@@ -67,7 +67,7 @@ python3 tools/check_handoff.py
 git diff --check
 ```
 
-关闭前重新完成 host Debug 配置、完整构建与注册核对，36 项 CTest 全部通过。原 CLI 的默认 28／38／56 px 三组均通过官方客户端上传、下载、原生精确位置恢复及重启检查；这些仍是本机隔离服务结果。Diagnostic 使用环境说明中的原有工具链构建，标准构建遇到 macOS `sysctl` 沙箱限制后，以相同命令和工具链获准重试通过。实际往返、TF 主记录与备份、远端记录保护和原固件恢复证据再次核对通过。未运行新的 sanitizer 或远端 CI。
+关闭前重新完成 host Debug 配置、完整构建与注册核对，36 项 CTest 全部通过。原 CLI 的默认 28／38／56 px 三组均通过官方客户端上传、下载、原生精确位置恢复及重启检查；这些仍是本机隔离服务结果。Diagnostic 使用环境说明中的原有工具链构建，标准构建遇到 macOS `sysctl` 沙箱限制后，以相同命令和工具链在沙箱外重试通过。实际往返、TF 主记录与备份、远端记录保护和原固件恢复证据再次核对通过。未运行新的 sanitizer 或远端 CI。
 
 实际设备操作前读取本次分区及 OTA 状态，备份原活动应用；Diagnostic 安装与原固件恢复分别独立校验。原 `0.5.1+ga2871cc` 已恢复，完整原应用槽验证通过，Flash 元数据与 otadata 不变，启动确认出厂 VCOM 和 TF 挂载正常。同步配置逐字恢复，DOM 回到原 20240114；阅读历史逐字恢复，原书旁文件在恢复前后相同。网络账户和选择未变，正常联网更新的连接时间与顺序予以保留。独立测试书及其测试服务记录留存，KOReader 已正常退出。
 

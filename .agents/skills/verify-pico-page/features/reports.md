@@ -14,4 +14,4 @@ Run `python3 tools/device_workbench.py --help`, then `python3 -m unittest discov
 
 ## Gotchas
 
-The process can exit successfully while its JSON says the reports are incomparable. Check both. A synthetic report proves comparator behavior only, not a device performance change. Full requirements are in `docs/development/diagnostic-workbench.md` under the comparison command.
+The process can exit successfully while its JSON says the reports are incomparable. Check both. A synthetic report proves comparator behavior only, not a device performance change. Full requirements are in `docs/development/device-diagnostics.md` under the comparison command.

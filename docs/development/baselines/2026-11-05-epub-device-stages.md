@@ -54,7 +54,7 @@
 
 测量版每次暂停多记录了一条 7 µs 的临时计时器样本。上表逐次采用实际暂停区间。排除三条重复样本后，用 `tools/summarize_reader_perf.py` 重新汇总，暂停耗时中位数为 558.004 ms，最大值为 572.011 ms。
 
-用 `sh tools/build_firmware.sh stages` 和 `sh tools/build_firmware.sh release` 验证 ESP32-S3 构建。现有 Debug 及 ASan／UBSan 各通过 36 项 CTest。三次首翻和三次再次向前均与成功正文帧及面板记录配对。关闭串口采集时截断了一行，发生在最后一个计时动作保存完成约 2.94 秒后。阶段版增加的日志字段见[诊断工作台](../diagnostic-workbench.md)。原始串口、镜像、日志与配对结果保存在本地忽略目录。
+用 `sh tools/build_firmware.sh stages` 和 `sh tools/build_firmware.sh release` 验证 ESP32-S3 构建。现有 Debug 及 ASan／UBSan 各通过 36 项 CTest。三次首翻和三次再次向前均与成功正文帧及面板记录配对。关闭串口采集时截断了一行，发生在最后一个计时动作保存完成约 2.94 秒后。阶段版增加的日志字段见[诊断工作台](../device-diagnostics.md)。原始串口、镜像、日志与配对结果保存在本地忽略目录。
 
 ## 实书 A 的 XML 回调细分
 

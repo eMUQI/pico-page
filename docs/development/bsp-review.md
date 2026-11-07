@@ -31,15 +31,15 @@ ESP-IDF 锁为 v6.1 commit `fff9895c82d744c7237be8847347bdd1b07c6643`，本机�
 - `components/freertos/FreeRTOS-Kernel/LICENSE.md`：MIT。
 - `components/xtensa/include/xtensa`：Tensilica MIT；heap 中 TLSF 为 BSD-3-Clause。
 - `components/esp_libc/COPYING.NEWLIB`、`COPYING.picolibc`：按文件划分的多项宽松许可，不能合并标记为 Apache-2.0。
-- `components/mbedtls/mbedtls/LICENSE`：Apache-2.0 OR GPL-2.0-or-later，本轮采用 Apache-2.0；由 IDF 系统组件间接引入。
+- `components/mbedtls/mbedtls/LICENSE`：Apache-2.0 OR GPL-2.0-or-later，本项目采用 Apache-2.0；由 IDF 系统组件间接引入。
 
-源码版权以文件标头为准。[IDF 版权清单](https://github.com/espressif/esp-idf/blob/v6.1/docs/en/COPYRIGHT.rst)提供 SDK 汇总；本轮没有复制或再分发 SDK。最终二进制发布前仍需依据链接产物补齐随包许可与工具链运行库通知。
+源码版权以文件标头为准。[IDF 版权清单](https://github.com/espressif/esp-idf/blob/v6.1/docs/en/COPYRIGHT.rst)提供 SDK 汇总；本项目没有复制或再分发 SDK 源码。最终二进制发布前仍需依据链接产物补齐随包许可与工具链运行库通知。
 
 ## 初始化与数据边界
 
 `read_pico_init()` 会初始化 EPD、启动 SD 探测、设置 18 MHz 显示时钟及 1290 mV 默认 VCOM，随后初始化 PMU、触摸和加速度计。官方应用在 `main/app_main.c::resolve_vcom_at_boot()` 另外调用 `read_pico_pmu_vcom_get()`，再将读到的工厂值交给显示驱动；这一步不在 BSP 初始化内部。因此当前入口不调用 `read_pico_init()`，也不复用其默认校准回退路径。后续适配必须先验证 PMU 读取与失败处置，不调用 `read_pico_pmu_vcom_set()` 或工厂标定入口。
 
-`read_pico_sd.c` 的普通挂载路径不自动格式化，但它包含显式格式化入口，并会建立演示资源目录。本轮没有调用探测、挂载或格式化函数；真实 TF 接入要明确控制这些副作用。`read_pico` 的 `WHOLE_ARCHIVE` 用于保留 Flash HPM 覆盖表；本轮保留上游构建定义，不启用依赖具体 Flash 芯片的 120 MHz 实验配置。
+`read_pico_sd.c` 的普通挂载路径不自动格式化，但它包含显式格式化入口，并会建立演示资源目录。审查时没有调用探测、挂载或格式化函数；真实 TF 接入要明确控制这些副作用。`read_pico` 的 `WHOLE_ARCHIVE` 用于保留 Flash HPM 覆盖表；本轮保留上游构建定义，不启用依赖具体 Flash 芯片的 120 MHz 实验配置。
 
 编译配置采用上游 `sdkconfig.ci` 的 ESP32-S3、16 MB Flash、Octal PSRAM 80 MHz、USB Serial/JTAG 等构建基线，不把它作为当前硬件的测量结果。上游产品配置中的 120 MHz 时序、波形和 VCOM 未移植为本项目运行策略。
 
@@ -55,7 +55,7 @@ ESP-IDF 锁为 v6.1 commit `fff9895c82d744c7237be8847347bdd1b07c6643`，本机�
 - 本项目每次刷新后保持电源轨 8 秒（`platform.cpp` 的 `rails_idle_us`），此前这 8 秒内 VCOM 一直开启，正是上游修正的情况。
 - epdiy 的 `lcd_do_update()` 每次刷新只进入一次扫描模式，全刷时每个清屏脉冲再各进入一次，因此每次刷新只多等几个 2 毫秒。
 - 不涉及 VCOM 电压值：本项目仍从 PMU 读取工厂值交给显示驱动，不调用 `read_pico_pmu_vcom_set()`。
-- `firmware/patches/read-pico-sd-release.patch` 修改的是 `read_pico_sd.c`，与本次改动无关，仍可直接应用。
+- `firmware/patches/read-pico-sd-release.patch` 修改的是 `read_pico_sd.c`，与该改动无关，仍可直接应用。
 
 显示效果和刷新耗时的变化只能在真机上确认。
 
@@ -72,7 +72,7 @@ ESP-IDF 锁为 v6.1 commit `fff9895c82d744c7237be8847347bdd1b07c6643`，本机�
 
 ## 2026-10-11 · 实验水波纹逐行相位补丁
 
-用户明确授权在构建副本加入 `firmware/patches/epdiy-row-phases.patch`，顺序在原欠载补丁之后；官方锁定和下载原件不变。新增单相差分扫描的逐行 LUT 借用接口，只用于 Read Pico 倒置竖屏的 16 条带水波纹；关闭时原查找路径不变。生产者汇合后清除上下文，调用方每拍返回后清除全局借用，失败不提交 back buffer，仍由平台原清屏恢复处理。来源、许可与裁剪范围见 [依赖记录](dependency-review.md#2026-10-11--文字转页与水波纹候选)。该候选的真机欠载、灰阶、残影与时延待验收，不把编译或故障替身通过视为面板验收。
+用户明确授权在构建副本加入 `firmware/patches/epdiy-row-phases.patch`，顺序在原欠载补丁之后；官方锁定和下载原件不变。新增单相差分扫描的逐行 LUT 借用接口，只用于 Read Pico 倒置竖屏的 16 条带水波纹；关闭时原查找路径不变。生产者汇合后清除上下文，调用方每拍返回后清除全局借用，失败不提交 back buffer，仍由平台原清屏恢复处理。来源、许可与裁剪范围见 [依赖记录](dependency-review.md#改编代码)。该候选的真机欠载、灰阶、残影与时延待验收，不把编译或故障替身通过视为面板验收。
 
 ## RTC 响应校验与接入（2026-10-11）
 

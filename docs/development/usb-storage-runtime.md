@@ -26,28 +26,12 @@ MSC 使用同步扇区读写，写操作完成后才返回成功；部分扇区�
 
 Read Pico BSP 未提供独立 VBUS 检测引脚，本实现不以 USB suspend 或连接事件推断电脑已安全弹出。TinyUSB 和 USB Serial/JTAG 分时使用内部 PHY；传输期间无法通过原串口进行自动烧录。硬件 BOOT/复位仍作为恢复入口，常规操作使用传输页的退出重启。
 
-## 历史验证记录
+## 与官方示例的差异
 
-2026-10-07：卷标候选已仅写入 `ota_0`，esptool 摘要校验通过。进入 USB 模式后，macOS 挂载 31.3 GB FAT32 分区并显示 `PICO PAGE`；Mac 已安全弹出。设备退出重启后，同一串口恢复，诊断确认 `card=1`、`frame_ok=1`、`saved=1` 和阅读工具页；未核对同一本书的位置锚点。
-
-2026-10-06：host 和 ASan/UBSan 各 9/9 通过；包含保存失败、显示/网络忙碌拒绝、卡目录移走后传输页可用、退出确认取消及扇区边界。固件构建成功，候选已仅烧录 `ota_0`（`0x10000`），烧录摘要校验通过。macOS 已识别 `Pico Page TF Card`（VID `303a`、PID `4002`），挂载约 31 GB FAT32 分区。1 MiB 专用文件已完成写入、`fsync`、重命名及 SHA-256 读回一致检查。首次文件访问等待了 macOS 可移动宗卷授权；该耗时不作为传输性能结果。用户实际操作退出重启后，串口和 TF 挂载恢复；迁移 EPUB 设备端 CRC32 与原导出一致，抽测进度和 K2 全刷通过。完整烧录未重复执行。私人验证日志位于忽略目录 `.local/usb-storage-check/`。
-
-## 资源整理记录
-
-测试样本共 71 个文件，分两组放入当时的 `Books/` 和 `Articles/` 目录；7 个单书数据目录随书移动，21 个 KOReader 字体保持原路径。71 个目标文件的 SHA-256 均与用户原始导出一致，单书数据目录内的文件摘要在移动前后保持一致。其中 70 个文件执行移动；一份含韩文组合字符的旧文件在 macOS 上可列出但无法按名称打开，改从原始导出复制为 `Books/061-私有样本 B.epub`。旧条目保留于 `Books/Kindle/`，尚未清理。没有覆盖已有目标或删除私人文件。专用验证文件保留为 `PicoPage/usb-transfer-test-renamed.bin`（1 MiB）。macOS `diskutil eject` 已成功。
-
-## 官方示例核对（2026-10-06）
-
-已对照本机 ESP-IDF 6.1 固定提交 `fff9895c82d744c7237be8847347bdd1b07c6643` 的 [`tusb_msc` 示例](https://github.com/espressif/esp-idf/tree/fff9895c82d744c7237be8847347bdd1b07c6643/examples/peripherals/usb/device/tusb_msc)，并检查已锁定的 `esp_tinyusb 2.4.0` 实际源码与头文件。USB 协议、描述符、驱动任务和 SDMMC 驱动仍使用官方组件。
+对照 ESP-IDF 6.1 固定提交 `fff9895c82d744c7237be8847347bdd1b07c6643` 的 [`tusb_msc` 示例](https://github.com/espressif/esp-idf/tree/fff9895c82d744c7237be8847347bdd1b07c6643/examples/peripherals/usb/device/tusb_msc)，并检查已锁定的 `esp_tinyusb 2.4.0` 实际源码与头文件。USB 协议、描述符、驱动任务和 SDMMC 驱动仍使用官方组件。
 
 - 示例先初始化原始 SD 卡，再安装 TinyUSB；应用与电脑不能同时挂载同一介质。本项目采用相同所有权边界，额外保留阅读进度保存与文件关闭步骤。
-- 官方 `tinyusb_msc_driver_config_t.user_flags.auto_mount_off` 可以关闭自动回挂。此前把自动回挂作为无法使用便利层的独立理由并不充分，现予以修正。
+- 官方 `tinyusb_msc_driver_config_t.user_flags.auto_mount_off` 可以关闭自动回挂，自动回挂不是弃用便利层的理由。
 - 当前版本 `tinyusb_msc.c` 的 `tud_msc_write10_cb` 在排入延后写入后返回长度；`tusb_write_func` 的介质写入失败仅记日志。项目保留同步回调，将 SDMMC 错误返回 MSC，同时检查范围和部分扇区写入。
 - 官方示例的自供电模式需要实际 VBUS 监测 GPIO；不能照搬其他开发板的引脚。现有 BSP 未提供该接线，仍保留手动安全弹出与退出流程，不宣称拔线自动恢复。
-- 本轮核对未发现需要替换 USB 协议栈或改动板级引脚的依据，没有额外重写协议层。便利层的构建排除依赖精确版本锁，升级时需重新检查上述回调与构建文件。
-
-用户实际执行退出重启后，串口与 TF 挂载恢复；迁移 EPUB 的设备端 CRC32 与原导出一致。抽测进度修订号为 3；K2 全刷前后修订号及正文 CRC32 `4bdf5d0e` 均保持一致。
-
-## 文件名清理（2026-10-06）
-
-设备上的 71 个正常使用 EPUB 已去掉导入序号和来源标识，保留书名、作者及扩展名。7 个同名单书数据目录和最近阅读路径同步更新；无重名覆盖，71 个文件 SHA-256 均与原始导出一致。重新挂载后读取 1 MiB 专用测试文件，SHA-256 仍与写入数据一致。上述短名兼容副本现在为 `Books/私有样本 B.epub`；`Books/Kindle/` 内不可按名称访问的旧条目仍保留，未声称该残留已清理。私人文件名映射与摘要仅保存在 `.local/usb-storage-check/rename-results.jsonl`，不纳入仓库。
+- 核对未发现需要替换 USB 协议栈或改动板级引脚的依据，没有额外重写协议层。便利层的构建排除依赖精确版本锁，升级时需重新检查上述回调与构建文件。
