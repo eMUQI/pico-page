@@ -13,7 +13,7 @@
 | `docs/planning/` | 产品决定、路线图、里程碑、词典方案与调研 | 维护决定、范围、依赖和候选；实际完成度链接开发状态 |
 | `docs/development-status.md` | 当前实现、未验收项和批次记录，供维护者与 agent 共用 | 当前摘要只在状态变化时更新；每批记录对应命令、结果和未测项 |
 | `docs/releases/` | 面向用户的版本说明 | 按版本维护，官网和设备更新清单读取同一来源 |
-| `docs/design/` | [设计系统](design/system/README.md)、当前设计说明及原始 PNG／HTML，供设计、开发与 agent 查阅 | 原件不修改；视觉规范以设计系统为准，当前交互以开发目录的 UI 说明为准 |
+| `docs/design/` | [设计系统](design/system/README.md)、当前设计说明及原始 PNG 与文字说明，供设计、开发与 agent 查阅 | 原件不修改；视觉规范以设计系统为准，当前交互以开发目录的 UI 说明为准 |
 | `firmware/`、`tools/host/`、`tests/`、`web/` 的 README | 对应子项目的构建、测试或部署入口 | 操作命令就近维护，跨模块规则用链接 |
 | `docs/examples/`、`docs/images/`、组件 `third_party/` | 配置示例、合成画面、依赖来源与许可 | 示例随格式核对；只保留文档引用的画面；许可随依赖变更 |
 
