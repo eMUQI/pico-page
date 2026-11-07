@@ -25,8 +25,8 @@
 | 修改固件或共享组件 | [贡献指南](../CONTRIBUTING.md) · [嵌入式开发规则](development/embedded-development.md) · [验收清单](development/acceptance.md) |
 | 定位具体实现 | [文档解析](development/document-runtime.md) · [字体与分页](development/graphics-runtime.md) · [图片](development/image-runtime.md) · [存储](development/store-implementation.md) · [界面](development/ui-implementation.md) · [平台](development/platform-runtime.md) |
 | EPUB 原书排版 | [支持范围](development/original-layout.md) · [CSS 调研与测量](development/baselines/2026-11-04-css-prototype.md) |
-| 样本与兼容验证 | [公开 EPUB](development/public-books.md) · [真实引擎对照](development/sync-runtime.md#真实引擎对照与复现) |
-| 设备诊断 | [诊断接口](development/console-runtime.md) · [诊断工作台](development/diagnostic-workbench.md) |
+| 样本与兼容验证 | [公开 EPUB](../tests/README.md#公开-epub-样本) · [真实引擎对照](development/sync-runtime.md#真实引擎对照与复现) |
+| 设备诊断 | [诊断构建与工具](development/device-diagnostics.md) |
 | 周期性版本测试与历史对比 | [测试基准](development/testing-baselines.md) |
 | 使用 AI 编程代理 | [代理规则](../AGENTS.md) · [代理工作流](development/agent-workflow.md) |
 | 版本、依赖和网站 | [版本管理](development/versioning.md) · [依赖审查](development/dependency-review.md) · [网站开发](../web/README.md) · [固件托管](development/firmware-hosting.md) |
@@ -35,7 +35,7 @@
 
 [开发状态](development-status.md)列出当前实现与待验证项；[测试基准](development/testing-baselines.md)规定公开实测口径；[验收清单](development/acceptance.md)定义应验证的行为。测试通过、构建成功、发布和真机验收是不同状态，不能互相替代。
 
-[路线图](planning/roadmap.md)与[词典计划](planning/dictionary-plan.md)用于后续功能规划，[原始设计](design/README.md)用于追溯视觉基线。历史资料中的路径、分区和命令不能直接作为当前安装或开发步骤。现行需求冲突按 [AGENTS.md](../AGENTS.md) 中的资料优先级处理。仓库与部署迁移见[公开发布检查](development/publication.md)。
+[路线图](planning/roadmap.md)用于后续功能规划，[原始设计](design/README.md)用于追溯视觉基线。历史资料中的路径、分区和命令不能直接作为当前安装或开发步骤。现行需求冲突按 [AGENTS.md](../AGENTS.md) 中的资料优先级处理。仓库与部署迁移见[公开发布检查](development/publication.md)。
 
 ## 文档放在哪里
 

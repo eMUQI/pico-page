@@ -10,7 +10,7 @@ The user reads a synthetic book, triggers K2 force refresh, changes typography, 
 
 ## Driving it with device_workbench
 
-Follow `docs/development/diagnostic-workbench.md` to identify the diagnostic firmware, private conditions JSON, free serial port, and synthetic card-relative book path. Run `python3 tools/device_workbench.py --help`, then the documented scenario command with the observed paths and a new output directory. Do not invent port names, build provenance, network results, or device authorization. Inspect the resulting `run.json`, raw operation trace, and relevant canvas. Confirm the scenario verdict and required physical observations separately.
+Follow `docs/development/device-diagnostics.md` to identify the diagnostic firmware, private conditions JSON, free serial port, and synthetic card-relative book path. Run `python3 tools/device_workbench.py --help`, then the documented scenario command with the observed paths and a new output directory. Do not invent port names, build provenance, network results, or device authorization. Inspect the resulting `run.json`, raw operation trace, and relevant canvas. Confirm the scenario verdict and required physical observations separately.
 
 ## Gotchas
 

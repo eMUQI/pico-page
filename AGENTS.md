@@ -66,7 +66,7 @@ Codex 非平凡开发任务使用已安装的 `pstack:poteto-mode`，验证使�
 
 先检查已有文件与 Git 差异，保护未提交的改动。实现或修复限于约定范围，包含配套文档、本地构建、测试及本次改动引入的失败修正。审计或讨论请求只交付结论；要求先审阅或暂不提交时，遵守该边界。
 
-构建前通过 ESP-IDF/EIM 安装记录及 `docs/development/environment.md` 定位已有工具链，不自行替换全局工具链。核对实际 IDF/BSP、依赖锁、补丁和生效 sdkconfig；改 defaults 后验证实际采用值。复用第三方代码前逐组件核对源码与许可证，记录 commit、依赖、修改与义务。
+构建前通过 ESP-IDF/EIM 安装记录及 `docs/development/environment.md` 定位已有工具链，不自行替换全局工具链。核对实际 IDF/BSP、依赖锁、补丁和生效 sdkconfig；改 defaults 后验证实际采用值。复用第三方代码前逐组件核对源码与许可证，在[第三方依赖](docs/development/dependency-review.md)记录 commit、修改与义务；只参考思路、未复制代码时不做记录。
 
 远端发布、推送、设备刷写、改分区及擦除 Flash/TF 需要维护者明确授权；不从历史开发记录推定新的设备操作授权。不得改写工厂 VCOM/PMU 校准；烧录偏移以目标设备实测分区为准。凭据、个人 EPUB、完整 Flash 备份和私有日志不提交；不默认关闭 TLS 验证。
 

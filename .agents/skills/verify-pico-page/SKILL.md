@@ -11,7 +11,7 @@ Read the root AGENTS.md verification matrix and select the affected paths from [
 
 Run from the repository root. For Python tool changes, run the actual CLI with the same input before and after the change, plus its existing unittest target. For shared C++ changes, follow `docs/development/environment.md` to prepare the pinned fonts and toolchain, configure and build host, and inspect `ctest --test-dir build/host -N` before running the required tests. Use `tools/host/README.md` for the headless reader. Build firmware when AGENTS requires it.
 
-For a device path, read `docs/development/diagnostic-workbench.md` first. Use an already identified diagnostic device only with current task authorization. This skill does not flash or select a partition. Do not open a serial port already owned by another process.
+For a device path, read `docs/development/device-diagnostics.md` first. Use an already identified diagnostic device only with current task authorization. This skill does not flash or select a partition. Do not open a serial port already owned by another process.
 
 ## Doctor
 

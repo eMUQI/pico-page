@@ -1,6 +1,6 @@
 # EPUB 图片显示
 
-2026-10-06，`reader_document` 和 `reader_graphics` 已提供共享图片读取与绘制路径。不修改原 EPUB，不生成专有阅读包，不把图片预转换到 TF 缓存。
+`reader_document` 和 `reader_graphics` 提供共享图片读取与绘制路径。不修改原 EPUB，不生成专有阅读包，不把图片预转换到 TF 缓存。
 
 ## 接口与显示行为
 
@@ -20,8 +20,8 @@ GIF 解码器按 [GIF89a 规范](https://giflib.sourceforge.net/gifstandard/GIF8
 
 PNG 使用固定 commit 的 MIT `pngle`，复用已审查的 miniz；JPEG 使用固定来源的 TJpgDec R0.03。渐进式 JPEG 另使用 Apache-2.0 JPEGDEC 与 CrossPoint 的三个修复补丁，来源 MIT 声明一并保留；本地第四个补丁修正未对齐读取、32/64 位读取宽度及未定义移位。没有引入其他阅读器的应用层。拷贝前已阅读源码与许可；精确版本、文件摘要、源代码修正及分发义务见[图片依赖记录](../../firmware/components/reader_graphics/third_party/README.md)。PNG 本地修正包括 bKGD 数组越界、窄图 Adam7 下溢、CRC 高字节移位、deflate 完整性、解压数量上限和独立解码器 RGBA 临时值；没有关闭 CRC 校验。
 
-## 休眠图片与验证
+## 休眠图片
 
 自定义锁屏由内容 worker 准备，与普通正文图片的读取和提交路径不同；文件、透明缓存、冷／热合成资源、取消与回退规则统一见[平台说明](platform-runtime.md#自定义锁屏)，页面和预览规则见[UI 说明](ui-implementation.md#自定义锁屏)。不把早期整层解码的分配量用于当前流式锁屏路径。
 
-图片及锁屏的验收场景见[验收矩阵](acceptance.md)，当前结果见[开发状态](../development-status.md)。历史 host 测量和早期透明层分配方式不作为当前测试数量或设备峰值。
+图片及锁屏的验收场景见[验收矩阵](acceptance.md)。

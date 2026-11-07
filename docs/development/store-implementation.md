@@ -62,28 +62,12 @@ ESP-IDF FatFs 的 `rename` 不覆盖已有目标。host 和固件都执行「保
 
 `clear_cache()` 仅移除 `PicoPage/cache` 下的内容，保留目录本身；不接触原书、伴随进度/设置、用户封面、`prepared` 或 `PicoPage/data`。host 拒绝根/路径上的符号链接；缓存内部链接只删除链接本身。嵌套清理最多 32 层，遇到错误返回失败，可能已清除部分缓存。生成的封面缓存位于此缓存目录内，会一并清除；调用前必须停止使用缓存的任务。协议不支持另一进程同时改动挂载目录；不将 TOCTOU 检查冒充并发写入隔离。
 
-## Host 验证
+## 依赖
 
-紧凑的 `tests/store_test.cpp` 使用真实临时目录和文件，检查：
+依赖固定版本、许可、审查边界及 Xtensa 移植修正见 `firmware/components/reader_store/third_party/README.md`。回归测试为 `tests/store_test.cpp` 与 `tests/store_sync_test.cpp`，后者在测试编译单元替换 `fsync` 以覆盖同步失败。
 
-- 保存确认、超过 double 精度的修订往返；坏主文件和缺失主文件恢复；临时文件不被采用。
-- 内容身份不匹配和新 schema 拒绝覆盖；路径穿越和符号链接隔离。
-- 临时/备份路径受阻时不确认保存；子进程 `RLIMIT_FSIZE` 产生实际短写与 `EFBIG` 后保留已提交主记录。
-- TOML 语法/字段/UTF-8/版本错误回退，原文不改写；全局和本书字段继承。
-- 单行配置写回保留注释，跨层外部修改阻止保存，删除覆盖恢复继承，行内表拒绝破坏性改写。
-- 最近书籍路径验证、备份恢复、保存失败与清理缓存后的保留。
-- 缓存清理保留原书、设置、进度、封面、prepared 与链接目标。
+## 词典配置与流式缓存
 
-`tests/store_sync_test.cpp` 仅在测试编译单元替换 `fsync`，其余操作仍使用真实文件；验证发布目录同步失败、文件同步失败、创建伴随目录后父目录同步失败，在持续失败和重试时均不返回保存确认，恢复同步后才成功；另验证只有备份时的相同记录重试。最近书籍复用同样的文件同步和发布失败检查，并覆盖坏主文件修复时保留旧备份。
-
-2026-10-06 追加检查：`cmake --build build/host --target store_test store_sync_test -j 4`，随后 `ctest --test-dir build/host -R '^store(_sync)?$' --output-on-failure`，2/2 通过。
-
-首次 red：空实现运行失败于保存确认断言。UTF-8 TOML 和 JSON 回归各自先观察到断言失败后修复。通过的 host 命令：根目录 `cmake --build build/host` 后 `ctest --test-dir build/host --output-on-failure`，以实际执行结果为准。此处不宣称完整 ST02 每个底层 syscall 或真机故障点都已验证。
-
-依赖固定版本、许可、审查边界及 Xtensa 移植修正见 `firmware/components/reader_store/third_party/README.md`。
-
-## 2026-10-23 · 词典配置与流式缓存
-
-`ReaderSettings.dictionary_enabled` 保存全局词典顺序，来源为 `[dictionary].enabled`，使用现有 `settings_snapshot`／`apply_settings`；详细格式见 [存储说明](storage.md#2026-10-23--词典配置与可重建索引)。数组编辑在已解析位置内识别字符串、注释和结束括号，保留内部及行尾注释；拒绝不能安全编辑的语法，保存前后均重新解析验证。配置无效、外部更改或提交失败时不宣称新列表已生效。
+`ReaderSettings.dictionary_enabled` 保存全局词典顺序，来源为 `[dictionary].enabled`，使用现有 `settings_snapshot`／`apply_settings`；详细格式见 [存储说明](storage.md#词典配置与可重建索引)。数组编辑在已解析位置内识别字符串、注释和结束括号，保留内部及行尾注释；拒绝不能安全编辑的语法，保存前后均重新解析验证。配置无效、外部更改或提交失败时不宣称新列表已生效。
 
 `CacheWriter::sync()` 仅同步未发布暂存文件，供调用者先同步再分段读回；`commit()` 仍执行最终截断、同步、关闭和发布。`begin_cache()` 对 `dictionaries/` 子目录允许最大 64 MiB，以容纳流式展开的索引，其他缓存仍保持 2 MiB 上限；这不是扩大单次内存分配。词典核心的解压索引与小型稀疏索引均通过此入口提交，取消或出错由暂存 writer 析构移除未发布临时文件。卡的单一所有权和不可强制取消在途 I/O 的约束不变。

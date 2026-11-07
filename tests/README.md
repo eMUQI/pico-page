@@ -9,19 +9,27 @@ ctest --test-dir build/host -N
 ctest --test-dir build/host --output-on-failure
 ```
 
-`-N` 只列举已配置的测试，不执行测试；增删入口或改变依赖后先重新配置。需要 Node.js 的入口在未找到 Node 时可能不注册，核对列表不能以跳过代替验证。诊断埋点可用 `-DPICO_PAGE_HOST_TRACE_EVENTS=ON` 开启；三种独立记录器配置和实际测试结果按[诊断工作台](../docs/development/diagnostic-workbench.md)执行与记录。
-
-主要覆盖：呈现/保存事务、旧代次拒绝、持久化失败重试、配置外部编辑、真实 EPUB 源位置、分页无半行、K2 全刷不改进度、应用层缺字库/读档/显示失败、排版取消/应用、网络取消与旧回包、账户变化后禁止采用旧候选，以及协议字段与受限 XPointer 映射。`app_test` 还覆盖内置说明的离线/无卡/无字体显示、翻屏边界、K2 全刷、再次打开和阅读记录不变，并分别运行同步及固件使用的异步应用模式。阅读页脚回归覆盖左右独立循环、热区边界/交界拖动、在途与过期触摸、正文/阅读记录/进度文件不变、统计前后真实绘制、百分比两位小数与舍入、无效时间和时区跨日；两种应用模式均执行。
-
-`sleep_io` 编译固件实际使用的 GPIO／IO 扩展器停放实现，故障替身覆盖后台探卡仍忙时在寄存器／GPIO 修改前拒绝浅睡、浅睡与关机的 CW_INT 区别、睡眠引脚范围、每一步准备／恢复失败、写入已生效但返回错误、触摸复位失败、重复调用及恢复后再次进入。它验证寄存器恢复与重试契约，不证明 PMU 实际唤醒、TF 电气行为、面板效果或功耗。
-
-`sleep_usb_console` 编译固件实际使用的 USB 浅睡交接实现，替身按 ESP-IDF 6.1 的引脚快照／恢复顺序执行。覆盖准备取消、拒绝或失败、拒绝后成功、多个周期唤醒、成功后失败、原 PHY 关闭、原电阻与覆盖状态恢复、重复恢复，以及短睡眠补足断开间隔和长睡眠不额外等待。它验证寄存器与成功标志的边界，不证明真实 USB 电气断开、电脑枚举或串口响应。
-
-Linux `app_test` 使用链接包装注入当前书库目录的 `readdir` 与 `lstat` 失败，覆盖首项／中途 EIO、条目 EIO／ENOENT、正常 EOF 前残留 errno、空目录、512 项上限及界面重试；不修改生产 I/O 接口或真实文件。
-
-封面与锁屏失败回归在 `app_test`、`content_worker_test` 中验证类别与文案独立、PNG 内部分配失败、永久负缓存的 SHA-256 绑定、I/O 有界重试、取消与旧代次隔离。自定义锁屏空闲重试测试观察超过三个 5 秒间隔，再验证显式休眠仍可恢复。
+`-N` 只列举已配置的测试，不执行测试；增删入口或改变依赖后先重新配置。需要 Node.js 的入口在未找到 Node 时可能不注册，核对列表不能以跳过代替验证。诊断埋点可用 `-DPICO_PAGE_HOST_TRACE_EVENTS=ON` 开启；三种独立记录器配置和实际测试结果按[诊断工作台](../docs/development/device-diagnostics.md)执行与记录。
 
 测试 EPUB 均由脚本生成；不提交个人书籍。`app_test` 使用 setup_fonts 下载的完整文楷字体。`tools/check_koreader_mapping.py` 是独立的真实 CREngine 兼容性对照，不是模拟期望值。墨水屏、TF 掉电、网络真实账户与双向接续仍需按 `docs/development/acceptance.md` 验收。
+
+## 公开 EPUB 样本
+
+阅读与同步对照另用两本 Project Gutenberg 的 EPUB 3，下载后放在忽略目录 `.local/public-books/`，不加入 Git。上游可能重新生成文件，结果只适用于下列摘要。书内权利声明为 `Public domain in the USA.`，使用条件见书内许可和 [Project Gutenberg 许可页](https://www.gutenberg.org/policy/license.html)。
+
+| 作品 | 下载 | SHA-256 |
+|---|---|---|
+| 鲁迅《阿Ｑ正傳》 | [25332 EPUB 3](https://www.gutenberg.org/ebooks/25332.epub3.images) | `5dcf5341be4b59461f61854c023ddcc38af52655dd8e60bed99bbec241545125` |
+| 鲁迅《吶喊》 | [27166 EPUB 3](https://www.gutenberg.org/ebooks/27166.epub3.images) | `373fcf0e86d48201b0ba317e15e5ae7dbdf3d33f26223c88950341395c7f2ba4` |
+
+用生产解析器和渲染器逐页检查分页、缺字和图片绘制：
+
+```sh
+sh tools/check_public_books.sh .local/card/Fonts/LXGWWenKai-Regular.ttf \
+  .local/public-books/lu-xun-aq-25332.epub .local/public-books/lu-xun-nahan-27166.epub
+```
+
+同步位置对照见[真实引擎对照](../docs/development/sync-runtime.md#真实引擎对照与复现)。
 
 ## EPUB 文件探针
 
@@ -86,19 +94,9 @@ build/host/chapter_stream_probe stream build/host/document-fixtures/stream-event
 
 现有 `document` 回归逐段核对文本、块、源锚点、链接、图片、分段标志和末段判定，覆盖 stored／deflate、UTF-16、实体、跨字符回调及最后一次 XML 输入中的暂停。取消、预算拒绝、随机访问、移动所有权、关闭、截断、坏 XML 和 CRC 失败必须清空输出并释放游标。超过 64 KiB 仍无完整 XML 事件的输入停止续读，验证同一有效正文仍可由原路径读完；这限制未处理输入，不是 XML 或总堆的完整上限。`app` 回归覆盖开书向章节任务移交游标、不重复开包、排队取消、换书和休眠／USB 后会话释放。设备内存、慢 TF、实体输入、睡眠／USB 交接及输入到正文呈现时间另按设备专项验证。
 
-## 平台边界
-
-`architecture` 检查应用组件不导入 Read Pico 实现，契约不导入 SDK/BSP 头。host 构建逐个编译 `platform_contract` 公共头，避免依赖头文件顺序；`display_network_gate` 编译实际端口实现，验证网络接收持有、显示延期、显示优先、撤回及完成释放。`core` 和 `app` 直接使用共享 `reader_input` 验证手势和休眠准备策略。`display_compatibility` 显式定义 `NDEBUG`，使用实际应用画布和 Read Pico 尺寸，验证正常尺寸、宽高颠倒但字节数相同、单轴不匹配及无效尺寸；校验失败不会被 Release 的断言裁剪掉。`architecture` 另检查 provider 不依赖应用输入策略，并通过 CMake 读取 profile，核对两个 OTA 槽大小。实际 ESP-IDF 应用循环仍须固件构建，设备侧刷新、输入和电源交接另做真机验收。
-
-## 首次引导
-
-`onboarding_test` 覆盖新卡三屏、两处跳过、K2／左右键和轻扫、排队及重复尾部、同屏休眠恢复、重看不写标记及错误返回、无卡与提交失败重启、旧配置／历史／书旁进度与备份、扫描上限和符号链接保守回退。可传输出目录导出四张 PGM（欢迎、练习、工具、说明首页）供视觉检查。既有 app 场景的 Driver 在全新夹具首次呈现后显式跳过引导，继续原场景；字体取消仍比较进入编辑前的完整配置字节，不再假定配置文件必须不存在。
-
-## 页脚白底维护驱动
+## BSP 波形测试
 
 显示补丁验证使用 `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug -DPICO_PAGE_TEST_BSP_WAVEFORM=ON`；sanitizer 配置同样开启该选项。配置会调用 `tools/setup_bsp.sh` 准备并校验固定 BSP，首次需要 GitHub 网络；准备失败直接停止，不能以跳过代替通过。CI 的 Debug 与 sanitizer 均启用。
-
-`footer_waveform` 编译实际 BSP 初始化及裁剪代码，遍历全部 256 种旧/新灰阶组合，核对默认 GL16 的第 33 相、完整 GL16 的第 45 相白→白维护驱动（从零计）、Gray8 无新增脉冲、变化像素序列及 Overlay 的非白对角保持与白底维护。`changed_pixels_waveform` 穷举掩码位序、边界、非法几何及禁用状态；`core` 验证 FullClean、ManualRefresh、失效基准及 Overlay 的实际帧路由。分配失败仍由既有驱动退回未掩码波形，分配与恢复流程沿用原实现；真机低内存、闪烁、灰底和恢复效果按 DP08／DP10 验收。
 
 ## CSS 独立原型
 

@@ -89,7 +89,7 @@ PMU 命令仍由应用任务串行执行。每次尝试最多调用一次 `TIME_
 
 沿用 `5f3406deec33304de8801046db583dec7c49e55b` BSP 与原有五个补丁，另加只读的 SD 忙状态补丁，低功耗方案移植自上游 `a2a63a6a2c606540be72156a6567392d948d65fc`，来源和许可见 [BSP 审查](bsp-review.md#2026-10-26--睡眠-io-停放移植)。无新任务、队列或文件访问；正常路径不分配堆内存，错误信息沿用 `std::string`，寄存器快照和触摸恢复状态固定大小。额外事务沿用 FCA9555／CST836U 驱动的 100 ms I²C 超时，触摸复位包含 10 ms 低电平及 50 ms 启动等待；单次驱动调用不可取消，新增步骤不构成整条休眠路径的硬时限。资源与功耗的真机结果按 PW02／PW04 验收，host 故障注入不证明实际电流改善。
 
-### 电源键菜单与关机、重启（2026-10-08）
+### 电源键菜单与关机、重启
 
 PMU `KEY_LONG` 打开菜单，`KEY_SHORT` 仍进入浅睡；同次长按的重复及后续短按被消费。启动或唤醒时先等待电源键释放，不改 PMU 阈值。持续按住仍可能触发硬件强制关机。网络、USB、诊断传输或内容任务进行中提示先结束任务。菜单取消恢复原页面、草稿和同步候选。菜单的打开、取消、本地保存失败页和「先结束任务」提示使用不清屏的整屏更新；帧呈现失败后显示基准失效，下一帧按全刷重画。关机、重启的结果画面仍全刷。
 
@@ -166,11 +166,10 @@ HTTP 只接受 HTTPS GET/PUT/POST，使用 ESP-IDF 系统证书包和主机名�
 
 早期平台接入阶段只编译网络调用路径，未连接真实服务或开启设备热点。后续设备及同步证据见开发状态，不以这条历史结论描述当前验证范围。
 
-## 来源、许可与验证
+## 来源与许可
 
 来源：[MindReset/read_pico_firmware](https://github.com/MindReset/read_pico_firmware/tree/5f3406deec33304de8801046db583dec7c49e55b)。初始化、按键区域和浅睡流程参考该 commit 的 `read_pico_init.c`、`read_pico_board.c`、`main/display.c`、`main/sleep.c` 及 `main/ui/ui_menu.h`。关机直接调用同一 commit 的 `components/read_pico_pmu/read_pico_pmu.c` 公开接口，其 Apache-2.0 许可与依赖不变。适配源文件保留上游 Apache-2.0 版权与许可标识，组件目录附完整 `LICENSE`，文件头标明本项目变更。锁定 BSP 的下载原件保持不变，构建副本应用项目补丁。EPDiy 的 LGPL-3.0-or-later 义务继续适用，详见 [BSP 审查](bsp-review.md)。
 
-实际完成：复用当前 `firmware/build/compile_commands.json` 的 Xtensa 工具链、包含路径和配置，以 C++17 单独编译 `platform.cpp` 和 `network.cpp`，均退出码 0，最新输出为忽略目录 `.local/review-platform.cpp.o`、`.local/review-network.cpp.o`。完整固件构建结果由 [开发状态](../development-status.md) 统一记录，单独目标编译不代替链接验证。
 
 设备写入前须通过 ROM/esptool 核对芯片、安全状态、Flash 容量与分区表，操作边界见[固件开发指南](../../firmware/README.md#硬件与写入边界)。实体触摸、光学效果、TF 故障与浅睡电流等须按验收表逐项核对，不能以驱动返回成功代替。
 

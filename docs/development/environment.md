@@ -1,6 +1,6 @@
 # 开发环境
 
-本文维护工具链定位、构建与检查方法及已知环境限制。具体批次的命令、产物和验收结果见[开发状态](../development-status.md)，公开实测报告见[测试基准](testing-baselines.md)。历史设备操作与主机记录不作为当前机器状态或操作授权。
+本文维护工具链定位、构建与检查方法及已知环境限制。当前验收状态见[开发状态](../development-status.md)，各次改动的命令与结果见对应 PR，公开实测报告见[测试基准](testing-baselines.md)。历史设备操作与主机记录不作为当前机器状态或操作授权。
 
 ## 工具链与依赖定位
 
@@ -67,7 +67,7 @@ ASan/UBSan 通过不等于已检查内存泄漏。须核对实际编译器与运
 
 CTest 日志位于 `build/host/Testing/Temporary/LastTest.log` 与 `build/sanitized/Testing/Temporary/LastTest.log`。核对实际注册项目和条件依赖，分别记录 macOS 本机与 Linux CI 结果。历史 Homebrew 动态库链接曾产生系统版本警告，本机运行通过不证明其他 macOS 版本兼容。本次编译警告、测试数量及结果以实际命令输出为准。
 
-`python3 tools/check_handoff.py` 只检查公开文档与示例，不能替代 C++ 测试、固件构建或真机验证。每批结果与未测范围记录在[开发状态](../development-status.md)。
+`python3 tools/check_handoff.py` 只检查公开文档与示例，不能替代 C++ 测试、固件构建或真机验证。每次改动的结果与未测范围写在 PR 描述中。
 
 ## 桌面预览与位置映射复核
 
