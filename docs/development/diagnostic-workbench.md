@@ -22,7 +22,7 @@ sh tools/build_firmware.sh diagnostic
 
 新指标调用使用 `PP_DIAGNOSTIC`，关闭后连参数求值、时钟读取和上下文构造一起删除；实现文件为空，不建立记录器、事件缓冲、轮询或任务。Performance 只有固定大小聚合记录器；Diagnostic 另有 64 个事件。正式构建没有新增 USB 命令。性能构建可通过调试器查看 `pico_page::diagnostics::recorder`；如需串口读聚合指标，可在隔离配置中额外启用诊断控制台，但必须将此配置差异记入结果，不能当作纯 Performance 基线。
 
-已审计并编译保护主循环的输入、分发、帧完成、页数统计、Wi-Fi 阶段和网络任务资源明细，以及同步映射、HTTP 结果明细。内容 worker 的每次完成资源输出已移除，创建失败的资源证据保留为 WARN。`StageTimer` 和 ZIP 读/解析/checkpoint 的旧计时只在 `CONFIG_PICO_PAGE_LEGACY_PERF_LOG` 下执行。该兼容开关默认关闭，依赖诊断控制台且不能与 PERF_METRICS 同开；保留 `tools/summarize_reader_perf.py` 对旧日志的使用方式。没有关闭全局 ESP-IDF 日志，启动信息和 WARN/ERROR 仍保留。本次没有证据证明旧日志导致了卡顿。
+已审计并编译保护主循环的输入、分发、帧完成、页数统计、Wi-Fi 阶段和网络任务资源明细，以及同步映射、HTTP 结果明细。内容 worker 的每次完成资源输出已移除，创建失败的资源证据保留为 WARN。`StageTimer` 和 ZIP 读/解析/checkpoint 的旧计时只在 `CONFIG_PICO_PAGE_LEGACY_PERF_LOG` 下执行。该兼容开关默认关闭，依赖诊断控制台且不能与 PERF_METRICS 同开；保留 `tools/summarize_reader_perf.py` 对旧日志的使用方式。没有关闭全局 ESP-IDF 日志，启动信息和 WARN/ERROR 仍保留。没有证据证明旧日志导致了卡顿。
 
 `stages` 构建的 `chapter_sequential_read` 记录每次顺序分段读取的墙钟耗时，包括 ZIP 迭代器读取与解压 `zip_read_inflate_us`、XML 推进 `xml_us` 和迭代循环内的内存准入检查 `memory_check_us`。三个字段为分段内累计值。`chapter_worker` 和 `chapter_prefetch_worker` 分别计量前台章节任务与预取任务。`content_pause` 记录内容任务在取消检查点等待恢复的区间。暂停、顺序读取和子阶段可能包含在同一任务墙钟中，应结合日志时间戳与目标帧关联。
 
@@ -67,7 +67,7 @@ sh tools/build_firmware.sh diagnostic
 
 事件含 seq、time_us、op、duration_us、task、kind、begin、result、session、layout、frame、request、detail。op 和 seq 是本次启动单调递增 ID；任务 ID 是固件任务句柄的整数表示。Frame 携带原始会话/排版代次、实际呈现序号和 frame token request，detail 为 FramePurpose。Content 的 request 是内容 generation，detail 为 ContentJob::Kind，可选的预取任务再加 256；Network 的 request 是网络操作 ID，Input 是实体输入序号。没有来源的上下文填 0，不伪造书籍/排版身份，不输出书名、路径或正文。
 
-渐进图片 Content（detail=2）另携带来源正文的 session/layout。ImagePatch 沿用这些代次和内容 generation，frame 是局部刷新使用的 UI token request，可与后续 Frame 的 request 关联；不是物理呈现序号。detail 是本次任务成功解码的图片数；灰阶缓存命中为 0，不能据此声称本轮执行了解码。失败图片的提示画布仍会提交，但 ImagePatch 为 failure。旧结果在现有身份检查处被拒绝，不产生 ImagePatch。开启配置在现有请求上增加固定标量，不新增任务、队列、I/O 或等待；关闭配置删除这些字段和记录调用。
+渐进图片 Content（detail=2）另携带来源正文的 session/layout。ImagePatch 沿用这些代次和内容 generation，frame 是局部刷新使用的 UI token request，可与后续 Frame 的 request 关联；不是物理呈现序号。detail 是本次任务成功解码的图片数；灰阶缓存命中为 0，不能据此声称该次执行了解码。失败图片的提示画布仍会提交，但 ImagePatch 为 failure。旧结果在现有身份检查处被拒绝，不产生 ImagePatch。开启配置在现有请求上增加固定标量，不新增任务、队列、I/O 或等待；关闭配置删除这些字段和记录调用。
 
 ## 协议扩展
 
@@ -198,7 +198,7 @@ python3 tools/device_workbench.py --port /dev/ttyACM0 \
 1. 开始采集后，在设备上打开测试图片页，按正常界面操作发起同步、取消或返回正文。忙态限制保持不变。
 2. 可以输入 `mark 简短说明` 标记观察到的问题。结束前回到目标图文页，等待图片补刷和进度保存完成，再输入 `end`。
 3. 工具检查正文、保存和任务状态，导出并校验当前画布，再冻结、排空记录器。画布导出前后的帧号、CRC、修订号或视图变化时，结果为 inconclusive；导出过程中设备或工具因帧变化拒绝继续时同样为 inconclusive，其他导出错误仍是 infra_error。
-4. 报告的 `analysis.image_chains` 列出内容、图片采用、驱动帧及交叠网络操作的 ID。只有成功 Content、同一 session/layout/generation 的成功 ImagePatch、对应成功 Frame 和本轮截图帧全部相符，且该内容任务区间与网络任务区间严格相交，才具备通过依据。网络任务须为成功，或有同一 request 的 NetworkStage 落在该内容任务区间内：在入口处即被取消的请求也会留下一个 Network 区间，但没有执行联网、校时或 HTTP，不能当作交叠。`network_stages` 列出这些阶段操作的 ID。detail=0 的缓存命中不满足本入口的解码要求。
+4. 报告的 `analysis.image_chains` 列出内容、图片采用、驱动帧及交叠网络操作的 ID。只有成功 Content、同一 session/layout/generation 的成功 ImagePatch、对应成功 Frame 和该次截图帧全部相符，且该内容任务区间与网络任务区间严格相交，才具备通过依据。网络任务须为成功，或有同一 request 的 NetworkStage 落在该内容任务区间内：在入口处即被取消的请求也会留下一个 Network 区间，但没有执行联网、校时或 HTTP，不能当作交叠。`network_stages` 列出这些阶段操作的 ID。detail=0 的缓存命中不满足本入口的解码要求。
 
 没有实际交叠、旧固件没有 ImagePatch、帧不匹配、漏事件或未完成任务均不可判定。证据和运行条件都完整时，已记录的失败、超时或驱动帧失败报告 fail，即使结束时的状态观察本身不可判定；证据有缺口、没有事件或缺少必需的条件与来源记录时仍为 inconclusive，与通过路径使用同一完整性判断。人工操作不使用固定 sleep 假设交叠，也不作为固定性能工作负载参与版本比较。真实交叠可能难以触发，需要重复独立采集；未触发不能伪造通过，也不能据此断言业务存在故障。网络操作仍仅证明 HTTP 包装函数运行，不证明同步正确。画布与驱动结果不证明物理屏幕。
 

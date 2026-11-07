@@ -41,7 +41,7 @@ sh tools/build_firmware.sh
 
 构建、写入摘要校验与真机验收分别记录；面板、输入、保存、睡眠、功耗及网络的待测项以[开发状态](../development-status.md)和[验收清单](acceptance.md)为准。
 
-## host 与交接检查
+## host 与文档检查
 
 host 使用本机 C/C++ 编译器与 CMake，不依赖 EIM 的交叉编译器；依赖和测试字体准备见[桌面开发指南](../../tools/host/README.md)与[测试说明](../../tests/README.md)。在仓库根目录执行：
 
@@ -83,13 +83,13 @@ python3 tools/check_koreader_mapping.py
 
 ## GitHub Actions
 
-个人 Pro 账户的 Actions 额度由该账户下的私有仓库共享；付费预算与付款状态由账户所有者管理，仓库工作流不修改账户计费设置。远端运行未启动时，本地验证不能记为远端 CI 通过。
+远端运行未启动时，本地验证不能记为远端 CI 通过。
 
-`Host checks` 和 `Website build` 保留原有检查名称，PR 更新后均生成检查结果，再由 `tools/ci_changes.py` 根据完整 PR 差异选择耗时步骤。路径判断包含删除与重命名前后的路径；无法取得差异时检查失败，不静默跳过。代码与构建配置变更执行 Debug、独立 Clang ASan/UBSan/LSan 和交接检查；仅文档、实现截图或网站变更跳过 host 构建，交接检查仍执行。新出现且未分类的路径默认执行 host 检查。路径选择回归由 host 工作流单独运行，不计入 CTest 注册数量。
+`Host checks` 和 `Website build` 保留原有检查名称，PR 更新后均生成检查结果，再由 `tools/ci_changes.py` 根据完整 PR 差异选择耗时步骤。路径判断包含删除与重命名前后的路径；无法取得差异时检查失败，不静默跳过。代码与构建配置变更执行 Debug、独立 Clang ASan/UBSan/LSan 和文档检查；仅文档、实现截图或网站变更跳过 host 构建，文档检查仍执行。新出现且未分类的路径默认执行 host 检查。路径选择回归由 host 工作流单独运行，不计入 CTest 注册数量。
 
 网站、发布说明、OTA 清单脚本及网站或共用路径脚本的改动执行 PR 网站构建与发布固件校验。分支 push 不单独触发工作流；main 仅在上述网站输入变更时构建并部署，发布 Release 和手动部署入口保留。host 合并后不自动重跑，直接推送 main 的代码需要手动补验；合并前应验证包含当前目标分支变更的结果。PR 新提交取消旧检查，正式部署继续串行并保留下载源比较及线上读回检查。COS 返回 403 时，仅允许候选清单与全部镜像均同官网现有副本逐字节一致的页面更新，并明确告警；新固件、内容变化、其他错误及认证发布失败仍阻止部署，不自动恢复桶权限。部署前通过共用路径脚本直接比较构建提交与最新 main 的网站输入：网站输入变化才让位给替代运行，只有文档或固件代码变化时仍完成当前部署；读取比较结果失败时停止部署。
 
-两个工作流继续通过 `[self-hosted, linux, x64, pico-page]` 使用现有私有 runner；是否切换到 GitHub 托管环境及切换时机另行决定，不作为本次整理或发布的前置条件。runner 串行领取任务，离线时排队，不自动回退。host 超时为 20 分钟，网站超时为 25 分钟（包含固件上传及完整公网读回）。系统依赖由管理员预先准备，工作流不执行 apt 或 sudo；host 检查 CMake、C++、Clang、ccache 及 pkg-config 依赖，网站检查 gh 和 curl，缺少依赖时失败。
+两个工作流继续通过 `[self-hosted, linux, x64, pico-page]` 使用现有私有 runner；是否切换到 GitHub 托管环境及切换时机另行决定，不作为发布的前置条件。runner 串行领取任务，离线时排队，不自动回退。host 超时为 20 分钟，网站超时为 25 分钟（包含固件上传及完整公网读回）。系统依赖由管理员预先准备，工作流不执行 apt 或 sudo；host 检查 CMake、C++、Clang、ccache 及 pkg-config 依赖，网站检查 gh 和 curl，缺少依赖时失败。
 
 host 和 COS 发布继续通过 `actions/setup-python@v5` 使用 Python 3.12，不替换系统 Python。host 正文相关检查和网站构建均显式准备 Node 24，防止缺少 Node 时条件测试未注册。COS 依赖安装在本任务 `RUNNER_TEMP/pico-page-cos` 虚拟环境中，不写入系统 Python。
 

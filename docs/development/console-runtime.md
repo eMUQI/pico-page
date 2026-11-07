@@ -2,7 +2,7 @@
 
 日期：2026-10-06。组件：`firmware/components/reader_console/`。
 
-本接口只用于受控设备验证。`CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE` 默认为 `n`，仅在 USB Serial JTAG 被选为控制台时可启用；普通固件保持关闭。启用后，连接 USB 的本地程序可以操作阅读界面，没有账户认证。组件已接入固件主循环并安装。状态、目录、资源导入/取消和完整字体及书籍导入均已在设备验证；本轮用于实际阅读操作与画布导出。
+本接口只用于受控设备验证。`CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE` 默认为 `n`，仅在 USB Serial JTAG 被选为控制台时可启用；普通固件保持关闭。启用后，连接 USB 的本地程序可以操作阅读界面，没有账户认证。组件已接入固件主循环并安装。状态、目录、资源导入/取消和完整字体及书籍导入均已在设备验证，也用于实际阅读操作与画布导出。
 
 新增构建模式、metrics/trace 协议、持续采集和结果格式见 [诊断工作台](diagnostic-workbench.md)。观察命令不计入用户活动，持续采集不重置停留保存的空闲计时。
 
@@ -78,7 +78,7 @@ python3 tools/device_console.py --port /dev/cu.TARGET_DEVICE upload local-book.e
 
 已查询乐鑫文档 MCP，并核对本机 ESP-IDF v6.1 的 `usb_serial_jtag_vfs.c`、`driver/usb_serial_jtag.h` 和 FreeRTOS `task.h`。官方资料：[控制台非阻塞 I/O](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/api-guides/stdio.html#blocking-and-non-blocking-i-o)、[USB Serial JTAG 睡眠限制](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/api-guides/usb-serial-jtag-console.html#sleep-mode-considerations)。手动浅睡期间 USB 不响应。平台在实际唤醒后短暂撤销 USB 上拉，恢复原配置以请求主机重新枚举；此恢复候选尚未真机验证，必要时仍需物理拔插。已有串口句柄需重新打开，不能通过这个连接承诺无人值守的睡眠/唤醒验证。取消入睡不会主动断开 USB。
 
-本轮将组件的启用与关闭分支分别用当前 Xtensa 工具链和固件配置编译，均通过 `-Werror`。这只是目标文件检查；完整链接和实际设备命令结果由主任务另行记录。导入新增的 host 检查复用 `store_test`、`store_sync_test`，覆盖 CRC、读回损坏、外部同名、残留临时文件、路径越界及同步失败；没有由这些检查推断 TF 掉电安全。
+组件的启用与关闭分支已分别用当前 Xtensa 工具链和固件配置编译，均通过 `-Werror`。这只是目标文件检查，不代表完整链接和实际设备命令结果。导入新增的 host 检查复用 `store_test`、`store_sync_test`，覆盖 CRC、读回损坏、外部同名、残留临时文件、路径越界及同步失败；没有由这些检查推断 TF 掉电安全。
 
 ## 主机客户端
 
@@ -105,7 +105,7 @@ python3 tools/device_console.py --port /dev/cu.TARGET_DEVICE capture .local/devi
 
 ## 翻页效果候选对比
 
-默认关闭。设备已安装本批诊断固件后，使用 `python3 tools/device_console.py --port <已确认端口> waveform ripple`，关闭时使用 `default`；也可从「设置 → 阅读 → 翻页效果」选择。命令不立即翻页或全刷；平台在下一次呈现前准备候选，准备失败记录日志并回退原刷新档位。非正文及全刷继续原路径。重启恢复关闭。当前候选的屏幕效果、残影、灰度、耗时和实体操作均未验收。
+默认关闭。设备安装诊断固件后，使用 `python3 tools/device_console.py --port <已确认端口> waveform ripple`，关闭时使用 `default`；也可从「设置 → 阅读 → 翻页效果」选择。命令不立即翻页或全刷；平台在下一次呈现前准备候选，准备失败记录日志并回退原刷新档位。非正文及全刷继续原路径。重启恢复关闭。当前候选的屏幕效果、残影、灰度、耗时和实体操作均未验收。
 
 每组使用同一本书、同一源位置、同一字号和「均衡」档位；切换后先按 K2 建立同样的清屏起点，再按相同顺序翻页至下一次自动全刷，分别记录默认 GL16 和水波纹，并在水波纹下分别核对上一页与下一页。观察中间白场、连续残影、抗锯齿边缘灰度和带图页；水波纹额外观察条带边界、方向和中断后恢复。保留照片或录像与原始串口日志，不以画布导出代替物理成像。
 

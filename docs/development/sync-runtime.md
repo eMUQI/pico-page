@@ -131,4 +131,4 @@ python3 tools/check_koreader_client.py \
 
 ## 外部代码边界与许可
 
-固件的协议和映射为独立实现，没有复制 KOReader/CREngine 源码或将其链接进固件。KOReader 根许可为 AGPLv3；研究参考的 CREngine 根声明为 GPLv2，具体子目录另有许可。本轮只将其构建为本地校验程序，不随产品发布；若分发该校验二进制，应先完成其 GPL 与外部链接依赖的分发义务核对，不能套用 Pico Page 尚未决定的总许可证。本地参考依赖 xxHash 0.8.3 为 BSD-2-Clause，源文件保留上游版权与许可。
+固件的协议和映射为独立实现，没有复制 KOReader/CREngine 源码或将其链接进固件。KOReader 根许可为 AGPLv3；研究参考的 CREngine 根声明为 GPLv2，具体子目录另有许可。只将其构建为本地校验程序，不随产品发布；若分发该校验二进制，应先完成其 GPL 与外部链接依赖的分发义务核对，不能直接套用 Pico Page 的项目许可。本地参考依赖 xxHash 0.8.3 为 BSD-2-Clause，源文件保留上游版权与许可。

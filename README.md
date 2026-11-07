@@ -61,7 +61,7 @@ K2 在所有可交互页面只全刷，不关闭面板、不确认或取消操�
 ## 使用边界
 
 - KOReader 接续要求两端使用内容完全相同的原始 EPUB 和同一同步账户。仅在位置能精确映射时提供接续，不按百分比猜测；TXT 和本地书签不参与同步。详见[操作步骤](docs/user/runtime.md#与-koreader-接续位置)和[兼容范围](docs/development/sync-runtime.md)。
-- EPUB 使用统一正文排版，不完整还原原书样式；表格、复杂 SVG、复杂 CSS、复杂文字塑形和双向文字不在完整支持范围内。TXT 不支持 UTF-16。
+- EPUB 默认使用统一正文排版；也可在排版面板中为单本书选择试验性的「原书」，按书内 CSS 显示字号、缩进、对齐、插图和内嵌字体等基础样式。表格、复杂 SVG、复杂 CSS、复杂文字塑形和双向文字不在完整支持范围内。TXT 不支持 UTF-16。
 - 暂不支持 PDF、批注、高亮、插件、阅读统计和多主题。自定义按键、蓝牙翻页等计划见[路线图](docs/planning/roadmap.md)，不代表当前可用。
 - 移动或备份书籍时，请一并保留原书旁的 `<完整文件名>.picopage/` 目录；它保存这本书的进度、书签和设置。完整备份方法见[文件与备份](docs/user/runtime.md#文件与备份)。
 
@@ -87,7 +87,7 @@ sh tools/build_firmware.sh
 | `tests/` | 回归测试和测试素材 |
 | `web/`、`docs/` | 官网、使用文档、配置示例、设计决定和验证记录 |
 
-桌面程序可通过 `sh tools/run_host.sh` 启动，用法见[桌面开发指南](tools/host/README.md)。提交改动前阅读 [AGENTS.md](AGENTS.md)，按改动范围执行[测试](tests/README.md)与[验收检查](docs/development/acceptance.md)。桌面运行、自动测试和固件构建均不能代替真机验证。
+桌面程序可通过 `sh tools/run_host.sh` 启动，用法见[桌面开发指南](tools/host/README.md)。提交改动前阅读[贡献指南](CONTRIBUTING.md)，按改动范围执行[测试](tests/README.md)与[验收检查](docs/development/acceptance.md)。桌面运行、自动测试和固件构建均不能代替真机验证。
 
 欢迎通过 [Issues](https://github.com/eMUQI/pico-page/issues) 报告问题。请提供固件版本、操作步骤、预期结果和实际结果；排版或同步问题可附不含私人内容的最小样本。不要上传账户凭据、个人 EPUB、完整 Flash 备份或未经检查的日志。功能取舍见[产品决定](docs/planning/decisions.md)。
 

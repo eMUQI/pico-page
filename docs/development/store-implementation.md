@@ -76,9 +76,9 @@ ESP-IDF FatFs 的 `rename` 不覆盖已有目标。host 和固件都执行「保
 
 `tests/store_sync_test.cpp` 仅在测试编译单元替换 `fsync`，其余操作仍使用真实文件；验证发布目录同步失败、文件同步失败、创建伴随目录后父目录同步失败，在持续失败和重试时均不返回保存确认，恢复同步后才成功；另验证只有备份时的相同记录重试。最近书籍复用同样的文件同步和发布失败检查，并覆盖坏主文件修复时保留旧备份。
 
-2026-10-06 本次追加检查：`cmake --build build/host --target store_test store_sync_test -j 4`，随后 `ctest --test-dir build/host -R '^store(_sync)?$' --output-on-failure`，2/2 通过。
+2026-10-06 追加检查：`cmake --build build/host --target store_test store_sync_test -j 4`，随后 `ctest --test-dir build/host -R '^store(_sync)?$' --output-on-failure`，2/2 通过。
 
-首次 red：空实现运行失败于保存确认断言。UTF-8 TOML 和 JSON 回归各自先观察到断言失败后修复。通过的 host 命令：根目录 `cmake --build build/host` 后 `ctest --test-dir build/host --output-on-failure`，以本轮实际最终执行结果为准。此处不宣称完整 ST02 每个底层 syscall 或真机故障点都已验证。
+首次 red：空实现运行失败于保存确认断言。UTF-8 TOML 和 JSON 回归各自先观察到断言失败后修复。通过的 host 命令：根目录 `cmake --build build/host` 后 `ctest --test-dir build/host --output-on-failure`，以实际执行结果为准。此处不宣称完整 ST02 每个底层 syscall 或真机故障点都已验证。
 
 依赖固定版本、许可、审查边界及 Xtensa 移植修正见 `firmware/components/reader_store/third_party/README.md`。
 

@@ -48,6 +48,6 @@ ctest --test-dir build/host --output-on-failure
 python3 tools/check_handoff.py
 ```
 
-`ctest -N` 列出实际注册的测试。缺少字体或 Node 等条件依赖时，注册数量可能减少，不能把较少的全部通过当作完整通过。测试覆盖与资源准备见[测试说明](../../tests/README.md)，sanitizer 参数见[开发环境](../../docs/development/environment.md#host-与交接检查)。
+`ctest -N` 列出实际注册的测试。缺少字体或 Node 等条件依赖时，注册数量可能减少，不能把较少的全部通过当作完整通过。测试覆盖与资源准备见[测试说明](../../tests/README.md)，sanitizer 参数见[开发环境](../../docs/development/environment.md#host-与文档检查)。
 
-交接检查只验证文档、设计文件、配置示例和本地链接，不验证固件行为。CI 按 PR 改动路径选择检查，具体规则见[GitHub Actions](../../docs/development/environment.md#github-actions)。固件修改仍需相应的固件构建和真机验证。
+文档检查只验证文档、设计文件、配置示例和本地链接，不验证固件行为。CI 按 PR 改动路径选择检查，具体规则见[GitHub Actions](../../docs/development/environment.md#github-actions)。固件修改仍需相应的固件构建和真机验证。

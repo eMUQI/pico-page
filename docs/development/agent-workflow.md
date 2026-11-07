@@ -1,10 +1,10 @@
-# 接入 pstack 并验证改动
+# AI 编程代理工作流
 
-Pico Page 使用 pstack 的开发流程，项目规则仍以根目录 AGENTS.md 和对应产品、实现文档为准。仓库只维护启用配置和验证入口，不复制或改写上游 skill。
+使用 AI 编程代理参与开发时，按本文接入 pstack 开发流程。项目规则仍以根目录 AGENTS.md 和对应产品、实现文档为准。仓库只维护启用配置和验证入口，不复制或改写上游 skill。
 
 ## 安装固定版本
 
-使用 [cursor/plugins PR #1143](https://github.com/cursor/plugins/pull/1143) 的 Codex 生成包。该 PR 尚未合并。本次固定提交为 `1937543ca806041f6a9111aa97961e5bd274b7d6`，包版本为 `0.15.36`，来源目录为 `harness/pstack/codex`，许可为 MIT。保留包内的 LICENSE、代理说明和全部相对引用。
+使用 [cursor/plugins PR #1143](https://github.com/cursor/plugins/pull/1143) 的 Codex 生成包。该 PR 尚未合并。固定提交为 `1937543ca806041f6a9111aa97961e5bd274b7d6`，包版本为 `0.15.36`，来源目录为 `harness/pstack/codex`，许可为 MIT。保留包内的 LICENSE、代理说明和全部相对引用。
 
 在已有 Codex CLI 的终端运行：
 
@@ -15,9 +15,7 @@ codex plugin add pstack@cursor-plugins --json
 
 如果已经配置同名 marketplace，先核对其来源和固定提交，不覆盖其他项目正在使用的配置。安装命令可能默认在用户配置中启用插件；将用户配置中的 `pstack@cursor-plugins` 设为 `enabled = false`，由项目 `.codex/config.toml` 的 `enabled = true` 启用，避免改变其他项目的工作流。项目配置须在受信任的检出中加载。
 
-按维护者要求，在用户插件配置中停用 `ponytail@ponytail`。本项目配置也将其设为 `enabled = false`，不同时启用两套常驻开发工作流。配置更新不会删除当前会话已收到的旧指令；本会话遵守停用指令，新会话再核对技能目录。
-
-安装后新开会话；桌面客户端若未刷新插件列表，重新启动后核对。在仓库根目录运行 `codex debug prompt-input`，确认 pstack 的 `setup-pstack` 和项目的 `verify-pico-page` 出现在技能目录中，且没有 ponytail 技能。该命令可能包含本机路径和上下文，输出只放 `.local/`。上游大多数 skill 保持手动调用，因此没有出现在自动目录中不表示安装失败。
+安装后新开会话；桌面客户端若未刷新插件列表，重新启动后核对。在仓库根目录运行 `codex debug prompt-input`，确认 pstack 的 `setup-pstack` 和项目的 `verify-pico-page` 出现在技能目录中。该命令可能包含本机路径和上下文，输出只放 `.local/`。上游大多数 skill 保持手动调用，因此没有出现在自动目录中不表示安装失败。
 
 ## 执行任务
 
@@ -25,7 +23,7 @@ codex plugin add pstack@cursor-plugins --json
 
 没有模型配置表时，沿用上游 Codex 适配的 `inherit-parent` 默认值，不写入 Cursor 模型名称。同模型的独立代理不算跨模型验证。确需改变角色模型时使用 `setup-pstack`，不在 AGENTS 中重复维护模型清单。
 
-调用 [`verify-pico-page`](../../.agents/skills/verify-pico-page/SKILL.md) 选择已有检查与实际操作入口。先复现，再修复，使用相同输入验证结果；本次修改需要的检查和未覆盖范围分别交接。普通讨论、文案修正按原有范围处理，不为运行 pstack 扩大任务。
+调用 [`verify-pico-page`](../../.agents/skills/verify-pico-page/SKILL.md) 选择已有检查与实际操作入口。先复现，再修复，使用相同输入验证结果；已执行的检查和未覆盖范围分别写明。普通讨论、文案修正按原有范围处理，不为运行 pstack 扩大任务。
 
 本项目在当前检出分支工作；没有维护者明确要求时不创建 worktree。并行代理使用互不重叠的文件范围，集成和验收由主代理负责。pstack 的自主执行说明不扩大当前任务的推送、合并、部署或设备操作授权。物理设备和串口只能由一个执行者操作。
 

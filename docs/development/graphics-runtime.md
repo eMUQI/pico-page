@@ -28,7 +28,7 @@ FreeType 使用上游默认的 stdio 文件流，未改第三方源码。host �
 
 书内内容标签复用正文 face；测量与绘制使用同一字体，临时字号在调用结束时恢复，不修改单书排版或阅读锚点。单书覆盖和排版预览切换字体或字重时更新复用关系，恢复相同字体后释放独立 face，避免重复持有相同 FreeType 字体表；书库始终保持全局字体。没有新增任务、后台全书扫描或逐字字体回退。
 
-[原书模式](css-style-prototype.md#原生阅读接入试验)按行内计算样式度量字宽和字号，行框使用整行最大的上伸、下伸与样式行高。正文、命中区域和页数统计共用分页边界。粗体与斜体复用 FreeType 合成接口，位图键区分斜体，仍共用原字形缓存上限。
+[原书模式](original-layout.md#阅读行为)按行内计算样式度量字宽和字号，行框使用整行最大的上伸、下伸与样式行高。正文、命中区域和页数统计共用分页边界。粗体与斜体复用 FreeType 合成接口，位图键区分斜体，仍共用原字形缓存上限。
 
 ### 正文字重（2026-10-11）
 
@@ -96,6 +96,6 @@ fonttools 只用于维护生成步骤，普通构建不需要它。字体子集�
 
 ## 欢迎页文楷子集
 
-首次引导副标题使用 `fonts/PicoPageWelcome.ttf`，由 `tools/setup_fonts.py` 已固定 SHA-256 的 LXGWWenKai v1.520 生成，只保留「花一分钟，学会翻页和打开工具。」的字形。生成入口为 `python3 tools/setup_onboarding_font.py`，名称改为 Pico Page Welcome，保留原版权与 OFL 元数据，分发时保留 `LXGW-OFL.txt`。本批使用环境现有 fontTools 4.61.1，普通构建不依赖 fontTools。
+首次引导副标题使用 `fonts/PicoPageWelcome.ttf`，由 `tools/setup_fonts.py` 已固定 SHA-256 的 LXGWWenKai v1.520 生成，只保留「花一分钟，学会翻页和打开工具。」的字形。生成入口为 `python3 tools/setup_onboarding_font.py`，名称改为 Pico Page Welcome，保留原版权与 OFL 元数据，分发时保留 `LXGW-OFL.txt`。生成时使用 fontTools 4.61.1，普通构建不依赖 fontTools。
 
-更新 UI 子集时保留 `fallback_characters.txt` 全部旧字符，再合入 `app_onboarding.cpp`；本批仅补入缺失符号「≡」，「‹ ›」及中文原已覆盖。验证字体 cmap 包含所有引导文案和欢迎副标题；内置 UI 字库仍使用现有 Regular／合成粗体。新子集映射 Flash，不复制整个文件到 RAM；只在欢迎绘制期间打开临时 face，绘制后释放。
+更新 UI 子集时保留 `fallback_characters.txt` 全部旧字符，再合入 `app_onboarding.cpp`；并补入缺失符号「≡」，「‹ ›」及中文原已覆盖。验证字体 cmap 包含所有引导文案和欢迎副标题；内置 UI 字库仍使用现有 Regular／合成粗体。新子集映射 Flash，不复制整个文件到 RAM；只在欢迎绘制期间打开临时 face，绘制后释放。

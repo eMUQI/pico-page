@@ -42,7 +42,7 @@ GB18030 解码表的来源与复核（2026-10-07）：`firmware/components/reade
 
 ## 公开分发核对（2026-11-04）
 
-维护者在本次开源整理中确认，官方允许使用水波纹实现，并要求原样保留。此记录依据维护者提供的确认，未附新的上游公开声明；源码、调度、epdiy 补丁及对应测试均保持原样，保留原 Apache-2.0／LGPL-3.0-or-later 声明与来源。
+开源整理时确认官方允许使用水波纹实现，并要求原样保留。此记录依据该确认，未附新的上游公开声明；源码、调度、epdiy 补丁及对应测试均保持原样，保留原 Apache-2.0／LGPL-3.0-or-later 声明与来源。
 
 项目总许可证已明确为 GPL-3.0-or-later 及 ESP-IDF 二进制库链接许可；下方历史记录中的「项目许可证待定」只描述当时状态。第三方组件继续保留各自许可，不能用项目 GPL 替代。公开前仍需逐组件核对固件对应源码与安装资料、FreeType 附加声明、字体与 Unicode 数据声明，以及设计工具导出资料的适用条款；步骤见[公开发布检查](publication.md)。网站查词图已改用合成正文和合成词典条目，移除授权未确认的真实词典释义截图。未确认事项不写成已完成审核。
 
@@ -52,13 +52,13 @@ GB18030 解码表的来源与复核（2026-10-07）：`firmware/components/reade
 
 按文件标签可得出许可的包以 Apache-2.0 为主，另有 MIT、BSD-2-Clause、BSD-3-Clause、ISC、CC0-1.0／Unlicense 等宽松许可，`epdiy` 为 LGPL-3.0-or-later，mbedTLS 为 Apache-2.0 OR GPL-2.0-or-later 双许可。工具未给出结论的包已按许可文件逐个核对：`esp_wifi`、`esp_phy`、`esp_coex` 的二进制库为 Apache-2.0；lwIP 为 BSD-3-Clause；http_parser 为沿用 NGINX 条款的 MIT 式许可；`esp_libc` 的 picolibc／newlib 部分由多份 BSD 式许可组成，以 `COPYING.picolibc` 和 `COPYING.NEWLIB` 为准；micro-ecc 为 BSD-2-Clause，只进入 bootloader，因此只随全量镜像分发。`main`、`platform_contract` 等项目组件缺少 SPDX 文件头，按[许可说明](../../LICENSING.md)为 GPL-3.0-or-later。
 
-据此，二进制发布需要随附各宽松许可要求保留的版权与许可文本、Apache-2.0 组件的许可及其 NOTICE（如有）、FreeType 的 FTL 致谢和字体 OFL；LGPL 的 epdiy 由公开的完整对应源码与构建步骤满足重新链接要求。本次只完成清单与许可核对，尚未生成随固件发布的许可汇编，也未逐包确认 NOTICE 文件是否存在；发布前仍按[公开发布检查](publication.md)处理。
+据此，二进制发布需要随附各宽松许可要求保留的版权与许可文本、Apache-2.0 组件的许可及其 NOTICE（如有）、FreeType 的 FTL 致谢和字体 OFL；LGPL 的 epdiy 由公开的完整对应源码与构建步骤满足重新链接要求。目前只完成清单与许可核对，尚未生成随固件发布的许可汇编，也未逐包确认 NOTICE 文件是否存在；发布前仍按[公开发布检查](publication.md)处理。
 
 ## EPUB 与 KOSync 上游调研（2026-10-05）
 
 以下版本用于早期探针的来源对照。探针使用 Python 标准库，部分 MD5 依公开采样规则实现。该批未引入下表所列项目的应用代码。实际纳入工程的 Expat、miniz 以及独立链接 CREngine 的验证工具，以本页依赖表为准。
 
-| 来源 | 固定版本 | 本轮用途与许可证据 |
+| 来源 | 固定版本 | 用途与许可证据 |
 |---|---|---|
 | CrossPoint | `50823ffa125b437b4c9fe5882f326458780198da` | 阅读位置映射、章节缓存、EPUB 解析边界；根 [LICENSE](https://github.com/crosspoint-reader/crosspoint-reader/blob/50823ffa125b437b4c9fe5882f326458780198da/LICENSE) 为 MIT |
 | CrossPoint vendored Expat | 随上述 commit；文件头标注 `2.7.3+` | [xmlparse.c 文件头](https://github.com/crosspoint-reader/crosspoint-reader/blob/50823ffa125b437b4c9fe5882f326458780198da/lib/expat/xmlparse.c) 含独立 MIT 授权和版权名单 |
@@ -71,19 +71,19 @@ CrossPoint 的位置转换依赖其 EPUB、分页缓存、字体和 Arduino I/O�
 
 ## 2026-10-06 · 功能实现前的来源核对
 
-新增能力先核对乐鑫官方示例，再检查 GitHub 已有实现及其适配边界；实际采用前记录版本、源码、依赖和许可证。本轮没有新增第三方依赖或复制上游应用代码。
+新增能力先核对乐鑫官方示例，再检查 GitHub 已有实现及其适配边界；实际采用前记录版本、源码、依赖和许可证。该次调研没有新增第三方依赖或复制上游应用代码。
 
 - 文件操作：核对本机 ESP-IDF `fff9895c82d744c7237be8847347bdd1b07c6643`（v6.1）的 [SDMMC 示例](https://github.com/espressif/esp-idf/blob/v6.1/examples/storage/sd_card/sdmmc/main/sd_card_example_main.c)和 `components/fatfs/vfs/vfs_fat.c`。示例文件头为 Public Domain / CC0；示例通过 `stat`、`unlink`、`rename` 替换文件，VFS 的 `fsync` 调用 `f_sync`。它不提供本项目的进度主记录/备份恢复协议，因此沿用 FileStore 的比较、同步和回读提交机制。
-- 同步：重新查看 [KOReader KOSync 插件](https://github.com/koreader/koreader/blob/master/plugins/kosync.koplugin/main.lua)和 [官方同步服务器](https://github.com/koreader/koreader-sync-server/blob/master/README.md)。本机已有 KOReader 客户端源码，检查了位置接续、设备字段和时间戳判断路径。本轮只核对协议与行为，没有复制或链接其 AGPL 应用代码；此前固定提交与许可证见[上游调研](#epub-与-kosync-上游调研2026-10-05)。本项目仍要求明确选择远端位置或确认上传；API 未提供的时间和设备在线状态不作推断。
-- CrossPoint 的固定版本和耦合范围见同一节上游调研。本轮沿用现有精确 XPointer 映射，不因上游具备类似功能就引入整套 Arduino 阅读器或用百分比代替源位置。
+- 同步：重新查看 [KOReader KOSync 插件](https://github.com/koreader/koreader/blob/master/plugins/kosync.koplugin/main.lua)和 [官方同步服务器](https://github.com/koreader/koreader-sync-server/blob/master/README.md)。本机已有 KOReader 客户端源码，检查了位置接续、设备字段和时间戳判断路径。只核对协议与行为，没有复制或链接其 AGPL 应用代码；此前固定提交与许可证见[上游调研](#epub-与-kosync-上游调研2026-10-05)。本项目仍要求明确选择远端位置或确认上传；API 未提供的时间和设备在线状态不作推断。
+- CrossPoint 的固定版本和耦合范围见同一节上游调研。项目沿用现有精确 XPointer 映射，不因上游具备类似功能就引入整套 Arduino 阅读器或用百分比代替源位置。
 
 ## 2026-10-06 · 交互耗时修复前的来源核对
 
-针对 [开发状态](../development-status.md) 中「交互耗时排查」列出的问题，先查官方资料与已有实现。本轮只读源码和文档，没有复制代码、新增依赖或修改固件。
+针对交互耗时排查中的问题，先查官方资料与已有实现。调研只读源码和文档，没有复制代码、新增依赖或修改固件。
 
 | 来源 | 版本 | 许可证 | 查看范围 |
 |---|---|---|---|
-| [crosspoint-reader/crosspoint-reader](https://github.com/crosspoint-reader/crosspoint-reader) | `7394e40fa97f61007f61458ed8d94e0dd378c323` | MIT（顶层） | 与 CrossMux 同结构，本轮以 CrossMux 为准 |
+| [crosspoint-reader/crosspoint-reader](https://github.com/crosspoint-reader/crosspoint-reader) | `7394e40fa97f61007f61458ed8d94e0dd378c323` | MIT（顶层） | 与 CrossMux 同结构，以 CrossMux 为准 |
 | [0x1abin/crossmux](https://github.com/0x1abin/crossmux) | `1512e8e049f2b1a4efc7c004a5b1a93cbc5e3f9f` | MIT（顶层） | 封面缓存、章节分页缓存、加载提示、缓存目录、Read Pico 记录 |
 | [0x1abin/freeink-sdk](https://github.com/0x1abin/freeink-sdk) | `96de1be6ce08eb732909e6e8149af8f892b9a2c5` | MIT（顶层） | FreeType 字体后端的取字宽与 hinting 选项 |
 | [KOReader coverbrowser](https://github.com/koreader/koreader/blob/master/plugins/coverbrowser.koplugin/bookinfomanager.lua) | master，2026-10-06 查看 | AGPL-3.0，仅参考行为 | 封面缓存与失效判断 |
@@ -100,7 +100,7 @@ CrossPoint 的位置转换依赖其 EPUB、分页缓存、字体和 Arduino I/O�
 - TF 总线：CrossMux 记录 Read Pico 为 1-bit SDMMC、40 MHz。本项目实测顺序读约 3.0 MiB/s，属于该接法的正常范围，不作为优化对象。
 - JPEG：`esp_jpeg` 与本项目已有的 tjpgd 同源，同样只支持 1/2、1/4、1/8 缩放和基线 JPEG；更换组件不能解决 PNG 或渐进式 JPEG 的耗时。
 
-不采用：CrossMux 用路径哈希作为缓存键、把非活动 OTA 分区用作字体缓存、预处理字体格式。前者与本项目以内容摘要识别书籍的进度规则不同；后两者涉及分区和新文件格式，超出本轮范围。
+不采用：CrossMux 用路径哈希作为缓存键、把非活动 OTA 分区用作字体缓存、预处理字体格式。前者与本项目以内容摘要识别书籍的进度规则不同；后两者涉及分区和新文件格式，超出当时的范围。
 
 实现结果：封面缓存、状态行和页起点记录均为本项目自行实现，没有复制上述项目的代码。许可证义务没有变化。
 
@@ -119,7 +119,7 @@ CrossPoint 的位置转换依赖其 EPUB、分页缓存、字体和 Arduino I/O�
 
 ## 2026-10-06 · 全书页数与设置页的来源核对
 
-本轮只读源码和文档，没有复制代码或新增第三方依赖。
+调研只读源码和文档，没有复制代码或新增第三方依赖。
 
 | 来源 | 版本 | 许可证 | 查看范围 |
 |---|---|---|---|
@@ -151,7 +151,7 @@ CrossPoint 的位置转换依赖其 EPUB、分页缓存、字体和 Arduino I/O�
 
 ## 2026-10-10 · 左右轻扫规则参考（2026-10-11 完成复核）
 
-本批只借鉴规则，分类及派发代码独立实现，未复制第三方代码、未引入依赖。屏幕布局、默认按键与确认语义沿用 Pico Page。
+只借鉴规则，分类及派发代码独立实现，未复制第三方代码、未引入依赖。屏幕布局、默认按键与确认语义沿用 Pico Page。
 
 | 来源 | 版本与许可 | 参考范围与取舍 |
 |---|---|---|

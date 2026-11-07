@@ -60,7 +60,7 @@
 
 ## 4. Codex 项目指导
 
-OpenAI 官方：`https://developers.openai.com/codex/guides/agents-md/` 本次核查时重定向至 `https://learn.chatgpt.com/docs/agent-configuration/agents-md`。官方说明 Codex 在工作前读取 AGENTS.md，并按项目目录组合指导。因此根文件只放稳定约束和必读路径；详细规格按任务读取，不把全部历史聊天塞进指导。本包不修改全局 Codex 配置，也不声称已写入用户客户端的项目设置。
+OpenAI 官方：`https://developers.openai.com/codex/guides/agents-md/` 核查时（2026-10）重定向至 `https://learn.chatgpt.com/docs/agent-configuration/agents-md`。官方说明 Codex 在工作前读取 AGENTS.md，并按项目目录组合指导。因此根文件只放稳定约束和必读路径；详细规格按任务读取，不把全部历史聊天塞进指导。本包不修改全局 Codex 配置，也不声称已写入用户客户端的项目设置。
 
 ## 自定义休眠图片实现参考（2026-10-11）
 
@@ -68,23 +68,23 @@ OpenAI 官方：`https://developers.openai.com/codex/guides/agents-md/` 本次�
 
 ## 透明锁屏的内存与分段处理（2026-10-19）
 
-核对 CrossPoint 官方 `develop` 的完整提交 `ad971c8ac03c9765e3835b3b54ee56f0b0332abe`：[PNG 转换器](https://github.com/crosspoint-reader/crosspoint-reader/blob/ad971c8ac03c9765e3835b3b54ee56f0b0332abe/lib/Epub/Epub/converters/PngToFramebufferConverter.cpp) 按源行分配灰度／透明度缓冲，逐行写帧缓冲，普通图片缓存使用单行 band 顺序落盘；开启透明保持时不创建该缓存。[透明休眠路径](https://github.com/crosspoint-reader/crosspoint-reader/blob/ad971c8ac03c9765e3835b3b54ee56f0b0332abe/src/activities/boot_sleep/SleepActivity.cpp) 按灰阶平面重复解码，透明度使用 4×4 有序阈值决定像素覆盖。其低峰值以重复解码和不同透明度处理换取，不能直接替代本项目的连续透明度混合、16 级输出及热缓存免解码约定。项目根许可证为 MIT；本次只研究实现思路，未复制源码、替换解码器或新增依赖。
+核对 CrossPoint 官方 `develop` 的完整提交 `ad971c8ac03c9765e3835b3b54ee56f0b0332abe`：[PNG 转换器](https://github.com/crosspoint-reader/crosspoint-reader/blob/ad971c8ac03c9765e3835b3b54ee56f0b0332abe/lib/Epub/Epub/converters/PngToFramebufferConverter.cpp) 按源行分配灰度／透明度缓冲，逐行写帧缓冲，普通图片缓存使用单行 band 顺序落盘；开启透明保持时不创建该缓存。[透明休眠路径](https://github.com/crosspoint-reader/crosspoint-reader/blob/ad971c8ac03c9765e3835b3b54ee56f0b0332abe/src/activities/boot_sleep/SleepActivity.cpp) 按灰阶平面重复解码，透明度使用 4×4 有序阈值决定像素覆盖。其低峰值以重复解码和不同透明度处理换取，不能直接替代本项目的连续透明度混合、16 级输出及热缓存免解码约定。项目根许可证为 MIT；只研究实现思路，未复制源码、替换解码器或新增依赖。
 
-KOReader 的 [移植说明](https://github.com/koreader/koreader/blob/master/doc/Porting.md) 建议中间格式接近输出格式；[BlitBuffer](https://github.com/koreader/koreader-base/blob/master/ffi/blitbuffer.lua) 同时支持 4 位、8 位灰度和带透明度的 `Color8A`／`TYPE_BB8A`。带透明度的中间表示有用途，但不是整屏复制和重复拼接的理由；其 Linux 平台、缓冲管理和内存预算不能直接当作 ESP32-S3 的实测依据。本次未复制 KOReader 代码或引入其 GPL／AGPL 组件，未验证其全部图片路径。
+KOReader 的 [移植说明](https://github.com/koreader/koreader/blob/master/doc/Porting.md) 建议中间格式接近输出格式；[BlitBuffer](https://github.com/koreader/koreader-base/blob/master/ffi/blitbuffer.lua) 同时支持 4 位、8 位灰度和带透明度的 `Color8A`／`TYPE_BB8A`。带透明度的中间表示有用途，但不是整屏复制和重复拼接的理由；其 Linux 平台、缓冲管理和内存预算不能直接当作 ESP32-S3 的实测依据。未复制 KOReader 代码或引入其 GPL／AGPL 组件，未验证其全部图片路径。
 
-本批先借鉴「分段写入，避免整图拼接」消除已经复现的缓存提交副本，保留当前 PNG 解码、透明精度、缓存格式及取消所有权。后续本地实现已将热缓存改为 1,368 字节行缓冲：先完整校验，再从同一打开文件逐行读取并直接合成，保留连续 alpha 与现有混合公式，第二遍失败或取消丢弃独占输出。截至该批记录，冷 PNG 解码直接合成及仅存有效图层边界仍为候选；涉及缩放、Adam7 渐进覆盖、透明边缘、缓存校验与取消边界，需要另行验证，不以外部固件的代码或示例替代真机验收。
+先借鉴「分段写入，避免整图拼接」消除已经复现的缓存提交副本，保留当前 PNG 解码、透明精度、缓存格式及取消所有权。后续本地实现已将热缓存改为 1,368 字节行缓冲：先完整校验，再从同一打开文件逐行读取并直接合成，保留连续 alpha 与现有混合公式，第二遍失败或取消丢弃独占输出。截至该批记录，冷 PNG 解码直接合成及仅存有效图层边界仍为候选；涉及缩放、Adam7 渐进覆盖、透明边缘、缓存校验与取消边界，需要另行验证，不以外部固件的代码或示例替代真机验收。
 
 ## 透明锁屏冷解码补充（2026-10-20）
 
-本轮检查 CrossPoint `ad24aea85c1f9b1a4b2b2e0719ec0dd39020a6b4`，相关 PNG 与休眠文件同上述已核对版本一致；行缓冲值得采用，但重复解码、阈值透明度和拒绝交错 PNG 不符合本项目既有行为。KOReader 的 [screensaver](https://github.com/koreader/koreader/blob/master/frontend/ui/screensaver.lua)、[ImageWidget](https://github.com/koreader/koreader/blob/master/frontend/ui/widget/imagewidget.lua) 与 [RenderImage](https://github.com/koreader/koreader/blob/master/frontend/ui/renderimage.lua) 支持透明图片及连续 Alpha，但常规路径仍读取完整编码文件和图像缓冲，不能据此推断 ESP32-S3 上的峰值更低。
+另检查 CrossPoint `ad24aea85c1f9b1a4b2b2e0719ec0dd39020a6b4`，相关 PNG 与休眠文件同上述已核对版本一致；行缓冲值得采用，但重复解码、阈值透明度和拒绝交错 PNG 不符合本项目既有行为。KOReader 的 [screensaver](https://github.com/koreader/koreader/blob/master/frontend/ui/screensaver.lua)、[ImageWidget](https://github.com/koreader/koreader/blob/master/frontend/ui/widget/imagewidget.lua) 与 [RenderImage](https://github.com/koreader/koreader/blob/master/frontend/ui/renderimage.lua) 支持透明图片及连续 Alpha，但常规路径仍读取完整编码文件和图像缓冲，不能据此推断 ESP32-S3 上的峰值更低。
 
 用户指定的 [read-pico-reader](https://github.com/wegooo-cell/read-pico-reader) 核对至 `2087afda444b17fb320562fc31ab9424b661e946`。[book_cover.c](https://github.com/wegooo-cell/read-pico-reader/blob/2087afda444b17fb320562fc31ab9424b661e946/main/book/book_cover.c) 使用 libpng 从文件读行、双行插值，拒绝交错 PNG；[book_lock_bookmark.c](https://github.com/wegooo-cell/read-pico-reader/blob/2087afda444b17fb320562fc31ab9424b661e946/main/book/book_lock_bookmark.c) 仍分配适配尺寸的灰度和 Alpha 整层，并直接叠加当前帧，另含自动去白及阴影。它减少输入缓冲但没有消除整层峰值；普通壁纸缓存与透明书封路径不同，不能把普通壁纸命中当作透明锁屏免解码。根许可为分文件混合规则，前者标注 Apache-2.0，后者标注 `LicenseRef-Kiikoread-Personal-Study-1.0`；本项目未复制其实现。
 
-本次采用文件分块读取的通用思路，继续使用已有 pngle，独立实现最终采样直接合成与行缓冲临时缓存。保留现有精度、Adam7、取消恢复、画布所有权和单张缓存，不引入 libpng、新任务或外部代码。取舍是以有界 TF 随机读写承接交错行重访，须测量慢卡冷路径；内存预算不再随编码文件大小或整屏透明层增加。热缓存仍免解码，缓存失败仍能显示本次输出。来源代码观察、host 像素验证和真机耗时分别记录，不据其他固件的实现宣称其稳定性更高。
+采用文件分块读取的通用思路，继续使用已有 pngle，独立实现最终采样直接合成与行缓冲临时缓存。保留现有精度、Adam7、取消恢复、画布所有权和单张缓存，不引入 libpng、新任务或外部代码。取舍是以有界 TF 随机读写承接交错行重访，须测量慢卡冷路径；内存预算不再随编码文件大小或整屏透明层增加。热缓存仍免解码，缓存失败仍能显示本次输出。来源代码观察、host 像素验证和真机耗时分别记录，不据其他固件的实现宣称其稳定性更高。
 
 同机压力测试再次复现内容 worker 在 EPUB 解压／XML 解析期间触发 IDLE0。核对乐鑫文档 MCP 和本机 IDF v6.1 的 [Task Priorities](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/api-guides/performance/speed.html#task-priorities)：持续计算任务需要阻塞让步，单纯 `taskYIELD()` 不保证低优先级空闲任务得到运行。修正现有解析块及分页页边界，不增加任务、不关闭或延长看门狗，也不主动代替空闲任务喂狗。
 
 
 ## TXT 目录识别（2026-10-31）
 
-核对已有独立研究检出 KOReader CREngine `f4a8be93255a439db4777d00f0bc53316acabebd` 的 `crengine/src/lvxml.cpp`：`DetectHeadingLevelByText` 使用卷、部、章的前缀与数字模式，TXT 导入另有短行长度判定。该引擎依赖完整 DOM／文本导入，不能直接作为 ESP32-S3 原生分段阅读的目录实现；源码按 GPL 分文件许可，本批只参考模式识别思路，没有复制实现或增加依赖。Pico Page 独立实现中文与英文短标题识别，在既有编码／身份扫描中收集分段标量锚点，避免额外整书读取。调度依据乐鑫文档 MCP 的 [任务看门狗说明](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/api-reference/system/wdts.html#task-watchdog-timer-twdt)及本机 IDF v6.1 FreeRTOS 接口：计算期间阻塞让出，保留 Idle 运行，不主动喂狗或改变看门狗配置。
+核对已有独立研究检出 KOReader CREngine `f4a8be93255a439db4777d00f0bc53316acabebd` 的 `crengine/src/lvxml.cpp`：`DetectHeadingLevelByText` 使用卷、部、章的前缀与数字模式，TXT 导入另有短行长度判定。该引擎依赖完整 DOM／文本导入，不能直接作为 ESP32-S3 原生分段阅读的目录实现；源码按 GPL 分文件许可，只参考模式识别思路，没有复制实现或增加依赖。Pico Page 独立实现中文与英文短标题识别，在既有编码／身份扫描中收集分段标量锚点，避免额外整书读取。调度依据乐鑫文档 MCP 的 [任务看门狗说明](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32s3/api-reference/system/wdts.html#task-watchdog-timer-twdt)及本机 IDF v6.1 FreeRTOS 接口：计算期间阻塞让出，保留 Idle 运行，不主动喂狗或改变看门狗配置。

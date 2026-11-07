@@ -98,7 +98,7 @@ build/host/chapter_stream_probe stream build/host/document-fixtures/stream-event
 
 显示补丁验证使用 `cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug -DPICO_PAGE_TEST_BSP_WAVEFORM=ON`；sanitizer 配置同样开启该选项。配置会调用 `tools/setup_bsp.sh` 准备并校验固定 BSP，首次需要 GitHub 网络；准备失败直接停止，不能以跳过代替通过。CI 的 Debug 与 sanitizer 均启用。
 
-`footer_waveform` 编译实际 BSP 初始化及裁剪代码，遍历全部 256 种旧/新灰阶组合，核对默认 GL16 的第 33 相、完整 GL16 的第 45 相白→白维护驱动（从零计）、Gray8 无新增脉冲、变化像素序列及 Overlay 的非白对角保持与白底维护。`changed_pixels_waveform` 穷举掩码位序、边界、非法几何及禁用状态；`core` 验证 FullClean、ManualRefresh、失效基准及 Overlay 的实际帧路由。分配失败仍由既有驱动退回未掩码波形，本批不修改分配或恢复流程；真机低内存、闪烁、灰底和恢复效果按 DP08／DP10 验收。
+`footer_waveform` 编译实际 BSP 初始化及裁剪代码，遍历全部 256 种旧/新灰阶组合，核对默认 GL16 的第 33 相、完整 GL16 的第 45 相白→白维护驱动（从零计）、Gray8 无新增脉冲、变化像素序列及 Overlay 的非白对角保持与白底维护。`changed_pixels_waveform` 穷举掩码位序、边界、非法几何及禁用状态；`core` 验证 FullClean、ManualRefresh、失效基准及 Overlay 的实际帧路由。分配失败仍由既有驱动退回未掩码波形，分配与恢复流程沿用原实现；真机低内存、闪烁、灰底和恢复效果按 DP08／DP10 验收。
 
 ## CSS 独立原型
 
@@ -112,4 +112,4 @@ python3 tools/survey_epub_css.py /path/to/private-library .local/css-survey-new 
   --probe build/host/css_probe --bench-header .local/css-survey-new-inputs.h
 ```
 
-调研输出目录必须尚不存在，脚本不覆盖旧证据；书籍只读，CSS、数据头和 JSON 必须留在忽略目录。`--probe` 既检查所有 CSS 和提取的行内声明，也检查每个 HTML/XHTML 的关联样式集合。原始统计不提交，公开结果只给匿名汇总。目标程序及构建方法见[测量程序](../tools/target_bench/css/README.md)，支持和证据边界见[候选说明](../docs/development/css-style-prototype.md)。
+调研输出目录必须尚不存在，脚本不覆盖旧证据；书籍只读，CSS、数据头和 JSON 必须留在忽略目录。`--probe` 既检查所有 CSS 和提取的行内声明，也检查每个 HTML/XHTML 的关联样式集合。原始统计不提交，公开结果只给匿名汇总。目标程序及构建方法见[测量程序](../tools/target_bench/css/README.md)，支持和证据边界见[候选说明](../docs/development/original-layout.md)。
