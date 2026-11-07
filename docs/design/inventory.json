@@ -3,7 +3,7 @@
   "original_files": 49,
   "declared_states_count": 69,
   "png_count": 36,
-  "html_count": 5,
+  "html_count": 0,
   "pngs": [
     {
       "state": "S02-1",
@@ -257,5 +257,13 @@
     "S12-5",
     "S12-6"
   ],
-  "note": "Original user-provided files preserved byte-for-byte; no missing screenshots generated. Missing PNG does not mean no HTML/text reference."
+  "note": "Original user-provided files preserved byte-for-byte except the design-tool HTML exports and support.js, removed on 2026-11-07 by maintainer decision; no missing screenshots generated. States without PNG are described in screens.md.",
+  "removed_files": [
+    "docs/design/original/reference/Read Pico 书库.dc.html",
+    "docs/design/original/reference/Read Pico 休眠与提示.dc.html",
+    "docs/design/original/reference/Read Pico 设计规范.dc.html",
+    "docs/design/original/reference/Read Pico 连接与设置.dc.html",
+    "docs/design/original/reference/Read Pico 阅读体验.dc.html",
+    "docs/design/original/reference/support.js"
+  ]
 }
