@@ -1,0 +1,354 @@
+---
+import Site from "../layouts/Site.astro";
+import { firmware } from "../firmware.js";
+import copy from "../copy/docs.json";
+import { defaultLocale, localizeHref, translator } from "../locales.js";
+
+const { locale = defaultLocale } = Astro.props;
+const t = translator(locale, copy);
+
+const sections = [
+  ["start", t("开始使用")],
+  ["controls", t("按键与触摸")],
+  ["typography", t("排版与刷新")],
+  ["bookmarks", t("书签与页脚")],
+  ["dictionaries", t("离线词典")],
+  ["transfer", t("传书")],
+  ["files", t("TF 卡上的文件")],
+  ["sync", t("与 KOReader 接续位置")],
+  ["power", t("休眠、关机与锁屏")],
+  ["update", t("固件更新")],
+  ["limits", t("限制")],
+  ["faq", t("常见问题")],
+];
+---
+<Site locale={locale} title={t("使用文档 · Pico Page")} description={t("Pico Page 的使用文档：按键与触摸、排版与刷新、书签与页脚、USB 和 Wi‑Fi 传书、文件备份、与 KOReader 接续阅读位置、休眠与固件更新。")} current="docs">
+  <div class="docs">
+    <nav class="toc" aria-label={t("文档目录")}>
+      <p class="eyebrow">{t("使用文档")}</p>
+      <ol>
+        {sections.map(([id, title]) => <li><a href={`#${id}`}>{title}</a></li>)}
+      </ol>
+    </nav>
+    <article>
+      <h1>{t("使用文档")}</h1>
+      <p class="lead">{t("这里说明 Pico Page 在 Read Pico 上的用法。同样的要点也在设备的「设置 → 使用说明」中，无需联网即可查看。")}</p>
+      {!firmware && <p class="notice">{t("网页安装尚未开放，项目仍在开发中。本文档按开发中的固件编写，内容可能调整。")}</p>}
+
+      <h2 id="start">{t("开始使用")}</h2>
+      <ol>
+        <li>{t("安装固件。步骤见")}<a href={localizeHref(locale, "/install/")}>{t("安装页")}</a>{t("。")}</li>
+        <li>{t("准备一张 FAT 文件系统的 TF 卡，把 EPUB、TXT 放进")} <code>Books/</code>{t("，把中文字体和它的许可证放进")} <code>Fonts/</code>{t("。字体可在")}<a href={localizeHref(locale, "/#fonts")}>{t("首页")}</a>{t("下载。")}</li>
+        <li>{t("把 TF 卡插入设备并重启：长按电源键，在菜单中选择「重启」。设备不支持热插拔，取出或插入 TF 卡后都需要重启。")}</li>
+        <li>{t("在书库点按一本书开始阅读，点按文件夹查看其中的书。")}</li>
+        <li>{t("轻点正文中部打开阅读工具，在「排版」中选择放入的字体。")}</li>
+      </ol>
+      <p>{t("再次打开同一本书时，设备恢复已保存的位置。书库顶部的「继续阅读」打开上次阅读的书。")}</p>
+
+      <h2 id="controls">{t("按键与触摸")}</h2>
+      <p>{t("以下是默认映射。")}</p>
+      <table>
+        <thead><tr><th>{t("操作")}</th><th>{t("结果")}</th></tr></thead>
+        <tbody>
+          <tr><td>{t("K1，或点正文左侧")}</td><td>{t("上一页")}</td></tr>
+          <tr><td>{t("K3，或点正文右侧")}</td><td>{t("下一页")}</td></tr>
+          <tr><td>K2</td><td>{t("立即全刷当前画面")}</td></tr>
+          <tr><td>{t("点正文中部")}</td><td>{t("打开阅读工具")}</td></tr>
+          <tr><td>{t("在正文左右轻扫")}</td><td>{t("翻页")}</td></tr>
+          <tr><td>{t("长按书库中的一本书")}</td><td>{t("查看书籍详情")}</td></tr>
+          <tr><td>{t("长按正文中的图片")}</td><td>{t("放大查看图片")}</td></tr>
+          <tr><td>{t("短按电源键")}</td><td>{t("休眠")}</td></tr>
+          <tr><td>{t("长按电源键")}</td><td>{t("打开关机、重启菜单")}</td></tr>
+        </tbody>
+      </table>
+      <ul>
+        <li>{t("K2 在所有可交互页面都只全刷当前画面。它不翻页、不关闭面板、不确认或取消操作，也不退出传输。关闭、取消和确认使用屏幕上的控件。")}</li>
+        <li>{t("在书库、目录、书签和使用说明中，K1、K3 和左右轻扫用于翻屏。工具和排版面板打开时，K1、K3 不翻动背后的正文。")}</li>
+        <li>{t("正文页脚两侧可分别切换信息或隐藏，隐藏后点原位置恢复。具体顺序见")}<a href="#bookmarks">{t("书签与页脚")}</a>{t("。")}</li>
+      </ul>
+
+      <h2 id="typography">{t("排版与刷新")}</h2>
+      <p>{t("轻点正文中部，选择「排版」。可以调整字体、字重、字号、行距、页边距、段距和首行缩进。调整时正文先显示预览，此时还没有保存：")}</p>
+      <ul>
+        <li>{t("点「应用到此书」，设置只用于这本书。")}</li>
+        <li>{t("点「设为阅读默认」，设置用于所有没有单独设置的书。")}</li>
+        <li>{t("点「放弃修改」，恢复原来的排版。")}</li>
+      </ul>
+      <p>{t("刷新模式有清晰、均衡、快速三档，在阅读工具的「刷新模式」或「设置 → 阅读」中选择。清晰模式每页全刷；均衡和快速可以调整自动全刷的间隔。画面有残影时，随时按 K2 全刷。")}</p>
+
+      <h2 id="bookmarks">{t("书签与页脚")}</h2>
+      <ol>
+        <li>{t("轻点正文中部打开阅读工具，点右上角「加书签」标记当前页。当前页已有书签时，点「删书签」删除。")}</li>
+        <li>{t("在阅读工具中打开「目录」，切换到「书签」，点一条记录跳转。")}</li>
+      </ol>
+      <p>{t("每本书最多保存 100 个书签。书签只保存在本机，不随 KOReader 位置同步；移动或备份书籍时，也要保留同名的")} <code>.picopage/</code> {t("目录。")}</p>
+      <ul>
+        <li>{t("点正文页脚左侧，依次切换页码、百分比、章节序号、章节名、不显示。")}</li>
+        <li>{t("点正文页脚右侧，依次切换电量、时钟、不显示。")}</li>
+        <li>{t("两侧互不影响。隐藏后点原位置恢复；时钟的校准方法见")}<a href="#wifi">{t("Wi‑Fi 设置与时间")}</a>{t("。")}</li>
+      </ul>
+
+      <h2 id="dictionaries">{t("离线词典")}</h2>
+      <p>{t("0.5.0 起支持 StarDict 离线词典，较早版本需更新后使用。本站不提供词典文件；已测试的词典见")}<a href={localizeHref(locale, "/#dictionaries")}>{t("首页词典区")}</a>{t("，也可以使用自己的 StarDict 词典。")}</p>
+      <ol>
+        <li>{t("在电脑上解压词典外层的 ZIP、")}<code>.tar.bz2</code> {t("等压缩包。保留内部的")} <code>.dict.dz</code> {t("文件，无需继续解压。")}</li>
+        <li>{t("用 USB 文件传输或读卡器，将每套词典的整个文件夹复制到 TF 卡根目录的")} <code>Dictionaries/</code> {t("中。Wi‑Fi 传书不支持上传词典。")}</li>
+        <li>{t("退出 USB 文件传输或把 TF 卡插回设备，让设备重新读取。打开「设置 → 阅读 → 离线词典」，启用需要的词典，可按使用习惯调整顺序。列表中没有时，点「重新扫描」。")}</li>
+      </ol>
+      <p>{t("每套词典单独一个文件夹，其中应有同名的")} <code>.ifo</code>{t("、")}<code>.idx</code> {t("和")} <code>.dict</code> {t("或")} <code>.dict.dz</code>{t("；包内如有")} <code>.syn</code> {t("等附加文件，也要一并保留。最多识别 32 套词典，不显示释义中的图片和音频。")}<code>.idx</code> {t("超过 64 MiB 或词条数超过 2,097,152 的词典无法使用，查词时会提示超出资源限制。")}</p>
+      <pre><code>{t("Dictionaries/\n└─ 我的词典/\n   ├─ dictionary.ifo\n   ├─ dictionary.idx\n   └─ dictionary.dict.dz")}</code></pre>
+      <p>{t("在正文中长按文字并拖动选词，松手后查询。查词面板可调整选区、切换词典、翻阅释义和展开显示；关闭后继续阅读。首次使用或清理缓存后可能等待较长时间，可关闭面板取消，稍后重试。")}</p>
+
+      <h2 id="transfer">{t("传书")}</h2>
+      <p>{t("除了把 TF 卡取出接到电脑，还有三种不拔卡的方式。USB 文件传输可以管理 TF 卡上的所有文件。Wi‑Fi 传书把 EPUB，以及 UTF-8 或 GB18030 编码的 TXT 上传到")} <code>Books/</code>{t("。固件 0.2.0-beta.3 起，同一页面还能把 TTF、OTF 字体上传到")} <code>Fonts/</code>{t("，把 PNG、JPEG 锁屏图片上传到")} <code>LockScreens/</code>{t("；更早的版本只能传书。字体的许可证要用 USB 文件传输或读卡器放入。")}</p>
+
+      <h3>{t("USB 文件传输")}</h3>
+      <ol>
+        <li>{t("用 USB 线连接设备和电脑，在设备上打开「设置 → 网络与传输」，点「开启 USB 传输」。设备先保存阅读位置，再把 TF 卡交给电脑。")}</li>
+        <li>{t("等待电脑把 TF 卡识别为可移动磁盘，然后管理文件。")}</li>
+        <li>{t("在电脑上安全弹出 TF 卡，等待弹出完成。")}</li>
+        <li>{t("在设备上选择退出并确认重启。设备重新读取 TF 卡上的配置和书库。")}</li>
+      </ol>
+      <p>{t("传输期间设备暂停阅读、同步和自动休眠。电脑还没有完成安全弹出时，不要拔线或重启设备，否则文件可能损坏。")}</p>
+      <p>{t("USB 文件传输期间不能使用原串口自动烧录固件。需要重新安装时，先完成上述安全退出步骤，再到")}<a href={localizeHref(locale, "/install/")}>{t("安装页")}</a>{t("连接设备。")}</p>
+
+      <h3 id="wifi">{t("Wi‑Fi 设置与时间")}</h3>
+      <p>{t("在「设置 → 网络与传输 → Wi‑Fi 设置」中打开 Wi‑Fi，点「添加网络」，从附近的网络中选择，用屏幕键盘输入密码。连接成功后才保存。设备只支持 2.4 GHz 网络，最多保存 5 个。")}</p>
+      <p>{t("Wi‑Fi 开启不代表已经连接。同步和传书按需连接，用完断开；连接方式默认自动选择附近信号最强的已保存网络，也可以指定网络。点「立即连接」后保持在线，直到手动断开或休眠。")}</p>
+      <p>{t("Wi‑Fi 页底部显示时间，时区固定为 UTC+8。联网时自动获取网络时间，也可点时间区域的「校准」主动校时；校时需要已保存的网络能够访问互联网。显示「尚未校准」时，不能把 Wi‑Fi 已连接当作校时成功。")}</p>
+
+      <h3>{t("经设备热点传书")}</h3>
+      <p>{t("不需要路由器。设备热点仅提供本地传输，不提供互联网连接。")}</p>
+      <ol>
+        <li>{t("在设备上打开「设置 → 网络与传输」。没有保存过 Wi‑Fi 时点「Wi‑Fi 传书」，保存过时点「经设备热点传书」。")}</li>
+        <li>{t("用手机扫描屏幕上的热点二维码，或在手机、电脑的 Wi‑Fi 设置中连接屏幕显示的热点并输入密码。iPhone 出现无互联网连接提示时，选择「不连接互联网使用」。")}</li>
+        <li>{t("保持连接设备热点，在 Safari 等浏览器中打开")} <code>http://192.168.4.1</code>{t("，选择一个或多个文件。选择后立即开始上传，设备按扩展名把文件依次保存到对应的文件夹。")}</li>
+        <li>{t("浏览器逐个显示结果，设备屏幕显示已保存的数量。")}</li>
+        <li>{t("在设备上点「结束传书」。设备关闭热点并重新扫描书库和字体列表，不需要重启。新字体在「排版」中选择。")}</li>
+      </ol>
+
+      <h3>{t("经已保存的 Wi‑Fi 传书")}</h3>
+      <p>{t("先按")}<a href="#wifi">{t("Wi‑Fi 设置")}</a>{t("添加网络，再让设备和手机或电脑连接同一个网络。该网络能访问互联网时，传书期间仍可上网。")}</p>
+      <ol>
+        <li>{t("在设备上打开「设置 → 网络与传输」，点「经已保存的 Wi‑Fi 传书」。")}</li>
+        <li>{t("确认手机或电脑连着屏幕上写明的网络，扫描二维码，或在浏览器输入屏幕上的完整地址。地址末尾的字母和数字每次随机生成，只输入 IP 地址打不开传书页。")}</li>
+        <li>{t("之后的上传和结束步骤与经设备热点传书相同。")}</li>
+      </ol>
+      <p>{t("同一网络中的其他设备只要知道完整地址，也能打开传书页。传完后请及时结束传书。")}</p>
+
+      <h3>{t("Wi‑Fi 传书的限制")}</h3>
+      <ul>
+        <li>{t("书籍最大 64 MiB，字体最大 32 MiB，锁屏图片最大 2 MiB、单边 4096 像素、总计 8 百万像素。不提供下载、删除、覆盖和断点续传。")}</li>
+        <li><code>LockScreens/</code> {t("最多 256 张图片，已满时新图片不会上传。")}</li>
+        <li>{t("同名文件不覆盖。需要导入另一个版本时，先在电脑上改名。")}</li>
+        <li>{t("同名、格式不支持、超过大小或空的文件标记为「未上传」，设备跳过这个文件，继续下一个。")}</li>
+        <li>{t("网络中断或停止上传后，当前这个文件可能已经保存。点「重试」核对：已经保存时会提示已有同名文件。")}</li>
+        <li>{t("传书期间设备暂停阅读、同步和自动休眠。")}</li>
+      </ul>
+
+      <h2 id="files">{t("TF 卡上的文件")}</h2>
+      <pre>{t("Books/                     EPUB、TXT，可以建子文件夹\nFonts/                     字体（TTF、OTF）和它们的许可证\nLockScreens/               锁屏图片（PNG、JPEG），可选\nPicoPage/settings.toml     阅读配置\nPicoPage/network.toml      Wi‑Fi 配置，含密码\nPicoPage/sync.toml         KOReader 同步账户，含凭据")}</pre>
+      <ul>
+        <li>{t("书籍、阅读进度和设置都是 TF 卡上的普通文件，可以在电脑上查看和备份。")}</li>
+        <li>{t("每本书的进度和单书设置保存在原书旁边、以完整文件名加")} <code>.picopage</code> {t("命名的目录里，例如")} <code>{t("书名.epub.picopage/")}</code>{t("。移动书籍时把这个目录一起移动，进度和设置才会跟随。")}</li>
+        <li>{t("完整备份应同时保留原书、同名的")} <code>.picopage/</code> {t("目录和")} <code>PicoPage/</code>{t("。")} <code>PicoPage/data/</code> {t("保存上次打开、最近阅读和锁屏轮播记录，不能当作缓存删除。")}</li>
+        <li><code>PicoPage/cache/</code> {t("是可重建缓存。清理缓存请在「设置 → 存储」使用「清理全部缓存」，它不会删除原书、阅读进度或设置，不要删除整个")} <code>PicoPage/</code> {t("目录代替清理缓存。")}</li>
+        <li><code>network.toml</code> {t("中的 Wi‑Fi 密码和")} <code>sync.toml</code> {t("中的同步账户密钥以明文保存；密钥可用于访问同步账户。备份请妥善保管，分享 TF 卡内容时不要包含这两个文件。")}</li>
+        <li>{t("TF 卡上没有可用字体时，正文使用内置字体。内置字体只包含 3,500 个常用汉字，其余字符显示为方框。放入新字体后重新启动设备，再到「排版」中选择。")}</li>
+      </ul>
+
+      <h2 id="sync">{t("与 KOReader 接续位置")}</h2>
+      <p>{t("设备使用 KOReader 的进度同步服务，与 KOReader 互相接续同一本 EPUB 的阅读位置。同步由你手动发起：设备不会自动跳转，也不会自动上传。")}</p>
+      <p>{t("前置条件：两端使用内容完全相同的原始 EPUB，并使用同一同步服务器和同一账户。账户在「设置 → KOReader 同步」中填写，验证通过后才保存；自建服务填写完整的 HTTPS 地址。使用同步需要先添加 Wi‑Fi。")}</p>
+      <ol>
+        <li>{t("打开这本书，轻点正文中部，选择「同步」。")}</li>
+        <li>{t("点「检查远端位置」。设备只查询，不跳转，也不上传。")}</li>
+        <li>{t("两端位置不同时，点「留在这里」或「跳到这里」。")}</li>
+        <li>{t("要用本机位置更新远端，点「上传本机位置…」，在确认页核对两端位置后上传。")}</li>
+      </ol>
+      <ul>
+        <li>{t("KOReader 端也应按内容匹配文档，不使用按文件名匹配的模式。两端排版不同，页码也不同，这是正常的。")}</li>
+        <li>{t("位置兼容还取决于 KOReader 为这本书使用的 DOM 版本。目前支持")} <code>20240114</code> {t("和")} <code>20260812</code>{t("，TF 卡")} <code>PicoPage/sync.toml</code> {t("的")} <code>dom_version</code> {t("必须与之相同；其他版本不在当前支持范围内。")}</li>
+        <li>{t("设备只在能精确定位远端位置时提供跳转，不按百分比推测。")}</li>
+        <li>{t("取消只能停止还没有发出的请求。已经发出的上传，服务器仍可能收到；结果不确定时，先重新检查远端位置。")}</li>
+        <li>{t("TXT 只保存本机进度，不支持接续。")}</li>
+      </ul>
+
+      <h2 id="power">{t("休眠、关机与锁屏")}</h2>
+      <ul>
+        <li>{t("短按电源键休眠，再按电源键唤醒。K1、K2、K3 不能唤醒设备。")}</li>
+        <li>{t("0.2.0-beta.4 起，准备休眠期间仅再短按电源键取消，触摸和 K1、K2、K3 均忽略，K2 不全刷；长按电源键仍请求电源菜单。此规则适用于所有休眠画面。")}</li>
+        <li>{t("自动休眠时间在「设置 → 电源与休眠」中调整。")}</li>
+        <li>{t("长按电源键打开关机、重启菜单。设备先保存阅读进度，再关机或重启。")}</li>
+        <li>{t("休眠画面可选书籍封面、保留正文、简洁屏保或自定义图片，选好后点「保存设置」。书没有封面时显示书名与作者。")}</li>
+      </ul>
+      <p>{t("使用自定义图片：把 PNG 或 JPEG 放进 TF 卡根目录的")} <code>LockScreens/</code>{t("，在「设置 → 电源与休眠」选「自定义图片」，再在「选择图片 / 轮播」中固定一张或选择轮播，最后点「保存设置」。0.2.0-beta.3 起，休眠时图片尚未准备好会等待转换；取消规则见上文。轮播会跳过损坏或超限的图片，确实没有可用图片或准备失败时才显示简洁屏保，唤醒后只在原页面页脚提示结果，不打断阅读。更早的固件请在保存设置后让设备空闲片刻，未准备好时会直接使用简洁屏保。")}</p>
+      <p>{t("图片文件不超过 2 MiB，单边不超过 4096 像素，总像素不超过 800 万。建议直接使用 684 × 1216 的图片。其他尺寸会等比缩放后居中显示，不裁切，空白处填白。可用的图片在")}<a href={localizeHref(locale, "/#lockscreens")}>{t("首页")}</a>{t("下载。")}</p>
+
+      <h2 id="update">{t("固件更新")}</h2>
+      <p>{t("固件仍处于测试阶段，功能还可能调整。更新前建议按")}<a href="#files">{t("文件备份说明")}</a>{t("保留 TF 卡上的书籍、进度和设置。请只从本站安装或更新固件；设备不能验证固件发布者的签名。")}</p>
+      {firmware?.requiresLayoutMigration && <p>{t("Pico Page 0.6.2 及更早的版本使用旧分区布局。要更新到新布局，请用电脑打开")}<a href={localizeHref(locale, "/install/")}>{t("安装页")}</a>{t("完整重装一次。旧设备可能仍显示「已是最新版本」。重装后可继续在设备上联网更新。")}</p>}
+      <ol>
+        <li>{t("在「设置 → 网络与传输 → Wi‑Fi 设置」中保存可访问互联网的网络，并打开 Wi‑Fi 开关。")}</li>
+        <li>{t("结束正在进行的同步、传书或书籍加载。确认设备正在充电，或电量不低于 20%；下载与重启安装期间保持供电。")}</li>
+        <li>{t("打开「设置 → 固件更新」，点「检查更新」。检查失败时，按屏幕提示处理 Wi‑Fi、互联网或更新服务器问题，再重试。")}</li>
+        <li>{t("发现新版本后查看更新说明，点「下载并安装」。下载期间可在屏幕上取消，不要强制断电或重启。")}</li>
+        <li>{t("下载并校验通过后，点「重启并安装」。设备保存阅读位置后重启，进入新固件。")}</li>
+      </ol>
+      <ul>
+        <li>{t("点「稍后」不会切换固件；关机或重启后需要重新下载。")}</li>
+        <li>{t("0.3.0 起，短暂无数据或连接中断会自动重试；服务器支持时，可在同次下载中接续。不支持关机或重启后的断点续传，失败或取消后可重新下载。")}</li>
+        <li>{t("装有 0.2.0-beta.1 的设备不能联网更新，需要先在")}<a href={localizeHref(locale, "/install/")}>{t("安装页")}</a>{t("重新安装。不支持更新所需分区布局的设备也会显示原因并阻止安装，可使用安装页重新安装。")}</li>
+        <li>{t("网页重新安装会替换内部闪存中的固件，TF 卡上的书籍、进度和 Pico Page 设置（包括已保存的 Wi‑Fi）不受影响。")}</li>
+      </ul>
+
+      <h2 id="limits">{t("限制")}</h2>
+      <ul>
+        <li>{t("支持 EPUB，以及 UTF-8（可带 BOM）、带 BOM 的 UTF-16LE／UTF-16BE 和 GB18030 编码的 TXT。")}</li>
+        <li>{t("EPUB 默认使用原书排版，也可在「排版」中切换到「统一排版」。表格、复杂的图形和样式可能简化显示，或无法打开。图片支持 PNG、JPEG 和 GIF 首帧；文字不环绕图片。")}</li>
+        <li>{t("不支持 PDF、批注、高亮、插件、阅读统计和多个主题。")}</li>
+        <li>{t("与 KOReader 接续位置仅支持 EPUB。")}</li>
+      </ul>
+
+      <h2 id="faq">{t("常见问题")}</h2>
+      <dl>
+        <dt>{t("iPhone 连接设备热点后提示「尚未接入互联网」")}</dt>
+        <dd>{t("设备热点仅用于本地传输，不提供互联网连接。请选择「不连接互联网使用」，保持连接该热点，再用 Safari 等浏览器打开")} <code>http://192.168.4.1</code> {t("传书。上传期间保持页面打开并连接设备热点。")}</dd>
+        <dt>{t("书里有空白方框")}</dt>
+        <dd>{t("当前字体缺少这些字符。把包含这些字符的完整中文字体放进")} <code>Fonts/</code>{t("，重新启动设备后在「排版」中选择它；经 Wi‑Fi 传书上传的字体不需要重启。")}</dd>
+        <dt>{t("画面有残影")}</dt>
+        <dd>{t("按 K2 全刷当前画面。经常出现时，把刷新模式改为清晰，或缩短自动全刷的间隔。")}</dd>
+        <dt>{t("提示保存失败或「尚未保存」")}</dt>
+        <dd>{t("检查 TF 卡是否插好、空间是否足够，然后重试。保存失败时设备不会进入休眠。不要用清理缓存代替处理保存错误。")}</dd>
+        <dt>{t("搜不到自己的 Wi‑Fi")}</dt>
+        <dd>{t("设备只支持 2.4 GHz 网络。确认路由器或手机热点开启了 2.4 GHz。")}</dd>
+        <dt>{t("换了位置后，书的进度没有了")}</dt>
+        <dd>{t("把原位置上同名的")} <code>.picopage</code> {t("目录移到书的新位置旁边。")}</dd>
+      </dl>
+    </article>
+  </div>
+</Site>
+<style>
+  .docs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 32px 64px;
+    padding: 56px 0 72px;
+  }
+  .toc {
+    flex: 0 1 200px;
+    display: block;
+    border-top: 1px solid var(--ink);
+    padding-top: 14px;
+    font-size: 14px;
+    line-height: 2;
+  }
+  .toc a {
+    text-decoration: none;
+  }
+  article {
+    flex: 1 1 520px;
+    min-width: 0;
+    max-width: 46em;
+    font-size: 16px;
+    line-height: 1.85;
+    color: var(--text);
+  }
+  h1 {
+    font-family: var(--serif);
+    font-size: clamp(34px, 4.6vw, 54px);
+    font-weight: 700;
+    line-height: 1.25;
+    color: var(--ink);
+  }
+  h2 {
+    margin-top: 56px;
+    border-top: 1px solid var(--ink);
+    padding-top: 20px;
+    font-family: var(--serif);
+    font-size: 28px;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--ink);
+    scroll-margin-top: 24px;
+  }
+  h3 {
+    margin-top: 32px;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  article p,
+  article ul,
+  article ol,
+  article dl,
+  table,
+  pre {
+    margin-top: 14px;
+  }
+  .lead {
+    margin-top: 18px;
+    font-size: 17px;
+  }
+  .notice {
+    border: 1px solid var(--accent);
+    padding: 12px 14px;
+    font-size: 14px;
+    color: var(--ink);
+  }
+  article ul,
+  article ol {
+    padding-left: 1.4em;
+  }
+  article ul {
+    list-style: disc;
+  }
+  article ol {
+    list-style: decimal;
+  }
+  article li + li {
+    margin-top: 6px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 15px;
+  }
+  th,
+  td {
+    border-bottom: 1px solid var(--line);
+    padding: 8px 12px 8px 0;
+    text-align: left;
+  }
+  th {
+    border-bottom-color: var(--ink);
+    font-weight: 600;
+    color: var(--ink);
+  }
+  pre {
+    border: 1px solid var(--line);
+    padding: 14px 16px;
+    background: #fbfaf7;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.9;
+    overflow-x: auto;
+  }
+  dt {
+    margin-top: 18px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  @media (min-width: 900px) {
+    .toc {
+      position: sticky;
+      top: 24px;
+    }
+  }
+  @media (max-width: 899px) {
+    .toc {
+      flex-basis: 100%;
+    }
+  }
+</style>

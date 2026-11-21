@@ -1,0 +1,5 @@
+[plugins."pstack@cursor-plugins"]
+enabled = true
+
+[plugins."ponytail@ponytail"]
+enabled = false

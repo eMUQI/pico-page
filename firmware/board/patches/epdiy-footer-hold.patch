@@ -1,0 +1,116 @@
+--- a/src/epdiy.h
++++ b/src/epdiy.h
+@@ -554,6 +554,18 @@
+  */
+ void epd_set_line_phase_luts(const uint8_t* const* luts, const int8_t* rows, unsigned count);
+
++/**
++ * Hold equal nonwhite grayscale pixels from first_column to the native right edge
++ * during full-width S3 1ppB difference draws. Negative values disable the mask.
++ * Display owner only: enable before one logical update and disable after all
++ * synchronous draws return, including on failure. The full-screen difference
++ * buffer must remain immutable between those draws. A compact PSRAM mask is
++ * prepared before scanning and reused across phases and directional-effect ticks.
++ * Allocation failure disables this optional hold for the update. Clearing and
++ * baseline recovery require a disabled mask.
++ */
++void epd_set_unchanged_pixel_hold(int first_column);
++
+ /** 最近一次 `epd_draw_base` 因上面的优化跳过的相位数。 */
+ int epd_last_leading_skip(void);
+
+--- a/src/render.c
++++ b/src/render.c
+@@ -21,6 +21,7 @@
+ #include "output_common/line_queue.h"
+ #include "output_common/lut.h"
+ #include "output_common/render_context.h"
++#include "output_common/epdiy-unchanged-pixels.h"
+ #include "output_common/render_method.h"
+ #include "output_lcd/render_lcd.h"
+
+@@ -46,6 +47,34 @@
+ static const uint8_t* const* page_phase_luts;
+ static const int8_t* page_line_phase;
+ static unsigned page_phase_count;
++static int unchanged_pixel_hold = -1;
++static uint8_t* unchanged_pixel_mask;
++static bool unchanged_pixel_mask_prepared;
++void epd_set_unchanged_pixel_hold(int first_column) {
++    heap_caps_free(unchanged_pixel_mask);
++    unchanged_pixel_mask = NULL;
++    unchanged_pixel_mask_prepared = false;
++    unchanged_pixel_hold = first_column;
++}
++
++static void prepare_unchanged_pixel_mask(const uint8_t* data) {
++    if (unchanged_pixel_mask_prepared) return;
++    unchanged_pixel_mask_prepared = true;
++    const int width = epd_width();
++    const int height = epd_height();
++    if (unchanged_pixel_hold < 0 || unchanged_pixel_hold >= width || width % 64 != 0) return;
++    const int stride = width / 4 - unchanged_pixel_hold / 64 * 16;
++    unchanged_pixel_mask = heap_caps_aligned_alloc(
++        16, (size_t)stride * height, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
++    if (unchanged_pixel_mask == NULL) {
++        ESP_LOGW("epdiy", "Footer hold unavailable; using normal grayscale update");
++        return;
++    }
++    for (int row = 0; row < height; ++row) {
++        epd_build_unchanged_suffix_mask(data + (size_t)row * width,
++            unchanged_pixel_mask + (size_t)row * stride, unchanged_pixel_hold, width);
++    }
++}
+ void epd_set_line_phase_luts(const uint8_t* const* luts, const int8_t* rows, unsigned count) {
+     page_phase_luts = luts;
+     page_line_phase = rows;
+@@ -256,6 +285,15 @@
+     if (page_phase_luts && (!(mode & MODE_PACKING_1PPB_DIFFERENCE) || frame_count != 1)) {
+         return EPD_DRAW_INVALID_PACKING_MODE;
+     }
++    if (unchanged_pixel_hold >= 0 &&
++        (!(mode & MODE_PACKING_1PPB_DIFFERENCE) || area.x != 0 || area.y != 0 ||
++         area.width != epd_width() || area.height != epd_height())) {
++        return EPD_DRAW_INVALID_PACKING_MODE;
++    }
++    prepare_unchanged_pixel_mask(data);
++    render_context.unchanged_pixel_mask = unchanged_pixel_mask;
++    render_context.unchanged_pixel_mask_offset = unchanged_pixel_hold < 0 ? 0 : unchanged_pixel_hold / 64 * 16;
++    render_context.unchanged_pixel_mask_stride = epd_width() / 4 - render_context.unchanged_pixel_mask_offset;
+     render_context.phase_luts = page_phase_luts;
+     render_context.line_phase = page_line_phase;
+     render_context.phase_count = page_phase_count;
+@@ -308,6 +346,7 @@
+
+     lcd_do_update(&render_context);
+     /* Producers have joined; the caller may now release borrowed phase tables. */
++    render_context.unchanged_pixel_mask = NULL;
+     render_context.phase_luts = NULL;
+     render_context.line_phase = NULL;
+     render_context.phase_count = 0;
+--- a/src/output_common/render_context.h
++++ b/src/output_common/render_context.h
+@@ -71,6 +71,9 @@
+     const uint8_t* const* phase_luts;
+     const int8_t* line_phase;
+     unsigned phase_count;
++    const uint8_t* unchanged_pixel_mask;
++    int unchanged_pixel_mask_offset;
++    int unchanged_pixel_mask_stride;
+     /// LUT building function. Must not be NULL
+     lut_build_func_t lut_build_func;
+
+--- a/src/output_lcd/render_lcd.c
++++ b/src/output_lcd/render_lcd.c
+@@ -287,5 +287,11 @@
+             ctx->lut_lookup_func(lp, buf, ctx->conversion_lut, ctx->display_width);
+         }
+
++        if (ctx->unchanged_pixel_mask != NULL) {
++            epd_apply_line_mask_VE(buf + ctx->unchanged_pixel_mask_offset,
++                ctx->unchanged_pixel_mask + (size_t)l * ctx->unchanged_pixel_mask_stride,
++                ctx->unchanged_pixel_mask_stride);
++        }
++
+         // apply the line mask
+         epd_apply_line_mask_VE(buf, ctx->line_mask, ctx->display_width / 4);

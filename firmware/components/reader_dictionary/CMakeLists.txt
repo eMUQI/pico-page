@@ -1,0 +1,16 @@
+set(dictionary_sources dictionary.cpp dictionary_file.cpp dictionary_gzip.cpp dictionary_selection.cpp dictionary_text.cpp)
+set(dictionary_definitions MINIZ_NO_DEFLATE_APIS MINIZ_NO_ZLIB_APIS
+    MINIZ_NO_ZLIB_COMPATIBLE_NAMES MINIZ_NO_STDIO MINIZ_NO_TIME)
+if(ESP_PLATFORM)
+    idf_component_register(SRCS ${dictionary_sources} INCLUDE_DIRS include
+        PRIV_INCLUDE_DIRS ../reader_document/third_party/miniz REQUIRES reader_document reader_store)
+    target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_17)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE ${dictionary_definitions})
+else()
+    add_library(reader_dictionary ${dictionary_sources})
+    target_include_directories(reader_dictionary PUBLIC include PRIVATE ../reader_document/third_party/miniz)
+    target_link_libraries(reader_dictionary PUBLIC reader_document reader_store)
+    target_compile_features(reader_dictionary PUBLIC cxx_std_17)
+    target_compile_definitions(reader_dictionary PRIVATE ${dictionary_definitions})
+    target_compile_options(reader_dictionary PRIVATE -Wall -Wextra -Werror)
+endif()

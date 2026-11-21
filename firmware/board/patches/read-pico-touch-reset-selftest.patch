@@ -1,0 +1,14 @@
+--- a/read_pico_board.c
++++ b/read_pico_board.c
+@@ -305,10 +305,8 @@ static esp_err_t fca9555_selftest(void) {
+     err = fca_expect_reg(7, 0xFF, "CFG1");
+     if (err != ESP_OK) return err;
+ 
+-    // 只翻转 MODE / TP_RST，SY_EN 和 VCOM 保持低。
+-    // / Toggle MODE / TP_RST only; keep SY_EN and VCOM low.
+     const uint8_t out_a = IOE_MODE | IOE_TP_RST;
+-    const uint8_t out_b = IOE_MODE;
++    const uint8_t out_b = IOE_TP_RST;
+     err = fca9555_set_output(s_ioe, 0, out_a);
+     if (err != ESP_OK) return err;
+     err = fca_expect_reg(2, out_a, "OUT0");

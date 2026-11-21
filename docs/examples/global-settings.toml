@@ -1,0 +1,47 @@
+# Paths under library.roots are relative to the mounted card root, not the host OS.
+schema_version = 1
+
+[system]
+# Interface language: zh-Hans / zh-Hant / en; global only.
+language = "zh-Hans"
+
+[library]
+roots = ["/Books"]
+view = "list"
+# Sort: recent / name / name_desc. Folders: first / recent.
+sort = "recent"
+folders = "first"
+
+[reader]
+# The font path is relative to the card root.
+font = "Fonts/LXGWWenKai-Regular.ttf"
+# Weight: light / regular / medium / bold. Light requires a sibling Light font and at least 34 px.
+font_weight = "regular"
+# Original EPUB stroke adjustment: -1 lighter, 0 as in the book, 1 heavier.
+original_weight_adjustment = 0
+font_size_px = 38
+line_height = 1.5
+margin_x_px = 36
+# Unified EPUB and TXT: false for left alignment, true for justified text.
+justify = false
+
+[display]
+# Refresh presets: clear / balanced / fast.
+refresh_preset = "balanced"
+# Body updates between full refreshes in each mode; valid range 0..30; zero disables automatic full refresh.
+balanced_full_refresh_pages = 25
+fast_full_refresh_pages = 30
+
+[network]
+# Disables sync, phone setup and both Wi-Fi upload paths; retains saved networks/accounts.
+wifi_enabled = true
+
+[power]
+# Minutes without input before the device sleeps; 0 disables idle sleep. Range 0..240.
+auto_sleep_minutes = 10
+# Sleep screen: cover / reading / simple / custom.
+sleep_screen = "cover"
+# Custom image basename; empty selects rotation.
+sleep_image = ""
+# Transparent PNGs preserve the pre-sleep frame when enabled.
+sleep_overlay = false

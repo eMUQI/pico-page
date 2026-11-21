@@ -1,0 +1,11 @@
+---
+import NotFoundPage from "../../components/NotFoundPage.astro";
+import { translatedLocales } from "../../locales.js";
+
+export function getStaticPaths() {
+  return translatedLocales.map(([locale, { prefix }]) => ({ params: { locale: prefix }, props: { locale } }));
+}
+
+const { locale } = Astro.props;
+---
+<NotFoundPage locale={locale} />

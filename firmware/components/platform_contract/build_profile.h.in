@@ -1,0 +1,18 @@
+#pragma once
+
+#include <cstdint>
+
+namespace pico_page::build_profile {
+inline constexpr char board[] = "@PICO_PAGE_BOARD_ID@";
+inline constexpr char manifest_url[] = "@PICO_PAGE_MANIFEST_URL@";
+inline constexpr char update_layout[] = "@PICO_PAGE_UPDATE_LAYOUT@";
+inline constexpr std::uint32_t update_slot_bytes = @PICO_PAGE_UPDATE_SLOT_BYTES@;
+inline constexpr std::uint32_t ota_0_offset = @PICO_PAGE_OTA_0_OFFSET@;
+inline constexpr std::uint32_t ota_1_offset = @PICO_PAGE_OTA_1_OFFSET@;
+inline constexpr std::uint32_t otadata_offset = @PICO_PAGE_OTADATA_OFFSET@;
+inline constexpr std::uint32_t otadata_bytes = @PICO_PAGE_OTADATA_SIZE@;
+inline constexpr std::uint32_t nvs_offset = @PICO_PAGE_NVS_OFFSET@;
+inline constexpr std::uint32_t nvs_bytes = @PICO_PAGE_NVS_SIZE@;
+inline constexpr std::uint32_t phy_init_offset = @PICO_PAGE_PHY_INIT_OFFSET@;
+inline constexpr std::uint32_t phy_init_bytes = @PICO_PAGE_PHY_INIT_SIZE@;
+}

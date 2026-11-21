@@ -1,0 +1,20 @@
+---
+import ChangelogPage from "../../components/ChangelogPage.astro";
+import DocsPage from "../../components/DocsPage.astro";
+import HomePage from "../../components/HomePage.astro";
+import InstallPage from "../../components/InstallPage.astro";
+import { translatedLocales } from "../../locales.js";
+
+export function getStaticPaths() {
+  const pages = { home: HomePage, docs: DocsPage, install: InstallPage, changelog: ChangelogPage };
+  return translatedLocales.flatMap(([locale, { prefix }]) =>
+    Object.entries(pages).map(([page, Page]) => ({
+      params: { locale: prefix, page: page === "home" ? undefined : page },
+      props: { locale, Page },
+    }))
+  );
+}
+
+const { locale, Page } = Astro.props;
+---
+<Page locale={locale} />

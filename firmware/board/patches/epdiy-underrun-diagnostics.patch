@@ -1,0 +1,71 @@
+--- a/src/output_common/render_context.h
++++ b/src/output_common/render_context.h
+@@ -56,2 +56,8 @@
+
++    // Reset before an update; ISR counters are read only after the renderer has stopped.
++    atomic_uint invalid_line_threads;
++    atomic_uint empty_line_queues;
++    atomic_uint short_scans;
++    atomic_int first_empty_line;
++
+     // Lookup table size.
+--- a/src/output_lcd/render_lcd.c
++++ b/src/output_lcd/render_lcd.c
+@@ -38,2 +38,3 @@
+     if (thread >= NUM_RENDER_THREADS) {
++        atomic_fetch_add_explicit(&ctx->invalid_line_threads, 1, memory_order_relaxed);
+         ctx->error |= EPD_DRAW_EMPTY_LINE_QUEUE;
+@@ -49,2 +50,6 @@
+     if (lq_read(lq, buf) != 0) {
++        atomic_fetch_add_explicit(&ctx->empty_line_queues, 1, memory_order_relaxed);
++        int unset = -1;
++        atomic_compare_exchange_strong_explicit(&ctx->first_empty_line, &unset,
++            ctx->lines_consumed, memory_order_relaxed, memory_order_relaxed);
+         ctx->error |= EPD_DRAW_EMPTY_LINE_QUEUE;
+@@ -68,2 +73,3 @@
+     if (ctx->lines_consumed < ctx->lines_total) {
++        atomic_fetch_add_explicit(&ctx->short_scans, 1, memory_order_relaxed);
+         ctx->error |= EPD_DRAW_EMPTY_LINE_QUEUE;
+--- a/src/render.c
++++ b/src/render.c
+@@ -253,2 +253,6 @@
+     render_context.error = EPD_DRAW_SUCCESS;
++    atomic_store(&render_context.invalid_line_threads, 0);
++    atomic_store(&render_context.empty_line_queues, 0);
++    atomic_store(&render_context.short_scans, 0);
++    atomic_store(&render_context.first_empty_line, -1);
+     render_context.drawn_lines = drawn_lines;
+@@ -292,3 +296,7 @@
+     if (render_context.error & EPD_DRAW_EMPTY_LINE_QUEUE) {
+-        ESP_LOGE("epdiy", "line buffer underrun occurred!");
++        ESP_LOGE("epdiy", "underrun invalid=%u empty=%u short=%u first_empty=%d phase=%d consumed=%d total=%d prepared=%d",
++            atomic_load(&render_context.invalid_line_threads), atomic_load(&render_context.empty_line_queues),
++            atomic_load(&render_context.short_scans), atomic_load(&render_context.first_empty_line),
++            render_context.current_frame, render_context.lines_consumed, render_context.lines_total,
++            atomic_load(&render_context.lines_prepared));
+     }
+@@ -333,2 +341,16 @@
+     }
++}
++
++enum EpdDrawError epd_clear_checked(void) {
++    render_context.error = EPD_DRAW_SUCCESS;
++    atomic_store(&render_context.invalid_line_threads, 0);
++    atomic_store(&render_context.empty_line_queues, 0);
++    atomic_store(&render_context.short_scans, 0);
++    atomic_store(&render_context.first_empty_line, -1);
++    epd_clear();
++    if (render_context.error != EPD_DRAW_SUCCESS) {
++        ESP_LOGE("epdiy", "clear failed error=%u short=%u",
++            (unsigned)render_context.error, atomic_load(&render_context.short_scans));
++    }
++    return render_context.error;
+ }
+--- a/src/epdiy.h
++++ b/src/epdiy.h
+@@ -260,2 +260,5 @@
+
++/** Clear the whole screen synchronously and return any scan error. */
++enum EpdDrawError epd_clear_checked(void);
++
+ /**

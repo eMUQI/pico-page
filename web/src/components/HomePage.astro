@@ -1,0 +1,869 @@
+---
+import Site from "../layouts/Site.astro";
+import { firmware } from "../firmware.js";
+import { items as transparentLockscreens } from "../../public/downloads/transparent-lockscreens/manifest.json";
+import copy from "../copy/home.json";
+import { defaultLocale, localizeHref, translator } from "../locales.js";
+
+const { locale = defaultLocale } = Astro.props;
+const t = translator(locale, copy);
+
+const screens = [
+  { id: "library", title: t("书库"), description: t("书籍与文件夹，一目了然。列表和封面卡片，按习惯切换。"), alt: t("书库卡片视图，显示继续阅读入口和另外两本示例书") },
+  { id: "reading", title: t("正文"), description: t("按键或轻点屏幕两侧翻页，底部随时查看阅读进度。"), alt: t("示例书籍正文，底部显示页码和电量") },
+  { id: "tools", title: t("阅读工具"), description: t("轻点正文中部，打开目录、排版、同步、刷新模式和全刷。"), alt: t("正文上的阅读工具，包含目录、排版、同步、刷新模式和全刷入口") },
+  { id: "typography", title: t("排版"), description: t("字体、字重、字号、行距等设置，先看预览，再应用到这本书。"), alt: t("示例书籍的排版面板，字号改为 40 px，尚未应用") },
+  { id: "dictionary", title: t("查词"), description: t("长按正文选词，释义显示在当前页。可调整选区、切换词典。"), alt: t("合成正文中选中 omega，下方面板显示合成词典条目") },
+  { id: "sync", title: t("位置接续"), description: t("检查远端位置后，选择继续阅读的位置；上传前确认。"), alt: t("示例书籍的同步面板，分别显示本机与远端阅读位置") },
+  { id: "sleep", title: t("休眠"), description: t("封面、正文、简洁屏保或自己的锁屏图片。"), alt: t("休眠画面，显示示例书籍封面和已保存的阅读进度") },
+];
+const lockscreens = [
+  { file: "01-own-books.png", title: t("读自己的书。"), alt: t("黑白书页交叠展开，配文：读自己的书。") },
+  { file: "02-keep-reading.png", title: t("接着读下去。"), alt: t("书中垂下的纸带连接山川与海岸，配文：接着读下去。") },
+  { file: "03-one-page.png", title: t("把时间留给一页书。"), alt: t("阳光在翻起的书页上投下阴影，竖排文字：把时间留给一页书。") },
+  { file: "04-offline.png", title: t("暂时离线，进入书中。"), alt: t("打开的书中浮现门廊与阶梯，配文：暂时离线，进入书中。") },
+  { file: "05-next-page.png", title: t("下一页，自有天地。"), alt: t("书页旋转展开，配以 Pico Page 字样和文字：下一页，自有天地。") },
+];
+const dictionaries = [
+  { audience: t("读英文书"), title: t("朗道英汉字典 5.0"), entries: "435,468", size: "8.7 MB" },
+  { audience: t("读中文书"), title: t("汉语大词典 离线版"), entries: "349,514", size: "73 MB" },
+  { audience: t("两种都读"), title: t("21 世纪英汉汉英双向词典"), entries: "213,741", size: "13 MB" },
+];
+---
+<Site locale={locale} title={t("Pico Page · 读自己的书，接着读下去")} description={t("Pico Page，为 Read Pico 设计的墨水屏阅读固件。离线阅读 TF 卡上的 EPUB 和 TXT，与 KOReader 接续同一本 EPUB 的阅读位置，长按正文可离线查词。书籍、进度和设置，以本地文件保存。")} current="home">
+  <section class="hero">
+    <div class="hero-copy">
+      <p class="lede">{t("为 Read Pico 4.7 英寸墨水屏设计的阅读固件")}</p>
+      <h1>{t("读自己的书，")}<br>{t("接着读下去。")}</h1>
+      <p class="summary">{t("离线阅读 TF 卡上的 EPUB 和 TXT。")}<br>{t("与 KOReader 接续同一本 EPUB 的阅读位置。")}</p>
+      <p class="actions"><a class="primary" href="#start">{t("三步开始使用")} <span aria-hidden="true">↓</span></a><a href={localizeHref(locale, "/docs/")}>{t("阅读完整文档")}</a></p>
+    </div>
+    <figure>
+      <div class="hero-screens">
+        <img src="/assets/screens/library.webp" width="684" height="1216" alt={t("书库卡片视图，显示示例书籍")} decoding="async">
+        <img src="/assets/screens/reading.webp" width="684" height="1216" alt={t("示例书籍正文与阅读进度")} fetchpriority="high">
+      </div>
+      <figcaption>{t("固件界面预览 · 演示数据 · 非设备实拍")}</figcaption>
+    </figure>
+  </section>
+
+  <section id="start" class="band">
+    <a id="install"></a>
+    <div class="heading-row">
+      <div>
+        <p class="eyebrow">{t("开始使用")}</p>
+        <h2>{t("三步，读上第一本书。")}</h2>
+      </div>
+      <p class="needs">{t("需要：Read Pico 一台、FAT 格式的 TF 卡一张、支持数据传输的 USB 线、装有 Chrome 或 Edge 的电脑。")}</p>
+    </div>
+    <ol class="start-steps">
+      <li>
+        <div class="step-head"><span class="numeral">1</span><span>{t("电脑 · 浏览器")}</span></div>
+        <h3>{t("安装固件")}</h3>
+        <p>{t("用 USB 线连接电脑，在浏览器中写入 Pico Page。整片覆盖安装，原厂系统或其他固件都可以直接装；启用了闪存加密或安全启动的设备除外。TF 卡上的书籍、阅读进度和 Pico Page 设置不受影响。")}</p>
+        {firmware ? (
+          <p class="outcome"><span class="muted">{t("完成标志")}</span>　{t("设备重启后显示书库。")}</p>
+        ) : (
+          <p class="outcome">{t("网页安装尚未开放。项目仍在开发中，开放后在安装页写入。")}</p>
+        )}
+        <a class="primary spread" href={localizeHref(locale, "/install/")}>{firmware ? t("打开安装页") : t("查看安装步骤")} <span aria-hidden="true">→</span></a>
+      </li>
+      <li>
+        <div class="step-head"><span class="numeral">2</span><span>{t("TF 卡 · 电脑")}</span></div>
+        <h3>{t("放入书和字体")}</h3>
+        <p>{t("把 EPUB、TXT 放进")} <code>Books/</code>{t("，把中文字体和许可证放进")} <code>Fonts/</code>{t("。")}</p>
+        <div class="tree">
+          <div class="muted">{t("TF 卡/")}</div>
+          <div><span>├─ <strong>Books/</strong></span><span>EPUB · TXT</span></div>
+          <div class="accent"><span>└─ <strong>Fonts/</strong></span><span>{t("强烈建议")}</span></div>
+        </div>
+        <p class="aside">{t("内置字体只有 3,500 个常用汉字，其余字符显示为方框。")}<a href="#fonts">{t("先下载一款字体 ↓")}</a></p>
+      </li>
+      <li>
+        <div class="step-head"><span class="numeral">3</span><span>{t("设备")}</span></div>
+        <h3>{t("打开书，选字体")}</h3>
+        <p>{t("把 TF 卡插回设备并重启（长按电源键，选「重启」），在书库里打开一本书。轻点正文中部 → 「排版」 → 选择你放入的字体。离线说明在「设置 → 使用说明」。")}</p>
+        <div class="keys" aria-label={t("默认按键")}>
+          <div><kbd>K1</kbd><span>{t("上一页")}</span></div>
+          <div><kbd>K2</kbd><span>{t("全刷")}</span></div>
+          <div><kbd>K3</kbd><span>{t("下一页")}</span></div>
+        </div>
+      </li>
+    </ol>
+    <p class="footnote">{t("不想拔卡？在设备上开启 USB 文件传输，同样可以放入书和字体。也可以用 Wi‑Fi 传书（设备热点或已保存的 Wi‑Fi）从浏览器上传书；固件 0.2.0-beta.3 起，同一页面还能上传字体和锁屏图片，更早的版本只能传书。")}<a href={localizeHref(locale, "/docs/#transfer")}>{t("传书方式详解")}</a></p>
+  </section>
+
+  <section id="fonts" class="band">
+    <a id="resources"></a>
+    <div class="font-layout">
+      <div>
+        <p class="eyebrow">{t("字体")}</p>
+        <h2>{t("放一款完整的中文字体。")}</h2>
+        <p class="lead">{t("TF 卡上没有字体时，正文使用内置字体。内置字体只包含 3,500 个常用汉字，书里出现其他字符时会显示为方框。放入一款完整的中文字体，就能正常显示。")}</p>
+        <div class="compare">
+          <div>
+            <p>{t("仅内置字体")}</p>
+            <p class="sample" role="img" aria-label={t("鄱阳湖畔䶮行，其中「鄱」「䶮」两个字显示为方框")}><span lang="zh-Hans"><span class="tofu"></span>阳湖畔<span class="tofu"></span>行</span></p>
+          </div>
+          <div>
+            <p>{t("放入霞鹜文楷")}</p>
+            <p class="sample wenkai" lang="zh-Hans">鄱阳湖畔䶮行</p>
+          </div>
+        </div>
+        <p class="note">{t("示意，缺字位置因书而异。")}</p>
+      </div>
+      <div class="font-card">
+        <p class="note">{t("推荐字体")}</p>
+        <h3 class="wenkai">{t("霞鹜文楷 Regular")}</h3>
+        <p class="wenkai specimen" lang="zh-Hans">读自己的书，接着读下去。</p>
+        <p class="credit">{t("v1.520 · 作者")} <a href="https://github.com/lxgw/LxgwWenKai/releases/tag/v1.520" target="_blank" rel="noopener">LXGW</a> · SIL Open Font License 1.1</p>
+        <a class="primary spread" href="/downloads/LXGWWenKai-Regular-v1.520.zip" download>{t("下载字体包（ZIP）")} <span aria-hidden="true">↓</span></a>
+        <ol class="numbered">
+          <li><span>1</span><span>{t("解压，把字体文件和许可证复制到 TF 卡的")} <code>Fonts/</code>{t("。")}</span></li>
+          <li><span>2</span><span>{t("打开一本书，轻点正文中部，在「排版」中选择该字体。")}</span></li>
+        </ol>
+        <p class="own">{t("也可以放入自己的 TTF / OTF 字体，记得附上许可证。")}<a href="/downloads/LXGWWenKai-v1.520-OFL.txt">{t("查看许可证")}</a></p>
+        <a class="more" href="#lockscreens"><span>{t("另有阅读图文、古印、现代文字印与植物锁屏，可按喜好选择。")}</span><span>{t("查看锁屏 ↓")}</span></a>
+      </div>
+    </div>
+  </section>
+
+  <section id="dictionaries" class="band" aria-labelledby="dictionaries-title">
+    <div class="dictionary-intro">
+      <div>
+        <p class="eyebrow">{t("离线词典")}</p>
+        <h2 id="dictionaries-title">{t("读到不懂的词，就地查一查。")}</h2>
+        <p class="lead">{t("长按正文选词，释义显示在当前页。可以安装多套词典，随时切换。")}</p>
+        <p class="dictionary-version">{t("0.5.0 起支持离线词典，较早版本需更新后使用。")}</p>
+        <h3 class="dictionary-list-title">{t("已测试的词典")}</h3>
+        <ul class="dictionary-list">
+          {dictionaries.map((dictionary) => (
+            <li>
+              <span class="dictionary-audience">{dictionary.audience}</span>
+              <div>
+                <h4>{dictionary.title}</h4>
+                <p>{dictionary.entries} {t("个词条 · 压缩包约")} {dictionary.size}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+        <p class="footnote">{t("本站不提供词典文件，也无法确认第三方文件的授权，请自行核实。可以在")} <a href="https://stardict.uber.space/zh_CN/index.html" target="_blank" rel="noopener">{t("StarDict 第三方目录 ↗")}</a> {t("查找，也可以使用自己的 StarDict 词典。")}</p>
+      </div>
+      <figure class="dictionary-screen">
+        <img src="/assets/screens/dictionary.webp" width="684" height="1216" alt={t("合成正文中选中 omega，下方面板显示合成词典条目，底部可调整选区、切换词典和翻页")} loading="lazy" decoding="async">
+        <figcaption class="note">{t("固件界面预览 · 合成正文与词条")}</figcaption>
+      </figure>
+    </div>
+    <div class="dictionary-setup">
+      <div>
+        <h3>{t("放入 TF 卡，就能离线使用。")}</h3>
+        <ol class="numbered">
+          <li><span>1</span><span>{t("在电脑上解压词典压缩包，得到一个文件夹。其中的")} <code>.dict.dz</code> {t("文件无需继续解压。")}</span></li>
+          <li><span>2</span><span>{t("用 USB 文件传输或读卡器，把整个文件夹复制到 TF 卡的")} <code>Dictionaries/</code>{t("。")}</span></li>
+          <li><span>3</span><span>{t("退出 USB 文件传输，或把 TF 卡插回设备，让设备重新读取。")}</span></li>
+          <li><span>4</span><span>{t("打开「设置 → 阅读 → 离线词典」，启用需要的词典。列表中没有时，点「重新扫描」。")}</span></li>
+        </ol>
+        <p class="footnote">{t("首次查词需要建立索引，可能等待较长时间。可以关闭面板取消，稍后重试。")}<a href={localizeHref(locale, "/docs/#dictionaries")}>{t("查看安装与查词说明 →")}</a></p>
+      </div>
+      <div>
+        <p class="dictionary-tree-label">{t("每套词典单独一个文件夹：")}</p>
+        <pre class="tree dictionary-tree" aria-label={t("TF 卡词典目录示例")}><code>{t("TF 卡/\n└─ Dictionaries/\n   ├─ stardict-chibigenc-2.4.2/\n   │  ├─ chibigenc.ifo\n   │  ├─ chibigenc.idx\n   │  ├─ chibigenc.dict.dz\n   │  └─ chibigenc.syn\n   └─ 另一套词典/\n      └─ …")}</code></pre>
+        <p class="footnote">{t("文件夹名称可以自定，文件夹内的文件保留原名。")}</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="features" class="band">
+    <p class="eyebrow">{t("功能")}</p>
+    <h2>{t("书和进度，都由你保管。")}</h2>
+    <p class="lead muted">{t("书籍、阅读进度与设置保存在 TF 卡上。开启 USB 文件传输或使用读卡器，就能在电脑上查看、备份和整理。")}</p>
+    <div class="features">
+      <article>
+        <h3>{t("原书直接读")}</h3>
+        <p>{t("EPUB 和 TXT 无需预先转换。目录、书签和书内链接帮你找到内容，长按插图可单独查看。")}</p>
+      </article>
+      <article>
+        <h3>{t("换设备，接着读")}</h3>
+        <p>{t("同一份 EPUB、同一个同步账户，与 KOReader 接续阅读位置。检查、采用、上传都由你决定。")}</p>
+      </article>
+      <article>
+        <h3>{t("按你的习惯排版")}</h3>
+        <p>{t("字体、字号、行距和页边距，预览后再应用。每本书可保留不同设置。三档刷新模式按需选择。")}</p>
+      </article>
+      <article>
+        <h3>{t("两种方式传书")}</h3>
+        <p>{t("USB 文件传输，或经设备热点、已保存的 Wi‑Fi 用浏览器上传。Wi‑Fi 上传的书籍最大 64 MiB，同名文件不覆盖。")}</p>
+      </article>
+    </div>
+    <details>
+      <summary>{t("格式与功能限制")}</summary>
+      <ul>
+        <li>{t("支持 EPUB，以及 UTF-8、GB18030 编码的 TXT。暂不支持 PDF、批注和高亮。")}</li>
+        <li>{t("移动书籍时，把原书旁同名的")} <code>.picopage/</code> {t("目录一起移动，进度和单书设置才会跟随。")}</li>
+        <li>{t("KOReader 位置接续仅支持 EPUB；超出精确定位范围时，不提供跳转。TXT 仅保存本地进度。")}</li>
+        <li>{t("EPUB 默认使用原书排版，也可在「排版」中切换到「统一排版」。表格与复杂版式可能简化显示；不支持的内容可能无法打开。")}</li>
+      </ul>
+    </details>
+  </section>
+
+  <section id="screens" class="band">
+    <p class="eyebrow">{t("界面")}</p>
+    <h2>{t("从打开一本书，到下一页。")}</h2>
+    <ol class="screens">
+      {screens.map((screen, index) => (
+        <li>
+          <img src={`/assets/screens/${screen.id}.webp`} width="684" height="1216" alt={screen.alt} loading="lazy" decoding="async">
+          <p class="screen-title"><span class="mono muted">0{index + 1}</span><strong>{screen.title}</strong></p>
+          <p>{screen.description}</p>
+        </li>
+      ))}
+    </ol>
+    <p class="note">{t("固件界面预览 · 演示数据 · 非设备实拍")}</p>
+    <dl id="devices" class="specs">
+      <div><dt>{t("屏幕")}</dt><dd>{t("4.7 英寸 · 684 × 1216")}</dd></div>
+      <div><dt>{t("灰阶")}</dt><dd>{t("16 级")}</dd></div>
+      <div><dt>{t("操作")}</dt><dd>{t("触摸屏 + 三个触摸键")}</dd></div>
+      <div><dt>{t("存储")}</dt><dd>{t("TF 卡")}</dd></div>
+    </dl>
+  </section>
+
+  <section id="lockscreens" class="band">
+    <div class="heading-row">
+      <div>
+        <p class="eyebrow">{t("锁屏")}</p>
+        <h2>{t("锁屏图集 01")}</h2>
+        <p class="note">{t("五张关于书与阅读的图文 · 684 × 1216 · 16 级灰度 · PNG")}</p>
+      </div>
+      <a class="primary" href="/downloads/PicoPage-LockScreens-01.zip" download>{t("下载全部（ZIP）")} <span aria-hidden="true">↓</span></a>
+    </div>
+    <div class="lockscreens">
+      {lockscreens.map((art) => (
+        <figure>
+          <a href={`/downloads/lockscreens/${art.file}`} aria-label={t("查看原图：{value}").replace("{value}", () => art.title)}>
+            <img src={`/downloads/lockscreens/${art.file}`} width="684" height="1216" alt={art.alt} loading="lazy" decoding="async">
+          </a>
+          <figcaption><strong>{art.title}</strong><a href={`/downloads/lockscreens/${art.file}`} download aria-label={t("下载 PNG：{value}").replace("{value}", () => art.title)}>{t("下载 PNG")} <span aria-hidden="true">↓</span></a></figcaption>
+        </figure>
+      ))}
+    </div>
+    <ol class="numbered usage">
+      <li><span>1</span><span>{t("把")} <code>LockScreens/</code> {t("复制到 TF 卡根目录，已有同名文件夹时合并。单张下载的 PNG 也放进这个文件夹。")}</span></li>
+      <li><span>2</span><span>{t("「设置 → 电源与休眠」选「自定义图片」，在「选择图片 / 轮播」中固定一张或选择轮播。")}</span></li>
+      <li><span>3</span><span>{t("点击「保存设置」。0.2.0-beta.3 起，休眠会等待图片准备（0.2.0-beta.4 起，再短按一次电源键可取消等待，触摸和 K1/K2/K3 均忽略）；更早版本请先让设备空闲片刻。")}</span></li>
+    </ol>
+  </section>
+
+  <section id="transparent-lockscreens" class="band">
+    <a id="historical-seals"></a>
+    <div class="heading-row">
+      <div>
+        <p class="eyebrow">{t("透明锁屏")}</p>
+        <h2>{t("让一方印、一片叶陪你读。")}</h2>
+        <p class="note">{t("三方古印 · 两张繁体现代印 · 三张植物线描 · 透明 PNG")}</p>
+      </div>
+      <a class="primary" href="/downloads/PicoPage-Transparent-LockScreens.zip" download>{t("下载八张（ZIP）")} <span aria-hidden="true">↓</span></a>
+    </div>
+    <p class="footnote">{t("透明叠加需要 0.4.0 及更高版本固件。在「设置 → 电源与休眠」选择「自定义图片」，开启「叠加当前画面」并保存。")}</p>
+    <p class="footnote">{t("印章采用放大后的右下内收位置。植物的叶片、花瓣与枝干主体为不透明白色，背景及枝叶间隙透明，正文不会透进主体。")}</p>
+    <div class="lockscreens seal-grid">
+      {transparentLockscreens.map((art) => (
+        <figure>
+          <a href={`/downloads/transparent-lockscreens/${art.file}`} aria-label={t("查看完整透明 PNG：{value}").replace("{value}", () => t(art.title))}>
+            <img src={`/downloads/transparent-lockscreens/${art.preview}`} width="320" height="320" alt={t(art.description)} loading="lazy" decoding="async">
+          </a>
+          <figcaption>
+            <strong>{t(art.title)}</strong>
+            <p>{art.author === "Pico Page" ? art.author : t(art.author)}{"year" in art && t(" · {value} 年").replace("{value}", () => art.year)}</p>
+            <p class="seal-source">{t("来源：")}<a href={art.source_url.startsWith("https://picopage.wulu.zone/") ? "#transparent-lockscreens" : art.source_url} {...(art.source_url.startsWith("https://picopage.wulu.zone/") ? {} : { target: "_blank", rel: "noopener" })}>{t(art.source_name)}</a>{"catalog_short" in art && <><br />{t(art.catalog_short)}</>}</p>
+            <a href={`/downloads/transparent-lockscreens/${art.file}`} download aria-label={t("下载透明 PNG：{value}").replace("{value}", () => t(art.title))}>{t("下载 PNG")} <span aria-hidden="true">↓</span></a>
+          </figcaption>
+        </figure>
+      ))}
+    </div>
+    <p class="footnote">{t("上方缩略图仅展示主体，下载文件保留完整透明画布。三方古印为公有领域原作的印面忠实复制；现代印由 Pico Page 设计排版，植物图由 Pico Page 使用 ImageGen 辅助制作。")}<a href="/downloads/transparent-lockscreens/SOURCES.txt">{t("作者与来源")}</a> · <a href="/downloads/transparent-lockscreens/RIGHTS.txt">{t("权利说明")}</a> · <a href="/downloads/transparent-lockscreens/FONT-OFL.txt">{t("现代印字体许可")}</a> · <a href="/downloads/transparent-lockscreens/README.txt">{t("使用说明")}</a></p>
+  </section>
+</Site>
+<style>
+  @font-face {
+    font-family: "Pico Page WenKai Sample";
+    src: url("/assets/fonts/PicoPageWenKaiSample.woff") format("woff");
+    font-display: swap;
+  }
+  :global(html) {
+    scroll-behavior: smooth;
+    scroll-padding-top: 24px;
+  }
+  img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  h2 {
+    margin-top: 10px;
+    font-family: var(--serif);
+    font-size: clamp(28px, 3.4vw, 40px);
+    font-weight: 600;
+    line-height: 1.3;
+    text-wrap: balance;
+  }
+  figcaption,
+  .note {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .band {
+    border-top: 1px solid var(--ink);
+    padding: 64px 0 72px;
+  }
+  .primary {
+    gap: 18px;
+    padding: 0 24px;
+  }
+  .primary.spread {
+    display: flex;
+    justify-content: space-between;
+    padding: 0 18px;
+  }
+  .heading-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    justify-content: space-between;
+    gap: 20px 40px;
+  }
+  .lead {
+    max-width: 32em;
+    margin-top: 14px;
+    font-size: 16px;
+    line-height: 1.85;
+    color: var(--text);
+    text-wrap: pretty;
+  }
+  .lead.muted {
+    color: var(--muted);
+  }
+  .wenkai {
+    font-family: "Pico Page WenKai Sample", "LXGW WenKai", "Kaiti SC", "STKaiti", "KaiTi", serif;
+  }
+
+  .hero {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 48px 64px;
+    padding: clamp(48px, 7vw, 80px) 0 48px;
+  }
+  .hero-copy {
+    flex: 1 1 420px;
+    min-width: 0;
+  }
+  .lede {
+    margin-bottom: 22px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  h1 {
+    font-family: var(--serif);
+    font-size: clamp(38px, 5.2vw, 62px);
+    font-weight: 700;
+    line-height: 1.22;
+    text-wrap: balance;
+  }
+  .summary {
+    max-width: 30em;
+    margin-top: 22px;
+    font-size: clamp(17px, 1.6vw, 19px);
+    line-height: 1.8;
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px 24px;
+    margin-top: 34px;
+    font-size: 15px;
+  }
+  .hero figure {
+    flex: 0 1 400px;
+    min-width: 0;
+    margin-left: auto;
+  }
+  .hero-screens {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: end;
+    gap: 16px;
+  }
+  .hero-screens img,
+  .screens img {
+    border: 1px solid var(--ink);
+    background: #fff;
+  }
+  .hero-screens img:first-child {
+    margin-bottom: 48px;
+  }
+  .hero figcaption {
+    margin-top: 14px;
+  }
+
+  .needs {
+    max-width: 28em;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text);
+  }
+  .start-steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+    margin-top: 40px;
+    border-top: 1px solid var(--ink);
+    border-left: 1px solid var(--ink);
+  }
+  .start-steps li {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    border-right: 1px solid var(--ink);
+    border-bottom: 1px solid var(--ink);
+    padding: 26px 26px 28px;
+  }
+  .step-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .numeral {
+    font-family: var(--serif);
+    font-size: 44px;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--ink);
+  }
+  .start-steps h3 {
+    font-size: 21px;
+    font-weight: 600;
+  }
+  .start-steps p {
+    font-size: 15px;
+    line-height: 1.8;
+    color: var(--text);
+    text-wrap: pretty;
+  }
+  .start-steps .outcome {
+    margin-top: auto;
+    border-top: 1px solid var(--line);
+    padding-top: 12px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--ink);
+  }
+  .tree {
+    border: 1px solid var(--line);
+    padding: 12px 14px;
+    background: #fbfaf7;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.9;
+  }
+  .tree div {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .tree strong {
+    font-weight: 500;
+  }
+  .tree span + span {
+    font-family: var(--sans);
+    font-size: 12px;
+  }
+  .start-steps .aside {
+    border-left: 2px solid var(--accent);
+    padding-left: 12px;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  .keys {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-top: auto;
+  }
+  .keys div {
+    display: grid;
+    gap: 2px;
+    border: 1px solid var(--ink);
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+  kbd {
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 500;
+  }
+  .footnote {
+    margin-top: 18px;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--muted);
+  }
+
+  .font-layout {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 40px 64px;
+  }
+  .font-layout > div {
+    flex: 1 1 380px;
+    min-width: 0;
+  }
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    max-width: 440px;
+    margin-top: 28px;
+  }
+  .compare div {
+    border: 1px solid var(--line);
+    padding: 14px 16px;
+    background: #fbfaf7;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .compare div + div {
+    border-color: var(--ink);
+    background: #fff;
+  }
+  .compare .sample {
+    margin-top: 8px;
+    font-family: var(--serif);
+    font-size: clamp(16px, 4.6vw, 22px);
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    color: var(--ink);
+  }
+  .compare .sample.wenkai {
+    font-family: "Pico Page WenKai Sample", "LXGW WenKai", "Kaiti SC", "STKaiti", "KaiTi", serif;
+  }
+  .tofu {
+    display: inline-block;
+    width: 0.9em;
+    height: 1em;
+    margin: 0 1px;
+    border: 1px solid var(--ink);
+    vertical-align: -0.12em;
+  }
+  .compare + .note {
+    margin-top: 10px;
+  }
+  .font-layout .font-card {
+    flex-basis: 420px;
+    border: 1px solid var(--ink);
+    padding: 28px;
+    background: #fff;
+  }
+  .font-card h3 {
+    margin-top: 6px;
+    font-size: 28px;
+    font-weight: 400;
+  }
+  .specimen {
+    margin-top: 12px;
+    font-size: 17px;
+    line-height: 1.8;
+    color: var(--text);
+  }
+  .credit {
+    margin-top: 6px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--muted);
+  }
+  .font-card .primary {
+    min-height: 50px;
+    margin-top: 22px;
+  }
+  .numbered {
+    display: grid;
+    gap: 12px;
+    margin-top: 22px;
+    font-size: 15px;
+    line-height: 1.75;
+    color: var(--text);
+  }
+  .numbered li {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+  .numbered li span:first-child {
+    font-family: var(--mono);
+    color: var(--accent);
+  }
+  .own {
+    margin-top: 18px;
+    border-top: 1px solid var(--line);
+    padding-top: 14px;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--muted);
+  }
+  .more {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 14px;
+    padding: 12px 14px;
+    background: #ebe9e2;
+    font-size: 14px;
+    text-decoration: none;
+  }
+  .more:hover {
+    background: #e2dfd6;
+    color: var(--ink);
+  }
+  .more span + span {
+    white-space: nowrap;
+  }
+
+  .dictionary-version {
+    margin-top: 14px;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--accent);
+  }
+  .dictionary-intro {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: 40px 64px;
+    align-items: start;
+  }
+  .dictionary-list-title {
+    margin-top: 32px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--muted);
+  }
+  .dictionary-list {
+    margin-top: 10px;
+    border-top: 1px solid var(--ink);
+  }
+  .dictionary-list li {
+    display: grid;
+    grid-template-columns: 5em minmax(0, 1fr);
+    gap: 16px;
+    align-items: baseline;
+    border-bottom: 1px solid var(--line);
+    padding: 16px 0;
+  }
+  .dictionary-audience {
+    font-size: 14px;
+    color: var(--accent);
+  }
+  .dictionary-list h4,
+  .dictionary-setup h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.6;
+  }
+  .dictionary-list p {
+    margin-top: 2px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--muted);
+  }
+  .dictionary-screen img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--line);
+  }
+  .dictionary-screen figcaption {
+    margin-top: 10px;
+  }
+  .dictionary-setup {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 32px 64px;
+    margin-top: 48px;
+    border-top: 1px solid var(--ink);
+    padding-top: 24px;
+  }
+  .dictionary-tree-label {
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text);
+  }
+  .dictionary-tree {
+    margin: 12px 0 0;
+    overflow-x: auto;
+  }
+  .dictionary-tree code {
+    font-size: inherit;
+  }
+  @media (max-width: 800px) {
+    .dictionary-intro,
+    .dictionary-setup {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .dictionary-screen {
+      max-width: 300px;
+    }
+  }
+
+  .features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+    gap: 36px 40px;
+    margin-top: 40px;
+  }
+  .features article {
+    border-top: 1px solid var(--ink);
+    padding-top: 16px;
+  }
+  .features h3 {
+    font-size: 18px;
+    font-weight: 600;
+  }
+  .features p {
+    margin-top: 8px;
+    font-size: 15px;
+    line-height: 1.8;
+    color: var(--text);
+    text-wrap: pretty;
+  }
+  details {
+    margin-top: 40px;
+    border-top: 1px solid var(--line);
+    padding-top: 16px;
+    font-size: 15px;
+  }
+  summary {
+    min-height: 32px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  details ul {
+    display: grid;
+    gap: 6px;
+    margin-top: 8px;
+    padding-left: 1.2em;
+    list-style: disc;
+    line-height: 1.8;
+    color: var(--text);
+  }
+
+  .screens {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
+    gap: 36px 24px;
+    margin-top: 40px;
+  }
+  .screens li {
+    min-width: 0;
+  }
+  .screens p {
+    margin-top: 4px;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text);
+    text-wrap: pretty;
+  }
+  .screens .screen-title {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-top: 12px;
+    font-size: 16px;
+    color: var(--ink);
+  }
+  .screen-title span {
+    font-size: 12px;
+  }
+  .screens + .note {
+    margin-top: 24px;
+  }
+  .specs {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+    margin-top: 48px;
+    border-top: 1px solid var(--ink);
+  }
+  .specs div {
+    padding: 16px 16px 0 0;
+  }
+  .specs dt {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .specs dd {
+    margin-top: 4px;
+    font-size: 15px;
+  }
+
+  .heading-row .note {
+    margin-top: 8px;
+    font-size: 14px;
+  }
+  .lockscreens {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr));
+    gap: 24px 16px;
+    margin-top: 28px;
+  }
+  .lockscreens figure {
+    min-width: 0;
+  }
+  .lockscreens img {
+    border: 1px solid var(--line);
+  }
+  .lockscreens figcaption {
+    margin-top: 8px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--ink);
+  }
+  .lockscreens strong {
+    display: block;
+    font-weight: 500;
+  }
+  .lockscreens figcaption a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    color: var(--muted);
+  }
+  .seal-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+  }
+  .seal-grid img {
+    background: #fff;
+  }
+  .seal-grid figcaption p {
+    margin: 4px 0;
+  }
+  .seal-grid .seal-source {
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .seal-grid .seal-source a {
+    display: inline;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .usage {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+    gap: 16px 32px;
+    margin-top: 28px;
+    border-top: 1px solid var(--line);
+    padding-top: 20px;
+    font-size: 14px;
+  }
+  .usage li {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+</style>

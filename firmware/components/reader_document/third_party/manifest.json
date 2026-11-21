@@ -1,0 +1,94 @@
+{
+  "source_repository": "https://github.com/crosspoint-reader/crosspoint-reader",
+  "commit": "50823ffa125b437b4c9fe5882f326458780198da",
+  "files": {
+    "expat/ascii.h": {
+      "sha256": "42f8b392c70366743eacbc60ce021389ccaa333598dd49eef6ee5c93698ca205",
+      "modified": false
+    },
+    "expat/asciitab.h": {
+      "sha256": "1cc0ae749019fc0e488cd1cf245f6beaa6d4f7c55a1fc797e5aa40a408bc266b",
+      "modified": false
+    },
+    "expat/expat.h": {
+      "sha256": "b5223912a8045cfac5a4fefaa32502dafdfb255161a680722d3a62a9b15a4f72",
+      "modified": false
+    },
+    "expat/expat_config.h": {
+      "sha256": "047dbea13683678668d9382cad1aced378e6511d4f7d40fe82f5c00cd563872a",
+      "modified": true
+    },
+    "expat/expat_external.h": {
+      "sha256": "7ed82825d053315c83ed58beb1bd8dcdc44116eeb938f170a67e3eac70fb64bf",
+      "modified": false
+    },
+    "expat/iasciitab.h": {
+      "sha256": "ad8b01e9f323cc4208bcd22241df383d7e8641fe3c8b3415aa513de82531f89f",
+      "modified": false
+    },
+    "expat/internal.h": {
+      "sha256": "690fe0022c4f893680fa1815b33f8e8c5a65b3d1b93b8e38036bc9d496172807",
+      "modified": false
+    },
+    "expat/latin1tab.h": {
+      "sha256": "eab66226da100372e01e42e1cbcd8ac2bbbb5c1b5f95d735289cc85c7a8fc2ba",
+      "modified": false
+    },
+    "expat/nametab.h": {
+      "sha256": "d95bdc1c798a6829ac71f4cdd3546c4d76a0d341b30561cc93b815843deeec07",
+      "modified": false
+    },
+    "expat/siphash.h": {
+      "sha256": "bebb56e1dc4cc644e3c52a73739b53a31c7cfe539aef9a31fef9c42402dc4a47",
+      "modified": false
+    },
+    "expat/utf8tab.h": {
+      "sha256": "8cd26bd461d334d5e1caedb3af4518d401749f2fc66d56208542b29085159c18",
+      "modified": false
+    },
+    "expat/winconfig.h": {
+      "sha256": "f7b8ac2a4566c712ca49dfc444ef1f90f9092c04081e77896868dc8647fe4cd0",
+      "modified": false
+    },
+    "expat/xmlparse.c": {
+      "sha256": "6a0bc75a89ec3592977014822e6e0fce73807d3f4fd1aee962e7ace4f682b1db",
+      "modified": true
+    },
+    "expat/xmlrole.c": {
+      "sha256": "2f46a4b921a6069623b172535ac6f2d5c1bff977f95e71bfcbd3318c6be2d787",
+      "modified": false
+    },
+    "expat/xmlrole.h": {
+      "sha256": "fe301afd6ea715712d8a96621c047e00f98dc07848a339502810146abee5e8de",
+      "modified": false
+    },
+    "expat/xmltok.c": {
+      "sha256": "7cff21c69341dd0f737a5c6ad927160aff771f786a57722d62294bccceb73c0e",
+      "modified": false
+    },
+    "expat/xmltok.h": {
+      "sha256": "33e3aaadfedece1fcc34ebe025745c81f9496cef8aa18e8719354bf84c03d3cc",
+      "modified": false
+    },
+    "expat/xmltok_impl.c": {
+      "sha256": "addc821084209230353fdb8465f7b0719f7e348d5c51fded3fccc948945b6ead",
+      "modified": false
+    },
+    "expat/xmltok_impl.h": {
+      "sha256": "f05ad4fe5e98429a7349ff04f57192cac58c324601f2a2e5e697ab0bc05d36d5",
+      "modified": false
+    },
+    "expat/xmltok_ns.c": {
+      "sha256": "46c0d6d09520fea911b75658c51e5a4a2e4b2153765b1f5e809f16668822692f",
+      "modified": false
+    },
+    "miniz/miniz.c": {
+      "sha256": "e2c1aeb66eef9191d8c3feb164db2def2335a61d039bf04ed849f6b042433b30",
+      "modified": false
+    },
+    "miniz/miniz.h": {
+      "sha256": "b53b62ed122e559b8f679e3cb787a0b0035fe87a58f909da0e44931678f4e85f",
+      "modified": false
+    }
+  }
+}

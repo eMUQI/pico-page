@@ -1,0 +1,129 @@
+--- a/src/epdiy.h
++++ b/src/epdiy.h
+@@ -545,14 +545,22 @@
+  */
+ void epd_set_leading_skip(bool enable);
+
++typedef struct {
++    uint16_t end_column;
++    uint8_t delay;
++} EpdPhaseSpan;
++
+ /**
+  * Borrow aligned 1 KiB phase LUTs and one phase index per physical display row
+  * for the next synchronous, single-phase 1ppB difference draw. Negative or
+- * out-of-range indices hold the row. Caller retains immutable buffers until
+- * epd_draw_base returns and then clears the override with NULL, NULL, 0.
++ * out-of-range phases hold the affected pixels. Optional spans cover a full
++ * physical row with increasing exclusive endpoints aligned to 16 pixels.
++ * Each span subtracts its delay from the row's phase index. Keep borrowed
++ * buffers immutable until epd_draw_base returns. Clear the override after the draw.
+  * Application display owner only; no concurrent draws or setters are permitted.
+  */
+-void epd_set_line_phase_luts(const uint8_t* const* luts, const int8_t* rows, unsigned count);
++void epd_set_line_phase_luts(const uint8_t* const* luts, const int8_t* rows, unsigned count,
++                             const EpdPhaseSpan* spans, unsigned span_count);
+
+ /**
+  * Hold equal nonwhite grayscale pixels from first_column to the native right edge
+--- a/src/render.c
++++ b/src/render.c
+@@ -46,6 +46,8 @@
+ static const uint8_t* const* page_phase_luts;
+ static const int8_t* page_line_phase;
+ static unsigned page_phase_count;
++static const EpdPhaseSpan* page_phase_spans;
++static unsigned page_phase_span_count;
+ static int unchanged_pixel_hold = -1;
+ static uint8_t* unchanged_pixel_mask;
+ static bool unchanged_pixel_mask_prepared;
+@@ -74,10 +76,13 @@
+             unchanged_pixel_mask + (size_t)row * stride, unchanged_pixel_hold, width);
+     }
+ }
+-void epd_set_line_phase_luts(const uint8_t* const* luts, const int8_t* rows, unsigned count) {
++void epd_set_line_phase_luts(const uint8_t* const* luts, const int8_t* rows, unsigned count,
++                             const EpdPhaseSpan* spans, unsigned span_count) {
+     page_phase_luts = luts;
+     page_line_phase = rows;
+     page_phase_count = count;
++    page_phase_spans = spans;
++    page_phase_span_count = span_count;
+ }
+
+ void epd_push_pixels(EpdRect area, short time, int color) {
+@@ -289,6 +294,20 @@
+          area.width != epd_width() || area.height != epd_height())) {
+         return EPD_DRAW_INVALID_PACKING_MODE;
+     }
++    if (page_phase_span_count) {
++        if (!page_phase_luts || !page_line_phase || !page_phase_spans ||
++            (mode & MODE_FORCE_NO_PIE) || area.x != 0 || area.width != epd_width()) {
++            return EPD_DRAW_INVALID_CROP;
++        }
++        int start_column = 0;
++        for (unsigned span = 0; span < page_phase_span_count; ++span) {
++            const int end_column = page_phase_spans[span].end_column;
++            if (end_column <= start_column || end_column > area.width || end_column % 16)
++                return EPD_DRAW_INVALID_CROP;
++            start_column = end_column;
++        }
++        if (start_column != area.width) return EPD_DRAW_INVALID_CROP;
++    }
+     prepare_unchanged_pixel_mask(data);
+     render_context.unchanged_pixel_mask = unchanged_pixel_mask;
+     render_context.unchanged_pixel_mask_offset = unchanged_pixel_hold < 0 ? 0 : unchanged_pixel_hold / 64 * 16;
+@@ -296,6 +315,8 @@
+     render_context.phase_luts = page_phase_luts;
+     render_context.line_phase = page_line_phase;
+     render_context.phase_count = page_phase_count;
++    render_context.phase_spans = page_phase_spans;
++    render_context.phase_span_count = page_phase_span_count;
+     render_context.area = area;
+     render_context.crop_to = crop_to;
+     render_context.waveform_range = waveform_range;
+@@ -349,6 +370,8 @@
+     render_context.phase_luts = NULL;
+     render_context.line_phase = NULL;
+     render_context.phase_count = 0;
++    render_context.phase_spans = NULL;
++    render_context.phase_span_count = 0;
+
+     if (render_context.error & EPD_DRAW_EMPTY_LINE_QUEUE) {
+         ESP_LOGE("epdiy", "underrun invalid=%u empty=%u short=%u first_empty=%d phase=%d consumed=%d total=%d prepared=%d",
+--- a/src/output_common/render_context.h
++++ b/src/output_common/render_context.h
+@@ -73,6 +73,8 @@
+     const uint8_t* const* phase_luts;
+     const int8_t* line_phase;
+     unsigned phase_count;
++    const EpdPhaseSpan* phase_spans;
++    unsigned phase_span_count;
+     const uint8_t* unchanged_pixel_mask;
+     int unchanged_pixel_mask_offset;
+     int unchanged_pixel_mask_stride;
+--- a/src/output_lcd/render_lcd.c
++++ b/src/output_lcd/render_lcd.c
+@@ -278,7 +278,21 @@
+             buf = lq_current(lq);
+         }
+
+-        if (ctx->phase_luts && ctx->line_phase && l < ctx->display_height) {
++        if (ctx->phase_span_count && l < ctx->display_height) {
++            const int row_phase = ctx->line_phase[l];
++            int start_column = 0;
++            for (unsigned i = 0; i < ctx->phase_span_count; ++i) {
++                const EpdPhaseSpan span = ctx->phase_spans[i];
++                const int phase = row_phase - span.delay;
++                const int pixels = span.end_column - start_column;
++                uint8_t* drive = buf + start_column / 4;
++                if (phase < 0 || (unsigned)phase >= ctx->phase_count)
++                    memset(drive, 0, pixels / 4);
++                else
++                    ctx->lut_lookup_func(lp + start_column / 4, drive, ctx->phase_luts[phase], pixels);
++                start_column = span.end_column;
++            }
++        } else if (ctx->phase_luts && ctx->line_phase && l < ctx->display_height) {
+             const int phase = ctx->line_phase[l];
+             if (phase < 0 || (unsigned)phase >= ctx->phase_count)
+                 memset(buf, 0, ctx->display_width / 4);

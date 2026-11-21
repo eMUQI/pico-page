@@ -1,0 +1,210 @@
+name: Website build
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'docs/releases/**'
+      - 'tools/ota_manifest.py'
+      - 'tools/release_notes.py'
+      - 'tools/deploy_firmware.py'
+      - 'tools/publish_cos.py'
+      - 'tools/cos-requirements.txt'
+      - 'tools/ci_changes.py'
+      - 'firmware/partitions.build.csv'
+      - 'firmware/board/profile.cmake'
+      - '.github/workflows/web.yml'
+  pull_request:
+  workflow_dispatch:
+  release:
+    types: [published]
+permissions:
+  contents: read
+env:
+  DEPLOY: ${{ github.event_name == 'release' || (github.event_name != 'pull_request' && github.ref == 'refs/heads/main') }}
+concurrency:
+  group: ${{ (github.event_name == 'release' || (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')) && 'pages-production' || format('web-{0}', github.event.pull_request.number || github.ref) }}
+  cancel-in-progress: ${{ !(github.event_name == 'release' || (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')) }}
+jobs:
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      # GitHub release events default to the tagged revision. Check out the default branch for the current site.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.repository.default_branch || '' }}
+          fetch-depth: 0
+          clean: true
+      - name: Select checks
+        id: changes
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 tools/ci_changes.py --base "$PR_BASE_SHA" | tee -a "$GITHUB_OUTPUT"
+      - name: Check website dependencies
+        if: steps.changes.outputs.web == 'true'
+        run: |
+          gh --version
+          curl --version
+      - if: steps.changes.outputs.web == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Fetch published firmware
+        if: steps.changes.outputs.web == 'true'
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          legacy_version=0.6.2
+          fetch_release() {
+            local version="$1" directory="$2" layout="$3"
+            mkdir -p "$directory"
+            gh release download "v$version" --dir "$directory" \
+              --pattern manifest.json --pattern "pico-page-$version-read_pico-release*.bin"
+            python3 tools/ota_manifest.py --check "$directory" --expect-layout "$layout" --require-full \
+              --expect-version "$version" --publish-base-url https://pico-page-firmware-test-1258873179.cos.ap-guangzhou.myqcloud.com/
+          }
+          mkdir -p web/public/firmware
+          gh release list --limit 100 --exclude-drafts --json tagName,publishedAt > web/public/firmware/releases.json
+          fetch_release "$legacy_version" web/public/firmware legacy
+          tag=$(python3 tools/ota_manifest.py --pick-release web/public/firmware/releases.json --after-version "$legacy_version")
+          if [ -n "$tag" ]; then
+            fetch_release "${tag#v}" web/public/firmware/ota-v2 ota7
+          fi
+      - name: Install dependencies
+        if: steps.changes.outputs.web == 'true'
+        run: npm ci --ignore-scripts
+      - name: Test installer failures
+        if: steps.changes.outputs.web == 'true'
+        run: npm test
+      - name: Build website
+        if: steps.changes.outputs.web == 'true'
+        env:
+          PUBLIC_GA_MEASUREMENT_ID: ${{ vars.PUBLIC_GA_MEASUREMENT_ID || 'G-S9XSC6V1KV' }}
+        run: npm run build
+      - name: Leave deployment to newer website inputs
+        if: env.DEPLOY == 'true'
+        working-directory: ${{ github.workspace }}
+        run: |
+          git fetch --quiet origin "${{ github.event.repository.default_branch }}"
+          website_changes=$(python3 tools/ci_changes.py --compare FETCH_HEAD)
+          if grep -qx 'web=true' <<< "$website_changes"; then
+            echo "STALE=true" >> "$GITHUB_ENV"
+            echo "::notice::Website inputs changed on the default branch; a newer run will deploy them."
+          fi
+      - name: Preserve the new OTA channel after its first deployment
+        if: env.DEPLOY == 'true' && env.STALE != 'true'
+        run: |
+          if [ ! -f dist/firmware/ota-v2/manifest.json ]; then
+            status=$(curl -sS --max-time 8 -H 'Cache-Control: no-cache' -o /dev/null -w '%{http_code}' \
+              "https://picopage.wulu.zone/firmware/ota-v2/manifest.json?deployment=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT")
+            if [ "$status" != 404 ]; then
+              echo "Deployment would remove the new OTA channel (production returned HTTP $status)" >&2
+              exit 1
+            fi
+          fi
+      - name: Upload website artifact
+        if: env.DEPLOY == 'true' && env.STALE != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: pico-page-web
+          path: web/dist/
+          if-no-files-found: error
+          retention-days: 3
+      - name: Set up COS publication runtime
+        if: env.DEPLOY == 'true' && env.STALE != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: tools/cos-requirements.txt
+      - name: Publish and verify firmware to Tencent COS
+        if: env.DEPLOY == 'true' && env.STALE != 'true'
+        working-directory: ${{ github.workspace }}
+        run: |
+          python3 -m venv "$RUNNER_TEMP/pico-page-cos"
+          "$RUNNER_TEMP/pico-page-cos/bin/python" -m pip install -r tools/cos-requirements.txt
+          "$RUNNER_TEMP/pico-page-cos/bin/python" tools/publish_cos.py web/dist/firmware
+      - name: Deploy to Cloudflare Pages
+        if: env.DEPLOY == 'true' && env.STALE != 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          echo "$(git rev-parse HEAD) $GITHUB_RUN_ID $GITHUB_RUN_ATTEMPT" > dist/deployment.txt
+          npx --yes wrangler@4.144.0 pages deploy dist --project-name=picopage --branch=main --commit-dirty=true
+      - name: Verify the production deployment
+        if: env.DEPLOY == 'true' && env.STALE != 'true'
+        shell: bash
+        run: |
+          base=https://picopage.wulu.zone
+          installer_body=$(mktemp)
+          trap 'rm -f "$installer_body"' EXIT
+          verify_manifest() {
+            local path="$1" status
+            if [ -f "dist/$path" ]; then
+              curl -fsS --max-time 8 "$base/$path" | cmp -s - "dist/$path"
+            else
+              status=$(curl -sS --max-time 8 -o /dev/null -w '%{http_code}' "$base/$path") && [ "$status" = 404 ]
+            fi
+          }
+          installer_fields() {
+            grep -oE -e '<html lang="[^"]+"' \
+              -e 'data-url="[^"]+" data-version="[^"]+" data-sha256="[[:xdigit:]]{64}"' \
+              -e '<span data-layout-migration="required"[^>]*>[^<]*[^<[:space:]][^<]*</span>' "$1"
+          }
+          verify_installer() {
+            local route="$1" locale="$2" expected installed status
+            if ! expected=$(installer_fields "dist${route}index.html") ||
+               ! grep -Fxq "<html lang=\"$locale\"" <<< "$expected" ||
+               ! grep -q '^data-url=' <<< "$expected"; then
+              echo "$route build is missing the expected language or firmware image metadata" >&2
+              return 1
+            fi
+            local expected_notice=absent
+            if [ -f dist/firmware/ota-v2/manifest.json ]; then
+              expected_notice=present
+            fi
+            local built_notice=absent
+            if grep -q '^<span data-layout-migration=' <<< "$expected"; then
+              built_notice=present
+            fi
+            if [ "$built_notice" != "$expected_notice" ]; then
+              echo "$route build migration notice should be $expected_notice" >&2
+              return 1
+            fi
+            if ! status=$(curl -sS --max-time 8 -o "$installer_body" -w '%{http_code}' "$base$route") ||
+               [ "$status" != 200 ]; then
+              echo "$route could not be read with HTTP 200 (status ${status:-unavailable})" >&2
+              return 1
+            fi
+            if ! installed=$(installer_fields "$installer_body") || [ "$installed" != "$expected" ]; then
+              echo "$route language, firmware image metadata, or migration notice differs from the build" >&2
+              return 1
+            fi
+          }
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsS --max-time 8 "$base/deployment.txt" | cmp -s - dist/deployment.txt &&
+              verify_manifest firmware/manifest.json &&
+              verify_manifest firmware/ota-v2/manifest.json &&
+              verify_installer /install/ zh-Hans &&
+              verify_installer /zh-hant/install/ zh-Hant &&
+              verify_installer /en/install/ en; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Production does not serve this deployment" >&2
+          exit 1

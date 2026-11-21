@@ -1,0 +1,16 @@
+{
+  "version": "2.0",
+  "statement": [
+    {
+      "effect": "allow",
+      "action": ["name/cos:GetObject"],
+      "resource": ["qcs::cos:ap-guangzhou:uid/1258873179:pico-page-firmware-test-1258873179/pico-page-*-read_pico-release*.bin"]
+    },
+    {
+      "effect": "allow",
+      "action": ["name/cos:PutObject"],
+      "resource": ["qcs::cos:ap-guangzhou:uid/1258873179:pico-page-firmware-test-1258873179/pico-page-*-read_pico-release*.bin"],
+      "condition": {"string_equal": {"cos:x-cos-forbid-overwrite": "true"}}
+    }
+  ]
+}
