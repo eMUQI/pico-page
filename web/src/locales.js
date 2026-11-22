@@ -1,9 +1,9 @@
 export const defaultLocale = "zh-Hans";
 export const languagePreferenceKey = "picopage.language";
 export const locales = {
-  "zh-Hans": { prefix: "", name: "简体中文" },
-  "zh-Hant": { prefix: "zh-hant", name: "繁體中文" },
-  en: { prefix: "en", name: "English" },
+  "zh-Hans": { prefix: "", name: "简体中文", shortName: "简" },
+  "zh-Hant": { prefix: "zh-hant", name: "繁體中文", shortName: "繁" },
+  en: { prefix: "en", name: "English", shortName: "EN" },
 };
 export const translatedLocales = Object.entries(locales).filter(([locale]) => locale !== defaultLocale);
 

@@ -16,6 +16,8 @@ const copy = {
     install: "安装页",
     instructions: "联网更新说明",
     empty: "还没有发布的版本。",
+    versions: "版本目录",
+    latest: "最新",
   },
   "zh-Hant": {
     heading: "更新日誌",
@@ -24,6 +26,8 @@ const copy = {
     install: "安裝頁面",
     instructions: "連線更新說明",
     empty: "目前尚未發佈任何版本。",
+    versions: "版本目錄",
+    latest: "最新",
     fallback: "此版本尚無繁體中文譯文，以下為簡體中文原文。",
   },
   en: {
@@ -33,6 +37,8 @@ const copy = {
     install: "installation page",
     instructions: "over-the-air update instructions",
     empty: "No versions have been released yet.",
+    versions: "Versions",
+    latest: "Latest",
     fallback: "English release notes are unavailable for this version. The Simplified Chinese original follows.",
   },
 }[locale];
@@ -91,80 +97,136 @@ const releases = readdirSync(directory).filter((name) => releaseFilename.test(na
   .map((version) => ({ version, date: releaseDate(version), ...readNotes(version) }));
 ---
 <Site title={`${copy.heading} · Pico Page`} description={copy.description} current="changelog" locale={locale}>
-  <article class="changelog">
-    <h1>{copy.heading}</h1>
-    <p class="lead">
-      {copy.lead}
-      {locale === "zh-Hans" && <>新版本可在<a href={installPath}>{copy.install}</a>安装，也可按<a href={updatePath}>{copy.instructions}</a>在设备上更新。</>}
-      {locale === "zh-Hant" && <>你可以透過<a href={installPath}>{copy.install}</a>安裝新版本，或依<a href={updatePath}>{copy.instructions}</a>在裝置上更新。</>}
-      {locale === "en" && <> Install a new version from the <a href={installPath}>{copy.install}</a>, or follow the <a href={updatePath}>{copy.instructions}</a> on your device.</>}
-    </p>
-    {firmware?.requiresLayoutMigration && <p class="notice">
-      {locale === "zh-Hans" && <>从 Pico Page 0.6.2 或更早版本更新到新分区布局时，请用电脑打开<a href={installPath}>{copy.install}</a>完整重装一次。</>}
-      {locale === "zh-Hant" && <>從 Pico Page 0.6.2 或更早版本升級到新的分割區配置時，請用電腦開啟<a href={installPath}>{copy.install}</a>，完整重裝一次。</>}
-      {locale === "en" && <>To upgrade from Pico Page 0.6.2 or earlier to the new partition layout, open the <a href={installPath}>{copy.install}</a> on a computer and perform a full reinstall once.</>}
-    </p>}
-    {releases.length === 0 && <p class="notice">{copy.empty}</p>}
-    {releases.map(({ version, date, language, content }) => (
-      <section id={`v${version}`}>
-        <h2><span>{version}</span>{date && <time class="mono" datetime={date}>{date}</time>}</h2>
-        {language !== locale && <p class="notice">{copy.fallback}</p>}
-        <div lang={language}>
-          {content.map((block) => {
-            const inline = (spans) => spans.map((span) => span.bold ? <strong>{span.bold}</strong> : span.code ? <code>{span.code}</code> : span.text);
-            if (block.kind === "heading") return <h3>{inline(block.spans)}</h3>;
-            if (block.kind === "list") return <ul>{block.items.map((item) => <li>{inline(item)}</li>)}</ul>;
-            return <p>{inline(block.spans)}</p>;
-          })}
-        </div>
-      </section>
-    ))}
-  </article>
+  <div class="changelog-layout">
+    <article class="changelog">
+      <h1>{copy.heading}</h1>
+      <p class="lead">
+        {copy.lead}
+        {locale === "zh-Hans" && <>新版本可在<a href={installPath}>{copy.install}</a>安装，也可按<a href={updatePath}>{copy.instructions}</a>在设备上更新。</>}
+        {locale === "zh-Hant" && <>你可以透過<a href={installPath}>{copy.install}</a>安裝新版本，或依<a href={updatePath}>{copy.instructions}</a>在裝置上更新。</>}
+        {locale === "en" && <> Install a new version from the <a href={installPath}>{copy.install}</a>, or follow the <a href={updatePath}>{copy.instructions}</a> on your device.</>}
+      </p>
+      {firmware?.requiresLayoutMigration && <p class="notice">
+        {locale === "zh-Hans" && <>从 Pico Page 0.6.2 或更早版本更新到新分区布局时，请用电脑打开<a href={installPath}>{copy.install}</a>完整重装一次。</>}
+        {locale === "zh-Hant" && <>從 Pico Page 0.6.2 或更早版本升級到新的分割區配置時，請用電腦開啟<a href={installPath}>{copy.install}</a>，完整重裝一次。</>}
+        {locale === "en" && <>To upgrade from Pico Page 0.6.2 or earlier to the new partition layout, open the <a href={installPath}>{copy.install}</a> on a computer and perform a full reinstall once.</>}
+      </p>}
+      {releases.length === 0 && <p class="notice">{copy.empty}</p>}
+      {releases.map(({ version, date, language, content }, index) => (
+        <section id={`v${version}`} class="release-entry">
+          <h2>
+            <span class="version-title">
+              <span>{version}</span>
+              {index === 0 && <span class="latest-badge mono">{copy.latest}</span>}
+            </span>
+            {date && <time class="mono" datetime={date}>{date}</time>}
+          </h2>
+          {language !== locale && <p class="notice">{copy.fallback}</p>}
+          <div lang={language}>
+            {content.map((block) => {
+              const inline = (spans) => spans.map((span) => span.bold ? <strong>{span.bold}</strong> : span.code ? <code>{span.code}</code> : span.text);
+              if (block.kind === "heading") return <h3>{inline(block.spans)}</h3>;
+              if (block.kind === "list") return <ul>{block.items.map((item) => <li>{inline(item)}</li>)}</ul>;
+              return <p>{inline(block.spans)}</p>;
+            })}
+          </div>
+        </section>
+      ))}
+    </article>
+    {releases.length > 1 && (
+      <nav class="version-index" aria-label={copy.versions}>
+        <p class="eyebrow">{copy.versions}</p>
+        <ol>
+          {releases.map(({ version, date }, index) => (
+            <li>
+              <a href={`#v${version}`}>
+                <span class="mono">{version}</span>
+                {index === 0 ? <span class="index-tag">{copy.latest}</span> : date && <span class="mono muted">{date}</span>}
+              </a>
+            </li>
+          ))}
+        </ol>
+      </nav>
+    )}
+  </div>
 </Site>
 
 <style>
+  .changelog-layout {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 32px 60px;
+    padding: clamp(36px, 5vw, 56px) 0 76px;
+  }
   .changelog {
+    flex: 1 1 540px;
+    min-width: 0;
     max-width: 46em;
-    padding: 56px 0 72px;
-    font-size: 16px;
+    font-size: 15.5px;
     line-height: 1.85;
     color: var(--text);
   }
   h1 {
     font-family: var(--serif);
-    font-size: clamp(34px, 4.6vw, 54px);
+    font-size: clamp(32px, 4.4vw, 48px);
     font-weight: 700;
-    line-height: 1.25;
+    line-height: 1.22;
     color: var(--ink);
   }
-  .lead,
+  .lead {
+    margin-top: 16px;
+    font-size: 16.5px;
+  }
   .notice {
-    margin-top: 14px;
+    margin-top: 16px;
+    border: 1px solid var(--line-strong);
+    border-left: 3px solid var(--accent);
+    padding: 13px 16px;
+    background: var(--surface);
+    font-size: 14px;
+    color: var(--ink);
+  }
+  .release-entry {
+    margin-top: 44px;
+    border-top: 1px solid var(--line-strong);
+    padding-top: 22px;
+    scroll-margin-top: 88px;
   }
   h2 {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
     justify-content: space-between;
-    gap: 4px 24px;
-    margin-top: 56px;
-    border-top: 1px solid var(--ink);
-    padding-top: 20px;
+    gap: 6px 24px;
     font-family: var(--serif);
-    font-size: 28px;
+    font-size: 26px;
     font-weight: 600;
     line-height: 1.3;
     color: var(--ink);
-    scroll-margin-top: 24px;
+  }
+  .version-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .latest-badge {
+    padding: 2px 8px;
+    border: 1px solid var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.5;
   }
   h2 time {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 400;
     color: var(--muted);
   }
   h3 {
-    margin-top: 28px;
-    font-size: 18px;
+    margin-top: 24px;
+    font-size: 17px;
     font-weight: 600;
     color: var(--ink);
   }
@@ -175,5 +237,49 @@ const releases = readdirSync(directory).filter((name) => releaseFilename.test(na
   section ul {
     padding-left: 1.4em;
     list-style: disc;
+  }
+  .version-index {
+    flex: 0 0 220px;
+    border: 1px solid var(--line);
+    padding: 18px;
+    background: var(--surface);
+    font-size: 13px;
+  }
+  .version-index ol {
+    display: grid;
+    gap: 2px;
+    margin-top: 14px;
+  }
+  .version-index a {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--line);
+    text-decoration: none;
+    color: var(--ink);
+  }
+  .version-index li:last-child a {
+    border-bottom: 0;
+  }
+  .version-index a:hover {
+    color: var(--accent);
+  }
+  .index-tag {
+    font-size: 11.5px;
+    color: var(--accent);
+    font-weight: 500;
+  }
+  @media (min-width: 960px) {
+    .version-index {
+      position: sticky;
+      top: 88px;
+    }
+  }
+  @media (max-width: 959px) {
+    .version-index {
+      display: none;
+    }
   }
 </style>

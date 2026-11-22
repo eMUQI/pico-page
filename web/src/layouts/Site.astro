@@ -3,32 +3,63 @@ import "../styles/site.css";
 import Analytics from "../components/Analytics.astro";
 import { defaultLocale, languagePreferenceKey, locales, localizeHref } from "../locales.js";
 
-const { title, description, current, locale = defaultLocale, noindex = false } = Astro.props;
+const { title, description, current, locale = defaultLocale, noindex = false, fullBleed = false } = Astro.props;
 const copy = {
- "zh-Hans": {
-   skip: "跳到正文", brand: "Pico Page 首页", tagline: "阅读固件", docs: "文档", install: "安装固件",
-   primaryNav: "主导航", sections: ["开始使用", "字体", "词典", "功能", "界面", "锁屏"],
-   languages: "语言", footerNav: "页脚导航", changelog: "更新日志", licenses: "第三方许可", home: "返回首页",
-   motto: "读自己的书，接着读下去。",
- },
- "zh-Hant": {
-   skip: "跳至正文", brand: "Pico Page 首頁", tagline: "閱讀韌體", docs: "文件", install: "安裝韌體",
-   primaryNav: "主導覽", sections: ["開始使用", "字型", "字典", "功能", "介面", "鎖定畫面"],
-   languages: "語言", footerNav: "頁尾導覽", changelog: "更新日誌", licenses: "第三方授權", home: "返回首頁",
-   motto: "讀自己的書，接著讀下去。",
- },
- en: {
-   skip: "Skip to content", brand: "Pico Page home", tagline: "Reading firmware", docs: "Docs", install: "Install firmware",
-   primaryNav: "Main navigation", sections: ["Get started", "Fonts", "Dictionaries", "Features", "Interface", "Lock screens"],
-   languages: "Language", footerNav: "Footer navigation", changelog: "Changelog", licenses: "Third-party licenses", home: "Back to home",
-   motto: "Read your own books. Pick up where you left off.",
- },
+  "zh-Hans": {
+    skip: "跳到正文",
+    brand: "Pico Page 首页",
+    tagline: "阅读固件",
+    homeNav: "首页",
+    docs: "文档",
+    install: "安装固件",
+    primaryNav: "主导航",
+    sections: ["上手与字体", "体验与界面", "词典与锁屏"],
+    languages: "语言",
+    footerNav: "页脚导航",
+    changelog: "更新日志",
+    licenses: "第三方许可",
+    home: "返回首页",
+    motto: "读自己的书，接着读下去。",
+  },
+  "zh-Hant": {
+    skip: "跳至正文",
+    brand: "Pico Page 首頁",
+    tagline: "閱讀韌體",
+    homeNav: "首頁",
+    docs: "文件",
+    install: "安裝韌體",
+    primaryNav: "主導覽",
+    sections: ["上手與字型", "體驗與介面", "字典與鎖定畫面"],
+    languages: "語言",
+    footerNav: "頁尾導覽",
+    changelog: "更新日誌",
+    licenses: "第三方授權",
+    home: "返回首頁",
+    motto: "讀自己的書，接著讀下去。",
+  },
+  en: {
+    skip: "Skip to content",
+    brand: "Pico Page home",
+    tagline: "Reading firmware",
+    homeNav: "Home",
+    docs: "Docs",
+    install: "Install firmware",
+    primaryNav: "Main navigation",
+    sections: ["Get started", "Experience", "Extras"],
+    languages: "Language",
+    footerNav: "Footer navigation",
+    changelog: "Changelog",
+    licenses: "Third-party licenses",
+    home: "Back to home",
+    motto: "Read your own books. Pick up where you left off.",
+  },
 }[locale];
-const anchors = ["start", "fonts", "dictionaries", "features", "screens", "lockscreens"];
+const homeAnchors = ["start", "features", "extras"];
 const currentPath = { docs: "/docs/", install: "/install/", changelog: "/changelog/" }[current] ?? "/";
 const path = (href) => localizeHref(locale, href);
 const localizedPath = (language) => localizeHref(language, currentPath);
 const homepagePaths = Object.fromEntries(Object.keys(locales).map((language) => [language, localizeHref(language, "/")]));
+const localeList = Object.entries(locales);
 ---
 <!doctype html>
 <html lang={locale}>
@@ -70,50 +101,67 @@ const homepagePaths = Object.fromEntries(Object.keys(locales).map((language) => 
   </head>
   <body>
     <a class="skip-link" href="#main">{copy.skip}</a>
-    <div class="wrap">
-      <header class="site-header">
-        <div class="bar">
+    <header class="site-header">
+      <div class="wrap">
+        <div class="header-inner">
           <a class="brand" href={path("/")} aria-label={copy.brand}>
             <span class="wordmark">Pico Page</span>
             <span class="tagline">Read Pico<br>{copy.tagline}</span>
           </a>
-          <div class="bar-links">
-            {current === "docs" ? <span class="here" aria-current="page">{copy.docs}</span> : <a class="outline" href={path("/docs/")}>{copy.docs}</a>}
-            {current === "install" ? <span class="here" aria-current="page">{copy.install}</span> : <a class="primary" href={path("/install/")}>{copy.install}</a>}
-          </div>
-        </div>
-        <div class="site-navigation">
-          <nav aria-label={copy.primaryNav}>
-            {anchors.map((anchor, index) => <a href={path(`/#${anchor}`)}>{copy.sections[index]}</a>)}
+          <nav class="header-nav" aria-label={copy.primaryNav}>
+            {current === "home" ? (
+              <>
+                {homeAnchors.map((anchor, index) => (
+                  <a href={path(`/#${anchor}`)}>{copy.sections[index]}</a>
+                ))}
+                <span class="nav-divider" aria-hidden="true"></span>
+                <a href={path("/docs/")}>{copy.docs}</a>
+                <a href={path("/changelog/")}>{copy.changelog}</a>
+              </>
+            ) : (
+              <>
+                <a href={path("/")}>{copy.homeNav}</a>
+                {current === "docs" ? <span class="nav-current" aria-current="page">{copy.docs}</span> : <a href={path("/docs/")}>{copy.docs}</a>}
+                {current === "changelog" ? <span class="nav-current" aria-current="page">{copy.changelog}</span> : <a href={path("/changelog/")}>{copy.changelog}</a>}
+              </>
+            )}
           </nav>
           <nav class="language-nav" aria-label={copy.languages}>
-            {Object.entries(locales).map(([language, { name }]) => language === locale ? (
-              <span lang={language} aria-current="true">{name}</span>
+            {localeList.map(([language, { name, shortName }]) => language === locale ? (
+              <span lang={language} aria-current="true" aria-label={name} title={name}>{shortName}</span>
             ) : (
-              <a href={localizedPath(language)} hreflang={language} lang={language} data-language-link={noindex ? "home" : "same-page"}>{name}</a>
+              <a href={localizedPath(language)} hreflang={language} lang={language} data-language-link={noindex ? "home" : "same-page"} aria-label={name} title={name}>{shortName}</a>
             ))}
           </nav>
+          <a class="header-github" href="https://github.com/eMUQI/pico-page" target="_blank" rel="noopener">GitHub</a>
+          {current === "install" ? (
+            <span class="header-cta-here" aria-current="page">{copy.install}</span>
+          ) : (
+            <a class="outline header-cta" href={path("/install/")}>{copy.install}</a>
+          )}
         </div>
-      </header>
-      <main id="main">
-        <slot />
-      </main>
-      <footer class="site-footer">
+      </div>
+    </header>
+    <main id="main">
+      {fullBleed ? <slot /> : <div class="wrap"><slot /></div>}
+    </main>
+    <footer class="site-footer">
+      <div class="wrap footer-inner">
         <div>
           <p class="wordmark">Pico Page</p>
           <p>{copy.motto}</p>
         </div>
         <nav aria-label={copy.footerNav}>
-          {current !== "docs" && <a href={path("/docs/")}>{copy.docs}</a>}
           {current !== "install" && <a href={path("/install/")}>{copy.install}</a>}
+          {current !== "docs" && <a href={path("/docs/")}>{copy.docs}</a>}
           {current !== "changelog" && <a href={path("/changelog/")}>{copy.changelog}</a>}
           <a href="https://github.com/eMUQI/pico-page" target="_blank" rel="noopener">GitHub</a>
           {current === "install" && <a href="/assets/third-party-licenses.txt">{copy.licenses}</a>}
           {current !== "home" && <a href={path("/")}>{copy.home}</a>}
           {current === "home" && <a class="muted" href="https://quotaframe.com" target="_blank" rel="noopener">QuotaFrame</a>}
         </nav>
-      </footer>
-    </div>
+      </div>
+    </footer>
     <Analytics />
   </body>
 </html>

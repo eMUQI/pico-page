@@ -14,13 +14,13 @@ npm run preview --prefix web
 | 路径 | 内容 |
 |---|---|
 | `src/layouts/Site.astro`、`src/styles/site.css` | 共用页头、导航、页脚、色板和字体栈；页面样式写在各页面文件里 |
-| `src/components/HomePage.astro` | 首页；锚点 `#start`、`#fonts`、`#features`、`#screens`、`#lockscreens`，旧锚点 `#install`、`#resources`、`#devices`、`#historical-seals` 保留以兼容外部链接 |
+| `src/components/HomePage.astro` | 首页；锚点 `#start`、`#fonts`、`#features`、`#screens`、`#extras`、`#transparent-lockscreens`、`#lockscreens`、`#dictionaries`，旧锚点 `#install`、`#resources`、`#devices`、`#historical-seals` 保留以兼容外部链接 |
 | `src/components/InstallPage.astro` | 安装页和安装脚本 |
 | `src/components/DocsPage.astro` | 使用文档 |
 | `src/components/ChangelogPage.astro` | 更新日志 |
 | `src/firmware.js` | 构建时查找可安装的全量镜像，首页和安装页共用 |
 | `src/pages/` | 静态路由；`404.astro` 让未知地址返回 404，设备据此区分「尚未发布固件」与清单读取失败 |
-| `public/assets/screens/` | 界面图，由桌面程序用生产绘制路径和原创合成数据导出，无损 WebP；不是设备实拍或验收证据 |
+| `public/assets/screens/`、`public/assets/read-pico-frame.webp` | 界面图由桌面程序用生产绘制路径和原创合成数据导出，无损 WebP；机身外框取自 `docs/images/readme-device-gallery.webp`（根据 MindReset 产品图制作），仅作展示，不是设备实拍或验收证据 |
 | `public/downloads/` | 字体与锁屏下载，权利说明见下文 |
 
 ## 语言

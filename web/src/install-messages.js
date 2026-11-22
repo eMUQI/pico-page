@@ -77,7 +77,11 @@ export const installMessages = {
       "unchangedScreenAnswer": "墨水屏断电后会保留旧画面。按住电源键约 10 秒强制关机，松开后再按住 1 秒以上开机；仍无变化时，重新连接并安装一次。",
       "missingGlyphsQuestion": "书里有空白方框",
       "missingGlyphsStart": "这是内置字体缺字。把完整中文字体放进 ",
-      "missingGlyphsEnd": "，并在「排版」中选择它。"
+      "missingGlyphsEnd": "，并在「排版」中选择它。",
+      "checkedLabel": "已确认",
+      "fontEssentialTag": "不要漏掉 Fonts/",
+      "copyPageUrl": "复制安装页地址",
+      "copiedPageUrl": "已复制网址，请发到电脑用 Chrome 或 Edge 打开"
     },
     "client": {
       "idle": "未连接",
@@ -229,7 +233,11 @@ export const installMessages = {
       "unchangedScreenAnswer": "電子紙螢幕斷電後會保留舊畫面。請按住電源鍵約 10 秒強制關機，鬆開後再按住至少 1 秒開機。如果仍無變化，請重新連接並再次安裝。",
       "missingGlyphsQuestion": "書中有空白方框",
       "missingGlyphsStart": "這是內建字型缺字。請將完整的中文字型放入 ",
-      "missingGlyphsEnd": "，再在「排版」中選擇該字型。"
+      "missingGlyphsEnd": "，再在「排版」中選擇該字型。",
+      "checkedLabel": "已確認",
+      "fontEssentialTag": "別漏掉 Fonts/",
+      "copyPageUrl": "複製安裝頁網址",
+      "copiedPageUrl": "已複製網址，請傳到電腦用 Chrome 或 Edge 開啟"
     },
     "client": {
       "idle": "未連接",
@@ -381,7 +389,11 @@ export const installMessages = {
       "unchangedScreenAnswer": "The e-paper display keeps its last image after the power turns off. Hold the power button for about 10 seconds to force the device off, release it, then hold it for at least 1 second to turn it on. If the screen still doesn't change, reconnect and install again.",
       "missingGlyphsQuestion": "Some characters appear as boxes",
       "missingGlyphsStart": "The built-in font is missing those characters. Copy a full Chinese font to ",
-      "missingGlyphsEnd": " and select it under “Layout”."
+      "missingGlyphsEnd": " and select it under “Layout”.",
+      "checkedLabel": "checked",
+      "fontEssentialTag": "Don’t skip Fonts/",
+      "copyPageUrl": "Copy installer link",
+      "copiedPageUrl": "Link copied — open it in desktop Chrome or Edge"
     },
     "client": {
       "idle": "Not connected",
