@@ -1,0 +1,9 @@
+diff --git a/components/esp_system/ld/ld.ext_ram.sections b/components/esp_system/ld/ld.ext_ram.sections
+index b214e591..9ae2fcea 100644
+--- a/components/esp_system/ld/ld.ext_ram.sections
++++ b/components/esp_system/ld/ld.ext_ram.sections
+@@ -11,3 +11,3 @@
+     HIDDEN(_ext_ram_on_same_bus = ORIGIN(ext_ram_seg) == ORIGIN(flash_rodata_seg));
+-    . = _ext_ram_on_same_bus ? ORIGIN(ext_ram_seg) + (_rodata_reserved_end - _flash_rodata_dummy_start) : 0;
++    . = _ext_ram_on_same_bus ? MAX(ABSOLUTE(.), ORIGIN(ext_ram_seg) + (_rodata_reserved_end - _flash_rodata_dummy_start)) : 0;
+     . = ALIGN(_ext_ram_on_same_bus ? _esp_mmu_page_size : 0);

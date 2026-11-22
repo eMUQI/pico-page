@@ -1,0 +1,1237 @@
+#include "app_impl.h"
+
+namespace pico_page {
+
+void ReaderApp::Impl::error(const std::string &text_in, const std::string &retry, bool repeatable) {
+    reset_dictionary_contact();
+    sleep_wait_footer.reset();
+    sleep_wait_restore_pending = false;
+    if (view != View::Error) error_onboarding_help = view == View::Onboarding && onboarding_from_help;
+    error_origin = origin_for(view);
+    image_viewing = false;
+    viewer_original.reset();
+    image_contrast_level = 0;
+    const std::string detail = text_in;
+#ifdef ESP_PLATFORM
+    ESP_LOGW("reader_app", "Error shown: %s", detail.c_str());
+#endif
+    abandon_content();
+    if (drawing_error) return;
+    drawing_error = true;
+    if (card_available && session.needs_save() && !save_failed)
+        persist();
+    if (clock_running()) {
+        clock_from_sync = false;
+        network::release(wifi_hold);
+    }
+    cancel_sync();
+    link_return = confirmed_link_return;
+    sync_return = confirmed_sync_return;
+    message = detail;
+    retry_path = repeatable ? retry : "";
+    std::size_t split = std::string::npos, mark = 0;
+    for (const char *separator : {"。", "，", "："}) {
+        const auto found = detail.find(separator);
+        if (found < split) { split = found; mark = std::strlen(separator); }
+    }
+    if (settings.language == i18n::Language::English) {
+        for (const char *separator : {". ", ", ", ": "}) {
+            const auto found = detail.find(separator);
+            if (found < split) { split = found; mark = std::strlen(separator); }
+        }
+    }
+    const auto title = detail.substr(0, split);
+    const auto body = split == std::string::npos ? std::string() : detail.substr(split + mark);
+    std::uint32_t visible_offset;
+    const bool available = session.visible_record() && chapter.offset_for(session.visible_record()->anchor, visible_offset);
+    const bool retained = (!async_content || available) && !foreground_job && card_available && has_book() && session.visible_record() &&
+                          restore_confirmed_position() && panel_background(752, false);
+    view = View::Error;
+    hits.clear();
+    const bool unsaved = card_available && session.needs_save();
+    const bool resumes = error_origin == Origin::Reading && has_book() && (session.visible_record() || session.saved_record());
+    if (retained) {
+        canvas.fill_rect(0, 752, 684, 464, 15);
+        canvas.line(0, 752, 683, 752, 1, 3);
+        const int title_height = title_lines(title, 36, 784, 612, 32, true, 2);
+        title_lines(body, 36, std::max(850, 784 + title_height + 16), 612, 26, false, 3);
+        note(error_origin == Origin::Reading ? tr("保留最后确认的位置。") :
+             error_onboarding_help ? tr("返回将回到使用说明。") : error_origin == Origin::Settings ? tr("返回将回到设置首页。") : tr("返回将回到书库。"), 1012);
+    } else {
+        canvas.clear();
+        header(retry.empty() ? tr("暂时无法继续") : tr("无法打开"), unsaved || resumes ? 0 : Back,
+               error_onboarding_help ? tr("使用说明") : error_origin == Origin::Settings ? tr("设置") : tr("书库"));
+        const int title_height = title_lines(title, 36, 160, 612, 40, true, 4);
+        int y = 160 + title_height + 28;
+        if (!body.empty()) y += wrapped(body, 36, y, 612, 28) + 28;
+        if (!retry.empty()) wrapped(retry, 36, y, 612, 24, true, 3);
+    }
+    const auto leave = return_label(error_origin);
+    const bool second = unsaved || !retry_path.empty();
+    button(Back, leave, 24, 1080, second ? 306 : 636, 96, !second);
+    if (unsaved) button(SaveRetry, tr("重试保存"), 354, 1080, 306, 96, true);
+    else if (!retry_path.empty()) button(Retry, tr("重试"), 354, 1080, 306, 96, true);
+    drawing_error = false;
+    if (!display.busy()) overlay();
+}
+
+void ReaderApp::Impl::back() {
+    if (view == View::Dictionary) {
+        if (dictionary_choosing) cancel_dictionary_sources(); else close_dictionary();
+        return;
+    }
+    if (view == View::DictionarySettings) { leave_dictionary_settings(); return; }
+    if (view == View::NetworkClosing) return;
+    if (network_worker_id && active_network) { wait_network(Back); return; }
+    if (view == View::Typography && font_picker_open) { cancel_font_picker(); overlay(); return; }
+    if (view == View::TextEntry) {
+        const auto field = entry.field;
+        entry = {};
+        if (field == TextEntry::Field::WifiPassword && join_manual) {
+            join_draft.password.clear();
+            open_entry(TextEntry::Field::WifiName, join_draft.ssid);
+            return;
+        }
+        if (field == TextEntry::Field::WifiPassword || field == TextEntry::Field::WifiName) {
+            leave_join(join_origin);
+            draw_wifi();
+        } else draw_sync_settings();
+        overlay();
+        return;
+    }
+    if (view == View::Update) {
+        if (update_page == UpdatePage::Notes) { update_page = notes_return; draw_update(); overlay(); return; }
+        if (update_page != UpdatePage::Home && update_page != UpdatePage::Failed) return;
+        update_page = UpdatePage::Home; update_notice.clear();
+        draw_settings(); overlay(); return;
+    }
+    if (view == View::WifiSettings) {
+        if (portal_live) { draw_portal(); overlay(); return; }
+        if (clock_running()) network::release(wifi_hold);
+        if (wifi_page == WifiPage::Joining || wifi_page == WifiPage::JoinFailed || wifi_page == WifiPage::Joined)
+            return;
+        if (wifi_page != wifi_entry_page) {
+            if (wifi_page == WifiPage::Add) {
+                network::release(wifi_hold);
+                if (wifi_worker && wifi_kind == WifiOperation::Kind::Scan) { wifi_worker = 0; wifi_request.reset(); }
+            }
+            wifi_page = wifi_page == WifiPage::Detail ? WifiPage::Saved
+                      : wifi_page == WifiPage::Forget ? WifiPage::Detail : WifiPage::Home;
+            draw_wifi(); overlay(); return;
+        }
+        wifi_page = wifi_entry_page = WifiPage::Home;
+        if (std::exchange(wifi_from_sync, false)) { draw_sync(); overlay(); return; }
+        if (std::exchange(wifi_from_transfer, false)) { draw_import(); overlay(); return; }
+    }
+    if (view == View::SyncSettings) {
+        if (account_page == AccountPage::Remove) { account_page = AccountPage::Form; draw_sync_settings(); overlay(); return; }
+        if (account_page == AccountPage::Verifying) { cancel_account(); draw_sync_settings(); overlay(); return; }
+        std::fill(account.password.begin(), account.password.end(), '\0');
+        account.password.clear();
+        if (std::exchange(account_from_sync, false) && has_book()) {
+            refresh_badge_config(); cancel_sync(); sync_status.clear(); draw_sync(); overlay(); return;
+        }
+    }
+    if (view == View::LockScreens || view == View::LockScreenPreview) { draw_power(); overlay(); return; }
+    if (view == View::PowerMenu) { close_power_menu(); return; }
+    if (view == View::Portal) return;
+    if (view == View::BookManagement) { draw_details(); overlay(); return; }
+    if (usb_prepared) {
+        if (usb_confirm) { usb_confirm = false; draw_usb(); overlay(); }
+        return;
+    }
+    if (view == View::RefreshConfirm || view == View::RefreshInterval || view == View::PageEffects) {
+        draw_refresh(); overlay(); return;
+    }
+    if (view == View::Help && !help_from_settings) { draw_library(); overlay(); return; }
+    if (view == View::Help || view == View::About || view == View::WifiSettings || view == View::PowerSettings || view == View::StorageSettings || view == View::InputSettings || view == View::LanguageSettings ||
+        view == View::SyncSettings || (view == View::Import && import_from_settings) ||
+        (view == View::Refresh && refresh_from_settings)) {
+        draw_settings(); overlay(); return;
+    }
+    if (view == View::Sync || view == View::Confirmation) {
+        if (clock_running()) {
+            clock_from_sync = false;
+            network::release(wifi_hold);
+        }
+        cancel_sync();
+        if (has_book())
+            recover_body();
+        else {
+            draw_library();
+            overlay();
+        }
+        return;
+    }
+    if (view == View::Library) {
+        if (!folder.empty()) {
+            auto p = folder.find_last_of('/');
+            const auto parent = p == std::string::npos ? "" : folder.substr(0, p);
+            folder = folder_root || parent == library_home_root ? "" : parent;
+            library_page = 0;
+            scan_library();
+            draw_library();
+            overlay();
+        }
+        return;
+    }
+    if (view == View::Tools || view == View::Contents || view == View::Typography ||
+        view == View::Refresh) {
+        show_page(offset);
+        return;
+    }
+    if (view == View::Error) {
+        return_to_origin(error_origin);
+        return;
+    }
+    draw_library();
+    overlay();
+}
+
+void ReaderApp::Impl::wifi_control(int id) {
+    const auto index = [&](int base) { return static_cast<std::size_t>(id - base); };
+    std::string detail;
+    if (id >= WifiNearbyBase) {
+        if (view != View::WifiSettings || wifi_page != WifiPage::Add || index(WifiNearbyBase) >= wifi_nearby.size()) return;
+        const auto& found = wifi_nearby[index(WifiNearbyBase)];
+        join_draft = {found.ssid, ""};
+        join_manual = false; join_open = found.open; join_secured = !found.open; join_origin = WifiPage::Add;
+        if (join_open) join_wifi();
+        else open_entry(TextEntry::Field::WifiPassword, "");
+        return;
+    }
+    if (id >= WifiModeBase) {
+        if (view != View::WifiSettings || wifi_page != WifiPage::Mode || index(WifiModeBase) >= wifi_saved.size()) return;
+        wifi_notice = provision::save_selected_network(root, wifi_saved[index(WifiModeBase)].ssid, detail)
+            ? "" : tr("连接方式未保存，请检查 TF 卡。");
+        draw_wifi(); overlay(); return;
+    }
+    if (id >= WifiSavedBase) {
+        if (view != View::WifiSettings || wifi_page != WifiPage::Saved || index(WifiSavedBase) >= wifi_saved.size()) return;
+        wifi_choice = wifi_saved[index(WifiSavedBase)].ssid;
+        wifi_page = WifiPage::Detail;
+        draw_wifi(); overlay(); return;
+    }
+    switch (id) {
+    case WifiConnect: connect_wifi(); return;
+    case WifiClock:
+        if (view == View::Sync) { start_clock_sync(); return; }
+        if (wifi_free(true)) {
+            auto targets = wifi_targets(detail);
+            if (targets.networks.empty()) wifi_notice = detail;
+            else start_wifi(WifiOperation::Kind::Clock, std::move(targets), wifi_hold);
+        }
+        break;
+    case WifiClockCancel:
+        if (!clock_running() || !network::live(wifi_hold)) return;
+        network::release(wifi_hold);
+        if (view == View::Sync) { draw_sync(); overlay(); return; }
+        wifi_notice = tr("正在结束校准…");
+        break;
+    case WifiDisconnect:
+        if (clock_running()) network::release(wifi_hold);
+        network::release(manual_hold); cancel_sync();
+        if (wifi_status.phase != WifiPhase::Offline) { wifi_status.phase = WifiPhase::Closing; wifi_notice = tr("正在结束…"); }
+        else wifi_notice.clear();
+        break;
+    case WifiManage: wifi_page = WifiPage::Saved; wifi_notice.clear(); break;
+    case WifiModeOpen: wifi_page = WifiPage::Mode; wifi_notice.clear(); break;
+    case WifiModeAuto:
+        wifi_notice = pinned_wifi_ssid.empty() || provision::save_selected_network(root, "", detail)
+            ? "" : tr("连接方式未保存，请检查 TF 卡。");
+        break;
+    case WifiAdd:
+    case WifiRescan: scan_wifi(); return;
+    case WifiManualName:
+        network::release(wifi_hold);
+        if (wifi_worker && wifi_kind == WifiOperation::Kind::Scan) { wifi_worker = 0; wifi_request.reset(); }
+        join_draft = {};
+        join_manual = true; join_open = join_secured = false; join_origin = WifiPage::Add;
+        open_entry(TextEntry::Field::WifiName, "");
+        return;
+    case WifiUpdatePassword:
+        if (!wifi_free()) break;
+        join_draft = {wifi_choice, ""};
+        join_manual = false; join_open = join_secured = false; join_origin = WifiPage::Detail;
+        open_entry(TextEntry::Field::WifiPassword, "");
+        return;
+    case WifiForget: wifi_page = WifiPage::Forget; break;
+    case WifiForgetConfirm:
+        wifi_page = WifiPage::Detail;
+        if (wifi_worker || network::live(manual_hold) || wifi_online()) wifi_notice = tr("请先断开 Wi-Fi，再忘记网络。");
+        else if (!provision::save_network_edit(root, {wifi_choice, ""}, true, 0, detail)) wifi_notice = tr("忘记网络失败，请检查 TF 卡。");
+        else {
+            wifi_notice = wifi_choice == pinned_wifi_ssid ? tr("网络已忘记，连接方式已改回自动。") : tr("网络已忘记。");
+            wifi_choice.clear();
+            wifi_page = WifiPage::Saved;
+        }
+        break;
+    case WifiJoinCancel:
+        network::release(wifi_hold);
+        wifi_worker = 0; wifi_request.reset();
+        if (!join_open) { open_entry(TextEntry::Field::WifiPassword, join_draft.password); return; }
+        leave_join(join_origin);
+        break;
+    case WifiJoinRetry: join_wifi(); return;
+    case WifiJoinEdit: open_entry(TextEntry::Field::WifiPassword, join_draft.password); return;
+    case WifiJoinList: leave_join(join_origin == WifiPage::Detail ? WifiPage::Saved : WifiPage::Add); break;
+    case WifiJoinDone: leave_join(WifiPage::Home); break;
+    case SyncEnable:
+    case SyncClockEnable: {
+        if (view != View::Sync || active_network || wifi_worker || network_worker_id || content_loading ||
+            !bookmark_io_ready()) return;
+        const auto snapshot = store.settings_snapshot();
+        auto values = snapshot.global_settings;
+        values.wifi_enabled = true;
+        if (store.apply_settings(snapshot, values, false, detail) != StoreStatus::Ok) {
+            auto& notice = id == SyncClockEnable ? clock_notice : sync_status;
+            notice = tr("Wi-Fi 开关未保存，请检查 TF 卡。");
+            draw_sync(); overlay(); return;
+        }
+        settings.wifi_enabled = true;
+        if (id == SyncClockEnable) start_clock_sync();
+        else check_sync();
+        return;
+    }
+    case SyncSubProgress:
+    case SyncSubClock: {
+        if (view != View::Sync || active_network || wifi_worker || network_worker_id || content_loading) return;
+        const auto next = id == SyncSubProgress ? SyncSubtab::Progress : SyncSubtab::Clock;
+        if (next == sync_subtab) return;
+        sync_subtab = next;
+        draw_sync(); overlay(); return;
+    }
+    case SyncOnceAuto: check_sync(true); return;
+    case SyncStay:
+        cancel_sync();
+        if (has_book()) recover_body();
+        return;
+    case SyncAccount:
+        cancel_sync();
+        account_from_sync = true;
+        open_account();
+        draw_sync_settings(); overlay(); return;
+    case AccountEndpoint: open_entry(TextEntry::Field::Endpoint, account.endpoint); return;
+    case AccountUser: open_entry(TextEntry::Field::Username, account.username); return;
+    case AccountPassword: open_entry(TextEntry::Field::Password, account.password); return;
+    case AccountVerify: verify_account(); return;
+    case AccountCancel: cancel_account(); draw_sync_settings(); overlay(); return;
+    case AccountRemove: account_page = AccountPage::Remove; draw_sync_settings(); overlay(); return;
+    case AccountRemoveConfirm: {
+        if (!bookmark_io_ready()) return;
+        const auto removed = store.remove_private("sync.toml");
+        cancel_sync();
+        open_account();
+        refresh_badge_config();
+        account_notice = removed == StoreStatus::Ok || removed == StoreStatus::Missing ? tr("同步账户已移除。") : tr("同步账户未移除，请检查 TF 卡。");
+        draw_sync_settings(); overlay(); return;
+    }
+    case EntryClear: entry.value.clear(); entry.field_dirty = true; flush_entry(); return;
+    case EntryMask: entry.masked = !entry.masked; entry.field_dirty = true; flush_entry(); return;
+    case EntryDefault: entry.value = provision::default_endpoint; entry.field_dirty = true; flush_entry(); return;
+    default: return;
+    }
+    draw_wifi(); overlay();
+}
+
+void ReaderApp::Impl::control(int id, PageTurnOrigin turn_origin) {
+    if (id == DictionaryOpen) { open_dictionary_settings(); return; }
+    if (view == View::Typography && font_picker_open && id != FullRefresh) {
+        font_picker_control(id); return;
+    }
+    if (view == View::Update && update_control(id)) return;
+    if (id == UpdateOpen) { update_open(); return; }
+    if (id == SleepCustom) { draft.sleep_screen = "custom"; draw_power(); overlay(); return; }
+    if (id == SleepOverlay) { draft.sleep_overlay = !draft.sleep_overlay; draw_power(); overlay(); return; }
+    if (id == SleepPreview) { preview_lock_screen(); return; }
+    if (id == SleepChoose || id == SleepRefresh) { list_lock_screens(); return; }
+    if (id == SleepRotation) {
+        draft.sleep_image.clear(); draft.sleep_screen = "custom"; draw_lock_screens(); overlay(); return;
+    }
+    if (view == View::LockScreens && id >= LockScreenBase && id < LockScreenBase + 256) {
+        const auto index = static_cast<std::size_t>(id - LockScreenBase);
+        if (index < lock_screens.size()) {
+            draft.sleep_image = lock_screens[index]; draft.sleep_screen = "custom";
+            draw_lock_screens(); overlay();
+        }
+        return;
+    }
+    if (view == View::NetworkClosing) {
+        if (id == ContinueOffline) {
+            network_after_cancel = 0;
+            return_to_origin(origin_for(view));
+        }
+        return;
+    }
+    if (id == Sync && view == View::Sync) return;
+    if (network_worker_id && active_network && id != FullRefresh) { wait_network(id); return; }
+    if (view == View::Sync && (id == Contents || id == Typography || id == Refresh)) {
+        if (clock_running()) {
+            clock_from_sync = false;
+            network::release(wifi_hold);
+        }
+        cancel_sync();
+    }
+    if (usb_prepared && id != UsbExit && id != UsbExitConfirm && id != UsbCancel)
+        return;
+    if (id == WifiSettings || (id == WifiModeOpen && view == View::Sync)) {
+        wifi_from_sync = view == View::Sync;
+        wifi_from_transfer = view == View::Import && !import_from_settings;
+        if (!portal_live) cancel_sync();
+        wifi_page = wifi_entry_page = id == WifiModeOpen ? WifiPage::Mode : WifiPage::Home;
+        wifi_choice.clear();
+        draw_wifi(); overlay(); return;
+    }
+    if (portal_live && (view == View::Portal || view == View::WifiSettings) && id != Back && id != FullRefresh) {
+        if (id == PortalStop && !portal_closing) {
+            portal_open_wifi = view == View::WifiSettings;
+            portal_action = PortalAction::Stop;
+            portal_closing = true;
+            draw_portal(); overlay();
+        }
+        return;
+    }
+    if ((id == WifiUpload || id == UsbStart) && view == View::Library) import_from_settings = false;
+    if (id == WifiUpload || id == WifiUploadStation) {
+        if (!wifi_enabled()) {
+            if (view == View::Library) { draw_import(); overlay(); return; }
+            wifi_page = wifi_entry_page = WifiPage::Home; draw_wifi(); overlay(); return;
+        }
+        ++portal_generation;
+        portal_requested = true;
+        portal_request_view = view;
+        portal_action = id == WifiUpload ? PortalAction::Upload : PortalAction::UploadStation;
+        return;
+    }
+    if (id == UsbStart) {
+        usb_request_view = view;
+        usb_action = UsbTransferAction::Start;
+        return;
+    }
+    if (id == UsbExit || id == UsbCancel) {
+        usb_confirm = id == UsbExit;
+        draw_usb(); overlay(); return;
+    }
+    if (id == UsbExitConfirm) {
+        usb_action = UsbTransferAction::Exit;
+        return;
+    }
+    if (id >= WifiConnect) { wifi_control(id); return; }
+    if (id >= BookmarkBase) {
+        const auto index = static_cast<std::size_t>(id - BookmarkBase);
+        if (view != View::Contents || !bookmarks_usable() || index >= bookmarks.bookmarks.size()) return;
+        const auto target = bookmarks.bookmarks[index].anchor;
+        if (async_content) { clear_page_history(); begin_seek(target); return; }
+        std::uint32_t position;
+        if (!seek(target, position, tr("书签位置无法恢复，原书内容可能已更改"))) return;
+        clear_page_history();
+        show_page(position);
+        return;
+    }
+    if (id >= DetailBase) {
+        const auto index = static_cast<std::size_t>(id - DetailBase);
+        if (index < entries.size() && !entries[index].directory) {
+            inspect_book(entries[index].path); if (!display.busy()) overlay();
+        }
+        return;
+    }
+    if (id >= TocToggleBase && id < LinkBase) {
+        const auto index = static_cast<std::size_t>(id - TocToggleBase);
+        if (index < document.toc().size() && toc_parent(index)) {
+            if (!toc_collapsed.erase(index)) toc_collapsed.insert(index);
+            draw_contents(); overlay();
+        }
+        return;
+    }
+    if (id >= LinkBase) {
+        const auto i = static_cast<std::size_t>(id - LinkBase);
+        if (i >= chapter.links.size())
+            return;
+        const auto link = chapter.links[i];
+        if (link.external) {
+            message = tr("外部链接无法在阅读器中打开");
+            draw_tools();
+            overlay();
+            return;
+        }
+        std::size_t index;
+        if (!document.chapter_index_for(link.resource, index)) {
+            error(tr("链接目标不在正文中"));
+            return;
+        }
+        const auto origin = session.visible_record();
+        if (!origin)
+            return;
+        if (async_content) {
+            if (!link_return) link_return = origin->anchor;
+            clear_page_history();
+            begin_chapter(index, 0, ContentJob::Target::Fragment, 0, PageTurnOrigin::Middle, {}, link.fragment);
+            return;
+        }
+        std::uint32_t target = 0;
+        if (!seek_fragment(index, link.fragment, target, tr("链接指向的位置不存在")))
+            return;
+        if (!link_return)
+            link_return = origin->anchor;
+        clear_page_history();
+        show_page(target);
+        return;
+    }
+    if (id >= TocBase) {
+        const auto index = static_cast<std::size_t>(id - TocBase);
+        if (index >= document.toc().size())
+            return;
+        const auto item = document.toc()[index];
+        std::size_t target;
+        if (!document.chapter_index_for(item.resource, target)) {
+            error(tr("目录目标不在正文中"));
+            return;
+        }
+        const auto& txt_headings = document.metadata().txt_headings;
+        if (index < txt_headings.size()) {
+            const auto heading = txt_headings[index];
+            clear_page_history();
+            if (async_content) begin_chapter(target, heading.part, ContentJob::Target::Start, heading.offset);
+            else if (load_chapter(target, heading.part)) show_page(heading.offset);
+            return;
+        }
+        if (async_content) {
+            clear_page_history();
+            begin_chapter(target, 0, ContentJob::Target::Fragment, 0, PageTurnOrigin::Middle, {}, item.fragment);
+            return;
+        }
+        std::uint32_t position = 0;
+        if (!seek_fragment(target, item.fragment, position, tr("目录项指向的位置不存在")))
+            return;
+        show_page(position);
+        return;
+    }
+    if (id >= EntryBase) {
+        const auto i = static_cast<std::size_t>(id - EntryBase);
+        if (i >= entries.size())
+            return;
+        const auto entry = entries[i];
+        if (entry.directory) {
+            folder = entry.path;
+            library_page = 0;
+            scan_library();
+            draw_library();
+            overlay();
+        } else if (async_content) open(entry.path);
+        else
+            defer(tr("正在打开书籍…"), [this, path = entry.path] { open(path); });
+        return;
+    }
+    switch (id) {
+    case OnboardingReplay:
+        start_onboarding(true); break;
+    case Help:
+        help_from_settings = view == View::Settings;
+        message.clear(); help_page = 0; draw_help();
+        break;
+    case About:
+        message.clear(); draw_about();
+        break;
+    case LinkReturn: {
+        if (!link_return)
+            return;
+        const auto target = *link_return;
+        if (async_content) { link_return.reset(); sync_return = false; clear_page_history(); begin_seek(target); return; }
+        std::uint32_t target_offset;
+        if (!seek(target, target_offset, tr("原位置无法恢复")))
+            return;
+        link_return.reset();
+        sync_return = false;
+        clear_page_history();
+        show_page(target_offset);
+        return;
+    }
+    case PowerMenu:
+        if (!display.busy() && !active_network && !update_waiting() && !content_loading && !foreground_job && !usb_prepared && view != View::Portal) {
+            if (counting_job && (counting_job->request.kind == ContentJob::Kind::SleepCover || counting_job->request.kind == ContentJob::Kind::LockScreen)) {
+                counting_job->cancel();
+                power_menu_wait = view;
+                return;
+            }
+            drain_save(); stop_covers(); clear_prefetch(); stop_counting_job();
+            power_return_canvas = canvas; power_return_hits = hits; power_return_view = view;
+            power_return_message = message; power_selected = PowerAction::None; power_save_failed = false;
+            draw_power_menu(); overlay();
+        }
+        return;
+    case PowerShutdown:
+    case PowerRestart:
+        if (view == View::PowerMenu && !power_save_failed) {
+            power_selected = id == PowerRestart ? PowerAction::Restart : PowerAction::Shutdown;
+            power_request = {power_selected, false};
+        }
+        return;
+    case PowerForce:
+        if (view == View::PowerMenu && power_save_failed)
+            power_request = {power_selected, true};
+        return;
+    case PowerCancel:
+        close_power_menu(); return;
+    case BookmarkToggle:
+        toggle_bookmark(); return;
+    case ContentsToc:
+    case ContentsBookmarks:
+        if (view != View::Contents) return;
+        contents_bookmarks = id == ContentsBookmarks;
+        if (contents_bookmarks) {
+            const auto present = page_bookmarks();
+            bookmark_page = present.empty() ? 0 : present.front() / bookmarks_per_screen;
+        } else toc_locate_current = true;
+        draw_contents(); overlay(); return;
+    case Back:
+        back();
+        return;
+    case Dismiss:
+        if (view == View::Tools)
+            show_page(offset);
+        else {
+            draw_library();
+            overlay();
+        }
+        return;
+    case LibraryRetry:
+        scan_library();
+        draw_library();
+        break;
+    case Retry:
+        if (!retry_path.empty()) open(retry_path);
+        return;
+    case SyncCancel:
+        sync_cancelled(uploading);
+        draw_sync();
+        break;
+    case Library:
+        if (!persist()) {
+            error(message);
+            return;
+        }
+        remember_position();
+        save_pages();
+        scan_library();
+        draw_library();
+        overlay(true);
+        return;
+    case Tools:
+        if (has_book()) {
+            if (session.visible_record() || session.saved_record())
+                recover_body();
+            else
+                open(book_path);
+        } else if (!last_book.empty()) {
+            if (async_content) open(last_book);
+            else defer(tr("正在打开书籍…"), [this] { open(last_book); });
+        }
+        return;
+    case Contents: {
+        load_fonts();
+        toc_page = 0;
+        toc_collapsed.clear();
+        const auto current = current_toc();
+        const auto &toc = document.toc();
+        for (std::size_t i = 0; i < toc.size(); ++i) {
+            if (!toc_parent(i)) continue;
+            auto end = i + 1;
+            while (end < toc.size() && toc[end].depth > toc[i].depth) ++end;
+            if (current <= i || current >= end) toc_collapsed.insert(i);
+        }
+        toc_locate_current = true;
+        draw_contents();
+        break;
+    }
+    case Typography:
+        typography_from_settings = origin_for(view) == Origin::Settings;
+        if (!begin_settings_edit())
+            return;
+        draft = edit_snapshot.config.settings;
+        typography_preview.reset();
+        typography_preview_failed = false;
+        font_picker_open = false;
+        reset_overrides = false;
+        book_scope = true;
+        draw_typography();
+        break;
+    case Refresh:
+        refresh_from_settings = view == View::Settings;
+        if (!begin_settings_edit(refresh_from_settings))
+            return;
+        draw_refresh();
+        break;
+    case LibraryFolders: {
+        if (!bookmark_io_ready()) return;
+        const auto snapshot = store.settings_snapshot();
+        auto values = snapshot.config.settings;
+        values.library_folders = values.library_folders == "first" ? "recent" : "first";
+        std::string detail;
+        if (store.apply_settings(snapshot, values, false, detail) == StoreStatus::Ok) {
+            library_page = 0;
+            message = tr("文件夹排序已保存");
+            scan_library();
+        } else message = tr("文件夹排序未保存，请检查 TF 卡或设置文件");
+        draw_input_settings(); break;
+    }
+    case LibrarySort: {
+        if (!bookmark_io_ready()) return;
+        const auto snapshot = store.settings_snapshot();
+        auto values = snapshot.config.settings;
+        values.library_sort = library_sort == "recent" ? "name" : library_sort == "name" ? "name_desc" : "recent";
+        std::string detail;
+        if (store.apply_settings(snapshot, values, false, detail) == StoreStatus::Ok) {
+            library_sort = values.library_sort; settings.library_sort = library_sort;
+            library_page = 0;
+            message = library_sort == "recent" ? tr("按最近阅读排序") : library_sort == "name" ? tr("按书名升序排列") : tr("按书名降序排列");
+            scan_library();
+        } else message = tr("排序未保存，请检查 TF 卡或设置文件");
+        draw_library(); break;
+    }
+    case LibraryList:
+    case LibraryGrid:
+        library_grid = id == LibraryGrid;
+        library_page = 0;
+        draw_library();
+        break;
+    case DetailReset:
+    case DetailDelete:
+        confirm_management(id == DetailDelete);
+        if (view == View::BookManagement) overlay();
+        return;
+    case ManageConfirm:
+        manage_book();
+        return;
+    case DetailOpen:
+        if (async_content) { open(detail_path); return; }
+        defer(tr("正在打开书籍…"), [this] { open(detail_path); });
+        return;
+    case PageEffects:
+        draw_page_effects();
+        break;
+    case EffectOff: case EffectRipple: case EffectDiagonal: case EffectTouchPosition: {
+        const auto effect = page_effect_choices[id - EffectOff].effect;
+        if (effect == page_effect) return;
+        page_effect = effect;
+        draw_page_effects();
+        break;
+    }
+    case RefreshAccept:
+        apply_refresh(RefreshFast);
+        return;
+    case RefreshInterval:
+        draft = edit_snapshot.config.settings;
+        draw_interval();
+        break;
+    case IntervalLess:
+    case IntervalMore: {
+        auto &interval = draft.refresh_preset == "fast" ? draft.fast_full_refresh_pages : draft.balanced_full_refresh_pages;
+        const int next_interval = std::clamp(interval + (id == IntervalMore ? 1 : -1), 0, 30);
+        if (next_interval == interval) return;
+        interval = next_interval;
+        draw_interval();
+        break;
+    }
+    case IntervalSave:
+        save_refresh(draft);
+        return;
+    case PowerSettings:
+        if (!begin_settings_edit(true)) return;
+        draft = edit_snapshot.config.settings;
+        draw_power();
+        break;
+    case SleepCover:
+    case SleepReading:
+    case SleepSimple:
+        draft.sleep_screen = id == SleepCover ? "cover" : id == SleepReading ? "reading" : "simple";
+        draw_power();
+        break;
+    case SleepLess:
+    case SleepMore:
+        draft.auto_sleep_minutes = std::clamp(draft.auto_sleep_minutes + (id == SleepMore ? 5 : -5), 0, 240);
+        draw_power();
+        break;
+    case PowerSave: {
+        if (!bookmark_io_ready()) return;
+        std::string detail;
+        if (store.apply_settings(edit_snapshot, draft, false, detail) != StoreStatus::Ok) {
+            error(trf("休眠设置未保存。{reason}。", {{"reason", reason(detail)}})); return;
+        }
+        settings.auto_sleep_minutes = draft.auto_sleep_minutes;
+        settings.sleep_screen = draft.sleep_screen;
+        settings.sleep_image = draft.sleep_image;
+        settings.sleep_overlay = draft.sleep_overlay;
+        custom_prepare_finished = custom_sleep_attempted = false; custom_prepare_attempts = 0;
+        custom_notice.clear(); custom_notice_pending = false;
+        custom_sleep_image.reset();
+        message = tr("休眠设置已保存");
+        draw_settings();
+        break;
+    }
+    case LanguageSettings:
+        if (!begin_settings_edit(true)) return;
+        draw_language_settings();
+        break;
+    case LanguageSimplified:
+    case LanguageTraditional:
+    case LanguageEnglish: {
+        if (view != View::LanguageSettings || !bookmark_io_ready()) return;
+        const auto language = id == LanguageEnglish ? i18n::Language::English :
+            id == LanguageTraditional ? i18n::Language::TraditionalChinese : i18n::Language::SimplifiedChinese;
+        if (language == settings.language && language == edit_snapshot.config.settings.language) return;
+        const bool saved = save_language(edit_snapshot, language);
+        if (saved && !begin_settings_edit(true)) return;
+        draw_language_settings();
+        break;
+    }
+    case StorageSettings:
+        begin_storage();
+        return;
+    case ClearCache:
+        begin_storage(true);
+        return;
+    case InputSettings:
+        message.clear();
+        draw_input_settings();
+        break;
+    case SyncSettings:
+        if (view == View::WifiSettings) leave_join(WifiPage::Home);
+        account_from_sync = false;
+        open_account();
+        draw_sync_settings();
+        break;
+    case LibraryView: {
+        if (!begin_settings_edit(true)) return;
+        auto values = edit_snapshot.config.settings;
+        const std::string previous = values.library_view == "grid" ? tr("卡片") : tr("列表");
+        values.library_view = values.library_view == "grid" ? "list" : "grid";
+        if (!bookmark_io_ready()) return;
+        std::string detail;
+        if (store.apply_settings(edit_snapshot, values, false, detail) == StoreStatus::Ok) {
+            settings.library_view = values.library_view;
+            library_grid = values.library_view == "grid";
+            library_page = 0;
+            message.clear();
+        } else
+            message = tr("视图未保存，仍用「") + previous + tr("」。请检查 TF 卡。");
+        draw_input_settings();
+        break;
+    }
+    case WifiToggle: {
+        if (!begin_settings_edit(true)) return;
+        auto values = edit_snapshot.global_settings;
+        values.wifi_enabled = !values.wifi_enabled;
+        std::string detail;
+        if (store.apply_settings(edit_snapshot, values, false, detail) != StoreStatus::Ok)
+            wifi_notice = tr("Wi-Fi 开关未保存，仍按原设置生效。请检查 TF 卡。");
+        else {
+            settings.wifi_enabled = values.wifi_enabled;
+            if (!values.wifi_enabled) {
+                cancel_sync(); network::release(manual_hold); network::release(wifi_hold);
+                if (wifi_status.phase != WifiPhase::Offline) wifi_status.phase = WifiPhase::Closing;
+            }
+            wifi_notice.clear();
+        }
+        draw_wifi();
+        break;
+    }
+    case Settings:
+        draw_settings();
+        break;
+    case Import:
+        import_from_settings = view == View::Settings;
+        draw_import();
+        break;
+    case Sync:
+        if (!bookmark_io_ready()) return;
+        refresh_badge_config();
+        cancel_sync();
+        sync_status.clear();
+        clock_notice.clear();
+        clock_feedback = ClockFeedback::Idle;
+        sync_subtab = !txt_name(book_path) && badge_configured ? SyncSubtab::Progress : SyncSubtab::Clock;
+        draw_sync();
+        break;
+    case SyncCheck:
+        check_sync();
+        return;
+    case SyncUpload:
+        if (!network::live(sync_hold)) { check_sync(); return; }
+        confirm_upload();
+        overlay();
+        return;
+    case SyncConfirm:
+        if (!network::live(sync_hold)) { check_sync(); return; }
+        upload();
+        return;
+    case SyncJump: {
+        if (!remote_anchor)
+            return;
+        sync::Config current;
+        std::string detail;
+        if (!sync::load_config(root, current, detail) || !same_account(current, sync_config)) {
+            cancel_sync();
+            sync_state = SyncState::ConfigChanged;
+            draw_sync();
+            overlay();
+            return;
+        }
+        const auto target = *remote_anchor;
+        if (async_content) {
+            const auto origin = session.visible_record();
+            cancel_sync();
+            if (origin) { link_return = origin->anchor; sync_return = true; }
+            clear_page_history(); begin_seek(target); return;
+        }
+        std::uint32_t start;
+        if (!seek(target, start, tr("远端位置无法恢复")))
+            return;
+        const auto origin = session.visible_record();
+        cancel_sync();
+        if (origin) { link_return = origin->anchor; sync_return = true; }
+        clear_page_history();
+        show_page(start);
+        return;
+    }
+    case ResumeDetails:
+        inspect_book(has_book() ? book_path : last_book); if (!display.busy()) overlay(); return;
+    case HelpPrevious: case HelpTools: case HelpNext: case HelpPosition: case HelpDevice:
+        help_zone = id;
+        if (id == HelpPosition) help_position = (help_position + 1) % 5;
+        if (id == HelpDevice) help_device = (help_device + 1) % 3;
+        draw_help(); break;
+    case HelpKey1: case HelpKey2: case HelpKey3:
+        help_key = id; draw_help(); break;
+    case FullRefresh:
+        force_refresh();
+        return;
+    case Prev:
+    case Next:
+        if (view == View::LockScreens) {
+            if (id == Prev && lock_screen_page) --lock_screen_page;
+            else if (id == Next) ++lock_screen_page;
+            draw_lock_screens();
+        } else if (view == View::Help) {
+            if (id == Prev && help_page) --help_page;
+            else if (id == Next && help_page + 1 < kHelpPages.size()) ++help_page;
+            else return;
+            draw_help();
+        } else if (view == View::Library) {
+            if (id == Prev && library_page)
+                --library_page;
+            else if (id == Next && library_page + 1 < library_pages())
+                ++library_page;
+            else return;
+            draw_library();
+        } else if (view == View::WifiSettings) {
+            if (wifi_page != WifiPage::Add) return;
+            if (id == Prev && wifi_add_page) --wifi_add_page;
+            else if (id == Next) ++wifi_add_page;
+            draw_wifi();
+        } else if (view == View::Contents && contents_bookmarks) {
+            if (id == Prev && bookmark_page) --bookmark_page;
+            else if (id == Next) ++bookmark_page;
+            draw_contents();
+        } else if (view == View::Contents) {
+            if (id == Prev && toc_page)
+                --toc_page;
+            else if (id == Next && toc_page + 1 < toc_starts.size())
+                ++toc_page;
+            draw_contents();
+        } else {
+            turn(id == Next, turn_origin);
+            return;
+        }
+        break;
+    case FontChoice:
+        font_entry = draft.font;
+        font_entry_weight = draft.font_weight;
+        font_entry_reset = reset_overrides;
+        {
+            auto at = std::find(fonts.begin(), fonts.end(), draft.font);
+            if (at == fonts.end()) {
+                if (fonts.size() < kMaxFontChoices) fonts.push_back(draft.font);
+                else fonts.back() = draft.font;
+                at = fonts.end() - 1;
+            }
+            font_picker_page = static_cast<std::size_t>(at - fonts.begin()) / fonts_per_screen;
+        }
+        font_picker_open = true;
+        draw_typography();
+        break;
+    case Scope:
+        book_scope = false;
+        apply_typography();
+        return;
+    case FullscreenToggle:
+        draft.fullscreen_reading = !draft.fullscreen_reading;
+        reset_overrides = false;
+        draw_typography();
+        break;
+    case AlignmentToggle:
+        draft.justify = !draft.justify;
+        reset_overrides = false;
+        draw_typography();
+        break;
+    case OriginalWeightLess:
+    case OriginalWeightMore:
+        draft.original_weight_adjustment += id == OriginalWeightMore ? 1 : -1;
+        reset_overrides = false;
+        draw_typography();
+        break;
+    case EpubLayoutUnified:
+    case EpubLayoutOriginal:
+        if (draft.original_epub == (id == EpubLayoutOriginal)) return;
+        change_epub_layout();
+        if (content_loading) return;
+        break;
+    case TxtKeepLineBreaks:
+    case TxtReflowParagraphs:
+        if (!txt_name(book_path) || draft.txt_reflow == (id == TxtReflowParagraphs)) return;
+        draft.txt_reflow = id == TxtReflowParagraphs;
+        reset_overrides = false;
+        draw_typography();
+        break;
+    case Defaults: {
+        const bool original = draft.original_epub;
+        draft = edit_snapshot.global_settings;
+        draft.original_epub = original;
+        reset_overrides = original == settings.original_epub;
+        draw_typography();
+        break;
+    }
+    case FontSizeLess:
+    case FontSizeMore:
+    case FontWeightLess:
+    case FontWeightMore:
+    case LineHeightLess:
+    case LineHeightMore:
+    case MarginLess:
+    case MarginMore:
+    case GapLess:
+    case GapMore:
+    case IndentLess:
+    case IndentMore: {
+        reset_overrides = false;
+        const bool more = id == FontSizeMore || id == FontWeightMore || id == LineHeightMore ||
+                          id == MarginMore || id == GapMore || id == IndentMore;
+        const int direction = more ? 1 : -1;
+        const int parameter = id == FontSizeLess || id == FontSizeMore ? FontSize
+            : id == FontWeightLess || id == FontWeightMore ? FontWeight
+            : id == LineHeightLess || id == LineHeightMore ? LineHeight
+            : id == MarginLess || id == MarginMore ? Margin
+            : id == GapLess || id == GapMore ? Gap : Indent;
+        if (parameter == FontWeight) {
+            const std::array<std::string, 4> weights{{"light", "regular", "medium", "bold"}};
+            const auto at = std::find(weights.begin(), weights.end(), draft.font_weight);
+            const int first = light_available(draft) ? 0 : 1;
+            draft.font_weight = weights[std::clamp(static_cast<int>(at - weights.begin()) + direction, first, 3)];
+        } else if (parameter == Gap)
+            draft.paragraph_gap_lines =
+                std::clamp(draft.paragraph_gap_lines + direction * .2, 0., 1.);
+        else if (parameter == Indent)
+            draft.indent_chars = std::clamp(draft.indent_chars + direction, 0, 2);
+        else if (parameter == FontSize)
+            draft.font_size_px = std::clamp(draft.font_size_px + direction * 2, 28, 56);
+        else if (parameter == LineHeight)
+            draft.line_height = std::clamp(draft.line_height + direction * .05, 1.35, 1.65);
+        else
+            draft.margin_x_px = std::clamp(draft.margin_x_px + direction * 4, 24, 52);
+        if (draft.font_weight == "light" && !light_available(draft)) draft.font_weight = "regular";
+        draw_typography();
+        break;
+    }
+    case Apply:
+        if (!typography_changed()) return;
+        apply_typography();
+        return;
+    case RefreshClear:
+    case RefreshBalanced:
+    case RefreshFast:
+        if (id == RefreshFast && edit_snapshot.config.settings.refresh_preset != "fast") {
+            draw_refresh_confirm(); overlay(); return;
+        }
+        apply_refresh(id);
+        return;
+    case SaveRetry: {
+        const auto origin = origin_for(view);
+        if (!persist()) { error(message); return; }
+        message = tr("进度已保存");
+        return_to_origin(origin);
+        return;
+    }
+    default:
+        return;
+    }
+    overlay();
+}
+
+void ReaderApp::Impl::input(const AppInput &input) {
+    const bool accepted = router.accept(input.event);
+    if (dictionary_contact_input(input, accepted)) return;
+    if (accepted && view == View::TextEntry && key_input(input)) return;
+    if (!accepted || display.busy() || view == View::Sleeping || view == View::PowerOff)
+        return;
+    if (view == View::Onboarding) { onboarding_input(input); return; }
+    if (view == View::Dictionary || view == View::DictionarySettings) {
+        if (input.queued) return;
+        if (!input.touch) {
+            if (input.event.input == Input::K2) force_refresh();
+            else if (input.event.input == Input::K1 || input.event.input == Input::Previous) dictionary_control(Prev);
+            else if (input.event.input == Input::K3 || input.event.input == Input::Next) dictionary_control(Next);
+        } else for (const auto& hit : hits) if (hit.contains(input.x, input.y)) { dictionary_control(hit.id, input.long_press); break; }
+        return;
+    }
+    if (async_content) {
+        if (counting_job) counting_job->cancel();
+    } else release_counting();
+    if (content_loading) {
+        if (!input.touch && input.event.input == Input::K2) force_refresh();
+        else if (!input.queued && input.touch && (loading_cancel.contains(input.x, input.y) ||
+                 (font_picker_open && std::any_of(hits.begin(), hits.end(), [&](const Hit& hit) {
+                     return hit.id == FontCancel && hit.contains(input.x, input.y);
+                 })))) {
+            const auto& request = pending_content ? *pending_content : foreground_job->request;
+            const auto kind = request.kind;
+            const bool preview = request.preview;
+            const bool mapping = kind == ContentJob::Kind::MapUpload || kind == ContentJob::Kind::MapDownload;
+            abandon_content();
+            if (kind == ContentJob::Kind::StorageScan || kind == ContentJob::Kind::ClearCache) {
+                storage_usage.books.reset(); storage_usage.cache.reset(); storage_usage.available.reset();
+                message = kind == ContentJob::Kind::ClearCache ? tr("已取消清理，部分缓存可能已删除") : tr("已取消统计");
+                draw_storage(); overlay(); return;
+            }
+            if (kind == ContentJob::Kind::ImageViewer) { close_image_viewer(); return; }
+            link_return = confirmed_link_return;
+            sync_return = confirmed_sync_return;
+            if (kind == ContentJob::Kind::Chapter && sync_return) { recover_body(); return; }
+            if (kind == ContentJob::Kind::LockScreenList || kind == ContentJob::Kind::LockScreenPreview) draw_power();
+            else if (mapping) { sync_cancelled(false); draw_sync(); }
+            else if (preview && font_picker_open) cancel_font_picker();
+            else if (preview) {
+                typography_preview.reset();
+                draw_tools();
+            }
+            else draw_library();
+            overlay();
+        }
+        return;
+    }
+    if (image_viewing && view == View::Reading) {
+        if (!input.queued && !input.touch && input.event.input == Input::K2) force_refresh();
+        else if (!input.queued && input.touch && input.y < viewer_toolbar_height) {
+            if (input.x >= viewer_action_left) {
+                image_contrast_level = (image_contrast_level + 1) % (viewer_contrast_levels + 1);
+                draw_image_viewer(true);
+            } else close_image_viewer();
+        }
+        return;
+    }
+    const bool preserve_prefetch = view == View::Reading &&
+        ((!input.touch && (input.event.input == Input::K3 || input.event.input == Input::Next || input.event.input == Input::K2)) ||
+         (input.touch && input.x >= 479 && input.y < reading_touch_bottom()));
+    if (!preserve_prefetch) clear_prefetch();
+    const auto turn_origin = [&] {
+        if (!input.touch && input.event.input != Input::Previous && input.event.input != Input::Next)
+            return PageTurnOrigin::Middle;
+        if (input.y < 0 || input.y >= canvas.height()) return PageTurnOrigin::Middle;
+        const int body_height = reading_touch_bottom();
+        if (input.y * 10 < body_height * 3) return PageTurnOrigin::Top;
+        if (input.y * 10 < body_height * 7) return PageTurnOrigin::Middle;
+        return PageTurnOrigin::Bottom;
+    };
+    if (input.queued) {
+        const bool turn_touch = input.touch && input.y < reading_touch_bottom() && (input.x < 205 || input.x >= 479);
+        const auto action = input.touch ? Action::None : map_input(context(), input.event.input);
+        const bool turn_key = action == Action::PreviousPage || action == Action::NextPage;
+        if (view != View::Reading || !turned || (!turn_touch && !turn_key))
+            return;
+        turn(turn_touch ? input.x >= 479 : action == Action::NextPage, turn_origin());
+        return;
+    }
+    turned = false;
+    if (view != View::Import && view != View::WifiSettings && view != View::Portal &&
+        (input.touch || input.event.input != Input::K2) && std::exchange(notice_shown, false)) {
+        message.clear(); cover_notice.clear();
+    }
+    if (input.touch) {
+        if (view == View::Reading) {
+            if (!settings.fullscreen_reading && input.y >= footer_top) {
+                const bool device = input.x >= reading_footer::device_left;
+                if (input.touch_bounds &&
+                    (input.touch_bounds->min_y < footer_top ||
+                     (input.touch_bounds->min_x >= reading_footer::device_left) != device ||
+                     (input.touch_bounds->max_x >= reading_footer::device_left) != device)) return;
+                if (device) {
+                    switch (footer_device) {
+                    case reading_footer::Device::Battery: footer_device = reading_footer::Device::Clock; break;
+                    case reading_footer::Device::Clock: footer_device = reading_footer::Device::Hidden; break;
+                    case reading_footer::Device::Hidden: footer_device = reading_footer::Device::Battery; break;
+                    }
+                } else {
+                    switch (footer_position) {
+                    case reading_footer::Position::Pages: footer_position = reading_footer::Position::Percent; break;
+                    case reading_footer::Position::Chapters: footer_position = reading_footer::Position::ChapterName; break;
+                    case reading_footer::Position::ChapterName: footer_position = reading_footer::Position::Hidden; break;
+                    case reading_footer::Position::Hidden: footer_position = reading_footer::Position::Pages; break;
+                    case reading_footer::Position::Percent: footer_position = reading_footer::Position::Chapters; break;
+                    }
+                }
+                footer();
+                display.present({{"ui", 0, 0, ++ui_sequence}, {}, FramePurpose::Overlay,
+                                 RefreshIntent::Content, RefreshRegion{0, footer_top, 684, 1216 - footer_top}});
+                return;
+            }
+            if (input.long_press && !image_at(input.x, input.y) && graphics::text_hit(page, input.x, input.y)) {
+                begin_dictionary(input.x, input.y); return;
+            }
+            for (const auto &link : links)
+                if (link.contains(input.x, input.y)) {
+                    control(link.id);
+                    return;
+                }
+            if (input.long_press)
+                if (const auto* box = image_at(input.x, input.y)) {
+                    begin_image_viewer(*box);
+                    return;
+                }
+            if (input.x < 205)
+                turn(false, turn_origin());
+            else if (input.x >= 479)
+                turn(true, turn_origin());
+            else {
+                draw_tools();
+                overlay();
+            }
+        } else {
+            for (const auto &hit : hits)
+                if (hit.contains(input.x, input.y)) {
+                    if (view == View::PowerMenu && input.touch_bounds) {
+                        const auto& bounds = *input.touch_bounds;
+                        if (!hit.contains(bounds.min_x, bounds.min_y) ||
+                            !hit.contains(bounds.max_x, bounds.max_y)) return;
+                    }
+                    int id = hit.id;
+                    if (input.long_press && view == View::Library && id == Tools) id = ResumeDetails;
+                    if (input.long_press && view == View::Library && id >= EntryBase && id < TocBase &&
+                        !entries[static_cast<std::size_t>(id - EntryBase)].directory)
+                        id += DetailBase - EntryBase;
+                    control(id);
+                    break;
+                }
+        }
+        return;
+    }
+    const auto action = map_input(context(), input.event.input);
+    if (action == Action::ForceRefresh)
+        force_refresh();
+    else if (action == Action::PreviousPage)
+        control(Prev, turn_origin());
+    else if (action == Action::NextPage)
+        control(Next, turn_origin());
+    else if (action == Action::Close || action == Action::CancelPreview ||
+             action == Action::Cancel)
+        back();
+}
+
+}

@@ -1,0 +1,19 @@
+{
+  "name": "pico-page-web",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.22.2"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "test": "node tests/installer.test.mjs",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "devDependencies": {
+    "astro": "7.3.4",
+    "esptool-js": "0.7.0",
+    "spark-md5": "3.0.2"
+  }
+}

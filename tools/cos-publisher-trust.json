@@ -1,0 +1,30 @@
+{
+  "version": "2.0",
+  "statement": [
+    {
+      "effect": "allow",
+      "principal": {
+        "federated": [
+          "qcs::cam::uin/100009571345:oidc-provider/PicoPageGitHub"
+        ]
+      },
+      "action": "name/sts:AssumeRoleWithWebIdentity",
+      "condition": {
+        "string_equal": {
+          "oidc:iss": [
+            "https://token.actions.githubusercontent.com"
+          ],
+          "oidc:aud": [
+            "pico-page-cos"
+          ]
+        },
+        "string_like": {
+          "oidc:sub": [
+            "repo:eMUQI@32332228/pico-page@1466601847:ref:refs/heads/main",
+            "repo:eMUQI@32332228/pico-page@1466601847:ref:refs/tags/v*"
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,860 @@
+---
+import Site from "../layouts/Site.astro";
+import { firmware } from "../firmware.js";
+import { installMessages } from "../install-messages.js";
+import { localizeHref } from "../locales.js";
+
+const { locale = "zh-Hans" } = Astro.props;
+const { page, client } = installMessages[locale];
+const steps = [page.beforeInstall, page.connectAndWrite, page.addBooks, page.startReading];
+---
+<Site title={page.title} description={page.description} current="install" locale={locale}>
+        <section class="intro">
+          <div>
+            <p class="eyebrow">{page.eyebrow}</p>
+            <h1>{page.headingFirst}<br>{page.headingSecond}</h1>
+          </div>
+          <ul class="needs">
+            <li><span>{page.device}</span><span>Read Pico 4.7″</span></li>
+            <li><span>{page.cable}</span><span>{page.dataCable}</span></li>
+            <li><span>{page.browser}</span><span>{page.desktopBrowser}</span></li>
+            <li><span>{page.card}</span><span>{page.filesystem}</span></li>
+          </ul>
+        </section>
+        <ol class="tracker" aria-label={page.steps}>
+          {steps.map((title, index) => (
+            <li class={index < 1 ? "past" : undefined} aria-current={index === 1 ? "step" : undefined}><span>0{index + 1}</span><strong>{title}</strong></li>
+          ))}
+        </ol>
+        <div class="layout">
+          <div class="steps">
+            <article class="step">
+              <span class="number" aria-hidden="true">1</span>
+              <div>
+                <h2>{page.beforeInstall}</h2>
+                <ul class="checks">
+                  <li><span aria-hidden="true">☐</span><span>{page.replaceFirmwareStart}<a href="https://dot.mindreset.tech/docs/read_0/firmware" target="_blank" rel="noopener">{page.stockInstructions}</a>{page.replaceFirmwareEnd}</span></li>
+                  <li><span aria-hidden="true">☐</span><span>{page.eraseStart}<strong>{page.eraseEmphasis}</strong>{page.eraseEnd}</span></li>
+                  {firmware?.requiresLayoutMigration && <li><span aria-hidden="true">☐</span><span data-layout-migration="required">{page.migration}</span></li>}
+                  <li><span aria-hidden="true">☐</span><span>{page.power}</span></li>
+                </ul>
+              </div>
+            </article>
+            <article class="step">
+              <span class="number" aria-hidden="true">2</span>
+              <div>
+                <h2>{page.connectDevice}</h2>
+                <p>{page.connectInstructions}</p>
+                <p>{page.exitTransfer}</p>
+                <div class="flash" data-phase={firmware ? "idle" : "unreleased"} data-url={firmware?.url} data-version={firmware?.version} data-sha256={firmware?.sha256} data-messages={firmware && JSON.stringify(client)}>
+                  <div class="flash-head">
+                    <span class="flash-status" aria-live="polite"><span class="dot"></span><span data-el="status">{firmware ? client.idle : page.unreleased}</span></span>
+                    {firmware && <span class="mono">Pico Page {firmware.version} · <a href={localizeHref(locale, `/changelog/#v${firmware.version}`)}>{page.changelog}</a></span>}
+                  </div>
+                  {firmware ? (
+                    <div class="flash-body">
+                      <p class="notice" data-el="error" role="alert" hidden></p>
+                      <div data-panel="failed" hidden>
+                        <div class="failure-message" role="alert" aria-atomic="true">
+                          <h3 data-el="failure-title"></h3>
+                          <p data-el="failure-message"></p>
+                          <p class="error-code">{page.errorCodeLabel}<span class="mono" data-el="failure-code"></span></p>
+                        </div>
+                        <button class="primary" type="button" data-el="retry">{page.retry}</button>
+                        <div class="diagnostics" data-el="diagnostics" hidden>
+                          <div class="diagnostic-actions">
+                            <button class="secondary" type="button" data-el="copy-diagnostics">{page.copyDiagnostics}</button>
+                            <span data-el="copy-status" role="status"></span>
+                          </div>
+                          <details data-el="diagnostic-details">
+                            <summary>{page.showDetails}</summary>
+                            <textarea data-el="diagnostic-text" aria-label={page.errorDetails} readonly rows="10" spellcheck="false"></textarea>
+                          </details>
+                        </div>
+                        <details data-el="connection-help" hidden>
+                          <summary>{page.connectHelp}</summary>
+                          <p>{page.recovery}</p>
+                        </details>
+                      </div>
+                      <div data-panel="idle">
+                        <p data-el="hint">{page.idleHint}{page.recovery}</p>
+                        <button class="primary" type="button" data-el="connect">{page.connect}</button>
+                      </div>
+                      <div data-panel="connected" hidden>
+                        <dl>
+                          <div><dt>{page.chip}</dt><dd>{page.flashChip}</dd></div>
+                          <div><dt>{page.method}</dt><dd>{page.overwrite}</dd></div>
+                        </dl>
+                        <p class="notice">{page.installWarning}</p>
+                        <label class="confirm"><input type="checkbox" data-el="confirm"><span>{page.confirm}</span></label>
+                        <div class="choices">
+                          <button class="primary" type="button" data-el="install" disabled>{page.install}</button>
+                          <button class="secondary" type="button" data-el="disconnect">{page.disconnect}</button>
+                        </div>
+                      </div>
+                      <div data-panel="writing" hidden>
+                        <div class="progress-line"><span data-el="stage" role="status"></span><span class="mono" data-el="percent"></span></div>
+                        <div class="track" role="progressbar" aria-label={client.installProgress} aria-valuemin="0" aria-valuemax="100"><div data-el="bar"></div></div>
+                        <p class="keep">{page.keepConnected}</p>
+                      </div>
+                      <div data-panel="done" hidden>
+                        <p class="finished">{page.finished}</p>
+                        <p class="after">{page.bootInstructions}</p>
+                        <div class="choices"><a class="primary" href="#step3">{page.next}</a></div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div class="flash-body">
+                      <div>
+                        <p>{page.unreleasedBody}</p>
+                        <button class="primary" type="button" disabled>{page.connect}</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </article>
+            <article id="step3" class="step">
+              <span class="number" aria-hidden="true">3</span>
+              <div>
+                <h2>{page.addBooks}</h2>
+                <p>{page.copyFiles}</p>
+                <div class="tree">
+                  <div class="muted">{page.card}/</div>
+                  <div><span>├─ <strong>Books/</strong></span><span>{page.bookFormats}</span></div>
+                  <div><span>├─ <strong class="accent">Fonts/</strong></span><span class="accent">{page.fonts}</span></div>
+                  <div><span>└─ LockScreens/</span><span class="muted">{page.lockScreens}</span></div>
+                </div>
+                <div class="font-note">
+                  <p>{page.fontNote}</p>
+                  <a href="/downloads/LXGWWenKai-Regular-v1.520.zip" download>{page.downloadFont}</a>
+                </div>
+              </div>
+            </article>
+            <article class="step">
+              <span class="number" aria-hidden="true">4</span>
+              <div>
+                <h2>{page.openBook}</h2>
+                <p>{page.openInstructions}</p>
+              </div>
+            </article>
+          </div>
+          <aside>
+            <div>
+              <h3>{page.alreadyUsing}</h3>
+              <p>{page.updateStart}<a href={localizeHref(locale, "/docs/#update")}>{page.updateLink}</a>{page.updateEnd}</p>
+            </div>
+            <div>
+              <h3>{page.troubleshooting}</h3>
+              <details>
+                <summary>{page.serialQuestion}</summary>
+                <p>{page.sleeping}{page.recovery}</p>
+                <p>{page.unresponsive}</p>
+              </details>
+              <details>
+                <summary>{page.otherFirmwareQuestion}</summary>
+                <p>{page.otherFirmwareAnswer}</p>
+              </details>
+              <details>
+                <summary>{page.interruptedQuestion}</summary>
+                <p>{page.interruptedAnswer}</p>
+              </details>
+              <details>
+                <summary>{page.unchangedScreenQuestion}</summary>
+                <p>{page.unchangedScreenAnswer}</p>
+              </details>
+              <details>
+                <summary>{page.missingGlyphsQuestion}</summary>
+                <p>{page.missingGlyphsStart}<code>Fonts/</code>{page.missingGlyphsEnd}</p>
+              </details>
+            </div>
+          </aside>
+        </div>
+  <script>
+      const card = document.querySelector(".flash[data-url]");
+      if (card) {
+        const { url, version, sha256 } = card.dataset;
+        const text = JSON.parse(card.dataset.messages);
+        const el = (name) => card.querySelector(`[data-el="${name}"]`);
+        const steps = document.querySelectorAll(".tracker li");
+        let transport, loader, md5;
+
+        function show(phase, error = "", diagnostic = "") {
+          card.dataset.phase = phase;
+          if (phase !== "writing") progress("", 0);
+          el("status").textContent = text[phase];
+          el("error").textContent = error;
+          el("error").hidden = !error;
+          el("diagnostics").hidden = !diagnostic;
+          el("diagnostic-text").value = diagnostic;
+          el("diagnostic-details").open = false;
+          el("copy-status").textContent = "";
+          el("connection-help").hidden = true;
+          el("connection-help").open = false;
+          el("confirm").checked = false;
+          el("install").disabled = true;
+          card.querySelectorAll("[data-panel]").forEach((panel) => (panel.hidden = panel.dataset.panel !== phase));
+          const current = phase === "done" ? 2 : 1;
+          steps.forEach((step, index) => {
+            step.classList.toggle("past", index < current);
+            if (index === current) step.setAttribute("aria-current", "step");
+            else step.removeAttribute("aria-current");
+          });
+        }
+
+        function showFailure({ title, message, code, diagnostic, status = text.failed }) {
+          show("failed", "", diagnostic);
+          el("status").textContent = status;
+          el("failure-title").textContent = title;
+          el("failure-message").textContent = message;
+          el("failure-code").textContent = code;
+          el("connection-help").hidden = !["CONNECT_FAILED", "FLASH_FAILED"].includes(code);
+          el("retry").disabled = !("serial" in navigator);
+        }
+
+        function diagnosticInfo(code, stage, error, details = {}) {
+          return Object.entries({
+            [text.diagnosticFormat]: "Pico Page installer v1",
+            [text.errorCode]: code,
+            [text.failedStage]: text[stage],
+            [text.timestamp]: new Date().toISOString(),
+            [text.firmwareVersion]: version,
+            [text.exceptionType]: error?.name || text.unknown,
+            ...details,
+            [text.browser]: navigator.userAgent,
+          }).map(([key, value]) => `${key}: ${value}`).join("\n");
+        }
+
+        el("copy-diagnostics").addEventListener("click", async () => {
+          const report = el("diagnostic-text").value;
+          try {
+            await navigator.clipboard.writeText(report);
+            if (el("diagnostic-text").value === report) el("copy-status").textContent = text.copied;
+          } catch {
+            if (el("diagnostic-text").value !== report) return;
+            el("diagnostic-details").open = true;
+            el("diagnostic-text").focus();
+            el("diagnostic-text").select();
+            el("copy-status").textContent = text.copyManually;
+          }
+        });
+
+        function progress(stage, percent = null) {
+          const track = el("bar").parentElement;
+          el("stage").textContent = stage;
+          el("percent").hidden = percent === null;
+          el("percent").textContent = percent === null ? "" : `${percent}%`;
+          track.dataset.indeterminate = String(percent === null);
+          track.setAttribute("aria-label", stage || text.installProgress);
+          el("bar").style.width = percent === null ? "" : `${percent}%`;
+          if (percent === null) track.removeAttribute("aria-valuenow");
+          else track.setAttribute("aria-valuenow", percent);
+        }
+
+        // Restarts an ESP32-S3 with its RTC watchdog, as esptool's watchdog_reset does. Read Pico
+        // stays in download mode after the RTS reset of esptool-js.
+        async function restart() {
+          await loader.writeReg(0x600080b0, 0x50d83aa1); // RTC_CNTL_WDTWPROTECT: unlock
+          await loader.writeReg(0x6000809c, 2000); // RTC_CNTL_WDTCONFIG1: timeout
+          await loader.writeReg(0x60008098, ((1 << 31) | (5 << 28) | (1 << 8) | 2) >>> 0); // RTC_CNTL_WDTCONFIG0: enable, reset the system
+          // The chip may restart before it answers the write that locks the registers again.
+          await loader.writeReg(0x600080b0, 0).catch(() => {});
+        }
+
+        async function restartAndReleasePort() {
+          let clean = true;
+          if (loader?.chip?.CHIP_NAME === "ESP32-S3") {
+            // The restart removes the USB serial port, so closing it afterwards may fail.
+            await restart().then(() => transport.disconnect().catch(() => {}), () => (clean = false));
+          }
+          if (!clean || loader?.chip?.CHIP_NAME !== "ESP32-S3") {
+            clean = true;
+            await loader?.after("hard_reset").catch(() => (clean = false));
+            await transport?.disconnect().catch(() => (clean = false));
+          }
+          transport = loader = undefined;
+          return clean;
+        }
+
+        async function connect(button) {
+          window.dispatchEvent(new CustomEvent("pico-page:analytics", { detail: "device_connect" }));
+          let port;
+          try {
+            port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] });
+          } catch {
+            return;
+          }
+          const buttonLabel = button.textContent;
+          button.disabled = true;
+          button.textContent = text.connecting;
+          try {
+            const [{ ESPLoader, Transport }, { default: SparkMD5 }] = await Promise.all([import("esptool-js"), import("spark-md5")]);
+            md5 = (image) => SparkMD5.ArrayBuffer.hash(image.slice().buffer);
+            transport = new Transport(port, false);
+            loader = new ESPLoader({ transport, baudrate: 115200 });
+            await loader.main();
+            // Only the stub that main() loads can erase the whole chip; without it the old boot
+            // data would survive the installation.
+            if (!loader.IS_STUB) throw new Error("The flasher stub is not running");
+            let refusal = "";
+            if (loader.chip.CHIP_NAME !== "ESP32-S3" || (await loader.detectFlashSize()) !== "16MB") {
+              refusal = text.unsupportedDevice;
+            } else {
+              // Read from the ROM during chip detection. The image is plaintext and unsigned: it
+              // would not start on a chip with flash encryption (an odd number of counter bits
+              // set) or secure boot.
+              const security = await loader.getSecurityInfo();
+              const encrypted = security.flashCryptCnt.toString(2).replaceAll("0", "").length % 2 === 1;
+              if (encrypted || security.parsedFlags.SECURE_BOOT_EN) {
+                refusal = text.secureDevice;
+              }
+            }
+            if (refusal) {
+              await restartAndReleasePort();
+              show("idle", refusal);
+            } else {
+              show("connected");
+            }
+          } catch (error) {
+            console.error(error);
+            await restartAndReleasePort();
+            showFailure({
+              title: text.connectFailed,
+              message: text.closeSerial + text.sentenceSpace + text.notErased,
+              code: "CONNECT_FAILED",
+              diagnostic: diagnosticInfo("CONNECT_FAILED", "connect", error),
+              status: text.connectIncomplete,
+            });
+          } finally {
+            button.disabled = false;
+            button.textContent = buttonLabel;
+          }
+        }
+
+        async function install() {
+          window.dispatchEvent(new CustomEvent("pico-page:analytics", { detail: "install_start" }));
+          show("writing");
+          progress(text.downloading);
+          let erasing = false;
+          let stage = "request", code = "DOWNLOAD_UNREACHABLE";
+          let title = text.downloadUnavailable;
+          let failure = text.checkNetwork;
+          const started = performance.now();
+          const details = { [text.httpStatus]: text.noResponse };
+          try {
+            const response = await fetch(url);
+            details[text.httpStatus] = response.status;
+            // These identifiers are available only when the server exposes them through CORS.
+            for (const header of ["x-cos-request-id", "x-oss-request-id", "x-request-id", "cf-ray"]) {
+              const value = response.headers.get(header);
+              if (value && /^[\w.-]{1,128}$/.test(value)) details[header] = value;
+            }
+            if (!response.ok) {
+              code = `DOWNLOAD_HTTP_${response.status}`;
+              if (response.status === 401 || response.status === 403) {
+                title = text.requestDenied;
+                failure = text.tryLater;
+              } else if (response.status === 429) {
+                title = text.tooManyRequests;
+                failure = text.avoidRepeatedClicks;
+              } else if (response.status === 404) {
+                title = text.fileNotFound;
+                failure = text.refreshRetry;
+              } else if (response.status >= 500) {
+                title = text.serviceUnavailable;
+                failure = text.tryLater;
+              } else {
+                title = text.downloadFailed;
+                failure = text.tryLater;
+              }
+              throw new Error(`HTTP ${response.status}`);
+            }
+            stage = "receive";
+            code = "DOWNLOAD_INTERRUPTED";
+            title = text.downloadInterrupted;
+            failure = text.tryLater;
+            const image = new Uint8Array(await response.arrayBuffer());
+            details[text.bytesReceived] = image.byteLength;
+            stage = "verify";
+            code = "VERIFY_FAILED";
+            title = text.verifyFailed;
+            failure = text.refreshRetry;
+            progress(text.verifying);
+            const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", image));
+            details[text.expectedDigest] = sha256;
+            const actualDigest = Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+            details[text.actualDigest] = actualDigest;
+            if (actualDigest !== sha256) {
+              code = "VERIFY_MISMATCH";
+              title = text.verifyMismatch;
+              failure = text.reconnectRetry;
+              throw new Error("The downloaded image does not match the published digest");
+            }
+            stage = "erase";
+            code = "FLASH_FAILED";
+            erasing = true;
+            progress(text.erasing);
+            await loader.eraseFlash();
+            stage = "prepare";
+            progress(text.preparing);
+            await loader.writeFlash({
+              fileArray: [{ data: image, address: 0 }],
+              flashMode: "keep",
+              flashFreq: "keep",
+              flashSize: "keep",
+              eraseAll: false,
+              compress: true,
+              calculateMD5Hash: md5,
+              reportProgress: (_, written, total) => {
+                // The final transfer callback precedes flash finalization and MD5 verification.
+                const transferring = written < total;
+                stage = transferring ? "write" : "finalize";
+                progress(transferring ? text.writingFirmware : text.finalizing, transferring ? Math.floor((written / total) * 100) : null);
+              },
+            });
+            progress(text.restarting);
+            show("done", (await restartAndReleasePort()) ? "" : text.restartNotice);
+            window.dispatchEvent(new CustomEvent("pico-page:analytics", { detail: "install_success" }));
+          } catch (error) {
+            window.dispatchEvent(new CustomEvent("pico-page:analytics", { detail: "install_failure" }));
+            console.error(error);
+            details[text.elapsed] = Math.round(performance.now() - started);
+            details[text.eraseStarted] = erasing ? text.yes : text.no;
+            const diagnostic = diagnosticInfo(code, stage, error, details);
+            progress(text.releasing);
+            await restartAndReleasePort();
+            showFailure({
+              title: erasing ? text.failed : title,
+              message: erasing ? text.retryFlash : failure + text.sentenceSpace + text.notErased,
+              code, diagnostic,
+              status: erasing ? text.failed : stage === "verify" ? text.verifyIncomplete : text.downloadIncomplete,
+            });
+          }
+        }
+
+        el("connect").addEventListener("click", () => connect(el("connect")));
+        el("retry").addEventListener("click", () => connect(el("retry")));
+        el("install").addEventListener("click", install);
+        el("confirm").addEventListener("change", () => (el("install").disabled = !el("confirm").checked));
+        el("disconnect").addEventListener("click", async () => {
+          show("idle", (await restartAndReleasePort()) ? "" : text.releaseNotice);
+        });
+        // The flasher stub runs until the device resets. Closing the page cannot reset it.
+        addEventListener("beforeunload", (event) => {
+          if (["connected", "writing"].includes(card.dataset.phase)) event.preventDefault();
+        });
+        if (!("serial" in navigator)) {
+          el("hint").textContent = text.unsupportedBrowser;
+          el("connect").disabled = true;
+        }
+      }
+  </script>
+</Site>
+<style>
+  .intro {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    justify-content: space-between;
+    gap: 24px 48px;
+    padding: 56px 0 40px;
+  }
+  .intro > div {
+    flex: 1 1 420px;
+    min-width: 0;
+  }
+  h1 {
+    margin-top: 12px;
+    font-family: var(--serif);
+    font-size: clamp(34px, 4.6vw, 54px);
+    font-weight: 700;
+    line-height: 1.25;
+  }
+  .needs {
+    flex: 0 1 380px;
+    display: grid;
+    gap: 8px;
+    border-top: 1px solid var(--ink);
+    padding-top: 14px;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .needs li {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+  .needs li span:first-child {
+    color: var(--muted);
+  }
+  .tracker {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+    gap: 1px;
+    border-block: 1px solid var(--ink);
+    background: var(--line);
+  }
+  .tracker li {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    padding: 14px 16px;
+    background: var(--bg);
+    color: var(--muted);
+  }
+  .tracker span {
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .tracker strong {
+    font-size: 15px;
+  }
+  .tracker .past {
+    color: var(--ink);
+  }
+  .tracker .past span::after {
+    content: " ✓";
+  }
+  .tracker [aria-current] {
+    background: var(--ink);
+    color: var(--bg);
+  }
+
+  .layout {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 40px 56px;
+    padding: 48px 0 64px;
+  }
+  .steps {
+    flex: 1 1 520px;
+    min-width: 0;
+    border-top: 1px solid var(--ink);
+  }
+  .step {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 0 18px;
+    padding: 26px 0;
+  }
+  .step + .step {
+    border-top: 1px solid var(--line);
+  }
+  .number {
+    font-family: var(--serif);
+    font-size: 30px;
+    font-weight: 600;
+    line-height: 1;
+  }
+  h2 {
+    font-size: 20px;
+    font-weight: 600;
+  }
+  .step p {
+    margin-top: 8px;
+    font-size: 15px;
+    line-height: 1.75;
+    color: var(--text);
+  }
+  .checks {
+    display: grid;
+    gap: 10px;
+    margin-top: 12px;
+    font-size: 15px;
+    line-height: 1.7;
+    color: var(--text);
+  }
+  .checks li {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+
+  .flash {
+    margin-top: 20px;
+    border: 1px solid var(--ink);
+    background: #fff;
+  }
+  .flash-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border-bottom: 1px solid var(--line);
+    padding: 12px 18px;
+    font-size: 13px;
+  }
+  .flash-head .mono {
+    color: var(--muted);
+  }
+  .flash-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 8px;
+    background: #b9b6ad;
+  }
+  [data-phase="connected"] .dot,
+  [data-phase="done"] .dot {
+    background: var(--ink);
+  }
+  [data-phase="writing"] .dot {
+    background: var(--accent);
+  }
+  .flash-body,
+  .flash-body > div {
+    display: grid;
+    gap: 16px;
+  }
+  .flash-body {
+    padding: 22px 18px 20px;
+  }
+  .failure-message {
+    display: grid;
+    gap: 16px;
+  }
+  .failure-message h3 {
+    font-size: 22px;
+    line-height: 1.4;
+  }
+  .flash .error-code {
+    font-size: 13px;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+  [data-el="retry"] {
+    background: var(--accent);
+  }
+  [data-el="retry"]:hover {
+    background: var(--ink);
+  }
+  .diagnostics {
+    position: relative;
+  }
+  .diagnostics details {
+    padding: 0;
+    border: 0;
+  }
+  .diagnostic-actions {
+    position: absolute;
+    inset: 0 110px auto 0;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .diagnostic-actions button {
+    flex-shrink: 0;
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .diagnostics summary {
+    width: max-content;
+    margin-left: auto;
+    min-height: 48px;
+    align-content: center;
+    color: var(--accent);
+    cursor: pointer;
+  }
+  .diagnostics textarea {
+    width: 100%;
+    margin-top: 12px;
+    padding: 10px;
+    box-sizing: border-box;
+    font: 12px/1.6 monospace;
+    resize: vertical;
+  }
+  .diagnostics [role="status"] {
+    font-size: 13px;
+    color: var(--accent);
+  }
+  @media (max-width: 600px) {
+    .flash-head {
+      flex-wrap: wrap;
+    }
+    .diagnostic-actions {
+      position: static;
+      flex-wrap: wrap;
+    }
+    .diagnostics summary {
+      margin-left: 0;
+    }
+  }
+  .flash p {
+    margin: 0;
+    line-height: 1.7;
+    color: var(--ink);
+  }
+  .flash p.notice {
+    border: 1px solid var(--accent);
+    padding: 12px 14px;
+    font-size: 14px;
+  }
+  .flash p.keep {
+    font-size: 13px;
+    color: var(--accent);
+  }
+  .flash p.finished {
+    font-size: 17px;
+    font-weight: 600;
+  }
+  .flash p.after {
+    color: var(--text);
+  }
+  .flash dl {
+    display: grid;
+    gap: 6px;
+    font-size: 14px;
+  }
+  .flash dl div {
+    display: grid;
+    grid-template-columns: 88px minmax(0, 1fr);
+  }
+  .flash dt {
+    color: var(--muted);
+  }
+  .confirm {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    align-items: start;
+    font-size: 14px;
+    line-height: 1.7;
+    cursor: pointer;
+  }
+  .confirm input {
+    margin: 5px 0 0;
+    accent-color: var(--ink);
+  }
+  .choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .choices .primary {
+    flex: 1 1 200px;
+  }
+  .progress-line {
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+  }
+  .track {
+    height: 8px;
+    background: #ebe9e2;
+    overflow: hidden;
+  }
+  .track div {
+    width: 0;
+    height: 100%;
+    background: var(--ink);
+    transition: width 0.12s linear;
+  }
+  .track[data-indeterminate="true"] div {
+    width: 35%;
+    animation: install-wait 1.4s ease-in-out infinite;
+  }
+  @keyframes install-wait {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(286%); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .track div {
+      transition: none;
+    }
+    .track[data-indeterminate="true"] div {
+      animation: none;
+      transform: translateX(93%);
+    }
+  }
+
+  .tree {
+    margin-top: 14px;
+    border: 1px solid var(--line);
+    padding: 14px 16px;
+    background: #fbfaf7;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.9;
+    overflow-x: auto;
+  }
+  .tree div {
+    display: flex;
+    gap: 24px;
+    white-space: nowrap;
+  }
+  .tree span:first-child {
+    min-width: 150px;
+  }
+  .tree span + span {
+    font-family: var(--sans);
+  }
+  .tree strong {
+    font-weight: 500;
+  }
+  .font-note {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 20px;
+    margin-top: 14px;
+    border: 1px solid var(--accent);
+    padding: 14px 16px;
+  }
+  .step .font-note p {
+    flex: 1 1 260px;
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--ink);
+  }
+  .font-note a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 42px;
+    padding: 0 16px;
+    background: var(--accent);
+    color: var(--bg);
+    font-size: 14px;
+    text-decoration: none;
+  }
+  .font-note a:hover {
+    background: var(--ink);
+  }
+
+  aside {
+    flex: 0 1 340px;
+    display: grid;
+    gap: 28px;
+    align-content: start;
+    min-width: 0;
+  }
+  aside > div {
+    border-top: 1px solid var(--ink);
+    padding-top: 16px;
+  }
+  h3 {
+    font-size: 16px;
+    font-weight: 600;
+  }
+  aside p {
+    margin-top: 8px;
+    font-size: 14px;
+    line-height: 1.75;
+    color: var(--text);
+  }
+  details {
+    border-bottom: 1px solid var(--line);
+    padding: 12px 0;
+  }
+  h3 + details {
+    margin-top: 6px;
+  }
+  summary {
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+</style>

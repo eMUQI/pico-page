@@ -1,0 +1,105 @@
+name: Host checks
+on: [pull_request, workflow_dispatch]
+permissions:
+  contents: read
+concurrency:
+  group: host-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.local/ccache
+      CCACHE_MAXSIZE: 256Mi
+      CCACHE_COMPILERCHECK: content
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          clean: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -m unittest discover -s tests -p test_ci_changes.py -v
+      - run: python3 -m unittest discover -s tests -p test_cos_guard.py -v
+      - run: python3 -m unittest discover -s tests -p test_publish_cos.py -v
+      - name: Select checks
+        id: changes
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 tools/ci_changes.py --base "$PR_BASE_SHA" | tee -a "$GITHUB_OUTPUT"
+      - if: steps.changes.outputs.host == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Install host dependencies
+        if: steps.changes.outputs.host == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ccache clang cmake pkg-config libsdl2-dev libssl-dev libcurl4-openssl-dev
+      - name: Check host dependencies
+        id: dependencies
+        if: steps.changes.outputs.host == 'true'
+        run: |
+          cmake --version
+          c++ --version
+          clang++ --version
+          ccache --version
+          pkg-config --modversion sdl2 openssl libcurl
+      - name: Cache font downloads
+        if: steps.changes.outputs.host == 'true'
+        uses: actions/cache@v5
+        with:
+          path: |
+            .local/downloads/freetype.tar.gz
+            .local/card/Fonts/*.ttf
+            .local/card/Fonts/*.otf
+          key: host-fonts-${{ runner.os }}-${{ hashFiles('tools/setup_fonts.py') }}
+      - name: Cache compiler outputs
+        if: steps.changes.outputs.host == 'true'
+        uses: actions/cache@v5
+        with:
+          path: .local/ccache
+          key: host-ccache-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: host-ccache-${{ runner.os }}-${{ runner.arch }}-
+      - if: steps.changes.outputs.host == 'true'
+        run: python3 tools/setup_fonts.py
+      - if: steps.changes.outputs.host == 'true'
+        run: >-
+          cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug
+          -DPICO_PAGE_TEST_BSP_WAVEFORM=ON
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      - if: steps.changes.outputs.host == 'true'
+        run: cmake --build build/host --parallel 2
+      - if: steps.changes.outputs.host == 'true'
+        run: ctest --test-dir build/host --output-on-failure
+      - name: Configure sanitizers
+        if: steps.changes.outputs.host == 'true'
+        run: >-
+          cmake -S . -B build/sanitized -DCMAKE_BUILD_TYPE=Debug
+          -DPICO_PAGE_TEST_BSP_WAVEFORM=ON
+          -DPICO_PAGE_HOST_TRACE_EVENTS=ON
+          -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          '-DCMAKE_C_FLAGS_DEBUG=-O1 -g' '-DCMAKE_CXX_FLAGS_DEBUG=-O1 -g'
+          '-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer'
+          '-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer'
+          '-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined'
+      - if: steps.changes.outputs.host == 'true'
+        run: cmake --build build/sanitized --parallel 2
+      - name: Test ASan, UBSan and LSan
+        if: steps.changes.outputs.host == 'true'
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1
+        run: |
+          ctest --test-dir build/sanitized -N
+          ctest --test-dir build/sanitized --output-on-failure
+      - name: Compiler cache statistics
+        if: always() && steps.dependencies.outcome == 'success'
+        run: ccache --show-stats
+      - run: python3 -m unittest discover -s tests -p test_check_docs.py -v
+      - run: python3 tools/check_docs.py

@@ -1,0 +1,28 @@
+--- a/read_pico_sd.c
++++ b/read_pico_sd.c
+@@ -221,6 +221,13 @@
+ }
+ 
++bool read_pico_sd_busy(void) {
++    portENTER_CRITICAL(&state_lock);
++    bool busy = probe_state == 1;
++    portEXIT_CRITICAL(&state_lock);
++    return busy;
++}
++
+ // 驱动操作期间占用忙状态，不在临界区执行 I/O。/ Reserve busy state across driver I/O outside the critical section.
+ static bool begin_operation(void) {
+     portENTER_CRITICAL(&state_lock);
+     bool ready = probe_state != 1;
+--- a/include/read_pico_sd.h
++++ b/include/read_pico_sd.h
+@@ -32,6 +32,9 @@
+ /// 查询实时 CD 并锁存失效，不卸载卡；拔卡后容量清零，重新插入也须显式 remount。
+ /// / Sample live CD and latch invalidation without unmounting; removal clears capacity and reinsertion requires explicit remount.
+ esp_err_t read_pico_sd_get_info(read_pico_sd_info_t* info);
++/** Reports BSP probe/mount/release activity even after media invalidation.
++ * This does not track application file I/O or reserve the card for sleep. */
++bool read_pico_sd_busy(void);
+ /// 调用前关闭所有字体、阅读及上传句柄；这是拔卡失效后恢复挂载的唯一入口。
+ /// / Close all font, reader and upload handles first; this is the only recovery entry after removal invalidation.
+ esp_err_t read_pico_sd_remount(void);

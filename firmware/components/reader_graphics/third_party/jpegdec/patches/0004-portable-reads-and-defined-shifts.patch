@@ -1,0 +1,84 @@
+--- a/src/JPEGDEC.h
++++ b/src/JPEGDEC.h
+@@ -1,3 +1,4 @@
++// Pico Page: honor NO_SIMD on ARM hosts to use the same portable decoder as the firmware.
+ //
+ // Copyright 2020 BitBank Software, Inc. All Rights Reserved.
+ // Licensed under the Apache License, Version 2.0 (the "License");
+@@ -39,7 +40,7 @@
+ #define ALLOWS_UNALIGNED
+ #endif
+ 
+-#if defined (__aarch64__) || defined (__arm64__)
++#if !defined(NO_SIMD) && (defined (__aarch64__) || defined (__arm64__))
+ #define HAS_NEON
+ #define ALLOWS_UNALIGNED
+ #endif // __aarch64
+@@ -309,23 +310,15 @@
+ void JPEG_setMaxOutputSize(JPEGIMAGE *pJPEG, int iMaxMCUs);
+ #endif // __cplusplus
+ 
+-#ifndef MOTOLONG
+-#ifdef ALLOWS_UNALIGNED
+-#define INTELSHORT(p) (*(uint16_t *)p)
+-#define INTELLONG(p) (*(uint32_t *)p)
+-#define MOTOSHORT(p) __builtin_bswap16(*(uint16_t *)p)
+-#if REGISTER_WIDTH == 64
+-#define MOTOLONG(p) __builtin_bswap64(*(uint64_t *)p)
+-#else
+-#define MOTOLONG(p) __builtin_bswap32(*(uint32_t *)p)
+-#endif
+-#else
+-// Due to unaligned memory causing an exception, we have to do these macros the slow way
+-#define INTELSHORT(p) ((*p) + (*(p+1)<<8))
+-#define INTELLONG(p) ((*p) + (*(p+1)<<8) + (*(p+2)<<16) + (*(p+3)<<24))
+-#define MOTOSHORT(p) (((*(p))<<8) + (*(p+1)))
+-#define MOTOLONG(p) (((*p)<<24) + ((*(p+1))<<16) + ((*(p+2))<<8) + (*(p+3)))
+-#endif // ALLOWS_UNALIGNED
+-#endif // MOTOLONG defined
++// Byte assembly avoids unaligned typed loads and preserves the selected bit-reader width.
++static inline my_ulong jpeg_read_be(const uint8_t* p, unsigned count) {
++    my_ulong value = 0;
++    for (unsigned i = 0; i < count; ++i) value = (value << 8) | p[i];
++    return value;
++}
++#define INTELSHORT(p) ((uint16_t)((p)[0] | ((uint16_t)(p)[1] << 8)))
++#define INTELLONG(p) ((uint32_t)(p)[0] | ((uint32_t)(p)[1] << 8) | ((uint32_t)(p)[2] << 16) | ((uint32_t)(p)[3] << 24))
++#define MOTOSHORT(p) ((uint16_t)jpeg_read_be((p), 2))
++#define MOTOLONG(p) jpeg_read_be((p), sizeof(my_ulong))
+ 
+ #endif // __JPEGDEC__
+--- a/src/jpeg.inl
++++ b/src/jpeg.inl
+@@ -1,3 +1,4 @@
++// Pico Page: applies the three CrossPoint progressive grayscale fixes listed in README.md.
+ //
+ // JPEG Decoder
+ //
+@@ -923,7 +924,7 @@
+                 while (iLen)
+                 {
+                     //               if (iBitNum > 6) // do long table
+-                    if ((cc >> (iBitNum-5)) == 0x1f) // first 5 bits are 1 - use long table
++                    if (iBitNum >= 5 && (cc >> (iBitNum-5)) == 0x1f) // first 5 bits are 1 - use long table
+                     {
+                         count = iMaxLength - iBitNum;
+                         codestart = cc << count;
+@@ -1112,7 +1113,7 @@
+                 while (iLen)
+                 {
+                     //               if (iBitNum > 6) // do long table
+-                    if ((cc >> (iBitNum-5)) == 0x1f) // first 5 bits are 1 - use long table
++                    if (iBitNum >= 5 && (cc >> (iBitNum-5)) == 0x1f) // first 5 bits are 1 - use long table
+                     {
+                         count = iMaxLength - iBitNum;
+                         codestart = cc << count;
+@@ -1843,7 +1844,7 @@
+     }
+ 
+     iPositive = (1 << pJPEG->cApproxBitsLow); // positive bit position being coded
+-    iNegative = ((-1) << pJPEG->cApproxBitsLow); // negative bit position being coded
++    iNegative = (-(1 << pJPEG->cApproxBitsLow)); // negative bit position being coded
+         
+     if (pJPEG->iScanStart == 0)
+     {

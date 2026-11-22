@@ -1,0 +1,1133 @@
+#include "pico_page/runtime.h"
+#include "display_compatibility.h"
+#include "pico_page/app.h"
+#include "pico_page/console.h"
+#include "pico_page/diagnostics.h"
+#include "pico_page/platform.h"
+#include "pico_page/provision.h"
+#include "pico_page/released_tap.h"
+#include "pico_page/sleep_input.h"
+#include "pico_page/store.h"
+#include "esp_log.h"
+#include "esp_heap_caps.h"
+#include "esp_mac.h"
+#include "esp_random.h"
+#include "esp_timer.h"
+#include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
+#include <algorithm>
+#include <atomic>
+#include <cstdio>
+#include <ctime>
+#include <memory>
+#include <limits>
+#include <utility>
+
+namespace {
+constexpr auto tag = "pico_page";
+constexpr std::int64_t idle_slow_us = 3'000'000;
+constexpr std::int64_t idle_save_us = 2'000'000;
+constexpr std::int64_t idle_background_us = 1'000'000;
+std::uint64_t presentation_sequence = 0;
+std::int64_t settled_us = 0;
+constexpr std::int64_t portal_idle_us = 600'000'000;
+constexpr char manual_paused[] = "手动连接已暂停，点「立即连接」可恢复。";
+namespace diag = pico_page::diagnostics;
+namespace platform = pico_page::platform;
+namespace provision = pico_page::provision;
+struct NetworkJob {
+    pico_page::NetworkOperation operation;
+    std::string card, body, error;
+    int status = 0;
+    bool portal = false;
+    bool station = false;
+    std::optional<pico_page::WifiOperation> wifi = std::nullopt;
+    std::vector<provision::NearbyWifi> nearby = {};
+    pico_page::LinkFailure failure = pico_page::LinkFailure::None;
+    std::optional<pico_page::UpdateOperation> update = std::nullopt;
+    pico_page::UpdateFailure update_failure = pico_page::UpdateFailure::None;
+    std::string joined = {};
+    pico_page::i18n::Language language = pico_page::i18n::Language::SimplifiedChinese;
+    bool clock_calibrated = false;
+};
+QueueHandle_t requests = nullptr, responses = nullptr;
+QueueHandle_t wifi_events = nullptr;
+struct UpdateEvent { std::uint64_t id; std::uint32_t bytes; };
+QueueHandle_t update_events = nullptr;
+// Held for each panel update and for each flash write of a firmware download. A flash
+// operation suspends cache access, which the panel's line timing cannot absorb.
+SemaphoreHandle_t flash_lock = nullptr;
+std::atomic_bool radio_active{false};
+pico_page::network::Holds holds;
+provision::WifiCredentials station_target;
+unsigned reconnects = 0;
+pico_page::WifiStatus radio_status;
+void publish_wifi(pico_page::WifiPhase phase, const std::string& ssid = "", const std::string& detail = "") {
+    using pico_page::network::live;
+    const bool manual = live(holds.manual) && !holds.manual_suspended;
+    if (radio_status.phase == phase && radio_status.ssid == ssid && radio_status.detail == detail && radio_status.manual == manual) return;
+    radio_status = {radio_status.sequence + 1, phase, ssid, detail, manual};
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+    ESP_LOGI("pico_network", "phase=%u time_ms=%lld internal_free=%u internal_largest=%u psram_free=%u psram_largest=%u",
+        static_cast<unsigned>(phase), static_cast<long long>(esp_timer_get_time() / 1000),
+        static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+        static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+        static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+        static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
+#endif
+    auto* event = new pico_page::WifiStatus(radio_status);
+    if (xQueueSend(wifi_events, &event, 0) != pdTRUE) {
+        pico_page::WifiStatus* old = nullptr;
+        if (xQueueReceive(wifi_events, &old, 0) == pdTRUE) delete old;
+        if (xQueueSend(wifi_events, &event, 0) != pdTRUE) delete event;
+    }
+}
+bool retained_station() {
+    return holds.retained();
+}
+void release_radio(const std::string& detail = "") {
+    if (radio_active.load()) {
+        publish_wifi(pico_page::WifiPhase::Closing);
+        platform::disconnect_network();
+        radio_active.store(false);
+    }
+    station_target = {};
+    publish_wifi(pico_page::WifiPhase::Offline, "", detail);
+}
+QueueHandle_t portal_events = nullptr;
+SemaphoreHandle_t portal_emit_lock = nullptr;
+struct PortalSession {
+    SemaphoreHandle_t lock = xSemaphoreCreateMutex();
+    pico_page::network::IdleTimer upload_idle;
+    pico_page::PortalStatus status;
+};
+void emit(const pico_page::PortalStatus &status) {
+    auto *event = new pico_page::PortalStatus(status);
+    xSemaphoreTake(portal_emit_lock, portMAX_DELAY);
+    if (xQueueSend(portal_events, &event, 0) != pdTRUE) {
+        pico_page::PortalStatus *oldest = nullptr;
+        if (xQueueReceive(portal_events, &oldest, 0) == pdTRUE)
+            delete oldest;
+        if (xQueueSend(portal_events, &event, 0) != pdTRUE)
+            delete event;
+    }
+    xSemaphoreGive(portal_emit_lock);
+}
+void upload_saved(void *context, const std::string &name) {
+    auto &session = *static_cast<PortalSession *>(context);
+    xSemaphoreTake(session.lock, portMAX_DELAY);
+    ++session.status.saved_books;
+    session.status.latest_book = name;
+    const auto status = session.status;
+    xSemaphoreGive(session.lock);
+    emit(status);
+}
+void upload_activity(void* context, bool active) {
+    auto& session = *static_cast<PortalSession*>(context);
+    xSemaphoreTake(session.lock, portMAX_DELAY);
+    session.upload_idle.update(active, esp_timer_get_time());
+    session.status.phase = active ? pico_page::PortalPhase::Receiving : pico_page::PortalPhase::Waiting;
+    const auto status = session.status;
+    xSemaphoreGive(session.lock);
+    emit(status);
+}
+std::string wifi_failure(const std::string &ssid, const platform::ConnectFailure &failure, pico_page::i18n::Language language) {
+    using Stage = platform::ConnectFailure::Stage;
+    const auto kind = failure.stage == Stage::Link      ? provision::WifiFailure::Rejected
+                      : failure.stage == Stage::Address ? provision::WifiFailure::NoAddress
+                      : failure.stage == Stage::Clock   ? provision::WifiFailure::NoClock
+                                                        : provision::WifiFailure::Setup;
+    ESP_LOGW(tag, "Wi-Fi failure stage %d, driver reason %d", static_cast<int>(failure.stage), failure.reason);
+    return provision::wifi_problem(ssid, kind, failure.reason, language);
+}
+std::vector<provision::NearbyWifi> nearby_wifi(const std::vector<platform::NearbyNetwork> &scanned) {
+    std::vector<provision::NearbyWifi> nearby;
+    for (const auto &item : scanned)
+        nearby.push_back({item.ssid, item.rssi, item.open});
+    return nearby;
+}
+pico_page::LinkFailure link_failure(const platform::ConnectFailure& failure) {
+    using pico_page::LinkFailure;
+    if (failure.stage != platform::ConnectFailure::Stage::Link) return LinkFailure::Other;
+    return provision::network_absent(failure.reason) ? LinkFailure::NotNearby
+         : provision::password_rejected(failure.reason) ? LinkFailure::Password : LinkFailure::Other;
+}
+bool ensure_station(const pico_page::WifiTargets& targets, const std::atomic_bool& cancelled, std::string& error,
+                    pico_page::LinkFailure& failure, pico_page::i18n::Language language, bool replace = false,
+                    platform::StationClock clock = platform::StationClock::Automatic) {
+    using pico_page::LinkFailure;
+    failure = LinkFailure::Other;
+    error = "操作已取消。";
+    if (cancelled.load()) return false;
+    if (!replace && platform::station_connected()) { failure = LinkFailure::None; error.clear(); return true; }
+    auto order = targets.networks;
+    radio_active.store(true);
+    if (targets.automatic) {
+        publish_wifi(pico_page::WifiPhase::Connecting);
+        std::vector<platform::NearbyNetwork> scanned;
+        std::string scan_error;
+        if (!platform::scan_networks(scanned, scan_error, &cancelled)) {
+            if (!cancelled.load()) error = scan_error;
+            return false;
+        }
+        order = provision::connection_order(targets.networks, nearby_wifi(scanned));
+        if (order.empty()) { failure = LinkFailure::NotNearby; error = "附近没有已保存的网络。"; return false; }
+    }
+    std::string refused, last = "没有可连接的网络。";
+    auto last_kind = LinkFailure::Other;
+    for (const auto& target : order) {
+        if (cancelled.load()) return false;
+        publish_wifi(pico_page::WifiPhase::Connecting, target.ssid);
+        platform::ConnectFailure reason;
+        std::string detail;
+        if (platform::connect_network(target.ssid, target.password, detail, &reason, clock, &cancelled)) {
+            station_target = target;
+            publish_wifi(pico_page::WifiPhase::Connected, target.ssid);
+            if (cancelled.load()) return false;
+            failure = LinkFailure::None;
+            error.clear();
+            return true;
+        }
+        if (cancelled.load()) return false;
+        last = wifi_failure(target.ssid, reason, language);
+        last_kind = link_failure(reason);
+        if (last_kind == LinkFailure::Password && refused.empty()) refused = last;
+    }
+    error = refused.empty() ? last : refused;
+    failure = refused.empty() ? last_kind : LinkFailure::Password;
+    return false;
+}
+void remember_connection(const std::string &card, const std::string &ssid) {
+    std::string error;
+    if (!provision::save_connection(card, ssid, std::time(nullptr), error))
+        ESP_LOGW(tag, "Connection record not saved: %s", error.c_str());
+}
+bool start_hotspot(NetworkJob &job, PortalSession &session) {
+    std::uint8_t mac[6]{};
+    esp_efuse_mac_get_default(mac);
+    char name[20];
+    std::snprintf(name, sizeof(name), "PicoPage-%02X%02X", mac[4], mac[5]);
+    // ESP-IDF's hardware RNG lacks a continuous entropy source before Wi-Fi starts.
+    static constexpr char unambiguous_password_chars[] = "abcdefghjkmnpqrstuvwxyz23456789";
+    std::string password;
+    for (int i = 0; i < 8; ++i)
+        password += unambiguous_password_chars[
+            (esp_random() ^ static_cast<std::uint32_t>(esp_timer_get_time())) %
+            (sizeof(unambiguous_password_chars) - 1)];
+    std::vector<platform::NearbyNetwork> scanned;
+    holds.manual_suspended = pico_page::network::live(holds.manual);
+    pico_page::network::release(holds.sync);
+    station_target = {};
+    radio_active.store(true);
+    if (!platform::start_access_point(name, password, scanned, job.error, job.operation.cancelled.get()))
+        return false;
+    publish_wifi(pico_page::WifiPhase::Hotspot);
+    xSemaphoreTake(session.lock, portMAX_DELAY);
+    session.status = {pico_page::PortalPhase::Waiting, name, password, "http://192.168.4.1", "", "", 0, "", job.operation.id};
+    xSemaphoreGive(session.lock);
+    platform::UploadServer server;
+    server.root = job.card;
+    server.cancelled = job.operation.cancelled.get();
+    server.network = name;
+    server.saved = upload_saved;
+    server.context = &session;
+    server.activity = upload_activity;
+    return platform::start_upload_server(server, job.error);
+}
+bool start_station_upload(NetworkJob &job, PortalSession &session) {
+    std::string error;
+    if (job.operation.targets.networks.empty()) {
+        job.error = "还没有可用的已保存网络。请先添加，也可使用设备热点传书。"; return false;
+    }
+    if (!ensure_station(job.operation.targets, *job.operation.cancelled, error, job.failure, job.language)) {
+        job.error = error; return false;
+    }
+    const auto joined = station_target.ssid;
+    remember_connection(job.card, joined);
+    static constexpr char alphabet[] = "abcdefghjkmnpqrstuvwxyz23456789";
+    std::string code;
+    for (int i = 0; i < 6; ++i)
+        code += alphabet[esp_random() % (sizeof(alphabet) - 1)];
+    const auto address = platform::station_address();
+    platform::UploadServer server;
+    server.root = job.card;
+    server.cancelled = job.operation.cancelled.get();
+    server.code = code;
+    server.network = joined;
+    server.saved = upload_saved;
+    server.context = &session;
+    server.activity = upload_activity;
+    if (address.empty() || !platform::start_upload_server(server, error)) {
+        ESP_LOGW(tag, "Upload server: %s", error.c_str());
+        job.error = "传书服务没有启动，请重试。";
+        return false;
+    }
+    xSemaphoreTake(session.lock, portMAX_DELAY);
+    session.status = {pico_page::PortalPhase::Waiting, "", "", "http://" + address + "/" + code, "", joined, 0, "", job.operation.id};
+    xSemaphoreGive(session.lock);
+    return true;
+}
+void run_portal(NetworkJob &job) {
+    using pico_page::PortalPhase;
+    PortalSession session;
+    session.upload_idle.update(false, esp_timer_get_time());
+    const bool started = session.lock && (job.station ? start_station_upload(job, session) : start_hotspot(job, session));
+    if (!started) {
+        ESP_LOGW(tag, "Upload session did not start: %s", job.error.c_str());
+        if (job.operation.cancelled->load())
+            job.error.clear();
+        else if (!job.station || job.error.empty())
+            job.error = job.station ? "传书服务没有启动，请重试。" : "设备热点没有启动，请重试。";
+    } else {
+        job.error.clear();
+        xSemaphoreTake(session.lock, portMAX_DELAY);
+        auto status = session.status;
+        xSemaphoreGive(session.lock);
+        emit(status);
+        while (!job.operation.cancelled->load()) {
+            if (job.station && !platform::station_connected()) {
+                if (!job.operation.cancelled->load())
+                    job.error = "与已保存的 Wi-Fi 连接已断开。可以改用设备热点传书。";
+                break;
+            }
+            xSemaphoreTake(session.lock, portMAX_DELAY);
+            const bool idle_expired = session.upload_idle.expired(esp_timer_get_time(), portal_idle_us);
+            xSemaphoreGive(session.lock);
+            if (idle_expired) {
+                job.error = "传书超过 10 分钟没有上传，已自动结束。";
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(200));
+        }
+    }
+    job.operation.cancelled->store(true);
+    platform::stop_portal_server();
+    if (!job.station || !retained_station())
+        release_radio(holds.manual_suspended ? manual_paused : "");
+    if (session.lock)
+        vSemaphoreDelete(session.lock);
+}
+template <typename Call>
+bool network_stage([[maybe_unused]] const NetworkJob& job, [[maybe_unused]] std::uint32_t stage, Call&& call) {
+    PP_DIAGNOSTIC(const auto measurement = diag::begin(diag::Kind::NetworkStage,
+        {0, 0, 0, job.update ? job.update->id : job.operation.id, stage});)
+    const bool okay = call();
+    PP_DIAGNOSTIC(diag::end(measurement, (job.update ? job.update->cancelled : job.operation.cancelled)->load() ? diag::Outcome::Cancelled
+        : okay ? diag::Outcome::Success : diag::Outcome::Failure);)
+    return okay;
+}
+#ifdef CONFIG_PICO_PAGE_PERF_METRICS
+void execute_request(NetworkJob &job) {
+#else
+void run_request(NetworkJob &job) {
+#endif
+    const auto& cancelled = *job.operation.cancelled;
+    if (cancelled.load() || !pico_page::network::live(job.operation.session)) return;
+    if (!network_stage(job, 1, [&] { return ensure_station(job.operation.targets, cancelled, job.error, job.failure, job.language); })) return;
+    publish_wifi(pico_page::WifiPhase::Clock, station_target.ssid);
+    platform::ConnectFailure failure;
+    if (!network_stage(job, 2, [&] { return platform::synchronize_clock(job.error, &failure, &cancelled); })) {
+        job.error = cancelled.load() ? "操作已取消。" : wifi_failure(station_target.ssid, failure, job.language);
+        job.failure = pico_page::LinkFailure::Other;
+        return;
+    }
+    if (cancelled.load()) return;
+    publish_wifi(pico_page::WifiPhase::Request, station_target.ssid);
+    const auto &request = job.operation.request;
+    const bool okay = network_stage(job, 3, [&] {
+        return platform::http_request(request.method, request.url, request.headers, request.body, job.body, job.status,
+                                      job.error, job.operation.cancelled.get());
+    });
+    if (!okay) {
+        job.error = request.method == "GET" ? "同步服务不可达，请检查网络或服务地址后重试。" : "上传结果未确认，请重新查询远端。";
+        pico_page::network::release(job.operation.session);
+    } else if (!cancelled.load()) holds.await_decision(job.operation.session, esp_timer_get_time());
+}
+void update_written(void* context, std::uint32_t written) {
+    const UpdateEvent event{*static_cast<const std::uint64_t*>(context), written};
+    xQueueOverwrite(update_events, &event);
+}
+void guard_flash(void*, bool begin) {
+    if (begin) {
+        xSemaphoreTake(flash_lock, portMAX_DELAY);
+        pico_page::platform::guard_flash_io(true);
+    } else {
+        pico_page::platform::guard_flash_io(false);
+        xSemaphoreGive(flash_lock);
+    }
+}
+void run_update(NetworkJob& job) {
+    using pico_page::UpdateFailure;
+    const auto& operation = *job.update;
+    const auto& cancelled = *operation.cancelled;
+    PP_DIAGNOSTIC(const auto measurement = diag::begin(diag::Kind::Network, {0, 0, 0, operation.id, 1});)
+    const auto perform = [&]() -> UpdateFailure {
+        if (cancelled.load()) return UpdateFailure::Cancelled;
+        if (!platform::firmware_layout_supported()) return UpdateFailure::WrongLayout;
+        if (!network_stage(job, 1, [&] { return ensure_station(operation.targets, cancelled, job.error, job.failure, job.language); }))
+            return UpdateFailure::Link;
+        job.joined = station_target.ssid;
+        publish_wifi(pico_page::WifiPhase::Clock, station_target.ssid);
+        platform::ConnectFailure failure;
+        if (!network_stage(job, 2, [&] { return platform::synchronize_clock(job.error, &failure, &cancelled); })) {
+            if (failure.stage != platform::ConnectFailure::Stage::Clock) {
+                job.error = wifi_failure(station_target.ssid, failure, job.language);
+                return UpdateFailure::Link;
+            }
+            job.error = "没有取得网络时间";
+            return UpdateFailure::Internet;
+        }
+        if (operation.kind == pico_page::UpdateOperation::Kind::Check) {
+            if (!network_stage(job, 4, [&] { return platform::resolve_host(operation.url, job.error, &cancelled); })) {
+                ESP_LOGW(tag, "Update check: %s", job.error.c_str());
+                job.error = "无法解析更新服务器的地址";
+                return UpdateFailure::Internet;
+            }
+            publish_wifi(pico_page::WifiPhase::Request, station_target.ssid);
+            return network_stage(job, 3, [&] {
+                return platform::http_request("GET", operation.url, {}, "", job.body, job.status, job.error, &cancelled);
+            })
+                ? UpdateFailure::None : UpdateFailure::Network;
+        }
+        publish_wifi(pico_page::WifiPhase::Request, station_target.ssid);
+        auto reason = platform::FirmwareFailure::None;
+        std::uint64_t id = operation.id;
+        const platform::FirmwareHooks hooks{update_written, guard_flash, &id};
+        network_stage(job, 5, [&] {
+            return platform::download_firmware({operation.url, operation.size, operation.sha256, operation.version}, hooks,
+                                                reason, job.error, &cancelled);
+        });
+        if (reason != platform::FirmwareFailure::None) ESP_LOGW(tag, "Firmware download: %s", job.error.c_str());
+        switch (reason) {
+        case platform::FirmwareFailure::None: return UpdateFailure::None;
+        case platform::FirmwareFailure::Cancelled: return UpdateFailure::Cancelled;
+        case platform::FirmwareFailure::Network: return UpdateFailure::Network;
+        case platform::FirmwareFailure::Server: return UpdateFailure::Server;
+        case platform::FirmwareFailure::Mismatch: return UpdateFailure::Mismatch;
+        case platform::FirmwareFailure::TooLarge: return UpdateFailure::TooLarge;
+        case platform::FirmwareFailure::WrongImage: return UpdateFailure::WrongImage;
+        case platform::FirmwareFailure::WrongLayout: return UpdateFailure::WrongLayout;
+        default: return UpdateFailure::Flash;
+        }
+    };
+    job.update_failure = perform();
+    if (job.update_failure != UpdateFailure::Link && job.update_failure != UpdateFailure::Internet) job.error.clear();
+    if (cancelled.load() && job.update_failure != UpdateFailure::None) job.update_failure = UpdateFailure::Cancelled;
+    PP_DIAGNOSTIC(diag::end(measurement, cancelled.load() ? diag::Outcome::Cancelled
+        : job.update_failure == UpdateFailure::None &&
+          (operation.kind != pico_page::UpdateOperation::Kind::Check || job.status == 200)
+            ? diag::Outcome::Success : diag::Outcome::Failure);)
+}
+#ifdef CONFIG_PICO_PAGE_PERF_METRICS
+void run_request(NetworkJob &job) {
+    PP_DIAGNOSTIC(const auto measurement = diag::begin(diag::Kind::Network, {0, 0, 0, job.operation.id});)
+    execute_request(job);
+    PP_DIAGNOSTIC(diag::end(measurement, job.operation.cancelled->load()
+        ? diag::Outcome::Cancelled : !job.error.empty() || job.status < 200 || job.status >= 300
+        ? diag::Outcome::Failure : diag::Outcome::Success);)
+}
+#endif
+void network_worker(void *) {
+    auto reconnect_language = pico_page::i18n::Language::SimplifiedChinese;
+    for (;;) {
+        NetworkJob *job = nullptr;
+        const auto wait = radio_active.load() || retained_station() ? pdMS_TO_TICKS(200) : portMAX_DELAY;
+        if (xQueueReceive(requests, &job, wait) == pdTRUE) {
+            reconnect_language = job->language;
+            if (job->portal) run_portal(*job);
+            else if (job->update) run_update(*job);
+            else if (job->wifi) {
+                const auto& operation = *job->wifi;
+                if (!operation.cancelled->load()) {
+                    if (operation.kind == pico_page::WifiOperation::Kind::Connect) {
+                        pico_page::network::release(holds.manual);
+                        holds.manual = operation.cancelled; holds.manual_suspended = false; reconnects = 0;
+                        if (!ensure_station(operation.targets, *operation.cancelled, job->error, job->failure, job->language))
+                            pico_page::network::release(holds.manual);
+                    } else if (operation.kind == pico_page::WifiOperation::Kind::Join) {
+                        ensure_station(operation.targets, *operation.cancelled, job->error, job->failure, job->language, true);
+                    } else if (operation.kind == pico_page::WifiOperation::Kind::Clock) {
+                        if (ensure_station(operation.targets, *operation.cancelled, job->error, job->failure, job->language,
+                                           false, platform::StationClock::Deferred)) {
+                            publish_wifi(pico_page::WifiPhase::Clock, station_target.ssid);
+                            job->clock_calibrated = platform::synchronize_clock(
+                                job->error, nullptr, operation.cancelled.get(), true);
+                        }
+                    } else {
+                        radio_active.store(true);
+                        std::vector<platform::NearbyNetwork> scanned;
+                        if (platform::scan_networks(scanned, job->error, operation.cancelled.get())) job->nearby = nearby_wifi(scanned);
+                        pico_page::network::release(operation.cancelled);
+                    }
+                }
+            } else {
+                run_request(*job);
+                if (!job->error.empty() || job->operation.cancelled->load()) pico_page::network::release(job->operation.session);
+            }
+            if (!retained_station()) release_radio(holds.manual_suspended ? manual_paused : "");
+            else if (platform::station_connected()) publish_wifi(pico_page::WifiPhase::Connected, station_target.ssid);
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+            ESP_LOGI("network_worker", "phase=request_done stack_free=%u http_status=%d failed=%d wifi_connected=%d internal_free=%u internal_largest=%u internal_min=%u psram_free=%u psram_largest=%u",
+                     static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)), job->status, !job->error.empty(),
+                     platform::station_connected(),
+                     static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                     static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                     static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                     static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+                     static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
+#endif
+            xQueueSend(responses, &job, portMAX_DELAY);
+        }
+        holds.expire(esp_timer_get_time());
+        if (!pico_page::network::live(holds.manual)) holds.manual_suspended = false;
+        if (!retained_station()) { release_radio(holds.manual_suspended ? manual_paused : ""); continue; }
+        if (!platform::station_connected()) {
+            std::string error;
+            pico_page::LinkFailure failure;
+            if (!holds.manual_suspended && pico_page::network::live(holds.manual) && reconnects++ == 0 &&
+                ensure_station({{station_target}, false}, *holds.manual, error, failure, reconnect_language)) continue;
+            holds.stop(); release_radio(error.empty() ? "Wi-Fi 连接已断开，请重试。" : error);
+        }
+    }
+}
+pico_page::platform::PageWaveform effect_waveform(pico_page::PageEffect effect) {
+    using pico_page::PageEffect;
+    using pico_page::platform::PageWaveform;
+    switch (effect) {
+    case PageEffect::Off: return PageWaveform::Gray16;
+    case PageEffect::Ripple: return PageWaveform::Ripple;
+    case PageEffect::Diagonal: return PageWaveform::Diagonal;
+    case PageEffect::TouchPosition: return PageWaveform::TouchPosition;
+    }
+    return PageWaveform::Gray16;
+}
+bool present(pico_page::ReaderApp &app) {
+    if (!app.pending_frame()) { pico_page::platform::cancel_display(); return true; }
+    if (!pico_page::platform::try_begin_display()) return true;
+    struct Release {
+        ~Release() { pico_page::platform::finish_display(); }
+    } release;
+    while (app.pending_frame()) {
+        if (!app.prepare_frame()) return true;
+        ++presentation_sequence;
+        std::string error;
+        using pico_page::platform::PageWaveform;
+        const auto candidate = effect_waveform(app.page_effect());
+        if (candidate != pico_page::platform::page_effect_waveform() &&
+            !pico_page::platform::set_page_effect_waveform(candidate, error)) {
+            ESP_LOGW(tag, "Page effect unavailable: %s; using configured refresh", error.c_str());
+            app.set_page_effect(pico_page::PageEffect::Off);
+            pico_page::platform::set_page_effect_waveform(PageWaveform::Gray16, error);
+        }
+        const auto selected = pico_page::platform::page_effect_waveform();
+        const bool use_effect = app.pending_frame()->purpose == pico_page::FramePurpose::Body &&
+                                selected != PageWaveform::Gray16;
+        pico_page::platform::set_page_waveform(use_effect ? selected :
+            app.fast_page_updates() ? PageWaveform::Gray8 : PageWaveform::Gray16,
+            app.pending_frame()->reverse_page_effect, app.pending_frame()->page_turn_origin);
+        PP_DIAGNOSTIC(const auto frame_wait_started = esp_timer_get_time();)
+        if (flash_lock) xSemaphoreTake(flash_lock, portMAX_DELAY);
+        PP_DIAGNOSTIC(const auto frame_present_started = esp_timer_get_time();)
+        PP_DIAGNOSTIC(const auto measurement = diag::begin(diag::Kind::Frame,
+            {app.pending_frame()->token.session, app.pending_frame()->token.layout,
+             presentation_sequence, app.pending_frame()->token.request,
+             static_cast<std::uint32_t>(app.pending_frame()->purpose)});)
+        const bool okay = pico_page::platform::present(
+            app.canvas().data(), app.canvas().pixels().size(),
+            app.pending_frame()->refresh == pico_page::RefreshIntent::FullClean, error, app.pending_frame()->region,
+            app.pending_frame()->changed_pixels_only,
+            app.pending_frame()->purpose == pico_page::FramePurpose::Body && app.has_reading_footer());
+        PP_DIAGNOSTIC(const auto frame_present_finished = esp_timer_get_time();)
+        if (flash_lock) xSemaphoreGive(flash_lock);
+        PP_DIAGNOSTIC(diag::end(measurement, okay ? diag::Outcome::Success : diag::Outcome::Failure);)
+        PP_DIAGNOSTIC(
+            const auto frame_timing = pico_page::platform::present_timing();
+            ESP_LOGI("pico_ota_perf", "frame at_us=%lld seq=%llu ok=%d wait_us=%lld present_us=%lld copy_us=%lld power_us=%lld draw_us=%lld",
+                     static_cast<long long>(frame_present_started), static_cast<unsigned long long>(presentation_sequence), okay,
+                     static_cast<long long>(frame_present_started - frame_wait_started),
+                     static_cast<long long>(frame_present_finished - frame_present_started),
+                     static_cast<long long>(frame_timing.copy_us), static_cast<long long>(frame_timing.power_us),
+                     static_cast<long long>(frame_timing.draw_us));
+        )
+        pico_page::console::frame_completed(*app.pending_frame(), okay);
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+        const auto completed = esp_timer_get_time();
+#endif
+        app.complete_frame(okay);
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+        const auto timing = pico_page::platform::present_timing();
+        ESP_LOGI(tag, "Frame complete: copy=%lld power=%lld draw=%lld complete=%lld ms ok=%d",
+                 static_cast<long long>(timing.copy_us / 1000),
+                 static_cast<long long>(timing.power_us / 1000),
+                 static_cast<long long>(timing.draw_us / 1000),
+                 static_cast<long long>((esp_timer_get_time() - completed) / 1000), okay);
+#endif
+        if (!okay) {
+            ESP_LOGE(tag, "Display transaction failed: %s", error.c_str());
+            settled_us = esp_timer_get_time();
+            return false;
+        }
+        settled_us = esp_timer_get_time();
+    }
+    return true;
+}
+}
+void pico_page::runtime::run() {
+    std::string error;
+    if (!pico_page::console::initialize(error))
+        ESP_LOGW(tag, "Diagnostic console unavailable: %s", error.c_str());
+    const bool unconfirmed = pico_page::platform::firmware_unconfirmed();
+    if (!pico_page::platform::initialize(error)) {
+        ESP_LOGE(tag, "Board initialization failed: %s", error.c_str());
+        if (unconfirmed) pico_page::platform::reject_firmware();
+        if (pico_page::platform::panel_ready()) {
+            pico_page::ReaderApp diagnostic(pico_page::platform::card_mount_path(), "pico-page-diagnostic");
+            if (!pico_page::runtime::validate_display_geometry(diagnostic.canvas(), pico_page::platform::display_info(), error)) {
+                ESP_LOGE(tag, "Display configuration failed: %s", error.c_str());
+                return;
+            }
+            if (diagnostic.initialize()) {
+                present(diagnostic);
+                diagnostic.show_error("硬件初始化失败，请检查设备后重启。");
+                present(diagnostic);
+            }
+        }
+        return;
+    }
+    std::uint8_t mac[6]{};
+    esp_efuse_mac_get_default(mac);
+    char writer[48];
+    std::snprintf(writer, sizeof(writer), "pico-page-%02x%02x%02x%02x%02x%02x", mac[0], mac[1],
+                  mac[2], mac[3], mac[4], mac[5]);
+    const auto *card = pico_page::platform::card_root();
+    auto app = std::make_unique<pico_page::ReaderApp>(card ? card : pico_page::platform::card_mount_path(), writer, true, true);
+    app->set_firmware_layout_supported(pico_page::platform::firmware_layout_supported());
+    if (!pico_page::runtime::validate_display_geometry(app->canvas(), pico_page::platform::display_info(), error)) {
+        ESP_LOGE(tag, "Display configuration failed: %s", error.c_str());
+        if (unconfirmed) pico_page::platform::reject_firmware();
+        return;
+    }
+    if (!app->initialize()) {
+        ESP_LOGE(tag, "Reader initialization failed");
+        if (unconfirmed) pico_page::platform::reject_firmware();
+        return;
+    }
+    const bool first_frame = present(*app);
+    // The bootloader rolls back an unconfirmed image on its next reset.
+    if (unconfirmed && !(first_frame && pico_page::platform::confirm_firmware())) pico_page::platform::reject_firmware();
+    if (!card) {
+        app->card_unavailable(pico_page::platform::card_start_issue());
+        present(*app);
+    }
+    requests = xQueueCreate(1, sizeof(NetworkJob *));
+    responses = xQueueCreate(1, sizeof(NetworkJob *));
+    portal_events = xQueueCreate(4, sizeof(pico_page::PortalStatus *));
+    wifi_events = xQueueCreate(4, sizeof(pico_page::WifiStatus *));
+    update_events = xQueueCreate(1, sizeof(UpdateEvent));
+    portal_emit_lock = xSemaphoreCreateMutex();
+    flash_lock = xSemaphoreCreateMutex();
+    const bool worker_ready =
+        requests && responses && portal_events && wifi_events && portal_emit_lock &&
+        xTaskCreate(network_worker, "pico_network", 16384, nullptr, 3, nullptr) == pdPASS;
+    bool usb_mode = false;
+    bool network_busy = false, sleep_requested = false, physical_suppressed = false;
+    pico_page::PowerRequest pending_power;
+    bool pending_usb = false, power_prepared = false;
+    std::shared_ptr<std::atomic_bool> portal_stop;
+    std::optional<pico_page::PortalStatus> deferred_portal_failure;
+    std::uint64_t input_sequence = 0, physical_sequence = 0, physical_source = 0;
+    bool continuous_contact = false;
+    pico_page::input::ReleasedTap released_tap;
+    std::int64_t last_activity = esp_timer_get_time();
+    pico_page::platform::Event sleep_input;
+    pico_page::input::SleepInput resume_input;
+    const auto dispatch_contact = [&](pico_page::Phase phase, int x, int y, bool hold = false, bool queued = false) {
+        pico_page::AppInput input{{physical_sequence, phase, pico_page::Input::TouchCenter}, true, x, y, queued, hold};
+        input.continuous = true;
+        app->input(input);
+    };
+    const auto reset_contact = [&] {
+        if (continuous_contact) dispatch_contact(pico_page::Phase::Cancel, 0, 0, false, true);
+        continuous_contact = false;
+        released_tap.accept({pico_page::platform::EventKind::InputReset}, presentation_sequence);
+        physical_source = physical_sequence = 0;
+        physical_suppressed = false;
+    };
+    const auto begin_sleep = [&] {
+        if (!app->begin_sleep()) return;
+        sleep_requested = true;
+        if (!present(*app)) {
+            app->cancel_sleep();
+            sleep_requested = false;
+            resume_input.begin();
+            last_activity = esp_timer_get_time();
+        }
+    };
+    const auto sleep_now = [&] {
+        if (app->pending_frame()) return false;
+        const bool ready = app->prepare_sleep();
+        if (!ready && app->sleep_pending()) return false;
+        if (ready && present(*app)) {
+            const bool polled = pico_page::platform::poll(sleep_input, error);
+            if (!polled) ESP_LOGW(tag, "Sleep input check failed: %s", error.c_str());
+            if (pico_page::input::SleepInput::ignores(sleep_input.kind)) sleep_input = {};
+            bool slept = false;
+            if (polled && sleep_input.kind == pico_page::platform::EventKind::None) {
+                if (!pico_page::platform::sleep(error, slept))
+                    ESP_LOGW(tag, "Sleep failed: %s", error.c_str());
+            }
+            if (sleep_input.kind == pico_page::platform::EventKind::Power) sleep_input = {};
+            if (!slept) resume_input.begin();
+            app->wake(slept);
+            present(*app);
+        } else {
+            app->cancel_sleep();
+            resume_input.begin();
+        }
+        last_activity = esp_timer_get_time();
+        return true;
+    };
+    const auto apply_wifi_status = [&] {
+        pico_page::WifiStatus *status = nullptr, *latest = nullptr;
+        while (wifi_events && !app->pending_frame() && xQueueReceive(wifi_events, &status, 0) == pdTRUE) {
+            delete latest;
+            latest = status;
+        }
+        if (!latest) return false;
+        app->show_wifi(*latest);
+        delete latest;
+        return true;
+    };
+    for (;;) {
+        app->record_clock_sync(platform::take_clock_sync());
+        app->poll_background(!sleep_requested && !resume_input.active() && (physical_source || pico_page::platform::input_waiting_before(
+            std::numeric_limits<std::int64_t>::max())));
+        const auto battery = pico_page::platform::battery();
+        app->set_battery(battery.valid ? std::optional<int>(battery.percent) : std::nullopt, battery.charging,
+            !sleep_requested && !resume_input.active() && !physical_source &&
+            !pico_page::platform::input_waiting_before(std::numeric_limits<std::int64_t>::max()));
+        if (!present(*app) && sleep_requested) {
+            app->cancel_sleep();
+            sleep_requested = false;
+            resume_input.begin();
+        }
+        const auto requested_power = app->take_power_request();
+        if (requested_power.action != pico_page::PowerAction::None) { pending_power = requested_power; }
+        const auto power_request = pending_power;
+        if (power_request.action != pico_page::PowerAction::None && !usb_mode && !network_busy &&
+            !physical_source && !pico_page::console::transfer_active()) {
+            sleep_requested = false;
+            if (power_prepared || app->prepare_power(power_request)) {
+                if (!power_prepared) {
+                    present(*app);
+                    app->stop_wifi();
+                    power_prepared = true;
+                }
+                if (radio_active.load()) { vTaskDelay(pdMS_TO_TICKS(20)); continue; }
+                if (!app->close_power_files()) {
+                    ESP_LOGE(tag, "Power teardown did not close file consumers");
+                    for (;;) vTaskDelay(pdMS_TO_TICKS(1000));
+                }
+                app->record_clock_sync(platform::take_clock_sync());
+                app->save_clock_sync();
+                if (power_request.install) {
+                    if (pico_page::platform::activate_firmware(error)) app->record_install();
+                    else ESP_LOGE(tag, "Firmware activation: %s", error.c_str());
+                }
+                if (!pico_page::platform::finish_power(error))
+                    ESP_LOGW(tag, "Power teardown: %s", error.c_str());
+                if (power_request.action == pico_page::PowerAction::Restart) esp_restart();
+                if (!pico_page::platform::power_off(error)) {
+                    ESP_LOGE(tag, "PMU power-off: %s", error.c_str());
+                    app->show_power_off_help();
+                    present(*app);
+                    pico_page::platform::finish_power(error);
+                }
+                // USB power can keep the ESP running after PMU shutdown.
+                pico_page::platform::set_performance(false);
+                for (;;) vTaskDelay(pdMS_TO_TICKS(1000));
+            }
+            pending_power = {};
+            present(*app);
+        }
+        auto usb_action = app->take_usb_transfer_action();
+        if (usb_action == pico_page::UsbTransferAction::Start && !network_busy) { pending_usb = true; app->stop_wifi(); }
+        if (pending_usb) {
+            usb_action = radio_active.load() ? pico_page::UsbTransferAction::None : pico_page::UsbTransferAction::Start;
+            if (usb_action != pico_page::UsbTransferAction::None) pending_usb = false;
+        }
+        if (usb_action == pico_page::UsbTransferAction::Start && !usb_mode) {
+            if (network_busy || physical_source || sleep_requested ||
+                pico_page::console::transfer_active() || app->pending_frame()) {
+                app->show_usb_transfer(false, "设备正忙，请稍后重试。");
+                present(*app);
+            } else {
+                app->show_usb_transfer(false, "正在准备 USB 文件传输。");
+                std::string problem = "设备正忙，请稍后重试。";
+                if (present(*app) && app->prepare_usb_transfer(&problem)) {
+                    usb_mode = true;
+                    pico_page::platform::set_performance(true);
+                    app->show_usb_transfer(false, "正在准备 USB 文件传输。");
+                    if (present(*app)) {
+                        const bool stopped = pico_page::console::shutdown(error);
+                        // USB Serial/JTAG no longer owns the PHY after MSC installation.
+                        if (stopped) esp_log_set_vprintf([](const char*, va_list) { return 0; });
+                        const bool started = stopped && pico_page::platform::start_usb_storage(error);
+                        app->show_usb_transfer(started, started ? "" : "启动失败，请退出并重启。");
+                        present(*app);
+                    }
+                } else {
+                    app->show_usb_transfer(false, problem);
+                    present(*app);
+                }
+            }
+        } else if (usb_action == pico_page::UsbTransferAction::Exit && usb_mode) {
+            if (pico_page::platform::stop_usb_storage(error)) esp_restart();
+            app->show_usb_transfer(false, "设备仍忙，请稍后退出。");
+            present(*app);
+        }
+        const auto portal_action = app->take_portal_action();
+        if (portal_action == pico_page::PortalAction::Upload || portal_action == pico_page::PortalAction::UploadStation) {
+            const bool station = portal_action == pico_page::PortalAction::UploadStation;
+            const auto targets = station ? app->upload_targets() : pico_page::WifiTargets{};
+            if (portal_stop || !worker_ready || usb_mode || network_busy || sleep_requested ||
+                pico_page::console::transfer_active() || !app->prepare_portal(station)) {
+                pico_page::PortalStatus refused{pico_page::PortalPhase::Closed, "", "", "",
+                    "设备正忙或暂时无法联网，请稍后重试。", "", 0, "", app->portal_generation()};
+                if (network_busy || pico_page::console::transfer_active())
+                    deferred_portal_failure = std::move(refused);
+                else app->show_portal(refused);
+            } else {
+                portal_stop = std::make_shared<std::atomic_bool>(false);
+                auto *job = new NetworkJob{{app->portal_generation(), {}, portal_stop, {}, targets}, card ? card : pico_page::platform::card_mount_path(), {}, {}, 0, true, station};
+                job->language = app->language();
+                xQueueSend(requests, &job, portMAX_DELAY);
+                network_busy = true;
+            }
+            present(*app);
+        }
+        if (portal_stop && (portal_action == pico_page::PortalAction::Stop || sleep_requested ||
+                            !app->portal_visible()))
+            portal_stop->store(true);
+        pico_page::PortalStatus *portal_status = nullptr, *latest_portal = nullptr;
+        while (portal_stop && !app->pending_frame() &&
+               xQueueReceive(portal_events, &portal_status, 0) == pdTRUE) {
+            delete latest_portal; latest_portal = portal_status;
+        }
+        if (latest_portal) { app->show_portal(*latest_portal); delete latest_portal; present(*app); }
+        NetworkJob *completed = nullptr;
+        if (network_busy && !app->pending_frame() &&
+            xQueueReceive(responses, &completed, 0) == pdTRUE) {
+            if (completed->portal) {
+                while (xQueueReceive(portal_events, &portal_status, 0) == pdTRUE)
+                    delete portal_status;
+                app->show_portal({pico_page::PortalPhase::Closed, "", "", "", completed->error, "", 0, "", completed->operation.id});
+                portal_stop.reset();
+            } else if (completed->update)
+                app->complete_update(completed->update->id, completed->update_failure, completed->status,
+                                     completed->body, completed->error, completed->failure,
+                                     completed->joined);
+            else if (completed->wifi) {
+                if (completed->wifi->kind == pico_page::WifiOperation::Kind::Clock) apply_wifi_status();
+                app->record_clock_sync(platform::take_clock_sync());
+                app->complete_wifi(completed->wifi->id, completed->nearby, completed->error, completed->failure,
+                                   completed->clock_calibrated);
+            } else
+                app->complete_network(completed->operation.id, completed->status, completed->body,
+                                      completed->error, completed->failure);
+            delete completed;
+            network_busy = false;
+            present(*app);
+        }
+        if (deferred_portal_failure && !usb_mode && !network_busy &&
+            !pico_page::console::transfer_active() && !app->pending_frame()) {
+            app->show_portal(*deferred_portal_failure);
+            deferred_portal_failure.reset();
+            present(*app);
+        }
+        if (apply_wifi_status()) present(*app);
+        if (!usb_mode && !network_busy && !sleep_requested && !resume_input.active() && !pico_page::console::transfer_active()) {
+            if (const auto wifi = app->take_wifi_request()) {
+                if (worker_ready) {
+                    auto* job = new NetworkJob{}; job->wifi = *wifi; job->language = app->language();
+                    if (xQueueSend(requests, &job, 0) == pdTRUE) network_busy = true;
+                    else { delete job; app->complete_wifi(wifi->id, {}, "设备暂时无法联网，请稍后重试。"); }
+                } else app->complete_wifi(wifi->id, {}, "设备暂时无法联网，请稍后重试。");
+                present(*app);
+            }
+        }
+        UpdateEvent written;
+        if (update_events && !app->pending_frame() && xQueueReceive(update_events, &written, 0) == pdTRUE) {
+            app->update_progress(written.id, written.bytes);
+            present(*app);
+        }
+        if (!usb_mode && !network_busy && !sleep_requested && !resume_input.active() && !pico_page::console::transfer_active()) {
+            if (auto update = app->take_update_request()) {
+                const auto id = update->id;
+                auto* job = worker_ready && update_events && flash_lock ? new NetworkJob{} : nullptr;
+                if (job) { job->update = std::move(*update); job->language = app->language(); }
+                if (job && xQueueSend(requests, &job, 0) == pdTRUE) network_busy = true;
+                else {
+                    delete job;
+                    app->complete_update(id, pico_page::UpdateFailure::Link, 0, "", "设备暂时无法联网，请稍后重试。");
+                    present(*app);
+                }
+            }
+        }
+        if (!usb_mode && !network_busy && !sleep_requested && !resume_input.active() && !pico_page::console::transfer_active()) {
+            const auto request = app->take_network_request();
+            if (request) {
+                if (worker_ready) {
+                    auto *job = new NetworkJob{*request, card ? card : pico_page::platform::card_mount_path(), {}, {}, 0, false, false};
+                    job->language = app->language();
+                    if (xQueueSend(requests, &job, 0) == pdTRUE)
+                        network_busy = true;
+                    else {
+                        delete job;
+                        app->complete_network(request->id, 0, "", "设备暂时无法联网，请稍后重试。");
+                        present(*app);
+                    }
+                } else {
+                    app->complete_network(request->id, 0, "", "设备暂时无法联网，请稍后重试。");
+                    present(*app);
+                }
+            }
+        }
+        if (sleep_requested && !app->pending_frame()) app->stop_wifi(true);
+        if (!usb_mode && sleep_requested && !network_busy && !radio_active.load() && !physical_source &&
+            !pico_page::console::transfer_active()) {
+            sleep_requested = !sleep_now();
+        }
+        auto event = std::exchange(sleep_input, pico_page::platform::Event{});
+        if (event.kind == pico_page::platform::EventKind::None && !pico_page::platform::poll(event, error))
+            ESP_LOGW(tag, "Input read failed: %s", error.c_str());
+        using pico_page::platform::EventKind;
+        const bool sleep_recovery = sleep_requested || resume_input.active();
+        if (sleep_requested && pico_page::input::SleepInput::ignores(event.kind)) event = {};
+        if (event.kind != EventKind::None || pico_page::console::transfer_active() || app->update_busy()) {
+            last_activity = esp_timer_get_time();
+            pico_page::platform::set_performance(true);
+        }
+        const auto dispatch_tap = [&](const pico_page::platform::Event& tap,
+                                      const pico_page::platform::Event& end) {
+            pico_page::AppInput input{
+                {physical_sequence, pico_page::Phase::Begin, pico_page::Input::TouchCenter},
+                tap.kind == EventKind::Touch, tap.x, tap.y, tap.time_us < settled_us,
+                pico_page::input::long_press(tap, end)};
+            if (input.touch) {
+                const auto gesture = pico_page::input::released_gesture(tap, end);
+                using Gesture = pico_page::input::ReleasedGesture;
+                if (gesture == Gesture::Ignore) return;
+                if (gesture != Gesture::Tap) {
+                    input.touch = false;
+                    input.long_press = false;
+                    input.event.input = gesture == Gesture::Next ? pico_page::Input::Next : pico_page::Input::Previous;
+                } else input.touch_bounds = {end.min_x, end.min_y, end.max_x, end.max_y};
+            }
+            if (tap.kind == EventKind::K1) input.event.input = pico_page::Input::K1;
+            if (tap.kind == EventKind::K2) input.event.input = pico_page::Input::K2;
+            if (tap.kind == EventKind::K3) input.event.input = pico_page::Input::K3;
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+            const auto dispatched = esp_timer_get_time();
+#endif
+            PP_DIAGNOSTIC(const auto measurement = diag::begin(diag::Kind::Input, {0, 0, 0, end.sequence});)
+            app->input(input);
+            input.event.phase = pico_page::Phase::End;
+            app->input(input);
+            PP_DIAGNOSTIC(diag::end(measurement, diag::Outcome::Success);)
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+            ESP_LOGI(tag, "Input dispatch: seq=%llu queued=%d waited=%lld prepare=%lld ms pending=%d",
+                     static_cast<unsigned long long>(end.sequence), input.queued,
+                     static_cast<long long>((dispatched - end.time_us) / 1000),
+                     static_cast<long long>((esp_timer_get_time() - dispatched) / 1000),
+                     app->pending_frame().has_value());
+#endif
+        };
+        if (resume_input.active()) {
+            if (event.kind == EventKind::SdRemoved || app->view() == pico_page::View::Error) {
+                resume_input.clear();
+                if (pico_page::input::SleepInput::ignores(event.kind)) event = {};
+            } else {
+                resume_input.accept(event);
+                event = {};
+                if (resume_input.ready(
+                        !app->content_busy() && !app->pending_frame() && !app->power_menu_pending() &&
+                            !pico_page::platform::input_waiting_before(std::numeric_limits<std::int64_t>::max()),
+                        !network_busy && !radio_active.load())) {
+                    if (resume_input.menu()) {
+                        resume_input.clear();
+                        event.kind = EventKind::PowerLong;
+                    } else if (resume_input.power()) {
+                        resume_input.clear();
+                        event.kind = EventKind::Power;
+                    } else resume_input.clear();
+                }
+            }
+        }
+        if (event.kind == EventKind::InputReset) {
+            reset_contact();
+        } else if (event.kind == EventKind::SdRemoved) {
+            reset_contact();
+            app->card_unavailable(pico_page::CardIssue::Removed);
+            present(*app);
+        } else if (event.kind == EventKind::PowerLong) {
+            reset_contact();
+            app->cancel_sleep();
+            sleep_requested = false;
+            if (sleep_recovery && !usb_mode && !pico_page::console::transfer_active() &&
+                (network_busy || radio_active.load())) {
+                resume_input.begin();
+                resume_input.accept(event);
+            } else if (!usb_mode && !network_busy && !pico_page::console::transfer_active()) {
+                if (!app->show_power_menu()) app->power_unavailable("请先结束当前任务，再关机或重启。");
+                if (sleep_recovery && app->power_menu_pending()) resume_input.begin();
+            } else app->power_unavailable(usb_mode ? "请先弹出设备并结束 USB 传输。" : "请先结束网络或传输任务。");
+            present(*app);
+        } else if (event.kind == EventKind::Power) {
+            if (usb_mode || app->view() == pico_page::View::PowerMenu || app->view() == pico_page::View::PowerOff ||
+                app->update_busy()) continue;
+            if (sleep_requested) {
+                app->cancel_sleep();
+                sleep_requested = false;
+                resume_input.begin();
+            } else {
+                reset_contact();
+                begin_sleep();
+            }
+        } else if (event.kind != EventKind::None) {
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+            ESP_LOGI(tag, "Input: seq=%llu kind=%d phase=%d x=%d y=%d",
+                     static_cast<unsigned long long>(event.sequence), static_cast<int>(event.kind),
+                     static_cast<int>(event.phase), event.x, event.y);
+#endif
+            if (event.phase == pico_page::platform::EventPhase::Begin) {
+                physical_source = event.sequence;
+                physical_suppressed = pico_page::console::transfer_active() && event.kind != EventKind::K2;
+                if (physical_suppressed) {
+                    physical_sequence = 0;
+                    continue;
+                }
+                if (input_sequence == std::numeric_limits<std::uint64_t>::max()) {
+                    ESP_LOGE(tag, "Input sequence exhausted");
+                    continue;
+                }
+                physical_sequence = ++input_sequence;
+                if (event.kind == EventKind::Touch && event.time_us >= settled_us &&
+                    app->can_drag_selection_at(event.x, event.y)) {
+                    continuous_contact = true;
+                    dispatch_contact(pico_page::Phase::Begin, event.x, event.y);
+                    present(*app);
+                    continue;
+                }
+            } else if (physical_suppressed && physical_source == event.sequence) {
+                if (event.phase != pico_page::platform::EventPhase::Move) {
+                    physical_suppressed = false;
+                    physical_source = 0;
+                }
+                continue;
+            } else if (!physical_sequence || physical_source != event.sequence) {
+                continue;
+            }
+            if (continuous_contact) {
+                const auto phase = event.phase == pico_page::platform::EventPhase::Move ? pico_page::Phase::Move :
+                    event.phase == pico_page::platform::EventPhase::End ? pico_page::Phase::End : pico_page::Phase::Cancel;
+                const bool defer_move = phase == pico_page::Phase::Move &&
+                    pico_page::platform::input_waiting_before(std::numeric_limits<std::int64_t>::max());
+                dispatch_contact(phase, event.x, event.y, false, defer_move);
+                if (phase != pico_page::Phase::Move) {
+                    continuous_contact = false;
+                    physical_source = physical_sequence = 0;
+                }
+                present(*app);
+                continue;
+            }
+            const auto tap = released_tap.accept(event, presentation_sequence);
+            if (event.phase == pico_page::platform::EventPhase::End || event.phase == pico_page::platform::EventPhase::Cancel)
+                physical_source = 0;
+            if (tap && tap->time_us < settled_us && !app->keyboard_visible() &&
+                pico_page::platform::input_waiting_before(settled_us)) {
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+                ESP_LOGI(tag, "Input superseded: seq=%llu",
+                         static_cast<unsigned long long>(tap->sequence));
+#endif
+            } else if (tap) dispatch_tap(*tap, event);
+            if (!physical_source) physical_sequence = 0;
+            present(*app);
+        }
+        if (event.kind == EventKind::None && physical_source && physical_sequence &&
+            !physical_suppressed && !usb_mode && !sleep_requested &&
+            !pico_page::console::transfer_active() &&
+            !pico_page::platform::input_waiting_before(std::numeric_limits<std::int64_t>::max())) {
+            const auto now = esp_timer_get_time();
+            const auto held = released_tap.due(now, presentation_sequence);
+            if (held && held->sequence == physical_source && held->time_us >= settled_us &&
+                app->can_long_press_at(held->x, held->y)) {
+                const pico_page::platform::Event end{EventKind::Touch, pico_page::platform::EventPhase::End,
+                                                      held->sequence, held->x, held->y, now};
+                released_tap.accept(end, presentation_sequence);
+                if (app->view() == pico_page::View::Library) {
+                    dispatch_tap(*held, end);
+                    physical_source = physical_sequence = 0;
+                } else {
+                    continuous_contact = true;
+                    dispatch_contact(pico_page::Phase::Begin, held->x, held->y, true);
+                }
+                last_activity = now;
+                present(*app);
+            }
+        }
+        if (!usb_mode && pico_page::console::poll(*app, pico_page::platform::card_root(), input_sequence,
+                                     !network_busy && !sleep_requested && !physical_source && !resume_input.active(),
+                                     !sleep_requested && !physical_source && !resume_input.active())) {
+            last_activity = esp_timer_get_time();
+            pico_page::platform::set_performance(true);
+        }
+        if (pico_page::console::transfer_active()) app->invalidate_identity_cache();
+        const auto idle = esp_timer_get_time() - last_activity;
+        if (!usb_mode && !sleep_requested && app->view() != pico_page::View::PowerMenu && app->view() != pico_page::View::PowerOff &&
+            idle >= idle_save_us && !physical_source && !app->pending_frame() &&
+            app->save_due()) {
+            app->save_progress();
+            present(*app);
+        }
+        if (!usb_mode && !sleep_requested && !network_busy && idle >= idle_save_us &&
+            !physical_source && !resume_input.active() && !app->pending_frame() &&
+            !app->content_busy() && !app->save_busy() && !app->save_due() &&
+            app->view() != pico_page::View::PowerMenu && app->view() != pico_page::View::PowerOff &&
+            !pico_page::console::transfer_active() &&
+            !platform::input_waiting_before(std::numeric_limits<std::int64_t>::max())) {
+            platform::persist_clock();
+            if (!platform::input_waiting_before(std::numeric_limits<std::int64_t>::max())) app->save_clock_sync();
+        }
+        const bool background = !usb_mode && idle >= idle_background_us && !physical_source && !resume_input.active() &&
+                                !network_busy && !sleep_requested && !app->pending_frame() &&
+                                !pico_page::console::transfer_active() && app->background_due();
+        if (background) {
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+            const auto started = esp_timer_get_time();
+#endif
+            app->background_step([] {
+                return pico_page::platform::input_waiting_before(std::numeric_limits<std::int64_t>::max());
+            });
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+            const auto elapsed_ms = (esp_timer_get_time() - started) / 1000;
+            if (elapsed_ms >= 150)
+                ESP_LOGI(tag, "Page counting slice: %lld ms state=%s", static_cast<long long>(elapsed_ms),
+                         app->background_state());
+#endif
+        }
+        else if (!usb_mode && !sleep_requested && idle >= idle_slow_us && !app->pending_frame() && !app->content_busy() && !app->save_busy())
+            pico_page::platform::set_performance(false);
+        const std::int64_t sleep_after = app->auto_sleep_minutes() * 60'000'000LL;
+        if (!usb_mode && app->view() != pico_page::View::PowerMenu && app->view() != pico_page::View::PowerOff &&
+            !sleep_requested && !resume_input.active() && sleep_after > 0 && idle >= sleep_after) {
+            reset_contact();
+            begin_sleep();
+        }
+        if (pico_page::console::transfer_active()) vTaskDelay(pdMS_TO_TICKS(1));
+        else pico_page::platform::wait_for_input(background ? portTICK_PERIOD_MS : 20);
+    }
+}

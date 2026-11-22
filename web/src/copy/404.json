@@ -1,0 +1,14 @@
+{
+  "zh-Hant": {
+    "找不到这一页 · Pico Page": "找不到這一頁 · Pico Page",
+    "找不到这一页。": "找不到這一頁。",
+    "地址可能有误，或者页面已经移走。": "地址可能有誤，或者頁面已經移走。",
+    "回到首页": "回到首頁"
+  },
+  "en": {
+    "找不到这一页 · Pico Page": "Page not found · Pico Page",
+    "找不到这一页。": "Page not found",
+    "地址可能有误，或者页面已经移走。": "Check the address. The page may have moved.",
+    "回到首页": "Back to the home page"
+  }
+}

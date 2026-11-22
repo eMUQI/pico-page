@@ -1,0 +1,271 @@
+import functools
+import hashlib
+import json
+import operator
+import struct
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
+import ota_manifest
+
+
+def image(version='0.2.0-beta.2', project='pico_page', chip=9, size=4096, flash=0x4F, tail=0):
+    body = bytearray(size)
+    struct.pack_into('<I', body, 0, 0xABCD5432)
+    body[16:16 + len(version)] = version.encode()
+    body[48:48 + len(project)] = project.encode()
+    header = bytearray(24)
+    header[0], header[1], header[3], header[23] = 0xE9, 2 if tail else 1, flash, 1
+    struct.pack_into('<H', header, 12, chip)
+    data = bytes(header) + struct.pack('<II', 0x3C000020, len(body)) + bytes(body)
+    if tail:
+        data += struct.pack('<II', 0x42000020, tail) + bytes(tail)
+    data += bytes((len(data) | 15) - len(data)) + bytes([functools.reduce(operator.xor, body, 0xEF)])
+    return data + hashlib.sha256(data).digest()
+
+
+def table(*entries):
+    labels = {(1, 2): b'nvs', (1, 1): b'phy_init', (0, 0x10): b'ota_0',
+              (0, 0x11): b'ota_1', (1, 0): b'otadata'}
+    data = bytearray()
+    for kind, subtype, start, size, *flags in entries:
+        data += struct.pack('<HBBII16sI', 0x50AA, kind, subtype, start, size,
+                            labels.get((kind, subtype), b'part'), flags[0] if flags else 0)
+    return bytes(data) + b'\xeb\xeb' + b'\xff' * 14 + hashlib.md5(data).digest()
+
+
+SLOT = ota_manifest.LEGACY.slot_bytes
+LAYOUT = ((1, 2, 0x9000, 0x6000), (1, 1, 0xF000, 0x1000), (0, 0x10, 0x10000, SLOT), (0, 0x11, 0x410000, SLOT),
+          (1, 0, 0x810000, 0x2000))
+OTA7_LAYOUT = (*LAYOUT[:2], (0, 0x10, 0x10000, 0x700000), (0, 0x11, 0x710000, 0x700000),
+               (1, 0, 0xE10000, 0x2000))
+
+
+class ManifestTest(unittest.TestCase):
+    def build(self, data, notes='## 新增\n- 书签', url='https://picopage.wulu.zone/firmware/'):
+        return ota_manifest.build_manifest(data, notes, url, '2026-10-18', (1, 1))
+
+    def test_fields_describe_the_image(self):
+        data = image()
+        name, manifest = self.build(data)
+        self.assertEqual(name, 'pico-page-0.2.0-beta.2-read_pico-release.bin')
+        self.assertEqual(manifest, dict(
+            manifest=1, board='read_pico', version='0.2.0-beta.2', published_at='2026-10-18',
+            url='https://picopage.wulu.zone/firmware/' + name, size=len(data),
+            sha256=hashlib.sha256(data).hexdigest(), data_schema=dict(progress=1, config=1), notes='## 新增\n- 书签'))
+
+    def test_publish_origin_changes_only_the_url_after_validation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            data = image()
+            name, manifest = self.build(data)
+            (directory / name).write_bytes(data)
+            path = directory / 'manifest.json'
+            original = json.dumps(manifest).encode()
+            command = ['ota_manifest.py', '--check', str(directory), '--expect-version', manifest['version'],
+                       '--publish-base-url', 'https://firmware.example.test/firmware/']
+            for damaged in (False, True):
+                path.write_bytes(original)
+                (directory / name).write_bytes(data[:-1] if damaged else data)
+                with patch.object(sys, 'argv', command):
+                    if damaged:
+                        with self.assertRaises(SystemExit):
+                            ota_manifest.main()
+                        self.assertEqual(path.read_bytes(), original)
+                    else:
+                        ota_manifest.main()
+                        self.assertEqual(json.loads(path.read_text()),
+                                         {**manifest, 'url': 'https://firmware.example.test/firmware/' + name})
+                        self.assertEqual((directory / name).read_bytes(), data)
+            for origin, version in [('http://firmware.example.test/firmware/', manifest['version']),
+                                    ('https://firmware.example.test/firmware/', '0.2.0-beta.9')]:
+                path.write_bytes(original)
+                (directory / name).write_bytes(data)
+                command[4], command[-1] = version, origin
+                with patch.object(sys, 'argv', command), self.assertRaises(SystemExit):
+                    ota_manifest.main()
+                self.assertEqual(path.read_bytes(), original)
+
+    def test_rejects_what_the_device_would_refuse(self):
+        for data in (image('0.2.0-beta.2+g1234567'), image('1234567890.0.0'), image(project='other'), image(chip=5), b'\xe9' * 64,
+                     image(size=ota_manifest.LEGACY.slot_bytes + 1)):
+            with self.assertRaises(ValueError):
+                self.build(data)
+        whole = image()
+        for data in (whole[:-1], whole[:2000], whole + b'\0', whole[:300] + bytes([whole[300] ^ 1]) + whole[301:],
+                     whole[:23] + b'\0' + whole[24:], whole[:1] + b'\x11' + whole[2:],
+                     whole[:1] + b'\x10' + whole[2:32] + bytes(256)):
+            with self.assertRaises(ValueError):
+                self.build(data)
+        for data in (image(size=4098), image(size=128, tail=1024)):
+            with self.assertRaises(ValueError):
+                self.build(data)
+        with self.assertRaises(ValueError):
+            self.build(image(), notes='长' * 3000)
+        for url in ('http://picopage.wulu.zone/firmware/', 'https://picopage.wulu.zone/firmware', 'https:///firmware/',
+                    'https://user@picopage.wulu.zone/firmware/', 'https://picopage.wulu.zone/a b/', 'https://#/',
+                    'https://picopage.wulu.zone/firmware/#x/', 'https://picopage.wulu.zone/' + 'a' * 500 + '/',
+                    'https://?origin/', 'https://picopage.wulu.zone/firmware/?v=1/', 'https://:443/firmware/',
+                    'https://picopage.wulu.zone\\firmware/', 'https://picopage.wulu.zone/a@b/'):
+            with self.assertRaises(ValueError):
+                self.build(image(), url=url)
+        with self.assertRaises(ValueError):
+            ota_manifest.build_manifest(image(), '', 'https://picopage.wulu.zone/firmware/', '18 Oct', (1, 1))
+
+    def test_localized_ota7_manifest_survives_publication(self):
+        data = image('0.7.0', project='pico_page_ota7')
+        source_url = 'https://picopage.wulu.zone/firmware/'
+        origin = 'https://firmware.example.test/firmware/'
+        translations = {'zh-Hant': '## 新增\n- 書籤', 'en': '## Added\n- Bookmarks'}
+        name, manifest = ota_manifest.build_manifest(data, '## 新增\n- 书签', source_url, '2026-10-18', (2, 1),
+                                                     notes_i18n=translations)
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / name).write_bytes(data)
+            path = directory / 'manifest.json'
+            path.write_text(ota_manifest.serialize_manifest(manifest), encoding='utf-8')
+            command = ['ota_manifest.py', '--check', str(directory), '--expect-layout', 'ota7',
+                       '--publish-base-url', origin]
+            with patch.object(sys, 'argv', command):
+                ota_manifest.main()
+            published = ota_manifest.checked_manifest(directory, origin, 'ota7', False)
+            self.assertEqual(published, {**manifest, 'url': origin + name})
+            path.write_text(ota_manifest.serialize_manifest({**published, 'notes_i18n': {'en': 'Partial'}}),
+                            encoding='utf-8')
+            with self.assertRaises(ValueError):
+                ota_manifest.checked_manifest(directory, origin, 'ota7', False)
+
+    def test_localized_notes_fit_the_serialized_budget(self):
+        data = image('0.7.0', project='pico_page_ota7')
+        with self.assertRaisesRegex(ValueError, '23 KiB'):
+            ota_manifest.build_manifest(data, 'a' * 7500, 'https://picopage.wulu.zone/firmware/', '2026-10-18',
+                                        (2, 1), notes_i18n={'zh-Hant': 'b' * 7500, 'en': '"' * 5000})
+
+    def test_check_accepts_only_a_manifest_that_describes_its_image(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / 'firmware'
+            url = 'https://picopage.wulu.zone/firmware/'
+            self.assertIsNone(ota_manifest.check_directory(directory, url))
+            directory.mkdir()
+            self.assertIsNone(ota_manifest.check_directory(directory, url))
+            data = image()
+            name, manifest = self.build(data)
+            (directory / name).write_bytes(data)
+            with self.assertRaises(ValueError):
+                ota_manifest.check_directory(directory, url)
+            (directory / 'manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
+            self.assertEqual(ota_manifest.check_directory(directory, url), '0.2.0-beta.2')
+            for key, value in (('sha256', '0' * 64), ('size', 1), ('version', '0.2.0-beta.3'), ('board', 'other'),
+                               ('url', 'https://example.com/firmware/' + name), ('extra', 1)):
+                (directory / 'manifest.json').write_text(json.dumps({**manifest, key: value}), encoding='utf-8')
+                with self.assertRaises(ValueError):
+                    ota_manifest.check_directory(directory, url)
+            (directory / 'manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
+            (directory / 'pico-page-0.2.0-beta.1-read_pico-release.bin').write_bytes(image('0.2.0-beta.1'))
+            with self.assertRaises(ValueError):
+                ota_manifest.check_directory(directory, url)
+            (directory / name).unlink()
+            with self.assertRaises(ValueError):
+                ota_manifest.check_directory(directory, url)
+
+    def test_full_image_holds_the_bootloader_the_layout_and_the_published_application(self):
+        application, bootloader = image(), image(size=512)
+        full = ota_manifest.build_full(bootloader, table(*LAYOUT), application)
+        self.assertEqual(full[:len(bootloader)], bootloader)
+        self.assertEqual(full[0x8000:0x8000 + len(table(*LAYOUT))], table(*LAYOUT))
+        self.assertEqual(full[0x10000:], application)
+        self.assertEqual(set(full[len(bootloader):0x8000] + full[0x8000 + len(table(*LAYOUT)):0x10000]), {0xFF})
+        damaged = table(*LAYOUT)[:-1] + b'\0'
+        for parts in ((image(size=512, chip=5), table(*LAYOUT)),
+                      (image(size=512, flash=0x3F), table(*LAYOUT)),
+                      (bootloader[:-1], table(*LAYOUT)), (image(size=0x8000), table(*LAYOUT)),
+                      (bootloader, damaged), (bootloader, table(*LAYOUT)[:-32]),
+                      (bootloader, table(*LAYOUT[:3])),
+                      (bootloader, table(*LAYOUT[:4])),
+                      (bootloader, table(*LAYOUT[:3], LAYOUT[4])),
+                      (bootloader, table((0, 0x10, 0x20000, SLOT), *LAYOUT[3:])),
+                      (bootloader, table(*LAYOUT[:3], (0, 0x11, 0x210000, SLOT), LAYOUT[4])),
+                      (bootloader, table(*LAYOUT[:4], (1, 0, 0x810000, 0x1000))),
+                      (bootloader, table(*LAYOUT[:4], (*LAYOUT[4], 1))),
+                      (bootloader, table(*LAYOUT, (1, 0x81, 0xFFF000, 0x2000)))):
+            with self.assertRaises(ValueError):
+                ota_manifest.build_full(*parts, application)
+        for other in (full + b'\0', full[:-1], full[:0x9000] + b'\0' + full[0x9001:], full[:0x7000] + b'\0' + full[0x7001:],
+                      full[:0x10000], full[:0x8010]):
+            with self.assertRaises(ValueError):
+                ota_manifest.verify_full(other, application)
+
+    def test_check_accepts_a_full_image_only_with_the_published_application(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory, url = Path(temporary), 'https://picopage.wulu.zone/firmware/'
+            data = image()
+            name, manifest = self.build(data)
+            (directory / name).write_bytes(data)
+            (directory / 'manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
+            full = directory / 'pico-page-0.2.0-beta.2-read_pico-release-full.bin'
+            full.write_bytes(ota_manifest.build_full(image(size=512), table(*LAYOUT), data))
+            self.assertEqual(ota_manifest.check_directory(directory, url), '0.2.0-beta.2')
+            full.write_bytes(ota_manifest.build_full(image(size=512), table(*LAYOUT), image(size=8192)))
+            with self.assertRaises(ValueError):
+                ota_manifest.check_directory(directory, url)
+            full.rename(directory / 'pico-page-0.2.0-beta.1-read_pico-release-full.bin')
+            with self.assertRaises(ValueError):
+                ota_manifest.check_directory(directory, url)
+
+    def test_ota7_requires_matching_image_layout_and_full_install(self):
+        application = image(project='pico_page_ota7', version='0.7.0')
+        legacy_image = image(version='0.7.0')
+        bootloader = image(size=512)
+        url = 'https://picopage.wulu.zone/firmware/'
+        name, manifest = self.build(application)
+        self.assertEqual((manifest['manifest'], manifest['layout']), (2, 'ota7'))
+        for data, partition_layout in ((application, LAYOUT), (legacy_image, OTA7_LAYOUT)):
+            with self.assertRaises(ValueError):
+                ota_manifest.build_full(bootloader, table(*partition_layout), data)
+        full = ota_manifest.build_full(bootloader, table(*OTA7_LAYOUT), application)
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            path = directory / 'manifest.json'
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            (directory / name).write_bytes(application)
+            with self.assertRaisesRegex(ValueError, 'Missing full-flash'):
+                ota_manifest.check_directory(directory, url, expected_layout='ota7', require_full=True)
+            (directory / ota_manifest.full_name('0.7.0')).write_bytes(full)
+            self.assertEqual(ota_manifest.check_directory(directory, url, expected_layout='ota7', require_full=True), '0.7.0')
+            with self.assertRaisesRegex(ValueError, 'Expected legacy firmware layout'):
+                ota_manifest.check_directory(directory, url, expected_layout='legacy', require_full=True)
+            with patch.object(sys, 'argv', ['ota_manifest.py', '--check', str(directory)]), self.assertRaises(SystemExit):
+                ota_manifest.main()
+            path.write_text(json.dumps({**manifest, 'manifest': 1}), encoding='utf-8')
+            with self.assertRaises(ValueError):
+                ota_manifest.check_directory(directory, url, expected_layout='ota7')
+
+    def test_ota7_accepts_an_application_larger_than_legacy_slots(self):
+        data = image(project='pico_page_ota7', version='0.7.0', size=SLOT)
+        self.assertGreater(len(data), SLOT)
+        self.assertEqual(self.build(data)[1]['size'], len(data))
+
+    def test_newest_release_follows_version_order(self):
+        tags = ['v0.2.0-beta.2', 'v0.2.0-beta.10', 'v0.2.0-rc.1', 'v0.2.0', 'v0.2.1-beta.1', 'v0.10.0-beta.1', 'v0.9.9']
+        releases = [dict(tagName=tag, isDraft=False) for tag in tags]
+        self.assertEqual(ota_manifest.newest_release(releases), 'v0.10.0-beta.1')
+        self.assertEqual(ota_manifest.newest_release(releases[:4]), 'v0.2.0')
+        self.assertEqual(ota_manifest.newest_release(releases[:3]), 'v0.2.0-rc.1')
+        self.assertEqual(ota_manifest.newest_release(releases[:2]), 'v0.2.0-beta.10')
+        self.assertEqual(ota_manifest.newest_release(releases, after_version='0.2.0'), 'v0.10.0-beta.1')
+        self.assertIsNone(ota_manifest.newest_release(releases[:4], after_version='0.2.0'))
+        self.assertIsNone(ota_manifest.newest_release(
+            [dict(tagName='v0.1.0-mvp', isDraft=False), dict(tagName='v0.3.0', isDraft=True),
+             dict(tagName='0.3.0', isDraft=False), dict(tagName='nightly', isDraft=False)]))
+        self.assertIsNone(ota_manifest.newest_release([]))
+
+    def test_schema_defaults_follow_the_device_constants(self):
+        self.assertEqual(ota_manifest.schema_defaults(), (2, 1))
+
+
+if __name__ == '__main__':
+    unittest.main()

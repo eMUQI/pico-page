@@ -1,0 +1,6 @@
+# Put alongside a book at <full-filename>.picopage/settings.toml.
+# Only font size is overridden; font, line height, and margins still inherit.
+schema_version = 1
+
+[reader]
+font_size_px = 42
