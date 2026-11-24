@@ -158,7 +158,7 @@ ReaderApp::Impl::Origin ReaderApp::Impl::origin_for(View source) const {
     case View::Reading: case View::Tools: case View::Contents: case View::Sync: case View::Confirmation:
     case View::Dictionary:
         return body_origin;
-    case View::Library: case View::BookDetails: case View::BookManagement:
+    case View::Statistics: case View::Library: case View::BookDetails: case View::BookManagement:
         return Origin::Library;
     case View::Typography:
         return typography_from_settings ? Origin::Settings : body_origin;
@@ -254,6 +254,7 @@ bool ReaderApp::Impl::begin_image(std::size_t start, const graphics::Page& plann
 
 bool ReaderApp::Impl::begin_chapter(std::size_t index, std::uint32_t part, ContentJob::Target target,
                    std::size_t position, const Anchor& anchor, const std::string& fragment) {
+    pause_statistics();
     poll_counting_job();
     std::unique_ptr<ContentJob> prepared;
     if (target == ContentJob::Target::Start && prepared_chapter &&
@@ -601,6 +602,10 @@ void ReaderApp::Impl::poll_counting_job() {
     auto job = std::move(counting_job);
     const auto& request = job->request;
     const auto& result = job->result;
+    if (request.kind == ContentJob::Kind::ReadingStatistics) {
+        complete_statistics_work(*request.statistics);
+        return;
+    }
     if (request.kind == ContentJob::Kind::Chapter) {
         if (request.generation != foreground_generation || request.identity.book_id != document.metadata().book_id) return;
         if (request.chapter_session == chapter_session) chapter_stream_bytes = result.chapter_stream_bytes;

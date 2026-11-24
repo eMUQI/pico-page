@@ -52,7 +52,7 @@ FreeType 使用上游默认的 stdio 文件流，未改第三方源码。host �
 
 ## 内置字体与许可
 
-`fonts/PicoPageFallback.otf` 从上述 Noto Sans SC 裁剪生成，共 4,085 个字符、916,468 字节，SHA-256 `717338dd42f6fd4d608980ef2e9161141b43069cf27a376498c7149eca754e92`。它有两个用途：TF 卡上的界面字体打不开时显示界面和错误提示；TF 卡上没有可用正文字体时显示正文。
+`fonts/PicoPageFallback.otf` 从上述 Noto Sans SC 裁剪生成，共 4,138 个字符、932,820 字节，SHA-256 `a0488c0427d5461a0da182861e73aaaffd2e3a283e02539ee61b90785cf9defa`。它有两个用途：TF 卡上的界面字体打不开时显示界面和错误提示；TF 卡上没有可用正文字体时显示正文。
 
 字符范围由三部分组成，完整清单在 `fonts/fallback_characters.txt`：
 
@@ -60,7 +60,7 @@ FreeType 使用上游默认的 stdio 文件流，未改第三方源码。host �
 - 《通用规范汉字表》一级字 3,500 个，清单在 `fonts/common_characters.txt`。源字体缺少其中任何一个时生成失败。
 - 正文常见符号：U+00A0–017F、U+01CD–01DC、U+2000–206F、U+2460–2473、U+3000–303F、U+FF00–FFEF。源字体没有的码位直接跳过。
 
-内置字体不能替代完整中文字体：一级字以外的简体字、繁体字和生僻字不在其中。任何字体缺少的字符都不使用该字体自带的 `.notdef`（各字体画成方框、花纹或空白，互不一致），统一画成空心方框，步进也不取字体的 `.notdef` 步进：断行逻辑视为 CJK 的字符（同一个 `cjk()` 判断：汉字、假名、CJK 标点和扩展区）占一个字宽，其余占半个字宽，方框画在这个宽度之内；每个字号只缓存宽、窄两个方框。只有 Unicode 规定没有可见形态的码位（Default_Ignorable_Code_Point 集合和 C0 控制符）缺少时不画方框、不占宽度；其他缺少的字符一律画方框，包括空格和行分隔符，因此不会出现缺字后两侧文字连在一起的情况。谚文、全角形式和绘文字缺少时占半个字宽。正文使用内置字体且当前页有缺字时，页面照常显示，状态栏提示缺字时可在排版中更换字体；没有缺字的页面显示页码。实测两本繁体公版书（《呐喊》《阿Q正传》）约 19% 的字符缺字，简体演示书缺字数为 0。
+内置字体不能替代完整中文字体：仅覆盖所列界面文案和常用字符，书中出现的其他汉字可能缺字。任何字体缺少的字符都不使用该字体自带的 `.notdef`（各字体画成方框、花纹或空白，互不一致），统一画成空心方框，步进也不取字体的 `.notdef` 步进：断行逻辑视为 CJK 的字符（同一个 `cjk()` 判断：汉字、假名、CJK 标点和扩展区）占一个字宽，其余占半个字宽，方框画在这个宽度之内；每个字号只缓存宽、窄两个方框。只有 Unicode 规定没有可见形态的码位（Default_Ignorable_Code_Point 集合和 C0 控制符）缺少时不画方框、不占宽度；其他缺少的字符一律画方框，包括空格和行分隔符，因此不会出现缺字后两侧文字连在一起的情况。谚文、全角形式和绘文字缺少时占半个字宽。正文使用内置字体且当前页有缺字时，页面照常显示，状态栏提示缺字时可在排版中更换字体；没有缺字的页面显示页码。实测两本繁体公版书（《呐喊》《阿Q正传》）约 19% 的字符缺字，简体演示书缺字数为 0。
 
 `common_characters.txt` 取自 Unicode 17.0.0 的 Unihan 数据库：`https://www.unicode.org/Public/17.0.0/ucd/Unihan.zip`，SHA-256 `f7a48b2b545acfaa77b2d607ae28747404ce02baefee16396c5d2d7a8ef34b5e`。提取 `Unihan_OtherMappings.txt` 中 `kTGH` 字段值为 `2013:1` 至 `2013:3500` 的字符，按序号排列，每行 50 个。Unihan 数据适用 Unicode License v3；仓库只包含这 3,500 个字符的清单，不包含 Unihan 文件。
 
@@ -70,6 +70,9 @@ FreeType 使用上游默认的 stdio 文件流，未改第三方源码。host �
 python3 -m venv .local/font-tools
 .local/font-tools/bin/pip install fonttools==4.60.1
 .local/font-tools/bin/python tools/setup_fonts_subset.py \
+  --strings firmware/components/reader_graphics/fonts/fallback_characters.txt \
+  --strings firmware/components/reader_app/app_statistics.cpp \
+  --strings firmware/components/reader_app/help_content.h \
   --strings firmware/components/reader_app/app.cpp \
   --strings firmware/main/app_main.cpp \
   --strings firmware/components/reader_sync/provision.cpp

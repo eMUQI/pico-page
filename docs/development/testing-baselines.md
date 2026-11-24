@@ -6,6 +6,7 @@
 
 | 日期与源码 | 记录 | 范围 |
 |---|---|---|
+| 2026-11-24 · `ac688a0` 与阅读统计开发版 | [阅读统计 host 对照](baselines/2026-11-24-reading-statistics-host.md) | 同一候选启停采集的翻页时延、进程内存、文件提交与休眠准备；真机测量见 [RS07](acceptance.md#本机阅读统计) |
 | 2026-11-06 · `main/584c232` 与候选 `3a0c0f6` 同机诊断构建 | [原书排版性能对照](baselines/2026-11-06-original-layout-performance.md) · [结构化结果](baselines/2026-11-06-original-layout-performance.json) | 同机三组合成样本的开书与成组翻页（自定义排版，含底部均分），另列原书模式页数统计的代理进度 |
 | 2026-11-06 · `49390ff` 加刷新候选 | [无变化刷新对照](baselines/2026-11-06-refresh-noop.md) · [结构化结果](baselines/2026-11-06-refresh-noop.json) | 同设备重复操作、相同画布、正文保存与 K2；保留转换段增量及完整采集、光学和能耗边界 |
 | 2026-11-05 · `main/5045a6d` | [KOReader 双向接续](baselines/2026-11-05-koreader-roundtrip.md) · [结构化结果](baselines/2026-11-05-koreader-roundtrip.json) | 一份原创 EPUB、两端不同字号，经真实 HTTPS 服务跨章往返、回读、重开及不支持结构保护；单轮定向验收 |

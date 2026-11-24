@@ -142,6 +142,7 @@ const char *view_name(View view) {
     case View::RefreshConfirm: return "refresh_confirm";
     case View::RefreshInterval: return "refresh_interval";
     case View::BookDetails: return "book_details";
+    case View::Statistics: return "statistics";
     case View::WifiSettings: return "wifi_settings";
     case View::Help: return "help";
     case View::About: return "about";
@@ -417,7 +418,7 @@ void execute(ReaderApp &app, const char *root, std::uint64_t &sequence, bool act
             return;
         }
         std::string detail;
-        app.invalidate_identity_cache();
+        app.set_diagnostic_transfer(true);
         transfer = FileStore(root).begin_import(std::string(input), size, crc, detail);
         if (!transfer) {
             error(id, detail.c_str());

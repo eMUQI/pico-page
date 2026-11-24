@@ -188,7 +188,7 @@ void ReaderApp::Impl::describe(Entry &entry) {
         entry.status = "文件夹";
         return;
     }
-    entry.status = recalled_position(entry.path).second;
+    entry.status = store.recalled_position(entry.path).second;
     if (!entry.status.empty()) return;
     char record[512] = {};
     std::size_t length = 0;
@@ -259,7 +259,7 @@ void ReaderApp::Impl::draw_library(bool decode, bool keep_cover_attempts) {
     view = View::Library;
     hits.clear();
     canvas.clear();
-    if (folder.empty()) header("书库", 0, "", 388);
+    if (folder.empty()) header("书库", 0, "", card_available ? 212 : 388);
     else {
         const auto slash = folder.find_last_of('/');
         const auto parent = slash == std::string::npos ? "" : folder.substr(0, slash);
@@ -267,6 +267,11 @@ void ReaderApp::Impl::draw_library(bool decode, bool keep_cover_attempts) {
         header(basename(folder), Back, parent_is_library ? "书库" : basename(parent), 388, &font,
                parent_is_library ? nullptr : &font);
         hits.back() = {0, 0, 396, 104, Back};
+    }
+    if (folder.empty() && card_available) {
+        canvas.line(224, 0, 224, 102, 1, 2);
+        center(statistics_entry(false), 224, 32, 172, 26);
+        hits.push_back({224, 0, 172, 104, StatisticsOpen});
     }
     if (card_available) {
         canvas.line(396, 0, 396, 102, 1, 2);
@@ -281,7 +286,7 @@ void ReaderApp::Impl::draw_library(bool decode, bool keep_cover_attempts) {
         std::string position;
         if (has_book() && page.end > page.start) position = chapter_label() + " · " + book_percent();
         else if (!has_book()) {
-            const auto recalled = recalled_position(last_book);
+            const auto recalled = store.recalled_position(last_book);
             if (!recalled.second.empty()) position = recalled.first + " · " + recalled.second;
         }
         outline(24, 128, 636, 206, 3);
@@ -463,6 +468,7 @@ void ReaderApp::Impl::draw_details() {
     if (detail_error.empty()) button(DetailOpen, detail_progress.record ? "继续阅读" : "打开书籍", 36, 630, 612, 96, true);
     else wrapped("无法打开：" + reason(detail_error, "无法解析文件内容") + "。", 36, 620, 612, 24);
     canvas.line(0, 764, 683, 764, 1, 3);
+    if (detail_error.empty()) value_row(StatisticsOpenBook, statistics_entry(true), "", "", 768, 96);
     if (detail_error.empty()) button(DetailReset, "清除本地阅读进度", 36, 872, 612, 96);
     button(DetailDelete, "删除原书文件", 36, 972, 612, 96);
     footer_bar(notice());
@@ -496,7 +502,7 @@ void ReaderApp::Impl::manage_book() {
         message = "原书已删除，阅读记录保留";
         scan_library(); draw_library();
     } else {
-        store.save_cache(position_name(detail_path), "");
+        store.save_cache(FileStore::position_cache_name(detail_path), "");
         message = "本地进度已清除，远端记录未修改";
         inspect_book(detail_path, true);
     }

@@ -2,11 +2,12 @@
 
 本页列出主线的当前实现和待验证项，只在实现或验收状态变化时更新。各项改动的范围、命令和结果见对应 PR 与 Git 历史；公开实测报告按[测试基准](development/testing-baselines.md)记录。
 
-## 当前状态（2026-11-07）
+## 当前状态（2026-11-24）
 
 最近发布版本为 **0.5.1**，功能和兼容范围见[发布说明](releases/0.5.1.md)。主线包含尚未发布的改动；合入主线不表示对应硬件专项已经验收。
 
 - **阅读**：TXT 自动目录与章节显示、连续回翻位置修复和全屏阅读已合入。正文页底部不足一行的余量均分到行间。全屏阅读的桌面验证覆盖 TXT 和 EPUB 原书模式的源锚点保持、单书设置与阅读默认，真机显示和触摸待验收。
+- **本机阅读统计**：开发版已接入 EPUB 和 TXT 有效时长采集，书库和书籍详情可查看日期与单书记录。交互画面见[阅读统计](development/ui-implementation.md#阅读统计)，主机测量见[性能对照](development/baselines/2026-11-24-reading-statistics-host.md)。实体墨水屏、TF 掉电恢复、资源占用及休眠耗时按 [RS01–RS07](development/acceptance.md#本机阅读统计) 待验收。
 - **原书排版（试验）**：EPUB 可按书启用，沿用正文、页数统计与源锚点恢复路径。支持作者 CSS 的基础文本与块样式、包内 TTF／OTF、块内 `<br>`、作者行高、图片宽高比与 `duokan-bleed` 出血；章节、页数索引及单图图层使用独立版本的持久缓存。已在 Read Pico 上用一本含 3,884 个正文文档的实书核对模式切换、连续翻页、跨章、重开位置和全屏图片贴边。冷开仍有明显等待。支持范围见[原书排版](development/original-layout.md)，性能见[实机对照](development/baselines/2026-11-06-original-layout-performance.md)。
 - **显示**：翻页效果重选和自动全刷间隔边界上的无效操作不再刷新；显示基准有效时，像素相同的普通更新被跳过，见[定向对照](development/baselines/2026-11-06-refresh-noop.md)。光学、能耗和长期稳定性未验收。LCD 双供数任务的启动竞态（#49）已修复，见[复现与修复](development/baselines/2026-11-05-https-display-gate.md#后续复现与本地修复)。
 - **同步**：一份原创 EPUB 已完成 Read Pico 与官方 KOReader 经 HTTPS 服务的不同字号跨章往返、回读、重开及不支持结构保护，见[定向接续验收](development/baselines/2026-11-05-koreader-roundtrip.md)。单轮结果不外推到其他书籍和结构。

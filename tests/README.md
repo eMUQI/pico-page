@@ -13,6 +13,18 @@ ctest --test-dir build/host --output-on-failure
 
 测试 EPUB 均由脚本生成；不提交个人书籍。`app_test` 使用 setup_fonts 下载的完整文楷字体。`tools/check_koreader_mapping.py` 是独立的真实 CREngine 兼容性对照，不是模拟期望值。墨水屏、TF 掉电、网络真实账户与双向接续仍需按 `docs/development/acceptance.md` 验收。
 
+## 本机阅读统计
+
+`reading_statistics` 验证单调计时、日期拆分与队列确认，`statistics_store` 验证副本身份、清除与文件恢复，`statistics_app` 通过应用的输入、面板确认和异步内容任务验证阅读与统计页面。单独复查或导出合成画面时，在仓库根目录运行：
+
+```sh
+ctest --test-dir build/host -R '^(reading_statistics|statistics_store|statistics_app)$' --output-on-failure
+mkdir -p artifacts/reading-statistics
+build/host/statistics_app_test build/host/document-fixtures .local/card/Fonts/LXGWWenKai-Regular.ttf artifacts/reading-statistics
+```
+
+最后一个参数指定 PGM 输出目录。省略该参数只执行断言。PNG 画面见[阅读统计](../docs/development/ui-implementation.md#阅读统计)。
+
 ## 公开 EPUB 样本
 
 阅读与同步对照另用两本 Project Gutenberg 的 EPUB 3，下载后放在忽略目录 `.local/public-books/`，不加入 Git。上游可能重新生成文件，结果只适用于下列摘要。书内权利声明为 `Public domain in the USA.`，使用条件见书内许可和 [Project Gutenberg 许可页](https://www.gutenberg.org/policy/license.html)。

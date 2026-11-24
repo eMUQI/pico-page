@@ -35,6 +35,7 @@ void configure_toml() {
 }
 namespace {
 constexpr std::size_t config_limit = 32768;
+constexpr const char* statistics_languages[] = {"zh-Hans", "zh-Hant", "en"};
 
 bool allowed_fields(toml_datum_t table, std::initializer_list<const char*> allowed,
                     const std::string& prefix, ConfigDiagnostic& diagnostic) {
@@ -77,11 +78,12 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
         return false;
     }
     if (!(book ? allowed_fields(table, {"schema_version", "reader", "display"}, "", diagnostic)
-               : allowed_fields(table, {"schema_version", "reader", "display", "library", "power", "network", "dictionary", "onboarding"}, "", diagnostic)) ||
+               : allowed_fields(table, {"schema_version", "reader", "display", "library", "power", "network", "dictionary", "onboarding", "statistics"}, "", diagnostic)) ||
         !allowed_fields(toml_get(table, "reader"), {"font", "font_weight", "font_size_px", "line_height", "margin_x_px", "paragraph_gap_lines", "indent_chars", "fullscreen_reading", "original_epub"}, "reader", diagnostic) ||
         !allowed_fields(toml_get(table, "display"), {"refresh_preset", "balanced_full_refresh_pages", "fast_full_refresh_pages"}, "display", diagnostic) ||
         !allowed_fields(toml_get(table, "library"), {"roots", "view", "sort", "folders"}, "library", diagnostic) ||
         !allowed_fields(toml_get(table, "dictionary"), {"enabled"}, "dictionary", diagnostic) ||
+        !allowed_fields(toml_get(table, "statistics"), {"enabled", "minimum_seconds", "maximum_seconds", "language"}, "statistics", diagnostic) ||
         !allowed_fields(toml_get(table, "onboarding"), {"done"}, "onboarding", diagnostic) ||
         !allowed_fields(toml_get(table, "network"), {"wifi_enabled"}, "network", diagnostic) ||
         !allowed_fields(toml_get(table, "power"), {"auto_sleep_minutes", "sleep_screen", "sleep_image", "sleep_overlay"}, "power", diagnostic)) return false;
@@ -156,6 +158,42 @@ bool apply(toml_datum_t table, bool book, ReaderSettings& settings, ConfigDiagno
         if (value.type != TOML_INT64 || value.u.int64 < 0 || value.u.int64 > 30) return false;
         (std::strcmp(field, "display.fast_full_refresh_pages") == 0 ? settings.fast_full_refresh_pages
                                                                  : settings.balanced_full_refresh_pages) = static_cast<int>(value.u.int64);
+    }
+    if (!book && toml_get(table, "statistics").type != TOML_UNKNOWN) {
+        auto& options = settings.statistics;
+        value = toml_seek(table, "statistics.enabled");
+        if (value.type != TOML_UNKNOWN) {
+            diagnostic.field = "statistics.enabled";
+            diagnostic.detail = "expected a boolean";
+            if (value.type != TOML_BOOLEAN) return false;
+            options.enabled = value.u.boolean;
+        }
+        const auto seconds = [&](const char* field, unsigned low, unsigned high, unsigned& target) {
+            const auto number = toml_seek(table, field);
+            if (number.type == TOML_UNKNOWN) return true;
+            diagnostic.field = field;
+            diagnostic.detail = "expected seconds in range " + std::to_string(low) + ".." + std::to_string(high);
+            if (number.type != TOML_INT64 || number.u.int64 < low || number.u.int64 > high) return false;
+            target = static_cast<unsigned>(number.u.int64);
+            return true;
+        };
+        if (!seconds("statistics.minimum_seconds", 1, 60, options.minimum_seconds) ||
+            !seconds("statistics.maximum_seconds", 5, 600, options.maximum_seconds)) return false;
+        if (options.minimum_seconds > options.maximum_seconds) {
+            diagnostic.field = "statistics.minimum_seconds";
+            diagnostic.detail = "minimum_seconds exceeds maximum_seconds";
+            return false;
+        }
+        value = toml_seek(table, "statistics.language");
+        if (value.type != TOML_UNKNOWN) {
+            diagnostic.field = "statistics.language";
+            diagnostic.detail = "expected zh-Hans, zh-Hant or en";
+            std::string name;
+            if (!string_value(value, name)) return false;
+            const auto found = std::find(std::begin(statistics_languages), std::end(statistics_languages), name);
+            if (found == std::end(statistics_languages)) return false;
+            options.language = static_cast<unsigned>(found - std::begin(statistics_languages));
+        }
     }
     value = toml_seek(table, "onboarding.done");
     if (value.type != TOML_UNKNOWN) {
@@ -317,6 +355,12 @@ SettingValues setting_values(const ReaderSettings& values, bool global = false) 
             enabled += quoted(path);
         }
         fields.emplace_back("dictionary.enabled", enabled + "]");
+        const auto& stats = values.statistics;
+        fields.emplace_back("statistics.enabled", stats.enabled ? "true" : "false");
+        fields.emplace_back("statistics.minimum_seconds", std::to_string(stats.minimum_seconds));
+        fields.emplace_back("statistics.maximum_seconds", std::to_string(stats.maximum_seconds));
+        fields.emplace_back("statistics.language", quoted(stats.language < std::size(statistics_languages)
+                                                            ? statistics_languages[stats.language] : ""));
         fields.emplace_back("onboarding.done", values.onboarding_done ? "true" : "false");
         fields.emplace_back("network.wifi_enabled", values.wifi_enabled ? "true" : "false");
         fields.emplace_back("library.view", quoted(values.library_view));
@@ -510,11 +554,12 @@ StoreStatus save_settings(const std::string& root, const SettingsSnapshot& snaps
                        values.library_sort != effective.library_sort ||
                        values.library_folders != effective.library_folders ||
                        values.dictionary_enabled != effective.dictionary_enabled ||
+                       values.statistics != effective.statistics ||
                        values.wifi_enabled != effective.wifi_enabled ||
                        values.onboarding_done != effective.onboarding_done ||
                        values.auto_sleep_minutes != effective.auto_sleep_minutes || values.sleep_screen != effective.sleep_screen || values.sleep_image != effective.sleep_image ||
                        values.sleep_overlay != effective.sleep_overlay))) {
-        error = "library.roots is read-only; library.view, library.sort, library.folders, power, network and dictionary fields are global only";
+        error = "library.roots is read-only; library.view, library.sort, library.folders, power, network, statistics and dictionary fields are global only";
         return StoreStatus::Invalid;
     }
     const auto desired = setting_values(values, !book_only);
@@ -563,6 +608,23 @@ StoreStatus save_settings(const std::string& root, const SettingsSnapshot& snaps
 
 ConfigResult FileStore::load_settings(const std::string& book_path) const {
     return settings_snapshot(book_path).config;
+}
+
+StoreStatus FileStore::load_statistics_options(StatisticsOptions& options) const {
+    const auto config = load_settings();
+    if (!config.diagnostics.empty()) return config.diagnostics.front().status;
+    options = config.settings.statistics;
+    return StoreStatus::Ok;
+}
+
+StoreStatus FileStore::save_statistics_options(const StatisticsOptions& options, const StatisticsOptions* expected) const {
+    const auto snapshot = settings_snapshot();
+    if (!snapshot.config.diagnostics.empty()) return snapshot.config.diagnostics.front().status;
+    auto values = snapshot.global_settings;
+    if (expected && values.statistics != *expected) return StoreStatus::ExternalChange;
+    values.statistics = options;
+    std::string error;
+    return apply_settings(snapshot, values, false, error);
 }
 
 SettingsSnapshot FileStore::settings_snapshot(const std::string& book_path) const {
