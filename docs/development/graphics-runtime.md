@@ -4,7 +4,7 @@
 
 ## 准备资源
 
-运行 `python3 tools/setup_fonts.py`。脚本将固定源码下载到 `.local/`，将正文和 UI 字体写入 `.local/card/Fonts/`，每个下载文件都检查 SHA-256。可以用 `--card <目录>` 指定准备目录；这一步不挂载设备、不擦写 TF 卡。完整字体和源码下载不纳入 Git。
+运行 `python3 tools/setup_fonts.py`。脚本将固定源码下载到 `.local/`，将文楷和 Noto Sans SC 完整字体写入 `.local/card/Fonts/`，每个下载文件都检查 SHA-256。可以用 `--card <目录>` 指定准备目录；这一步不挂载设备、不擦写 TF 卡。完整字体和源码下载不纳入 Git。
 
 | 资源 | 固定来源 | SHA-256 |
 |---|---|---|
@@ -52,7 +52,7 @@ FreeType 使用上游默认的 stdio 文件流，未改第三方源码。host �
 
 ## 内置字体与许可
 
-`fonts/PicoPageFallback.otf` 从上述 Noto Sans SC 裁剪生成，共 4,138 个字符、932,820 字节，SHA-256 `a0488c0427d5461a0da182861e73aaaffd2e3a283e02539ee61b90785cf9defa`。它有两个用途：TF 卡上的界面字体打不开时显示界面和错误提示；TF 卡上没有可用正文字体时显示正文。
+`fonts/PicoPageFallback.otf` 从上述 Noto Sans SC 裁剪生成，共 4,138 个字符、932,820 字节，SHA-256 `a0488c0427d5461a0da182861e73aaaffd2e3a283e02539ee61b90785cf9defa`。菜单、状态和错误提示直接使用该内置字体。TF 卡上没有可用正文字体时，正文也使用它。
 
 字符范围由三部分组成，完整清单在 `fonts/fallback_characters.txt`：
 

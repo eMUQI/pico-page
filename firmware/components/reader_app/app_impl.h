@@ -1504,7 +1504,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool initialize() {
         const bool first_boot = store.needs_onboarding();
         refresh_badge_config();
-        if (!ui.open(root + "/Fonts/NotoSansSC-Regular.otf") && !ui.open_fallback())
+        if (!ui.open_fallback())
             return false;
         const auto configuration = store.load_settings();
         settings = configuration.settings;
