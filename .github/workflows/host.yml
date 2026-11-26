@@ -7,7 +7,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   host:
-    runs-on: [self-hosted, linux, x64, pico-page]
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-24.04"]' || '["self-hosted","linux","x64","pico-page"]') }}
     timeout-minutes: 20
     env:
       CCACHE_DIR: ${{ github.workspace }}/.local/ccache
@@ -35,6 +35,11 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: '24'
+      - name: Install dependencies on the hosted runner
+        if: github.event_name == 'pull_request' && steps.changes.outputs.host == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ccache clang cmake pkg-config libsdl2-dev libssl-dev libcurl4-openssl-dev
       - name: Check host dependencies
         id: dependencies
         if: steps.changes.outputs.host == 'true'

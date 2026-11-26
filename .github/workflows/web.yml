@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: ${{ !(github.event_name == 'release' || (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')) }}
 jobs:
   web:
-    runs-on: [self-hosted, linux, x64, pico-page]
+    runs-on: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-24.04"]' || '["self-hosted","linux","x64","pico-page"]') }}
     timeout-minutes: 25
     permissions:
       contents: read

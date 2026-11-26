@@ -89,7 +89,7 @@ python3 tools/check_koreader_mapping.py
 
 网站、发布说明、OTA 清单脚本及网站或共用路径脚本的改动执行 PR 网站构建与发布固件校验。分支 push 不单独触发工作流；main 仅在上述网站输入变更时构建并部署，发布 Release 和手动部署入口保留。host 合并后不自动重跑，直接推送 main 的代码需要手动补验；合并前应验证包含当前目标分支变更的结果。PR 新提交取消旧检查，正式部署继续串行并保留下载源比较及线上读回检查。COS 返回 403 时，仅允许候选清单与全部镜像均同官网现有副本逐字节一致的页面更新，并明确告警；新固件、内容变化、其他错误及认证发布失败仍阻止部署，不自动恢复桶权限。部署前通过共用路径脚本直接比较构建提交与最新 main 的网站输入：网站输入变化才让位给替代运行，只有文档或固件代码变化时仍完成当前部署；读取比较结果失败时停止部署。
 
-两个工作流继续通过 `[self-hosted, linux, x64, pico-page]` 使用现有私有 runner；是否切换到 GitHub 托管环境及切换时机另行决定，不作为发布的前置条件。runner 串行领取任务，离线时排队，不自动回退。host 超时为 20 分钟，网站超时为 25 分钟（包含固件上传及完整公网读回）。系统依赖由管理员预先准备，工作流不执行 apt 或 sudo；host 检查 CMake、C++、Clang、ccache 及 pkg-config 依赖，网站检查 gh 和 curl，缺少依赖时失败。
+拉取请求的 host 检查和网站构建使用 GitHub 托管的 Ubuntu 24.04。host 作业安装 CMake、Clang、ccache 和 SDL2、OpenSSL、libcurl 开发包。其他触发方式使用带有 self-hosted、linux、x64 和 pico-page 标签的私有 runner，依赖由管理员预先准备。host 超时为 20 分钟，网站超时为 25 分钟。
 
 host 和 COS 发布继续通过 `actions/setup-python@v5` 使用 Python 3.12，不替换系统 Python。host 正文相关检查和网站构建均显式准备 Node 24，防止缺少 Node 时条件测试未注册。COS 依赖安装在本任务 `RUNNER_TEMP/pico-page-cos` 虚拟环境中，不写入系统 Python。
 
