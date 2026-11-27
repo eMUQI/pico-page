@@ -924,16 +924,25 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::unique_ptr<ContentJob> prepared_chapter;
     std::shared_ptr<ChapterSession> chapter_session;
     std::size_t chapter_stream_bytes = 0;
+    static constexpr std::size_t maximum_library_chapter_stream_bytes = 1024U * 1024;
+    bool chapter_session_in_library = false;
+    bool has_original_next_part() const {
+        return chapter_session && chapter_session.use_count() == 1 && !chapter.last_part &&
+            reading_detail() == ChapterLoad::Original &&
+            chapter_session->document.has_chapter_stream(chapter_index, ChapterLoad::Original, chapter.part + 1);
+    }
+    void cancel_chapter_prefetch() {
+        if (counting_job && counting_job->request.chapter_prefetch) counting_job->cancel();
+        prepared_chapter.reset();
+    }
     void release_chapter_session() {
-        if (chapter_session) {
-            if (counting_job && counting_job->request.chapter_session == chapter_session) counting_job->cancel();
-            if (prepared_chapter && prepared_chapter->request.chapter_session == chapter_session) prepared_chapter.reset();
-        }
-        chapter_session.reset(); chapter_stream_bytes = 0;
+        cancel_chapter_prefetch();
+        chapter_session.reset(); chapter_stream_bytes = 0; chapter_session_in_library = false;
     }
     std::uint64_t chapter_prefetch_hits = 0;
     std::size_t prepared_chapter_size_bytes = 0;
     bool chapter_prefetch_attempted = false;
+    bool chapter_prefetch_cancelled_for_pressure = false;
     bool chapter_prefetch_due() const;
     void prepare_chapter();
     void finish_chapter(ContentJob& job, PageTurnOrigin origin);
@@ -956,7 +965,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             chapter_cache.reset(); recent_chapter_cache.reset();
             chapter_cache_write_needed = recent_cache_write_needed = false;
         }
-        prepared_chapter.reset(); chapter_prefetch_attempted = false;
+        chapter_prefetch_attempted = false;
         release_chapter_session();
         chapter_feedback_after.reset();
         content_loading = image_prepared = false;
@@ -1049,9 +1058,9 @@ struct ReaderApp::Impl final : DisplayBackend {
         ContentJob::Request request;
         request.kind = kind;
         if (kind == ContentJob::Kind::Open) {
-            chapter_session = std::make_shared<ChapterSession>();
+            if (!chapter_session) chapter_session = std::make_shared<ChapterSession>();
             request.chapter_session = chapter_session;
-        }
+        } else if (chapter_session_in_library) release_chapter_session();
         request.root = root; request.relative_path = path; request.path = root + "/" + path;
         request.generation = foreground_generation;
         struct stat info{};

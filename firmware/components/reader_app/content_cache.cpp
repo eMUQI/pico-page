@@ -1,6 +1,8 @@
 #include "content_cache.h"
 #include "pico_page/stage_timer.h"
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -85,9 +87,12 @@ struct Reader {
         return begin <= end && end <= size + 1;
     }
 };
-std::string key(const std::string& book_id, std::size_t index, std::uint32_t part, bool original) {
+std::string cache_directory(const std::string& book_id, std::size_t index, bool original) {
     return std::string("content/") + revision(original) + "/" + book_id + "/" +
-           std::to_string(index) + "/" + std::to_string(part);
+           std::to_string(index);
+}
+std::string key(const std::string& book_id, std::size_t index, std::uint32_t part, bool original) {
+    return cache_directory(book_id, index, original) + "/" + std::to_string(part);
 }
 namespace css = document::css;
 void encode_author(Writer& w, const Chapter& chapter, const std::function<bool()>& stop) {
@@ -363,7 +368,7 @@ bool load_content(const FileStore& store, EpubDocument& doc, std::size_t index, 
         return true;
     }
     if (original) {
-        const auto loaded = doc.load_chapter(index, chapter, error, detail, part, stop);
+        const auto loaded = doc.load_chapter(index, chapter, error, detail, part, stop, {}, sequential);
         if (loaded && deferred) *deferred = prepare(doc, index, chapter, stop, true);
         return loaded;
     }
@@ -379,10 +384,11 @@ bool load_content(const FileStore& store, EpubDocument& doc, std::size_t index, 
 bool load_anchored_content(const FileStore& store, EpubDocument& doc, std::size_t index,
                            Chapter& chapter, std::string& error, ChapterLoad detail,
                            const Anchor& anchor, std::uint32_t& offset, const std::function<bool()>& stop,
-                           ContentCacheEntry* deferred, bool sequential) {
+                           ContentCacheEntry* deferred, bool sequential, const std::function<void()>& before_source_read) {
     if (!doc.txt_index()) {
         const auto matches = [&](const Chapter& part) { return part.offset_for(anchor, offset); };
-        return find_content(store, doc, index, chapter, error, detail, matches, stop, deferred, sequential) &&
+        return find_content(store, doc, index, chapter, error, detail, matches, stop,
+                            deferred, sequential, true, before_source_read) &&
                chapter.offset_for(anchor, offset);
     }
     if (deferred) *deferred = {};
@@ -395,15 +401,21 @@ bool load_anchored_content(const FileStore& store, EpubDocument& doc, std::size_
 }
 
 bool find_content(const FileStore& store, EpubDocument& doc, std::size_t index, Chapter& chapter,
-                  std::string& error, ChapterLoad detail, const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop, ContentCacheEntry* deferred, bool sequential) {
+                  std::string& error, ChapterLoad detail, const std::function<bool(const Chapter&)>& match,
+                  const std::function<bool()>& stop, ContentCacheEntry* deferred, bool sequential,
+                  bool search_sparse_original_cache, const std::function<void()>& before_source_read) {
     if (deferred) *deferred = {};
     const bool original = detail == ChapterLoad::Original;
     std::uint32_t cached_prefix = 0;
+    bool cache_gap = false;
     if (original || detail == ChapterLoad::Reading) {
         release(chapter); error.clear();
         for (std::uint32_t part = 0; part < 4096; ++part) {
             if (stop && stop()) { release(chapter); error = kChapterCancelled; return false; }
-            if (!load(store, doc, index, part, chapter, stop, deferred, original)) break;
+            if (!load(store, doc, index, part, chapter, stop, deferred, original)) {
+                cache_gap = true;
+                break;
+            }
             cached_prefix = part + 1;
             if (match(chapter)) return true;
             if (deferred) *deferred = {};
@@ -412,7 +424,34 @@ bool find_content(const FileStore& store, EpubDocument& doc, std::size_t index, 
         }
     }
     if (original) {
-        const auto loaded = doc.find_chapter_part(index, chapter, error, detail, match, stop);
+        if (search_sparse_original_cache && cache_gap) {
+            std::array<std::uint32_t, 4> parts{};
+            std::size_t count = 0;
+            bool too_many_parts = false;
+            const auto status = store.visit_cache_entries(cache_directory(doc.metadata().book_id, index, true), 64,
+                [&](std::string_view name) {
+                    if (name.size() > 1 && name.front() == '0') return true;
+                    std::uint32_t part = 0;
+                    const auto end = name.data() + name.size();
+                    const auto parsed = std::from_chars(name.data(), end, part);
+                    if (parsed.ec != std::errc{} || parsed.ptr != end || part <= cached_prefix || part == kLastChapterPart)
+                        return true;
+                    if (count == parts.size()) { too_many_parts = true; return false; }
+                    parts[count++] = part;
+                    return true;
+                }, stop);
+            if (status == StoreStatus::Cancelled) { error = kChapterCancelled; return false; }
+            if (status == StoreStatus::Ok && !too_many_parts) {
+                for (std::size_t i = 0; i < count; ++i) {
+                    if (load(store, doc, index, parts[i], chapter, stop, deferred, true) && match(chapter)) return true;
+                    if (deferred) *deferred = {};
+                    release(chapter);
+                    if (stop && stop()) { error = kChapterCancelled; return false; }
+                }
+            }
+        }
+        if (before_source_read) before_source_read();
+        const auto loaded = doc.find_chapter_part(index, chapter, error, detail, match, stop, {}, sequential);
         if (loaded && deferred) *deferred = prepare(doc, index, chapter, stop, true);
         return loaded;
     }

@@ -22,9 +22,11 @@ bool load_content(const FileStore& store, EpubDocument& document, std::size_t in
 bool load_anchored_content(const FileStore& store, EpubDocument& document, std::size_t index,
                            Chapter& chapter, std::string& error, ChapterLoad detail,
                            const Anchor& anchor, std::uint32_t& offset, const std::function<bool()>& stop = {},
-                           ContentCacheEntry* deferred = nullptr, bool sequential = false);
+                           ContentCacheEntry* deferred = nullptr, bool sequential = false,
+                           const std::function<void()>& before_source_read = {});
 bool find_content(const FileStore& store, EpubDocument& document, std::size_t index,
                   Chapter& chapter, std::string& error, ChapterLoad detail,
                   const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop = {},
-                  ContentCacheEntry* deferred = nullptr, bool sequential = false);
+                  ContentCacheEntry* deferred = nullptr, bool sequential = false,
+                  bool search_sparse_original_cache = false, const std::function<void()>& before_source_read = {});
 }

@@ -620,11 +620,15 @@ void ReaderApp::Impl::control(int id, PageTurnOrigin turn_origin) {
         }
         remember_position();
         save_pages();
+        cancel_chapter_prefetch();
+        chapter_session_in_library = controlled_storage && has_original_next_part() &&
+            chapter_stream_bytes <= maximum_library_chapter_stream_bytes;
         scan_library();
         draw_library();
         overlay(true);
         return;
     case Tools:
+        chapter_session_in_library = false;
         if (has_book()) {
             if (session.visible_record() || session.saved_record())
                 recover_body();
@@ -844,9 +848,11 @@ void ReaderApp::Impl::control(int id, PageTurnOrigin turn_origin) {
         break;
     }
     case Settings:
+        if (chapter_session_in_library) release_chapter_session();
         draw_settings();
         break;
     case Import:
+        if (chapter_session_in_library) release_chapter_session();
         import_from_settings = view == View::Settings;
         draw_import();
         break;

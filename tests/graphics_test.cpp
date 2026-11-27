@@ -42,6 +42,29 @@ int main(int argc, char** argv) {
         assert(font.draw(space, U'\u200b', 40, 60) && space.pixels() == Canvas().pixels());
     }
     {
+        Canvas clipped(19, 21), full(80, 80);
+        constexpr int crop_x = 31, crop_y = 23;
+        constexpr std::uint8_t background = 7;
+        clipped.clear(background);
+        full.clear(background);
+        assert(font.set_pixel_size(28));
+        const auto draw = [&](char32_t scalar, int x, int baseline, std::uint8_t gray) {
+            assert(font.draw(clipped, scalar, x, baseline, gray));
+            assert(font.draw(full, scalar, x + crop_x, baseline + crop_y, gray));
+        };
+        draw(U'龘', -5, 16, 2);
+        assert(clipped.pixel(0, 17) == 2 && clipped.pixel(3, 3) == background);
+        draw(U'我', -5, 16, 0);
+        draw(U'读', 5, 25, 14);
+
+        for (int y = 0; y < clipped.height(); ++y) {
+            for (int x = 0; x < clipped.width(); ++x)
+                assert(clipped.pixel(x, y) == full.pixel(x + crop_x, y + crop_y));
+            const auto last_byte = static_cast<std::size_t>(y + 1) * clipped.stride() - 1;
+            assert((clipped.pixels()[last_byte] >> 4) == background);
+        }
+    }
+    {
         Canvas rasterized, cached;
         assert(font.set_pixel_size(28) && font.draw(rasterized, fallback_text[0], 40, 60));
         Font warmed;
@@ -158,7 +181,25 @@ int main(int argc, char** argv) {
         assert(memory == "字体处理内存不足（F12） [FT=64] [U+8BFB]");
         for (const auto scalar : decode_utf8(memory)) assert(font.contains(scalar));
     }
-    if (argc > 1) assert(font.open(argv[1]));
+    if (argc > 1) {
+        std::ifstream file(argv[1], std::ios::binary);
+        const std::vector<unsigned char> bytes{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+        Font memory;
+        assert(font.open(argv[1]) && memory.open_memory(bytes.data(), bytes.size()));
+        for (const int pixels : {28, 38, 28}) {
+            assert(font.set_pixel_size(pixels) && memory.set_pixel_size(pixels));
+            Canvas from_file(600, 100), from_memory(600, 100);
+            int x = 8;
+            for (const auto scalar : decode_utf8("阅读、落叶与风。Aa 龘天地书！读")) {
+                const auto advance = font.advance(scalar);
+                assert(advance >= 0 && advance == memory.advance(scalar));
+                assert(font.draw(from_file, scalar, x, 64) && memory.draw(from_memory, scalar, x, 64));
+                x += advance;
+            }
+            assert(from_file.pixels() == from_memory.pixels());
+        }
+        assert(font.open(argv[1]));
+    }
 
     Canvas canvas;
     std::string image_error;

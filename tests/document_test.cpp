@@ -25,16 +25,22 @@ static void same_reading_part(const Chapter& a, const Chapter& b) {
     assert(a.resource == b.resource && a.part == b.part && a.last_part == b.last_part);
     assert(a.split_node == b.split_node && a.plain_dom == b.plain_dom && a.long_source_node == b.long_source_node);
     assert(a.text == b.text && a.css_sources == b.css_sources && a.warnings == b.warnings);
+    assert(a.author_style_fallback == b.author_style_fallback && a.author_styles == b.author_styles);
+    assert(a.author_fonts.size() == b.author_fonts.size());
+    for (std::size_t i = 0; i < a.author_fonts.size(); ++i) {
+        const auto& x = a.author_fonts[i]; const auto& y = b.author_fonts[i];
+        assert(std::tie(x.resource, x.bytes, x.crc32) == std::tie(y.resource, y.bytes, y.crc32));
+    }
     assert(a.source_nodes.empty() && b.source_nodes.empty());
     assert(a.blocks.size() == b.blocks.size() && a.runs.size() == b.runs.size());
     assert(a.fragments.size() == b.fragments.size() && a.links.size() == b.links.size() && a.images.size() == b.images.size());
     for (std::size_t i = 0; i < a.blocks.size(); ++i) {
         const auto& x = a.blocks[i]; const auto& y = b.blocks[i];
-        assert(std::tie(x.begin, x.end, x.kind) == std::tie(y.begin, y.end, y.kind));
+        assert(std::tie(x.begin, x.end, x.kind, x.style) == std::tie(y.begin, y.end, y.kind, y.style));
     }
     for (std::size_t i = 0; i < a.runs.size(); ++i) {
         const auto& x = a.runs[i]; const auto& y = b.runs[i];
-        assert(std::tie(x.begin, x.end, x.element_reference) == std::tie(y.begin, y.end, y.element_reference));
+        assert(std::tie(x.begin, x.end, x.element_reference, x.style) == std::tie(y.begin, y.end, y.element_reference, y.style));
         assert(x.source == y.source);
     }
     for (std::size_t i = 0; i < a.fragments.size(); ++i)
@@ -46,7 +52,8 @@ static void same_reading_part(const Chapter& a, const Chapter& b) {
     }
     for (std::size_t i = 0; i < a.images.size(); ++i) {
         const auto& x = a.images[i]; const auto& y = b.images[i];
-        assert(std::tie(x.begin, x.end, x.resource, x.alt) == std::tie(y.begin, y.end, y.resource, y.alt));
+        assert(std::tie(x.begin, x.end, x.resource, x.alt, x.width, x.height) ==
+               std::tie(y.begin, y.end, y.resource, y.alt, y.width, y.height));
         assert(x.source == y.source);
     }
 }
@@ -642,6 +649,16 @@ int main(int argc, char** argv) {
         assert(font_layout.load_chapter(0, original, error, ChapterLoad::Original));
         assert(original.author_fonts.size() == 2 && style_at(U"内联").font_families == 1);
         assert(original.author_fonts.front().resource == "EPUB/Fonts/welcome.ttf");
+        EpubDocument sibling_styles;
+        assert(sibling_styles.open(fixture_dir + "sibling-styles.epub", error));
+        assert(sibling_styles.load_chapter(0, original, error, ChapterLoad::Original));
+        assert(!original.author_style_fallback);
+        assert(style_at(U"左一") == style_at(U"左二") && style_at(U"左二").font_px == 20);
+        assert(style_at(U"左二").language == document::css::TextLanguage::EnglishUS);
+        assert(style_at(U"左英").language == document::css::TextLanguage::EnglishGB);
+        assert(style_at(U"行内").font_px == 29 && style_at(U"有编号").font_px == 31);
+        assert(style_at(U"异类").font_px == 23 && style_at(U"左末").font_px == 20);
+        assert(style_at(U"右一") == style_at(U"右二") && style_at(U"右一").font_px == 34);
         EpubDocument original_layout;
         assert(original_layout.open(fixture_dir + "original-layout.epub", error));
         assert(original_layout.load_chapter(0, original, error, ChapterLoad::Original));
@@ -998,6 +1015,57 @@ int main(int argc, char** argv) {
         }
         assert(rejected && error == "Invalid EPUB stream length or CRC" && part.text.empty());
         assert(!corrupt.read_stats().stream_active);
+    }
+    {
+        const auto directory = std::filesystem::path(argv[1]).parent_path();
+        const auto path = (directory / "stream-events.epub").string();
+        EpubDocument reference, sequential;
+        assert(reference.open(path, error));
+        assert(sequential.open_verified(path, reference.metadata(), error, {}, reference.verified_epub_index()));
+        const auto find_fragment = [](const Chapter& part) {
+            std::uint32_t offset = 0;
+            return part.fragment_offset("s1000", offset);
+        };
+        Chapter expected, actual;
+        assert(reference.find_chapter_part(0, expected, error, ChapterLoad::Original, find_fragment));
+        assert(expected.part > 0 && !expected.last_part && !expected.author_style_fallback && !expected.author_styles.empty());
+        assert(sequential.find_chapter_part(0, actual, error, ChapterLoad::Original, find_fragment, {}, {}, true));
+        same_reading_part(expected, actual);
+
+        const auto next = expected.part + 1;
+        auto reader = sequential.detach_reader();
+        assert(reader && reader->has_chapter_stream(0, ChapterLoad::Original, next));
+        assert(!sequential.read_stats().stream_active);
+        const auto full_start = reference.read_stats().xml_feed_bytes;
+        assert(reference.load_chapter(0, expected, error, ChapterLoad::Original, next) && !expected.last_part);
+        const auto sequential_start = reader->read_stats().xml_feed_bytes;
+        assert(reader->load_chapter(0, actual, error, ChapterLoad::Original, next, {}, {}, true));
+        same_reading_part(expected, actual);
+        const auto xml_bytes = reader->read_stats().xml_feed_bytes - sequential_start;
+        assert(xml_bytes > 0 && xml_bytes < reference.read_stats().xml_feed_bytes - full_start);
+        assert(reader->has_chapter_stream(0, ChapterLoad::Original, next + 1));
+
+        unsigned checks = 0;
+        assert(!reader->load_chapter(0, actual, error, ChapterLoad::Original, next + 1,
+                                     [&] { return ++checks >= 4; }, {}, true));
+        assert(error == kChapterCancelled && actual.text.empty() && !reader->read_stats().stream_active);
+        assert(reader->load_chapter(0, actual, error, ChapterLoad::Original, next + 1, {}, {}, true));
+        assert(reference.load_chapter(0, expected, error, ChapterLoad::Original, next + 1));
+        same_reading_part(expected, actual);
+
+        const auto image_path = (directory / "part-boundary-image.epub").string();
+        assert(reference.open(image_path, error) && sequential.open(image_path, error));
+        assert(sequential.load_chapter(0, actual, error, ChapterLoad::Original, 0, {}, {}, true) && !actual.last_part);
+        assert(sequential.load_chapter(0, actual, error, ChapterLoad::Original, 1, {}, {}, true));
+        assert(reference.load_chapter(0, expected, error, ChapterLoad::Original, 1) && !expected.images.empty());
+        same_reading_part(expected, actual);
+
+        const auto large_token_path = (directory / "stream-large-token.epub").string();
+        assert(reference.open(large_token_path, error) && sequential.open(large_token_path, error));
+        assert(reference.load_chapter(0, expected, error, ChapterLoad::Original, 1));
+        assert(sequential.load_chapter(0, actual, error, ChapterLoad::Original, 1, {}, {}, true));
+        same_reading_part(expected, actual);
+        assert(!sequential.read_stats().stream_active);
     }
     return 0;
 }

@@ -540,8 +540,11 @@ void ContentJob::run() {
         ContentJob& job;
         ~FinishChapterSession() {
             if (!job.request.chapter_session) return;
+            const bool cancelled = job.cancelled_.load(std::memory_order_relaxed);
+            if (cancelled && job.request.chapter_prefetch && job.result.error.empty())
+                job.result.error = kChapterCancelled;
             auto& document = job.request.chapter_session->document;
-            if (!job.result.error.empty() || job.cancelled_.load(std::memory_order_relaxed)) document.close();
+            if (!job.result.error.empty() || cancelled) document.close();
             job.result.chapter_stream_bytes = document.metadata().book_id.empty() ? 0 : document.retained_bytes();
         }
     } finish{*this};
@@ -1270,13 +1273,30 @@ void ContentJob::open_book() {
     const auto stop = [this] { return cancelled_.load(std::memory_order_relaxed); };
     struct stat before{}, after{};
     if (stat(request.path.c_str(), &before) != 0) { result.error = "Book file unavailable"; return; }
+    auto* parked_reader = request.chapter_session && request.chapter_session->document.read_stats().stream_active
+        ? &request.chapter_session->document : nullptr;
+    const auto drop_parked_stream = [&] {
+        if (!parked_reader) return;
+        parked_reader->reset_chapter_stream();
+        parked_reader = nullptr;
+    };
     result.document = std::make_unique<EpubDocument>();
     auto& document = *result.document;
-    if (!(request.identity.book_id.empty() ? document.open(request.path, result.error, stop, request.book_index) :
-          document.open_verified(request.path, request.identity, result.error, stop, request.book_index)) || stop()) return;
+    const auto verify_source = [&] {
+        return request.identity.book_id.empty() ? document.open(request.path, result.error, stop, request.book_index) :
+            document.open_verified(request.path, request.identity, result.error, stop, request.book_index);
+    };
+    if (!verify_source()) {
+        if (!parked_reader || stop()) return;
+        drop_parked_stream();
+        if (!verify_source()) return;
+    }
+    if (stop()) return;
     FileStore store(request.root);
     result.configuration = store.load_settings(request.relative_path);
     const auto detail = result.configuration.settings.original_epub ? ChapterLoad::Original : ChapterLoad::Reading;
+    if (parked_reader && (detail != ChapterLoad::Original || request.chapter_session->path != request.path ||
+        parked_reader->metadata().book_id != document.metadata().book_id)) drop_parked_stream();
     const auto revision = document.metadata().txt_encoding == TxtEncoding::Utf8 ? request.content_revision :
         txt_content_revision(document.metadata().txt_encoding);
     result.progress = store.load_progress(request.relative_path, document.metadata().book_id, revision);
@@ -1292,12 +1312,13 @@ void ContentJob::open_book() {
         std::uint32_t offset = 0;
         if (!document.chapter_index_for(anchor.resource, result.chapter_index) ||
             !load_anchored_content(store, document, result.chapter_index, result.chapter, result.error, detail,
-                                   anchor, offset, stop, &result.content_cache, !!request.chapter_session)) {
+                                   anchor, offset, stop, &result.content_cache, !!request.chapter_session, drop_parked_stream)) {
             if (result.error.empty()) result.error = "Saved position cannot be mapped";
             return;
         }
         result.offset = offset;
     } else {
+        drop_parked_stream();
         while (result.chapter_index + 1 < document.spine().size() && !document.spine()[result.chapter_index].linear)
             ++result.chapter_index;
         if (!load_content(store, document, result.chapter_index, result.chapter, result.error, detail, 0, stop, &result.content_cache, false, !!request.chapter_session)) return;
@@ -1310,11 +1331,24 @@ void ContentJob::open_book() {
     }
     result.file_size = after.st_size; result.file_modified = after.st_mtime; result.file_inode = after.st_ino;
     if (request.chapter_session) {
-        if (auto reader = document.detach_reader()) {
-            request.chapter_session->document = std::move(*reader);
-            request.chapter_session->path = request.path;
+        if (parked_reader && (!result.content_cache.from_disk || result.chapter.last_part ||
+            !parked_reader->has_chapter_stream(result.chapter_index, detail, result.chapter.part + 1)))
+            drop_parked_stream();
+        auto reader = document.detach_reader();
+        if (!reader && parked_reader) {
+            drop_parked_stream();
+            reader = document.detach_reader();
+        }
+        if (reader) {
+            if (!parked_reader) {
+                request.chapter_session->document = std::move(*reader);
+                request.chapter_session->path = request.path;
+            }
             result.chapter_stream_bytes = request.chapter_session->document.retained_bytes();
-        } else document.reset_chapter_stream();
+        } else {
+            request.chapter_session->document.close();
+            document.reset_chapter_stream();
+        }
     }
 }
 bool ContentJob::checkpoint() {
@@ -1365,21 +1399,24 @@ void ContentJob::load_chapter() {
         !document.open_verified(request.path, request.identity, result.error, stop, request.book_index)) return;
     if (stop()) { result.error = kChapterCancelled; return; }
     std::uint32_t position = 0;
+    const bool keep_original_stream = request.chapter_session && detail == ChapterLoad::Original;
     if (request.target == Target::Anchor || request.target == Target::Fragment) {
         if (request.target == Target::Anchor) {
             if (!load_anchored_content(store, document, request.chapter, result.chapter, result.error, detail,
-                                       request.anchor, position, stop, &result.content_cache)) return;
+                                       request.anchor, position, stop, &result.content_cache, keep_original_stream)) return;
         } else if (request.fragment.empty()) {
-            if (!load_content(store, document, request.chapter, result.chapter, result.error, detail, 0, stop, &result.content_cache)) return;
+            if (!load_content(store, document, request.chapter, result.chapter, result.error, detail,
+                              0, stop, &result.content_cache, false, keep_original_stream)) return;
         } else {
             const auto match = [&](const Chapter& part) { return part.fragment_offset(request.fragment, position); };
             if (!find_content(store, document, request.chapter, result.chapter, result.error, detail, match,
-                              stop, &result.content_cache)) return;
+                              stop, &result.content_cache, keep_original_stream)) return;
         }
         result.offset = position;
         if (request.target == Target::Fragment && result.offset >= result.chapter.text.size() && !result.chapter.last_part) {
             const auto next = result.chapter.part + 1;
-            if (!load_content(store, document, request.chapter, result.chapter, result.error, detail, next, stop, &result.content_cache)) return;
+            if (!load_content(store, document, request.chapter, result.chapter, result.error, detail,
+                              next, stop, &result.content_cache, false, keep_original_stream)) return;
             result.offset = 0;
         }
         result.author_fonts = prepare_embedded_fonts(store, document, result.chapter, result.author_fonts_stable, stop);

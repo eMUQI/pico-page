@@ -68,6 +68,7 @@ constexpr std::uint32_t kMaxText = 2 * kChapterPartScalars;
 constexpr std::size_t kPartRecords = 4096, kPartMetadata = 256 * 1024;
 constexpr std::size_t kPartRecordsHard = 6000, kPartMetadataHard = 448 * 1024;
 constexpr char kPartComplete[] = "Chapter part complete";
+constexpr char kPartUnavailable[] = "Chapter part is not available: ";
 bool platform_memory_room(std::size_t bytes) {
 #ifdef ESP_PLATFORM
     constexpr std::size_t reserve = 768 * 1024;
@@ -715,6 +716,15 @@ struct AuthorLayoutState {
         std::size_t names_begin = 0;
         bool suppressed = false;
     };
+    struct SiblingStyle {
+        const Ancestor* parent = nullptr;
+        std::array<char, 64> names{};
+        std::size_t tag_bytes = 0, class_bytes = 0;
+        css::TextLanguage language{};
+        bool block = false, heading = false;
+        std::uint32_t work = 0;
+        css::ComputedStyle computed;
+    };
     css::StyleSheet sheet;
     std::array<std::string, css::kEmbeddedFontCount> font_names;
     css::FontFamilies font_families{};
@@ -722,17 +732,18 @@ struct AuthorLayoutState {
     css::Context context;
     css::WorkBudget work;
     std::array<Ancestor, 64> ancestors;
+    SiblingStyle sibling_style;
     std::array<char, 32 * 1024> names;
     std::size_t names_used = 0;
     css::TextLanguage book_language;
-    const std::function<bool()>& stop;
+    const std::function<bool()>* stop;
 #ifdef ESP_PLATFORM
     TickType_t yielded_at = xTaskGetTickCount();
 #endif
     css::Checkpoint checkpoint;
 
     AuthorLayoutState(css::Limits limits, css::TextLanguage language, const std::function<bool()>& cancel)
-        : sheet(limits), book_language(language), stop(cancel), checkpoint{[](void* opaque) {
+        : sheet(limits), book_language(language), stop(&cancel), checkpoint{[](void* opaque) {
             auto& owner = *static_cast<AuthorLayoutState*>(opaque);
 #ifdef ESP_PLATFORM
             if (xTaskGetTickCount() - owner.yielded_at >= pdMS_TO_TICKS(20)) {
@@ -740,7 +751,7 @@ struct AuthorLayoutState {
                 owner.yielded_at = xTaskGetTickCount();
             }
 #endif
-            return owner.stop && owner.stop();
+            return owner.stop && *owner.stop && (*owner.stop)();
         }, this} { context.defer_box_percentages = true; }
 
     bool start(std::size_t depth, std::string_view tag, const char** attrs, bool block, bool heading) {
@@ -753,6 +764,7 @@ struct AuthorLayoutState {
         }
         auto* parent = depth ? &ancestors[depth - 1] : nullptr;
         auto& current = ancestors[depth];
+        if (sibling_style.parent == &current) sibling_style.parent = nullptr;
         current.names_begin = names_used;
         const auto copy = [&](std::string_view value) {
             auto* destination = names.data() + names_used;
@@ -789,8 +801,37 @@ struct AuthorLayoutState {
         if (heading || tag == "b" || tag == "strong") defaults.bold = true;
         if (tag == "em" || tag == "i") defaults.italic = true;
         if (tag == "u") defaults.underline = true;
-        if (sheet.compute(current.element, parent ? &parent->style : nullptr, context, attr_view(attrs, "style"),
-                          work, current.style, checkpoint, &defaults, &font_families) != css::Result::Complete) return false;
+        const auto inline_style = attr_view(attrs, "style");
+        const bool cacheable = parent && id.empty() && inline_style.empty() &&
+            tag.size() + classes.size() <= sibling_style.names.size();
+        const bool reuse_style = cacheable && sibling_style.parent == parent && sibling_style.language == defaults.language &&
+            sibling_style.block == block && sibling_style.heading == heading &&
+            std::string_view(sibling_style.names.data(), sibling_style.tag_bytes) == tag &&
+            std::string_view(sibling_style.names.data() + sibling_style.tag_bytes, sibling_style.class_bytes) == classes &&
+            work.styles < work.maximum_styles && work.work <= work.maximum_work &&
+            sibling_style.work <= work.maximum_work - work.work;
+        if (reuse_style) {
+            ++work.styles;
+            if (checkpoint.cancelled(checkpoint.context)) return false;
+            work.work += sibling_style.work;
+            current.style = sibling_style.computed;
+        } else {
+            const auto previous_work = work.work;
+            if (sheet.compute(current.element, parent ? &parent->style : nullptr, context, inline_style,
+                              work, current.style, checkpoint, &defaults, &font_families) != css::Result::Complete) return false;
+            if (cacheable) {
+                sibling_style.parent = parent;
+                sibling_style.tag_bytes = tag.size();
+                sibling_style.class_bytes = classes.size();
+                if (!tag.empty()) std::memcpy(sibling_style.names.data(), tag.data(), tag.size());
+                if (!classes.empty()) std::memcpy(sibling_style.names.data() + tag.size(), classes.data(), classes.size());
+                sibling_style.language = defaults.language;
+                sibling_style.block = block;
+                sibling_style.heading = heading;
+                sibling_style.work = work.work - previous_work;
+                sibling_style.computed = current.style;
+            }
+        }
         if (parent && parent->style.underline) current.style.underline = true;
         current.suppressed = current.style.display == css::Display::None || (parent && parent->suppressed);
         if (current.suppressed) current.style.display = css::Display::None;
@@ -1373,6 +1414,7 @@ struct ZipTiming {
 struct ChapterStreamTiming {
     ZipTiming::Clock::time_point started = ZipTiming::Clock::now();
     std::int64_t zip_read_inflate_us = 0, xml_us = 0, memory_check_us = 0;
+    std::size_t xml_feed_bytes = 0;
     ChapterCallbackTiming callbacks;
 
     template <typename Operation>
@@ -1395,9 +1437,9 @@ struct ChapterStreamTiming {
 
     ~ChapterStreamTiming() {
         using Phase = ChapterCallbackTiming::Phase;
-        ESP_LOGI("reader_perf", "stage=chapter_sequential_read us=%lld min_us=0 zip_read_inflate_us=%lld xml_us=%lld memory_check_us=%lld callback_memory_us=%lld callback_memory_calls=%u callback_text_us=%lld callback_anchor_us=%lld callback_markup_us=%lld",
+        ESP_LOGI("reader_perf", "stage=chapter_sequential_read us=%lld min_us=0 zip_read_inflate_us=%lld xml_us=%lld xml_feed_bytes=%u memory_check_us=%lld callback_memory_us=%lld callback_memory_calls=%u callback_text_us=%lld callback_anchor_us=%lld callback_markup_us=%lld",
             static_cast<long long>(ZipTiming::elapsed(started)), static_cast<long long>(zip_read_inflate_us),
-            static_cast<long long>(xml_us), static_cast<long long>(memory_check_us),
+            static_cast<long long>(xml_us), static_cast<unsigned>(xml_feed_bytes), static_cast<long long>(memory_check_us),
             callbacks.microseconds(Phase::Memory), callbacks.calls[static_cast<std::size_t>(Phase::Memory)],
             callbacks.microseconds(Phase::Text), callbacks.microseconds(Phase::Anchors), callbacks.microseconds(Phase::Markup));
     }
@@ -1407,12 +1449,15 @@ struct ChapterStreamTiming {
 
 struct ChapterStream {
     std::size_t index;
+    ChapterLoad detail;
+    std::unique_ptr<AuthorLayoutState> author;
     Chapter ready;
     ChapterParser parser;
     mz_zip_reader_extract_iter_state* iterator = nullptr;
     std::array<char, 4096> input{};
     bool input_finished = false;
-    ChapterStream(std::size_t value, const std::string& resource) : index(value), parser(ready, resource) {
+    ChapterStream(std::size_t value, const std::string& resource, ChapterLoad detail)
+        : index(value), detail(detail), parser(ready, resource) {
         parser.keep_mapping = false; parser.keep_anchors = true; parser.resumable = true;
     // Expat retains incomplete token bytes while a parser remains open between calls.
         parser.xml.pending_limit = 64U * 1024;
@@ -1552,6 +1597,11 @@ struct EpubDocument::Impl {
         return true;
     }
     std::unique_ptr<AuthorLayoutState> prepare_author_styles(std::size_t index, const std::function<bool()>& stop);
+    bool finish_author_part(Chapter& chapter, AuthorLayoutState* author, bool retain_author,
+                            std::string& error, const std::function<bool()>& stop);
+    bool read_chapter_stream(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
+                             const std::function<bool()>& stop, std::optional<std::uint32_t> wanted = {},
+                             const std::function<bool(const Chapter&)>* match = nullptr);
     std::unordered_map<std::string, std::pair<std::uint16_t, std::uint16_t>> image_sizes;
     bool read_image_sizes(Chapter& chapter, std::string& error, const std::function<bool()>& stop) {
         const StageTimer timer{"image_header_read", 0};
@@ -2398,6 +2448,13 @@ std::size_t EpubDocument::retained_bytes() const {
     const auto& stream = *owner.chapter_stream;
     const auto& parser = stream.parser;
     bytes += sizeof(ChapterStream) + parser.frames.capacity() * sizeof(ChapterParser::Frame) + parser.xml.error.capacity();
+    if (stream.author) {
+        const auto& author = *stream.author;
+        bytes += sizeof(AuthorLayoutState) + author.sheet.report().allocated_bytes +
+            author.fonts.capacity() * sizeof(EmbeddedFont);
+        for (const auto& name : author.font_names) bytes += name.capacity();
+        for (const auto& font : author.fonts) bytes += font.resource.capacity();
+    }
     if (parser.fragment_ordinals) bytes += ChapterParser::kFragmentIndexBytes;
     if (parser.xml.html) bytes += parser.xml.html->retained_bytes();
     for (const auto& frame : parser.frames) {
@@ -2408,7 +2465,8 @@ std::size_t EpubDocument::retained_bytes() const {
         bytes += part->resource.capacity() + part->text.capacity() * sizeof(char32_t) +
             part->blocks.capacity() * sizeof(TextBlock) + part->runs.capacity() * sizeof(TextRun) +
             part->fragments.capacity() * sizeof(FragmentTarget) + part->links.capacity() * sizeof(DocumentLink) +
-            part->images.capacity() * sizeof(DocumentImage) + part->warnings.capacity() * sizeof(std::string);
+            part->images.capacity() * sizeof(DocumentImage) + part->warnings.capacity() * sizeof(std::string) +
+            part->author_styles.capacity() * sizeof(css::ComputedStyle);
         for (const auto& run : part->runs) bytes += run.source.resource.capacity() + run.source.node.capacity();
         for (const auto& fragment : part->fragments) bytes += fragment.id.capacity();
         for (const auto& link : part->links) bytes += link.resource.capacity() + link.fragment.capacity();
@@ -2426,49 +2484,84 @@ std::unique_ptr<EpubDocument> EpubDocument::detach_reader() {
     return reader;
 }
 void EpubDocument::reset_chapter_stream() { impl_->chapter_stream.reset(); }
+bool EpubDocument::has_chapter_stream(std::size_t index, ChapterLoad detail, std::uint32_t next_part) const {
+    const auto& stream = impl_->chapter_stream;
+    return stream && stream->index == index && stream->detail == detail && stream->parser.part == next_part;
+}
 bool EpubDocument::read_next_chapter_part(std::size_t index, Chapter& chapter, std::string& error,
                                           const std::function<bool()>& stop) {
+    return impl_->read_chapter_stream(index, chapter, error, ChapterLoad::Reading, stop);
+}
+bool EpubDocument::Impl::read_chapter_stream(std::size_t index, Chapter& chapter, std::string& error,
+                                              ChapterLoad detail, const std::function<bool()>& stop,
+                                              std::optional<std::uint32_t> wanted,
+                                              const std::function<bool(const Chapter&)>* match) {
 #ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
     ChapterStreamTiming timing;
 #endif
-    release(chapter); error.clear();
-    auto& owner = *impl_;
+    pico_page::release(chapter); error.clear();
+    const bool original = detail == ChapterLoad::Original;
     const auto abort = [&](const std::string& message) {
-        const bool retry = owner.chapter_stream && owner.enable_html_repair(index, owner.chapter_stream->parser.xml);
-        const auto wanted = owner.chapter_stream ? owner.chapter_stream->parser.part : 0;
-        error = message; owner.chapter_stream.reset(); release(chapter);
+        const bool retry = !original && chapter_stream && enable_html_repair(index, chapter_stream->parser.xml);
+        const auto failed_part = chapter_stream ? chapter_stream->parser.part : 0;
+        error = message; chapter_stream.reset(); pico_page::release(chapter);
         if (retry) {
-            while (read_next_chapter_part(index, chapter, error, stop)) {
-                if (chapter.part == wanted) return true;
+            while (read_chapter_stream(index, chapter, error, detail, stop)) {
+                if (chapter.part == failed_part) return true;
                 if (chapter.last_part) break;
             }
-            release(chapter);
+            pico_page::release(chapter);
         }
         return false;
     };
     if (stop && stop()) return abort(kChapterCancelled);
-    if (!owner.file || owner.txt || index >= owner.book().spine.size()) return abort("Invalid EPUB stream chapter");
-    if (owner.chapter_stream && owner.chapter_stream->index != index) owner.chapter_stream.reset();
-    if (!owner.chapter_stream) {
-        const auto& resource = owner.book().spine[index].resource;
-        const auto* entry = owner.find_member(resource);
+    if (!file || txt || index >= book().spine.size()) return abort("Invalid EPUB stream chapter");
+    if (chapter_stream && (chapter_stream->index != index || chapter_stream->detail != detail ||
+                          (wanted && chapter_stream->parser.part > *wanted)))
+        chapter_stream.reset();
+    if (!chapter_stream) {
+        const auto& resource = book().spine[index].resource;
+        const auto* entry = find_member(resource);
         if (!entry || entry->bytes > kMaxXmlBytes) return abort("Missing or oversized EPUB stream resource");
+        std::unique_ptr<AuthorLayoutState> author;
+        if (original) {
+            author = prepare_author_styles(index, stop);
+            if (stop && stop()) return abort(kChapterCancelled);
+            if (!author) return abort(kAuthorUnavailable);
+        }
         if (!memory_room(sizeof(ChapterStream) + sizeof(mz_zip_reader_extract_iter_state) + 96U * 1024))
             return abort(kChapterMemoryError);
-        auto stream = std::make_unique<ChapterStream>(index, resource);
-        if (index < owner.html_repair_offsets.size() && owner.html_repair_offsets[index] != kNoHtmlRepair) {
+        auto stream = std::make_unique<ChapterStream>(index, resource, detail);
+        stream->author = std::move(author);
+        stream->parser.author = stream->author.get();
+        if (index < html_repair_offsets.size() && html_repair_offsets[index] != kNoHtmlRepair) {
             stream->parser.xml.html_fallback = true;
-            stream->parser.xml.html_prefix_bytes = owner.html_repair_offsets[index];
+            stream->parser.xml.html_prefix_bytes = html_repair_offsets[index];
         }
-        stream->iterator = mz_zip_reader_extract_iter_new(&owner.zip, entry->member, 0);
+        stream->iterator = mz_zip_reader_extract_iter_new(&zip, entry->member, 0);
         if (!stream->iterator) return abort("Cannot initialize EPUB stream");
         const auto scalars = std::min<std::size_t>(entry->bytes, kMaxText) + 1024;
         if (memory_room(scalars * sizeof(char32_t))) stream->parser.chapter.text.reserve(scalars);
-        owner.chapter_stream = std::move(stream);
+        chapter_stream = std::move(stream);
     }
-    auto& stream = *owner.chapter_stream;
+    struct StreamCall {
+        std::unique_ptr<ChapterStream>& active;
+        ~StreamCall() {
+            if (!active) return;
+            active->parser.match_part = nullptr;
+            if (active->author) active->author->stop = nullptr;
+        }
+    } call{chapter_stream};
+    auto& stream = *chapter_stream;
     auto& parser = stream.parser;
-    parser.captured = false; parser.requested_part = parser.part;
+    parser.captured = false; parser.requested_part = wanted.value_or(parser.part);
+    parser.match_part = match;
+    if (stream.author) stream.author->stop = &stop;
+#ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
+    const auto measure_xml = [&](const auto& operation) {
+        return original ? timing.measure(timing.xml_us, operation) : timing.measure_xml(parser, operation);
+    };
+#endif
 #ifdef ESP_PLATFORM
     auto yielded_at = xTaskGetTickCount();
 #endif
@@ -2487,7 +2580,7 @@ bool EpubDocument::read_next_chapter_part(std::size_t index, Chapter& chapter, s
         if (!has_room) return abort(kChapterMemoryError);
         if (parser.xml.suspended) {
 #ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
-            const bool resumed = timing.measure_xml(parser, [&] { return parser.xml.resume(); });
+            const bool resumed = measure_xml([&] { return parser.xml.resume(); });
 #else
             const bool resumed = parser.xml.resume();
 #endif
@@ -2499,6 +2592,7 @@ bool EpubDocument::read_next_chapter_part(std::size_t index, Chapter& chapter, s
             if (!parser.xml.error.empty()) return abort(parser.xml.error);
             if (!parser.seen_body || (parser.part == 0 && parser.chapter.text.empty()))
                 return abort("Chapter contains no supported body content");
+            if (!parser.selected()) return abort(kPartUnavailable + parser.chapter.resource);
             parser.capture(true);
             break;
         }
@@ -2513,11 +2607,12 @@ bool EpubDocument::read_next_chapter_part(std::size_t index, Chapter& chapter, s
             const auto before = parser.xml.bytes;
             const auto feed = [&] { return parser.xml.feed(stream.input.data(), size, false); };
 #ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
-            const bool parsed = timing.measure_xml(parser, feed);
+            const bool parsed = measure_xml(feed);
+            timing.xml_feed_bytes += parser.xml.bytes - before;
 #else
             const bool parsed = feed();
 #endif
-            owner.xml_feed_bytes += parser.xml.bytes - before;
+            xml_feed_bytes += parser.xml.bytes - before;
             if (!parsed) return abort(parser.xml.error);
             continue;
         }
@@ -2527,7 +2622,7 @@ bool EpubDocument::read_next_chapter_part(std::size_t index, Chapter& chapter, s
         stream.input_finished = true;
         const auto finish = [&] { return parser.xml.feed("", 0, true); };
 #ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
-        const bool finished = timing.measure_xml(parser, finish);
+        const bool finished = measure_xml(finish);
 #else
         const bool finished = finish();
 #endif
@@ -2535,15 +2630,21 @@ bool EpubDocument::read_next_chapter_part(std::size_t index, Chapter& chapter, s
     }
     if (stop && stop()) return abort(kChapterCancelled);
     chapter = std::move(stream.ready);
+    if (original && !finish_author_part(chapter, stream.author.get(), !chapter.last_part, error, stop))
+        return abort(error);
     if (chapter.text.capacity() - chapter.text.size() > 4096 && memory_room(chapter.text.size() * sizeof(char32_t))) {
         std::u32string exact(chapter.text.begin(), chapter.text.end()); chapter.text.swap(exact);
     }
-    if (chapter.last_part) owner.chapter_stream.reset();
+    if (chapter.last_part) chapter_stream.reset();
     return true;
 }
 
 bool EpubDocument::load_chapter(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail, std::uint32_t part,
                                 const std::function<bool()>& stop, const std::function<void(const Chapter&)>& visit, bool sequential) {
+    if (sequential && detail == ChapterLoad::Original && part != kLastChapterPart && !impl_->txt) {
+        if (impl_->read_chapter_stream(index, chapter, error, detail, stop, part)) return true;
+        if (error == kChapterCancelled || error.rfind(kPartUnavailable, 0) == 0) return false;
+    }
     if (sequential && detail == ChapterLoad::Reading && part != kLastChapterPart && !impl_->txt) {
         if (impl_->chapter_stream && (impl_->chapter_stream->index != index ||
             impl_->chapter_stream->parser.part > part)) reset_chapter_stream();
@@ -2562,6 +2663,10 @@ bool EpubDocument::load_chapter(std::size_t index, Chapter& chapter, std::string
 bool EpubDocument::find_chapter_part(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
                                      const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop, const std::function<void(const Chapter&)>& visit, bool sequential) {
     reset_chapter_stream();
+    if (sequential && detail == ChapterLoad::Original && !impl_->txt) {
+        if (impl_->read_chapter_stream(index, chapter, error, detail, stop, {}, &match)) return true;
+        if (error == kChapterCancelled || error.rfind(kPartUnavailable, 0) == 0) return false;
+    }
     if (sequential && detail == ChapterLoad::Reading && !impl_->txt) {
         while (read_next_chapter_part(index, chapter, error, stop)) {
             if (visit) visit(chapter);
@@ -2697,6 +2802,37 @@ std::unique_ptr<AuthorLayoutState> EpubDocument::Impl::prepare_author_styles(
     return author;
 }
 
+bool EpubDocument::Impl::finish_author_part(Chapter& chapter, AuthorLayoutState* author, bool retain_author,
+                                             std::string& error, const std::function<bool()>& stop) {
+    chapter.author_style_fallback = !author;
+    if (author && std::none_of(chapter.runs.begin(), chapter.runs.end(), [&](const TextRun& run) {
+            const auto& style = chapter.style(run.style);
+            return !style.hidden && style.display != css::Display::None;
+        })) {
+        std::vector<css::ComputedStyle>().swap(chapter.author_styles);
+        chapter.author_style_fallback = true;
+    }
+    if (!chapter.author_style_fallback) {
+        if (retain_author) {
+            if (!author->fonts.empty()) {
+                std::size_t font_bytes = author->fonts.size() * sizeof(EmbeddedFont);
+                for (const auto& font : author->fonts) font_bytes += font.resource.size() + 1;
+                if (!memory_room(font_bytes)) return fail(error, kChapterMemoryError);
+                chapter.author_fonts = author->fonts;
+            }
+        } else chapter.author_fonts = std::move(author->fonts);
+        if (chapter.blocks.size() > 1 && !read_image_sizes(chapter, error, stop)) return false;
+    }
+#if defined(ESP_PLATFORM) && defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
+    ESP_LOGI("author_css", "part=%u styles=%u fallback=%d psram_min=%u internal_min=%u stack_free=%u",
+        static_cast<unsigned>(chapter.part), static_cast<unsigned>(chapter.author_styles.size()),
+        chapter.author_style_fallback, static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM)),
+        static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+        static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+#endif
+    return true;
+}
+
 bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
                               std::uint32_t wanted, const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop,
                               const std::function<void(const Chapter&)>& visit) {
@@ -2752,7 +2888,7 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
             parser.visit_part(true);
             if (!parser.captured && (wanted == kLastChapterPart || parser.selected())) parser.capture(true);
         }
-        if (!parser.captured) { pico_page::release(chapter); return fail(error, "Chapter part is not available: " + spine[index].resource); }
+        if (!parser.captured) { pico_page::release(chapter); return fail(error, kPartUnavailable + spine[index].resource); }
         if (detail == ChapterLoad::Mapping) {
             for (const auto& path : parser.css_links) {
                 if (stop && stop()) { pico_page::release(chapter); return fail(error, kChapterCancelled); }
@@ -2772,26 +2908,10 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
             chapter.plain_dom = parser.chapter.plain_dom;
             chapter.long_source_node = parser.chapter.long_source_node;
         }
-        chapter.author_style_fallback = detail == ChapterLoad::Original && !author;
-        if (author && std::none_of(chapter.runs.begin(), chapter.runs.end(), [&](const TextRun& run) {
-                const auto& style = chapter.style(run.style);
-                return !style.hidden && style.display != css::Display::None;
-            })) {
-            std::vector<css::ComputedStyle>().swap(chapter.author_styles);
-            chapter.author_style_fallback = true;
+        if (detail == ChapterLoad::Original && !finish_author_part(chapter, author.get(), false, error, stop)) {
+            pico_page::release(chapter);
+            return false;
         }
-        if (author && !chapter.author_style_fallback) {
-            chapter.author_fonts = std::move(author->fonts);
-            if (chapter.blocks.size() > 1 && !read_image_sizes(chapter, error, stop)) { pico_page::release(chapter); return false; }
-        }
-#if defined(ESP_PLATFORM) && defined(CONFIG_PICO_PAGE_DIAGNOSTIC_CONSOLE)
-        if (detail == ChapterLoad::Original)
-            ESP_LOGI("author_css", "part=%u styles=%u fallback=%d psram_min=%u internal_min=%u stack_free=%u",
-                static_cast<unsigned>(chapter.part), static_cast<unsigned>(chapter.author_styles.size()),
-                chapter.author_style_fallback, static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM)),
-                static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
-                static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
-#endif
         if (detail != ChapterLoad::Layout && detail != ChapterLoad::Mapping && chapter.text.capacity() - chapter.text.size() > 4096 &&
             memory_room(chapter.text.size() * sizeof(char32_t))) {
             std::u32string exact(chapter.text.begin(), chapter.text.end());

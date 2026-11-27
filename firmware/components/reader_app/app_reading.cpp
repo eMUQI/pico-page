@@ -6,6 +6,9 @@ bool ReaderApp::Impl::open(std::string path) {
     if (display.busy() || !card_available) return false;
     pause_statistics();
     statistics_flush_requested = statistics_collector.pending_count() != 0;
+    auto library_session = chapter_session_in_library && view == View::Library && path == book_path
+        ? std::move(chapter_session) : nullptr;
+    const auto library_stream_bytes = chapter_stream_bytes;
     abandon_content();
     invalidate_counting();
     if (counting_job) counting_job->cancel();
@@ -23,7 +26,13 @@ bool ReaderApp::Impl::open(std::string path) {
         else remember_position();
     }
     save_pages();
-    if (async_content) return begin_open(path);
+    if (async_content) {
+        if (library_session) {
+            chapter_session = std::move(library_session);
+            chapter_stream_bytes = library_stream_bytes;
+        }
+        return begin_open(path);
+    }
     std::string detail;
     if (!open_document(path, detail)) {
         book_path.clear();
@@ -137,6 +146,18 @@ void ReaderApp::Impl::draw_battery_icon(int center_x, int center_y) {
 }
 
 void ReaderApp::Impl::reclaim_caches() {
+#ifdef ESP_PLATFORM
+    constexpr std::size_t minimum_free_psram_bytes = 1536U * 1024;
+#endif
+    if (chapter_session_in_library) {
+        bool release_parked_session = view != View::Library || !card_available;
+#ifdef ESP_PLATFORM
+        release_parked_session |= heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < minimum_free_psram_bytes;
+#endif
+        PP_HOST_WORK(release_parked_session |= host_work::memory_pressure;)
+        if (release_parked_session) { release_chapter_session(); ++cache_evictions; }
+        return;
+    }
     if (view != View::Reading || display.busy() || content_loading ||
         (counting_job && (counting_job->request.kind == ContentJob::Kind::SleepCover || counting_job->request.kind == ContentJob::Kind::LockScreen))) return;
     auto page_bytes = page_index_bytes();
@@ -144,13 +165,23 @@ void ReaderApp::Impl::reclaim_caches() {
         if (cache_usage(page_bytes).retained > cache_target) return true;
         PP_HOST_WORK(if (host_work::memory_pressure) return true;)
 #ifdef ESP_PLATFORM
-        return heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < 1536U * 1024 ||
+        return heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < minimum_free_psram_bytes ||
                heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 512U * 1024;
 #else
         return false;
 #endif
     };
     if (!pressure()) return;
+    if (prepared_chapter && prepared_chapter->request.chapter_session != chapter_session) {
+        prepared_chapter.reset(); ++cache_evictions;
+        if (!pressure()) return;
+    }
+    if (counting_job && counting_job->request.chapter_prefetch &&
+        counting_job->request.chapter_session != chapter_session) {
+        chapter_prefetch_cancelled_for_pressure = true;
+        counting_job->cancel();
+        return;
+    }
     if (chapter_session) {
         release_chapter_session(); ++cache_evictions;
         if (!pressure()) return;
