@@ -456,7 +456,7 @@ bool ContentJob::start() {
     if ((request.kind == Kind::Pagination || request.kind == Kind::FontIdentity || request.kind == Kind::LibraryCovers ||
          request.kind == Kind::PageCacheRead || request.kind == Kind::PageCacheWrite || request.kind == Kind::ContentCacheWrite ||
          request.kind == Kind::SleepCover || request.kind == Kind::LockScreen || request.kind == Kind::LockScreenPreview ||
-         dictionary_kind(request.kind) || request.chapter_prefetch) &&
+         request.kind == Kind::ReadingStatistics || dictionary_kind(request.kind) || request.chapter_prefetch) &&
         heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < required_internal) {
         start_failure_ = StartFailure::InternalMemory;
         return false;
@@ -503,6 +503,7 @@ void ContentJob::run() {
     const bool failed = !result.error.empty() || !result.failed_images.empty() ||
         (request.kind == Kind::SaveProgress && result.progress.status != StoreStatus::Ok) ||
         (request.kind == Kind::SaveBookmarks && result.bookmark_status != StoreStatus::Ok) ||
+        (request.statistics && request.statistics->status != StoreStatus::Ok) ||
         (request.kind == Kind::ClearCache && result.clear_cache_status != StoreStatus::Ok);
     auto outcome = failed ? diagnostics::Outcome::Failure : diagnostics::Outcome::Success;
     if (!failed && request.kind == Kind::LibraryCovers && result.failure_kind == ContentFailureKind::NoCover)
@@ -524,6 +525,7 @@ void ContentJob::run() {
             const bool failed = !job.result.error.empty() || !job.result.failed_images.empty() ||
                 (job.request.kind == Kind::SaveProgress && job.result.progress.status != StoreStatus::Ok) ||
                 (job.request.kind == Kind::SaveBookmarks && job.result.bookmark_status != StoreStatus::Ok) ||
+                (job.request.statistics && job.request.statistics->status != StoreStatus::Ok) ||
                 (job.request.kind == Kind::ClearCache && job.result.clear_cache_status != StoreStatus::Ok);
             ESP_LOGI("reader_perf", "stage=content_worker us=%lld min_us=0 job=%p kind=%u generation=%llu outcome=%s chapter=%u part=%u scalars=%u retained_hit=%d cache_committed=%d",
                 static_cast<long long>(us), static_cast<void*>(&job), static_cast<unsigned>(job.request.kind),
@@ -545,6 +547,10 @@ void ContentJob::run() {
     } finish{*this};
     result.offset = request.offset;
     const auto stop = [this] { return checkpoint(); };
+    if (request.kind == Kind::ReadingStatistics) {
+        request.statistics->run(FileStore(request.root), stop);
+        return;
+    }
     if (request.kind == Kind::StorageScan || request.kind == Kind::ClearCache) {
         FileStore store(request.root);
         if (request.kind == Kind::ClearCache) {

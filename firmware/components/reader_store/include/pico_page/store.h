@@ -2,6 +2,7 @@
 
 #include "pico_page/record.h"
 #include "pico_page/i18n.h"
+#include "pico_page/statistics_store.h"
 
 #include <ctime>
 #include <optional>
@@ -90,6 +91,7 @@ bool valid_dictionary_id(const std::string& path);
 
 struct ReaderSettings {
     i18n::Language language = i18n::Language::SimplifiedChinese;
+    StatisticsOptions statistics;
     std::string font = "Fonts/LXGWWenKai-Regular.ttf";
     std::string font_weight = "regular";  // light, regular, medium or bold; unsupported heavier weights are synthesized.
     int original_weight_adjustment = 0;
@@ -239,6 +241,25 @@ struct StorageUsage {
 class FileStore {
 public:
     explicit FileStore(std::string card_root);
+
+    static std::string position_cache_name(const std::string& book_path);
+    std::string encode_cached_position(const std::string& book_path, const ReadingRecord& visible,
+                                       const std::string& chapter, const std::string& percent, i18n::Language language) const;
+    std::pair<std::string, std::string> recalled_position(const std::string& book_path,
+                                                          i18n::Language language) const;
+
+    int cached_progress_percent(const std::string& book_path, const ReadingRecord& required) const;
+
+    StoreStatus load_statistics_options(StatisticsOptions& options) const;
+    StoreStatus save_statistics_options(const StatisticsOptions& options, const StatisticsOptions* expected = nullptr) const;
+    StoreStatus begin_statistics_writer(std::uint64_t& writer) const;
+    StoreStatus statistics_book_id(const StatisticsBookSource& source, std::uint64_t& id, bool create) const;
+    StoreStatus commit_statistics(std::uint64_t writer, const StatisticsBookSource& source,
+                                  const std::vector<StatisticsWrite>& records) const;
+    StoreStatus query_statistics(const StatisticsQuery& query, StatisticsReport& report,
+                                 const std::function<bool()>& stop = {}) const;
+    /** A single-book clear may retain the active writer by fencing all issued record IDs through discard_through. */
+    StoreStatus clear_statistics(std::uint64_t book_id, std::uint64_t discard_through = UINT64_MAX) const;
 
     /**
      * Read a committed position matching the caller-verified original content.
@@ -434,6 +455,12 @@ public:
                            std::string_view prefix = {}, std::string_view suffix = {}) const;
 
 private:
+    std::pair<std::string, std::string> read_cached_position(const std::string& path,
+                                                             std::optional<i18n::Language> language,
+                                                             const ReadingRecord* required) const;
+    int current_statistics_progress(std::uint64_t id, const StatisticsBookSource& source,
+                                    std::uint64_t recorded_signature, std::string& bound_content) const;
+    std::uint64_t position_signature(const std::string& path, const ReadingRecord& record) const;
     std::string root_;
 };
 

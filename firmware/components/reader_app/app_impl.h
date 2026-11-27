@@ -196,7 +196,11 @@ enum Control {
     DictionarySources, DictionaryNextEntry, DictionaryStart = 55008, DictionaryEnd, DictionaryManage,
     DictionaryPreviousSource, DictionaryNextSource,
     DictionaryStartPrevious, DictionaryStartNext, DictionaryEndPrevious, DictionaryEndNext,
-    DictionaryToggleBase = 56000, DictionaryUpBase = 56100, DictionaryDownBase = 56200, DictionarySourceBase = 56400
+    DictionaryToggleBase = 56000, DictionaryUpBase = 56100, DictionaryDownBase = 56200, DictionarySourceBase = 56400,
+    StatisticsOpen = 57000, StatisticsOpenBook, StatisticsCalendar, StatisticsBooks, StatisticsSettings,
+    StatisticsUnknown, StatisticsToggle, StatisticsMinDown, StatisticsMinUp,
+    StatisticsMaxDown, StatisticsMaxUp, StatisticsApply, StatisticsClear, StatisticsConfirm, StatisticsRetry,
+    StatisticsMonthBase = 57100, StatisticsDayBase = 57200, StatisticsBookBase = 57300
 };
 static_assert(ContentsBookmarks < EntryBase);
 struct PageEffectChoice {
@@ -326,6 +330,46 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool library_uses_body = false, library_font_reload = true;
     Display display{*this};
     Session session{display};
+    ReadingStatistics statistics_collector;
+    StatisticsOptions statistics_options;
+    StatisticsReport statistics_report;
+    StoreStatus statistics_status = StoreStatus::Ok;
+    std::uint64_t statistics_resolved_id = 0;
+    bool statistics_loading = false, statistics_save_failed = false;
+    bool statistics_redraw = false, statistics_running = false, statistics_flush_requested = false;
+    bool statistics_resume_open = false, statistics_confirmed = false;
+    bool statistics_serial_transfer = false, statistics_lost_on_handoff = false, statistics_sleep_flushed = false;
+    std::uint64_t statistics_writer = 0, statistics_mount = 1, statistics_generation = 0;
+    std::uint64_t statistics_book = 0, statistics_session = 0, statistics_layout = 0, statistics_revision = 0;
+    std::uint64_t statistics_next_sample_ms = 0, statistics_retry_ms = 0;
+    std::map<std::uint64_t, StatisticsBookSource> statistics_sources;
+    std::shared_ptr<StatisticsWork> statistics_pending;
+    std::optional<std::pair<View, int>> statistics_waiting_control;
+    StatisticsQuery statistics_last_query;
+    std::optional<StatisticsBookSource> statistics_lookup;
+#ifndef ESP_PLATFORM
+    std::function<StatisticsClock()> statistics_test_clock;
+#endif
+    std::uint64_t statistics_milliseconds() const;
+    StatisticsClock statistics_now() const;
+    void adopt_statistics_options(StatisticsOptions options);
+    void open_statistics_book();
+    bool statistics_body_visible() const;
+    void pause_statistics();
+    void resume_statistics();
+    void confirm_statistics_body(const Frame& frame);
+    void run_statistics(bool allow_start);
+    void flush_statistics_for_handoff();
+    void retire_statistics_mount();
+    void complete_statistics_work(StatisticsWork& work);
+    std::shared_ptr<StatisticsWork> statistics_batch();
+    void request_statistics(StatisticsQuery query, std::optional<StatisticsBookSource> lookup = {});
+    void cancel_statistics_query();
+    bool statistics_mutating() const;
+    void save_statistics_options(StatisticsOptions options);
+    void clear_statistics(std::uint64_t book_id);
+    void redraw_statistics_when_ready();
+
     InputRouter router;
     EpubDocument document;
     EpubDocument::VerifiedIndex verified_reader_index() const {
@@ -1042,7 +1086,13 @@ struct ReaderApp::Impl final : DisplayBackend {
 
     void stop_counting_job() {
         sleep_cover_deadline.reset();
-        if (counting_job) { counting_job->cancel(); counting_job.reset(); }
+        if (counting_job) {
+            counting_job->cancel();
+            if (counting_job->request.kind == ContentJob::Kind::ReadingStatistics) {
+                counting_job->wait();
+                poll_counting_job();
+            } else counting_job.reset();
+        }
         counting_session.reset();
         font_scan.reset();
     }
@@ -1086,6 +1136,10 @@ struct ReaderApp::Impl final : DisplayBackend {
                 diagnostic_layout = frame.token.layout;
             }
         )
+        pause_statistics();
+        if (frame.purpose == FramePurpose::Body) statistics_confirmed = false;
+        if (statistics_collector.pending_count() && (view != View::Reading || image_viewing || content_loading))
+            statistics_flush_requested = true;
         pending = frame;
         return true;
     }
@@ -1555,7 +1609,10 @@ struct ReaderApp::Impl final : DisplayBackend {
         last_clock_sync_at = store.last_clock_sync();
         refresh_badge_config();
         if (!ui.open_fallback()) return false;
-        settings = store.load_settings().settings;
+        const auto configuration = store.load_settings();
+        settings = configuration.settings;
+        if (!configuration.diagnostics.empty()) settings.statistics.enabled = false;
+        adopt_statistics_options(settings.statistics);
         library_grid = settings.library_view == "grid";
         library_sort = settings.library_sort;
         std::string detail;
@@ -1613,38 +1670,17 @@ struct ReaderApp::Impl final : DisplayBackend {
         Anchor anchor;
     };
     std::optional<PendingPosition> pending_position;
-    static std::string position_name(const std::string &relative) {
-        char name[40];
-        std::snprintf(name, sizeof(name), "positions/%016llx", path_hash(relative));
-        return name;
-    }
-    std::string position_header(const std::string &relative, const struct stat &info) const {
-        return "PPPOS2\n" + std::string(i18n::language_code(settings.language)) + "\n" + relative + "\n" + std::to_string(info.st_size) + " " +
-               std::to_string(static_cast<long long>(info.st_mtime)) + "\n";
-    }
     void remember_position() {
-        struct stat info{};
-        if (!has_book() || !card_available || !session.visible_record() || page.end <= page.start ||
-            stat((root + "/" + book_path).c_str(), &info) != 0) return;
-        const auto name = position_name(book_path);
-        auto bytes = position_header(book_path, info) + chapter_label() + "\n" + book_percent();
+        if (!has_book() || !card_available || !session.visible_record() || page.end <= page.start) return;
+        const auto name = FileStore::position_cache_name(book_path);
+        auto bytes = store.encode_cached_position(book_path, *session.visible_record(), chapter_label(), book_percent(), settings.language);
+        if (bytes.empty()) return;
         if (session.needs_save()) {
             pending_position = PendingPosition{name, std::move(bytes), document.metadata().book_id, session.visible_record()->anchor};
             return;
         }
         pending_position.reset();
         store.save_cache(name, bytes);
-    }
-    std::pair<std::string, std::string> recalled_position(const std::string &relative) {
-        struct stat info{};
-        std::string cached;
-        if (stat((root + "/" + relative).c_str(), &info) != 0) return {};
-        const auto header = position_header(relative, info);
-        if (store.load_cache(position_name(relative), header.size() + 512, cached) != StoreStatus::Ok ||
-            cached.compare(0, header.size(), header) != 0) return {};
-        const auto split = cached.find('\n', header.size());
-        if (split == std::string::npos) return {};
-        return {cached.substr(header.size(), split - header.size()), cached.substr(split + 1)};
     }
     void describe(Entry &entry);
     struct CoverEntry {
@@ -3230,7 +3266,10 @@ struct ReaderApp::Impl final : DisplayBackend {
             text(usb_active ? tr("USB 文件传输已开启") : tr("USB 文件传输未开启"), 36, 160, 40, 612, 1, true);
             const int height = wrapped(usb_active ? tr("用数据线连接电脑后，TF 卡会显示为可移动磁盘。传输期间设备暂停阅读和同步。完成后先在电脑上安全弹出，再退出并重启。")
                                                   : tr("传输期间设备暂停阅读和同步。完成后先在电脑上安全弹出，再退出并重启。"), 36, 244, 612, 28);
-            if (!message.empty()) wrapped(message, 36, 272 + height, 612, 26);
+            int notice_y = 272 + height;
+            if (!message.empty()) notice_y += wrapped(message, 36, notice_y, 612, 26) + 12;
+            if (statistics_lost_on_handoff)
+                wrapped(tr("部分阅读时长未保存"), 36, notice_y, 612, 26);
             button(UsbExit, tr("退出并重启"), 24, 1080, 636, 96);
         }
     }
@@ -3488,6 +3527,27 @@ struct ReaderApp::Impl final : DisplayBackend {
             return Context::Tools;
         }
     }
+    enum class StatisticsPage { Overview, Year, Month, Day, Books, Book, Settings, ClearBook, ClearAll };
+    StatisticsPage statistics_page = StatisticsPage::Overview, statistics_book_parent = StatisticsPage::Books;
+    bool statistics_from_details = false;
+    int statistics_today = -1, statistics_year = 1970, statistics_month = 1, statistics_day = -1;
+    unsigned statistics_list_page = 0;
+    std::uint64_t statistics_book_id = 0;
+    std::string statistics_book_title, statistics_book_path;
+    StatisticsOptions statistics_draft;
+    const char* statistics_entry(bool book) const;
+    void open_statistics(bool book);
+    void load_statistics_page();
+    void draw_statistics();
+    void draw_statistics_overview();
+    void draw_statistics_calendar();
+    void draw_statistics_books();
+    void draw_statistics_settings();
+    void statistics_control(int id);
+    void statistics_back();
+    void statistics_footer(const std::string& middle, bool previous, bool next);
+    void statistics_heat_mark(int x, int y, int size, std::uint64_t duration_ms);
+    std::string statistics_duration(std::uint64_t duration_ms) const;
     void input(const AppInput &input);
 };
 

@@ -191,7 +191,8 @@
     "把原位置上同名的": "把原位置上同名的",
     "目录移到书的新位置旁边。": "目錄移到書的新位置旁邊。",
     "。": "。",
-    "、": "、"
+    "、": "、",
+    "在书库首页点「阅读统计」查看本机阅读时长，或在书籍详情点「本书统计」查看单本书的记录。": "在書庫首頁點「閱讀統計」查看本機閱讀時長，或在書籍詳情點「本書統計」查看單本書的紀錄。"
   },
   "en": {
     "开始使用": "Get started",
@@ -385,6 +386,7 @@
     "把原位置上同名的": "Move the matching",
     "目录移到书的新位置旁边。": " folder from the old location next to the book in its new location.",
     "。": ".",
-    "、": ", "
+    "、": ", ",
+    "在书库首页点「阅读统计」查看本机阅读时长，或在书籍详情点「本书统计」查看单本书的记录。": "Select Reading stats on the library home screen to see time spent reading on this device. Open a book’s details and select Book stats to see its reading history."
   }
 }

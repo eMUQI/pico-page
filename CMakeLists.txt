@@ -39,11 +39,21 @@ target_link_libraries(core_test PRIVATE reader_core reader_input)
 target_compile_options(core_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME core COMMAND core_test)
 
+add_executable(reading_statistics_test tests/reading_statistics_test.cpp)
+target_link_libraries(reading_statistics_test PRIVATE reader_core)
+target_compile_options(reading_statistics_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME reading_statistics COMMAND reading_statistics_test)
+
 add_subdirectory(firmware/components/reader_store)
 add_executable(store_test tests/store_test.cpp)
 target_link_libraries(store_test PRIVATE reader_store)
 target_compile_options(store_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME store COMMAND store_test)
+
+add_executable(statistics_store_test tests/statistics_store_test.cpp)
+target_link_libraries(statistics_store_test PRIVATE reader_store)
+target_compile_options(statistics_store_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME statistics_store COMMAND statistics_store_test)
 
 add_executable(store_sync_test tests/store_sync_test.cpp)
 target_link_libraries(store_sync_test PRIVATE reader_store)
@@ -163,6 +173,11 @@ target_compile_options(image_cache_bench PRIVATE -Wall -Wextra -Werror)
 
 add_executable(onboarding_test tests/onboarding_test.cpp)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(reading_statistics_bench EXCLUDE_FROM_ALL tools/reading_statistics_bench.cpp)
+    target_link_libraries(reading_statistics_bench PRIVATE reader_app)
+    target_link_options(reading_statistics_bench PRIVATE "LINKER:--wrap=fsync" "LINKER:--wrap=rename")
+    target_compile_options(reading_statistics_bench PRIVATE -Wall -Wextra -Werror)
+
     add_executable(large_epub_probe tests/large_epub_probe.cpp tests/host_allocations.cpp)
     add_dependencies(large_epub_probe document_fixtures_target)
     target_link_libraries(large_epub_probe PRIVATE reader_app)
@@ -187,6 +202,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_compile_definitions(app_test PRIVATE PICO_PAGE_WRAP_MALLOC_TEST=1 PICO_PAGE_WRAP_LIBRARY_IO_TEST=1)
 endif()
 add_test(NAME app COMMAND app_test ${document_fixtures}
+    ${CMAKE_CURRENT_SOURCE_DIR}/.local/card/Fonts/LXGWWenKai-Regular.ttf)
+
+add_executable(statistics_app_test tests/statistics_app_test.cpp)
+add_dependencies(statistics_app_test document_fixtures_target)
+target_link_libraries(statistics_app_test PRIVATE reader_app)
+target_compile_options(statistics_app_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME statistics_app COMMAND statistics_app_test ${document_fixtures}
     ${CMAKE_CURRENT_SOURCE_DIR}/.local/card/Fonts/LXGWWenKai-Regular.ttf)
 
 add_executable(provision_test tests/provision_test.cpp)

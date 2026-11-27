@@ -6,6 +6,8 @@
 
 当前发布版本为 [0.8.0](releases/0.8.0.md)，主线可能包含尚未发布的改动。双 4 MiB 布局的 [OTA 清单](https://picopage.wulu.zone/firmware/manifest.json)固定提供 0.6.2，双 7 MiB 布局使用[独立清单](https://picopage.wulu.zone/firmware/ota-v2/manifest.json)；旧布局设备需通过[官网安装页](https://picopage.wulu.zone/install/)完整重装一次，见[分区迁移方案](planning/ota-partition-migration.md)。
 
+主线开发版支持离线阅读统计，入口及计时规则见[使用指南](user/runtime.md#阅读统计)。
+
 ## 已知限制
 
 - 原书排版是 EPUB 的默认排版，仍为试验功能；部分书首次打开有明显等待，全书页数需要后台统计。支持范围见[原书排版](development/original-layout.md)。

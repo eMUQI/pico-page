@@ -45,3 +45,8 @@ sleep_screen = "cover"
 sleep_image = ""
 # Transparent PNGs preserve the pre-sleep frame when enabled.
 sleep_overlay = false
+
+[statistics]
+enabled = true
+minimum_seconds = 5
+maximum_seconds = 120

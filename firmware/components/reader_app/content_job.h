@@ -6,6 +6,7 @@
 #include "pico_page/diagnostics.h"
 #include "page_cache.h"
 #include "content_cache.h"
+#include "statistics_work.h"
 #include "pico_page/graphics.h"
 #include "pico_page/store.h"
 #include "pico_page/sync.h"
@@ -90,7 +91,7 @@ struct DictionaryItem {
 
 class ContentJob {
 public:
-    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks, LockScreenList, LockScreen, ContentCacheWrite, LockScreenPreview, DictionaryList, DictionaryPrepare, DictionaryLookup, DictionaryRead, DictionaryPage, StorageScan, ClearCache };
+    enum class Kind { Pagination, FontIdentity, Image, ImageViewer, Open, Chapter, SaveProgress, LibraryCovers, PageCacheRead, PageCacheWrite, Inspect, SleepCover, MapUpload, MapDownload, SaveBookmarks, LockScreenList, LockScreen, ContentCacheWrite, LockScreenPreview, DictionaryList, DictionaryPrepare, DictionaryLookup, DictionaryRead, DictionaryPage, StorageScan, ClearCache, ReadingStatistics };
     static bool dictionary_kind(Kind kind) {
         return kind == Kind::DictionaryList || kind == Kind::DictionaryPrepare ||
                kind == Kind::DictionaryLookup || kind == Kind::DictionaryRead || kind == Kind::DictionaryPage;
@@ -106,6 +107,7 @@ public:
     struct Request {
         std::string path, font;
         std::string sleep_image;
+        std::shared_ptr<StatisticsWork> statistics;
         bool sleep_overlay = false;
         std::shared_ptr<graphics::Canvas> lock_background;
         std::string lock_screen_shown;

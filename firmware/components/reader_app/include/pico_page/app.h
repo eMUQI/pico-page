@@ -1,5 +1,6 @@
 #pragma once
 #include "pico_page/core.h"
+#include "pico_page/reading_statistics.h"
 #include "pico_page/graphics.h"
 #include "pico_page/sync.h"
 #include "pico_page/provision.h"
@@ -48,7 +49,8 @@ enum class View {
     Update,
     Dictionary,
     DictionarySettings,
-    LanguageSettings
+    LanguageSettings,
+    Statistics
 };
 enum class PageEffect { Off, Ripple, Diagonal, TouchPosition };
 enum class PowerAction { None, Shutdown, Restart };
@@ -172,7 +174,11 @@ class ReaderApp {
     ReaderApp &operator=(const ReaderApp &) = delete;
     /** Drops all verified identities before storage can change outside this application. */
     void invalidate_identity_cache();
+    void set_diagnostic_transfer(bool active);
     bool initialize();
+#ifndef ESP_PLATFORM
+    void set_statistics_clock_for_test(std::function<StatisticsClock()> source);
+#endif
     /** Refuses during active sync or portal work; cancelled HTTP may drain while local reading resumes. */
     bool open_book(const std::string &relative_path);
     /** Updates the battery reading; nullopt means unknown. Call regularly on the owning task.
