@@ -127,6 +127,19 @@ void ReaderApp::Impl::save_refresh(const ReaderSettings &values) {
 
 ReaderApp::ReaderApp(std::string root, std::string writer, bool controlled_storage, bool async_content)
     : impl_(std::make_unique<Impl>(std::move(root), std::move(writer))) { impl_->controlled_storage = controlled_storage; impl_->async_content = async_content; }
+bool ReaderApp::set_diagnostic_transfer(bool active) {
+    if (impl_->statistics_serial_transfer == active) return true;
+    if (active) {
+        if (!impl_->statistics_worker_idle()) return false;
+        impl_->pause_statistics();
+        invalidate_identity_cache();
+        impl_->persist();
+    }
+    impl_->statistics_serial_transfer = active;
+    if (!active) impl_->resume_statistics();
+    return true;
+}
+
 void ReaderApp::invalidate_identity_cache() {
     impl_->library_font_reload = true;
     impl_->drain_save(); impl_->abandon_content(); impl_->foreground_job.reset(); impl_->stop_covers();
@@ -190,7 +203,11 @@ void ReaderApp::record_install() {
     impl_->save_update_state();
 }
 void ReaderApp::input(const AppInput &event) {
+    if (event.event.phase == Phase::Begin) impl_->statistics_waiting_control.reset();
+    const bool reading = impl_->statistics_running && event.event.phase == Phase::Begin;
+    if (reading) impl_->pause_statistics();
     impl_->input(event);
+    if (reading && !impl_->pending) impl_->resume_statistics();
 }
 bool ReaderApp::can_long_press_at(int x, int y) const {
     if (impl_->image_at(x, y)) return true;
@@ -217,7 +234,8 @@ bool ReaderApp::prepare_frame() {
     const auto paused = [](const std::unique_ptr<ContentJob>& job) {
         return !job || !job->started() || job->done() ||
             (job->request.kind != ContentJob::Kind::Pagination &&
-             job->request.kind != ContentJob::Kind::Chapter && !ContentJob::dictionary_kind(job->request.kind)) || job->pause();
+             job->request.kind != ContentJob::Kind::Chapter && !ContentJob::dictionary_kind(job->request.kind) &&
+             !(job->request.statistics && job->request.statistics->kind == StatisticsWork::Kind::Query)) || job->pause();
     };
     const bool foreground = paused(impl_->foreground_job);
     const bool background = paused(impl_->counting_job);
@@ -236,6 +254,8 @@ void ReaderApp::complete_frame(bool success) {
         impl_->custom_rotation_name.clear();
     }
     if (success) {
+        if (impl_->statistics_collector.pending_count())
+            impl_->statistics_commit_after_ms = impl_->statistics_milliseconds() + background_idle_ms;
         if (impl_->view == View::Reading && !impl_->image_viewing && impl_->body_images_pending && !impl_->inline_image_pending) {
             const auto delay = frame.purpose == FramePurpose::Body && !impl_->session.visible_record()
                 ? std::chrono::milliseconds(0) : inline_image_delay;
@@ -247,6 +267,7 @@ void ReaderApp::complete_frame(bool success) {
             ++impl_->body_updates;
     }
     if (result && impl_->session.presented(*result)) {
+        impl_->confirm_statistics_body(frame);
         if (frame.purpose == FramePurpose::Body) impl_->remember_page();
         impl_->confirmed_link_return = impl_->link_return;
         impl_->confirmed_sync_return = impl_->sync_return;
@@ -270,7 +291,9 @@ void ReaderApp::complete_frame(bool success) {
         if (impl_->sleep_wait_footer) impl_->restore_sleep_wait();
         else impl_->sleep_wait_restore_pending = false;
     }
+    if (success && frame.purpose != FramePurpose::Body) impl_->resume_statistics();
     if (!success) {
+        impl_->statistics_confirmed = false;
         impl_->abandon_content();
         if (impl_->usb_prepared) {
             impl_->message = impl_->tr("屏幕更新失败，请退出并重启。");
@@ -317,7 +340,11 @@ int ReaderApp::auto_sleep_minutes() const {
 UsbTransferAction ReaderApp::take_usb_transfer_action() {
     if (impl_->usb_action == UsbTransferAction::Start) {
         if (impl_->usb_request_view && impl_->view != *impl_->usb_request_view) impl_->usb_action = UsbTransferAction::None;
-        else if (impl_->cancel_custom_preparation()) return UsbTransferAction::None;
+        else if (impl_->cancel_custom_preparation() || !impl_->statistics_worker_idle()) return UsbTransferAction::None;
+        else if (impl_->statistics_collector.pending_count() && !impl_->save_failed && impl_->session.needs_save()) {
+            impl_->schedule_save();
+            return UsbTransferAction::None;
+        } else if (!impl_->save_failed && !impl_->flush_statistics_for_handoff()) return UsbTransferAction::None;
     }
     impl_->usb_request_view.reset();
     return std::exchange(impl_->usb_action, UsbTransferAction::None);
@@ -332,11 +359,13 @@ bool ReaderApp::prepare_usb_transfer(std::string* problem) {
         impl_->foreground_job->cancel(); return refuse(impl_->tr("正在结束后台任务，请稍后重试。"));
     }
     if (impl_->cancel_custom_preparation()) return refuse(impl_->tr("正在结束后台任务，请稍后重试。"));
+    if (!impl_->statistics_worker_idle()) return refuse(impl_->tr("正在结束后台任务，请稍后重试。"));
     invalidate_identity_cache();
     if (!impl_->card_available) return refuse(impl_->tr("没有可用的 TF 卡。"));
     if (impl_->network_worker_id || impl_->portal_live || impl_->usb_prepared || impl_->display.busy() || impl_->active_network)
         return refuse(impl_->tr("设备正忙，请稍后重试。"));
     if (!impl_->persist()) return refuse(impl_->tr("阅读位置没有保存，没有进入 USB 传输。请稍后重试。"));
+    if (!impl_->flush_statistics_for_handoff()) return refuse(impl_->tr("正在结束后台任务，请稍后重试。"));
     save_clock_sync();
     impl_->cancel_sync();
     impl_->save_pages();
@@ -355,6 +384,7 @@ bool ReaderApp::prepare_usb_transfer(std::string* problem) {
     impl_->entries.clear();
     impl_->clear_page_history();
     impl_->covers.clear();
+    impl_->retire_statistics_mount();
     impl_->card_available = false;
     impl_->usb_prepared = true;
     return true;
@@ -372,7 +402,7 @@ PortalAction ReaderApp::take_portal_action() {
         if (impl_->view != impl_->portal_request_view) {
             impl_->portal_action = PortalAction::None;
             impl_->portal_requested = false;
-        } else if (impl_->cancel_custom_preparation()) return PortalAction::None;
+        } else if (impl_->cancel_custom_preparation() || !impl_->statistics_worker_idle()) return PortalAction::None;
     }
     return std::exchange(impl_->portal_action, PortalAction::None);
 }
@@ -500,7 +530,7 @@ WifiTargets ReaderApp::upload_targets() const {
 }
 bool ReaderApp::keyboard_visible() const { return impl_->view == View::TextEntry; }
 bool ReaderApp::prepare_portal(bool station) {
-    if (impl_->cancel_custom_preparation()) return false;
+    if (impl_->cancel_custom_preparation() || !impl_->statistics_worker_idle()) return false;
     if (impl_->portal_live || impl_->network_worker_id) return false;
     if (impl_->content_loading || impl_->usb_prepared || impl_->display.busy() || impl_->active_network ||
         !impl_->card_available || !impl_->persist() || !wifi_enabled()) return false;
@@ -510,6 +540,7 @@ bool ReaderApp::prepare_portal(bool station) {
     impl_->clear_prefetch();
     impl_->release_counting();
     impl_->stop_counting_job();
+    impl_->pause_statistics();
     if (!impl_->portal_requested) ++impl_->portal_generation;
     impl_->portal_requested = false;
     impl_->portal_live = true;
@@ -533,6 +564,9 @@ void ReaderApp::show_portal(const PortalStatus &status) {
         impl_->portal_live = impl_->portal_requested = false;
         const bool open_wifi = std::exchange(impl_->portal_open_wifi, false) || view == View::WifiSettings;
         if (impl_->portal_ready_received && impl_->card_available) {
+            StatisticsOptions options;
+            if (impl_->store.load_statistics_options(options) != StoreStatus::Ok) options.enabled = false;
+            impl_->adopt_statistics_options(options);
             impl_->scan_fonts();
             impl_->effective_font.clear();
             impl_->custom_prepare_finished = false; impl_->custom_prepare_attempts = 0;
@@ -590,6 +624,12 @@ void ReaderApp::show_portal(const PortalStatus &status) {
 }
 bool ReaderApp::power_menu_pending() const { return impl_->power_menu_wait.has_value(); }
 bool ReaderApp::show_power_menu() {
+    if (impl_->counting_job && impl_->counting_job->request.statistics) {
+        impl_->pause_statistics();
+        impl_->counting_job->cancel();
+        impl_->power_menu_wait = impl_->view;
+        return true;
+    }
     const bool dictionary_view = impl_->view == View::Dictionary || impl_->view == View::DictionarySettings;
     if (dictionary_view && !impl_->network_worker_id && !impl_->active_network && !impl_->usb_prepared &&
         (impl_->content_loading || impl_->foreground_job)) {
@@ -613,6 +653,7 @@ bool ReaderApp::show_power_menu() {
     return impl_->view == View::PowerMenu || impl_->power_menu_wait.has_value();
 }
 PowerRequest ReaderApp::take_power_request() {
+    if (impl_->power_request.action != PowerAction::None && !impl_->statistics_worker_idle()) return {};
     return std::exchange(impl_->power_request, PowerRequest{});
 }
 void ReaderApp::power_unavailable(const std::string& message) {
@@ -659,6 +700,10 @@ bool ReaderApp::prepare_power(PowerRequest request) {
             : impl_->trf("{data}没有保存到 TF 卡，仍要关机吗？", {{"data", unsaved}});
         impl_->draw_power_menu(); impl_->overlay(); return false;
     }
+    if (saved && !impl_->flush_statistics_for_handoff()) {
+        impl_->power_request = request;
+        return false;
+    }
     impl_->remember_position();
     impl_->cancel_sync();
     impl_->drain_save(); impl_->abandon_content(); impl_->foreground_job.reset();
@@ -688,6 +733,8 @@ void ReaderApp::show_power_off_help() {
 bool ReaderApp::begin_sleep() {
     if (impl_->display.busy() || impl_->power_menu_wait || impl_->usb_prepared ||
         impl_->view == View::PowerMenu || impl_->view == View::PowerOff || update_busy()) return false;
+    impl_->pause_statistics();
+    impl_->statistics_sleep_flushed = false;
     impl_->sleep_onboarding = impl_->view == View::Onboarding;
     impl_->sleep_origin = impl_->origin_for(impl_->view);
     impl_->sleep_destination_captured = true;
@@ -695,11 +742,14 @@ bool ReaderApp::begin_sleep() {
     return true;
 }
 bool ReaderApp::sleep_pending() const {
-    return impl_->sleep_cover_deadline.has_value() || (impl_->sleep_destination_captured &&
-        impl_->foreground_job && ContentJob::dictionary_kind(impl_->foreground_job->request.kind) &&
-        impl_->foreground_job->started() && !impl_->foreground_job->done());
+    if (impl_->sleep_cover_deadline) return true;
+    if (!impl_->sleep_destination_captured) return false;
+    if (impl_->counting_job && impl_->counting_job->request.statistics) return true;
+    return impl_->foreground_job && ContentJob::dictionary_kind(impl_->foreground_job->request.kind) &&
+        impl_->foreground_job->started() && !impl_->foreground_job->done();
 }
 void ReaderApp::cancel_sleep() {
+    impl_->statistics_sleep_flushed = false;
     impl_->sleep_destination_captured = false;
     impl_->custom_sleep_attempted = false;
     impl_->custom_prepare_finished = false; impl_->custom_prepare_attempts = 0;
@@ -709,6 +759,7 @@ void ReaderApp::cancel_sleep() {
     impl_->custom_rotation_name.clear();
     impl_->sleep_wait_restore_pending = bool(impl_->sleep_wait_footer);
     impl_->restore_sleep_wait();
+    impl_->resume_statistics();
     if (impl_->sleep_cover_deadline) {
         impl_->sleep_cover_deadline.reset();
         if (impl_->counting_job) impl_->counting_job->cancel();
@@ -722,6 +773,7 @@ void ReaderApp::cancel_sleep() {
 }
 bool ReaderApp::prepare_sleep() {
     if (impl_->power_menu_wait) return false;
+    impl_->pause_statistics();
     if (impl_->foreground_job && ContentJob::dictionary_kind(impl_->foreground_job->request.kind) &&
         impl_->foreground_job->started() && !impl_->foreground_job->done()) {
         impl_->foreground_job->cancel(); return false;
@@ -762,6 +814,10 @@ bool ReaderApp::prepare_sleep() {
     if (!impl_->persist()) return false;
     if (impl_->has_book() && !impl_->session.visible_record()) return false;
     save_clock_sync();
+    if (!impl_->statistics_sleep_flushed) {
+        if (!impl_->flush_statistics_for_handoff()) return false;
+        impl_->statistics_sleep_flushed = true;
+    }
     impl_->remember_position();
     impl_->save_pages();
     impl_->clear_body_cache();
@@ -818,13 +874,15 @@ void ReaderApp::wake(bool slept) {
     if (impl_->sleep_onboarding) {
         impl_->draw_onboarding(); impl_->overlay(true);
     } else if (impl_->sleep_origin == Impl::Origin::Reading && impl_->has_book()) {
-        if (impl_->async_content) impl_->open(impl_->book_path);
+        if (impl_->async_content) { impl_->statistics_resume_open = true; impl_->open(impl_->book_path); }
         else impl_->recover_body();
     } else {
         impl_->return_to_origin(impl_->sleep_origin, true);
     }
 }
 void ReaderApp::card_unavailable(CardIssue issue) {
+    impl_->pause_statistics();
+    impl_->retire_statistics_mount();
     stop_wifi();
     impl_->power_return_canvas.reset(); impl_->power_request = {};
     invalidate_identity_cache();
@@ -872,11 +930,20 @@ std::optional<BookPages> ReaderApp::book_pages() const {
 CacheUsage ReaderApp::cache_usage() const { return impl_->cache_usage(); }
 
 bool ReaderApp::content_busy() const {
-    return !!impl_->foreground_job || impl_->pending_content.has_value() ||
+    return (impl_->view == View::Statistics && (impl_->statistics_loading || impl_->statistics_redraw)) ||
+           !!impl_->foreground_job || impl_->pending_content.has_value() ||
            (impl_->async_content && impl_->view == View::Reading && !impl_->image_viewing && impl_->body_images_pending);
 }
 bool ReaderApp::background_due() const {
-    return !!impl_->cover_job || impl_->pending_covers.has_value() || !!impl_->counting_job ||
+    return (impl_->statistics_flush_requested && impl_->statistics_collector.pending_count() &&
+            impl_->card_available && !impl_->usb_prepared && !impl_->portal_live && !impl_->statistics_serial_transfer &&
+            !impl_->statistics_retry_ms && !impl_->save_failed && !impl_->active_network && !impl_->network_worker_id &&
+            !impl_->power_menu_wait && !impl_->content_loading && !impl_->display.busy() &&
+            !impl_->foreground_job && !impl_->pending_content && !impl_->save_job && !impl_->bookmark_job &&
+            !impl_->session.needs_save() && !impl_->sleep_destination_captured &&
+            impl_->statistics_milliseconds() >= impl_->statistics_commit_after_ms &&
+            impl_->view != View::PowerMenu && impl_->view != View::PowerOff && impl_->view != View::Sleeping) ||
+           !!impl_->cover_job || impl_->pending_covers.has_value() || !!impl_->counting_job ||
            impl_->chapter_cache_due() || impl_->custom_prepare_due() || impl_->prefetch_due() ||
            impl_->chapter_prefetch_due() || impl_->counting_due();
 }
@@ -915,7 +982,7 @@ void ReaderApp::poll_background(bool cancel) {
     if (impl_->view == View::PowerOff) return;
     if (cancel && impl_->body_images_pending && !impl_->inline_image_pending && !impl_->display.busy())
         impl_->inline_image_after = std::chrono::steady_clock::now() + inline_image_delay;
-    if (cancel && impl_->counting_job) impl_->counting_job->cancel();
+    if (cancel && impl_->counting_job && !impl_->counting_job->request.statistics) impl_->counting_job->cancel();
     impl_->poll_counting_job();
     if (impl_->sleep_wait_restore_pending) impl_->restore_sleep_wait();
     if (impl_->sleep_wait_footer && !impl_->sleep_wait_restore_pending && impl_->view == impl_->sleep_wait_view) return;
@@ -933,6 +1000,12 @@ void ReaderApp::poll_background(bool cancel) {
         impl_->error(std::exchange(impl_->bookmark_error, std::string()));
     }
     if (!cancel || !impl_->content_loading) impl_->poll_content(!cancel);
+    if (!cancel && impl_->statistics_waiting_control && !impl_->counting_job && !impl_->display.busy()) {
+        const auto [origin, id] = *std::exchange(impl_->statistics_waiting_control, std::nullopt);
+        if (impl_->view == origin && !impl_->sleep_destination_captured && !impl_->usb_prepared)
+            impl_->control(id);
+    }
+    impl_->run_statistics(!cancel, false);
     if (!cancel) impl_->poll_dictionary_panel();
     if (!cancel) impl_->flush_entry();
     if (!cancel && impl_->custom_notice_pending &&
@@ -977,7 +1050,12 @@ void ReaderApp::poll_background(bool cancel) {
 void ReaderApp::background_step(const std::function<bool()>& stop) {
     if (impl_->view == View::PowerOff) return;
     impl_->poll_counting_job();
-    if (stop && stop()) { if (impl_->counting_job) impl_->counting_job->cancel(); return; }
+    if (stop && stop()) {
+        if (impl_->counting_job && !impl_->counting_job->request.statistics) impl_->counting_job->cancel();
+        return;
+    }
+    impl_->run_statistics(true, true);
+    if (impl_->counting_job) return;
     if (impl_->chapter_cache_due()) impl_->write_chapter_cache();
     else if (impl_->custom_prepare_due()) impl_->prepare_custom_sleep(false);
     else if (impl_->prefetch_due()) impl_->prepare_next(stop);

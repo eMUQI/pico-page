@@ -76,6 +76,7 @@ void ReaderApp::Impl::error(const std::string &text_in, const std::string &retry
 }
 
 void ReaderApp::Impl::back() {
+    if (view == View::Statistics) { statistics_back(); return; }
     if (view == View::Dictionary) {
         if (dictionary_choosing) cancel_dictionary_sources(); else close_dictionary();
         return;
@@ -335,6 +336,13 @@ void ReaderApp::Impl::wifi_control(int id) {
 }
 
 void ReaderApp::Impl::control(int id, PageTurnOrigin turn_origin) {
+    if (counting_job && counting_job->request.statistics &&
+        (id == ManageConfirm || id == DetailDelete || id == DetailReset || id == Library || id == SaveRetry ||
+         (view != View::Reading && (save_job || bookmark_job)))) {
+        statistics_waiting_control = std::make_pair(view, id);
+        return;
+    }
+    if (id == StatisticsOpen || id == StatisticsOpenBook) { open_statistics(id == StatisticsOpenBook); return; }
     if (id == DictionaryOpen) { open_dictionary_settings(); return; }
     if (view == View::Typography && font_picker_open && id != FullRefresh) {
         font_picker_control(id); return;
@@ -1073,6 +1081,17 @@ void ReaderApp::Impl::input(const AppInput &input) {
     if (!accepted || display.busy() || view == View::Sleeping || view == View::PowerOff)
         return;
     if (view == View::Onboarding) { onboarding_input(input); return; }
+    if (view == View::Statistics) {
+        if (input.queued) return;
+        if (!input.touch) {
+            if (input.event.input == Input::K2) force_refresh();
+            else if (input.event.input == Input::K1 || input.event.input == Input::Previous) statistics_control(Prev);
+            else if (input.event.input == Input::K3 || input.event.input == Input::Next) statistics_control(Next);
+        } else for (const auto& hit : hits) {
+            if (hit.contains(input.x, input.y)) { statistics_control(hit.id); break; }
+        }
+        return;
+    }
     if (view == View::Dictionary || view == View::DictionarySettings) {
         if (input.queued) return;
         if (!input.touch) {

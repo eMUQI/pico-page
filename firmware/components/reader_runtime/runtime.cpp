@@ -30,7 +30,7 @@ namespace {
 constexpr auto tag = "pico_page";
 constexpr std::int64_t idle_slow_us = 3'000'000;
 constexpr std::int64_t idle_save_us = 2'000'000;
-constexpr std::int64_t idle_background_us = 1'000'000;
+constexpr std::int64_t idle_background_us = pico_page::ReaderApp::background_idle_ms * 1000;
 std::uint64_t presentation_sequence = 0;
 std::int64_t settled_us = 0;
 constexpr std::int64_t portal_idle_us = 600'000'000;
@@ -1085,7 +1085,7 @@ void pico_page::runtime::run() {
             last_activity = esp_timer_get_time();
             pico_page::platform::set_performance(true);
         }
-        if (pico_page::console::transfer_active()) app->invalidate_identity_cache();
+        app->set_diagnostic_transfer(pico_page::console::transfer_active());
         const auto idle = esp_timer_get_time() - last_activity;
         if (!usb_mode && !sleep_requested && app->view() != pico_page::View::PowerMenu && app->view() != pico_page::View::PowerOff &&
             idle >= idle_save_us && !physical_source && !app->pending_frame() &&

@@ -4,6 +4,8 @@ namespace pico_page {
 
 bool ReaderApp::Impl::open(std::string path) {
     if (display.busy() || !card_available) return false;
+    pause_statistics();
+    statistics_flush_requested = statistics_collector.pending_count() != 0;
     abandon_content();
     invalidate_counting();
     if (counting_job) counting_job->cancel();
@@ -52,6 +54,7 @@ bool ReaderApp::Impl::finish_open(const std::string& path, ContentJob::Result* l
     contents_bookmarks = false;
     const auto restored =
         loaded ? loaded->progress : store.load_progress(path, document.metadata().book_id, revision_for(path, document.metadata()));
+    open_statistics_book();
     session.open(document.metadata().book_id, revision_for(path, document.metadata()), writer, restored.record);
     if (restored.status != StoreStatus::Ok && restored.status != StoreStatus::Missing && restored.status != StoreStatus::Cleared) {
         error(tr("原进度读取失败。为保护阅读记录，已停止打开本书。原书和进度文件都没有被修改。"), path);
@@ -491,6 +494,7 @@ bool ReaderApp::Impl::show_page(std::size_t start, bool reverse_page_effect, Pag
     const StageTimer timer{hit ? "body_prepare_hit" : reused ? "body_prepare_reuse" : "body_prepare_miss", 0};
     if (display.busy())
         return false;
+    pause_statistics();
     load_fonts();
     if (inline_image_pending) {
         const auto& request = pending_content ? *pending_content : foreground_job->request;

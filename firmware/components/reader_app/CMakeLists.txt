@@ -27,6 +27,8 @@ set(app_sources
     app_power.cpp
     app_reading.cpp
     app_settings.cpp
+    app_statistics.cpp
+    app_statistics_runtime.cpp
     app_sync.cpp
     app_transfer.cpp
     app_update.cpp
