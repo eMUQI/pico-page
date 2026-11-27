@@ -319,7 +319,8 @@ class ReaderApp {
      * typography; nullopt until every chapter has been counted or outside the reading order.
      */
     std::optional<BookPages> book_pages() const;
-    /** True when optional background work is pending or active, including covers, caches and page counting. */
+    static constexpr std::int64_t background_idle_ms = 1000;
+    /** True when optional background work is due or active, including covers, caches and page counting. */
     bool background_due() const;
     /** True while foreground content is pending, including the inline-image dwell interval and cancellation. */
     bool content_busy() const;

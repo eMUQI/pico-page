@@ -341,7 +341,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     bool statistics_serial_transfer = false, statistics_lost_on_handoff = false, statistics_sleep_flushed = false;
     std::uint64_t statistics_writer = 0, statistics_mount = 1, statistics_generation = 0;
     std::uint64_t statistics_book = 0, statistics_session = 0, statistics_layout = 0, statistics_revision = 0;
-    std::uint64_t statistics_next_sample_ms = 0, statistics_retry_ms = 0;
+    std::uint64_t statistics_next_sample_ms = 0, statistics_retry_ms = 0, statistics_commit_after_ms = 0;
     std::map<std::uint64_t, StatisticsBookSource> statistics_sources;
     std::shared_ptr<StatisticsWork> statistics_pending;
     std::optional<std::pair<View, int>> statistics_waiting_control;
@@ -358,7 +358,7 @@ struct ReaderApp::Impl final : DisplayBackend {
     void pause_statistics();
     void resume_statistics();
     void confirm_statistics_body(const Frame& frame);
-    void run_statistics(bool allow_start);
+    void run_statistics(bool allow_start, bool idle);
     bool statistics_worker_idle();
     bool flush_statistics_for_handoff();
     void start_statistics_work(std::shared_ptr<StatisticsWork> work);

@@ -30,7 +30,7 @@ namespace {
 constexpr auto tag = "pico_page";
 constexpr std::int64_t idle_slow_us = 3'000'000;
 constexpr std::int64_t idle_save_us = 2'000'000;
-constexpr std::int64_t idle_background_us = 1'000'000;
+constexpr std::int64_t idle_background_us = pico_page::ReaderApp::background_idle_ms * 1000;
 std::uint64_t presentation_sequence = 0;
 std::int64_t settled_us = 0;
 constexpr std::int64_t portal_idle_us = 600'000'000;

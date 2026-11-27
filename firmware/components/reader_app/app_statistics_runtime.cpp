@@ -289,7 +289,7 @@ void ReaderApp::Impl::redraw_statistics_when_ready() {
     overlay();
 }
 
-void ReaderApp::Impl::run_statistics(bool allow_start) {
+void ReaderApp::Impl::run_statistics(bool allow_start, bool idle) {
     redraw_statistics_when_ready();
     if (!allow_start || !card_available || usb_prepared || portal_live || statistics_serial_transfer ||
         sleep_destination_captured || active_network || network_worker_id || view == View::Sleeping ||
@@ -302,16 +302,16 @@ void ReaderApp::Impl::run_statistics(bool allow_start) {
         statistics_flush_requested = statistics_collector.pending_count() != 0;
     }
     if (statistics_retry_ms && now_ms >= statistics_retry_ms) statistics_retry_ms = 0;
-    if ((!statistics_flush_requested || !statistics_collector.pending_count() || statistics_retry_ms) &&
-        !statistics_pending) return;
+    const bool commit_due = statistics_flush_requested && statistics_collector.pending_count() && !statistics_retry_ms &&
+        !save_failed && (statistics_pending || (idle && now_ms >= statistics_commit_after_ms));
+    if (!commit_due && !statistics_pending) return;
     if (save_job || bookmark_job || foreground_job || pending_content || cover_job || counting_job || content_loading) return;
     if (session.needs_save() && !save_failed) {
         if (statistics_pending) schedule_save();
         return;
     }
     std::shared_ptr<StatisticsWork> work;
-    if (statistics_flush_requested && !statistics_retry_ms && !save_failed &&
-        !(statistics_pending && statistics_pending->kind == StatisticsWork::Kind::Clear))
+    if (commit_due && !(statistics_pending && statistics_pending->kind == StatisticsWork::Kind::Clear))
         work = statistics_batch();
     if (!work) work = std::exchange(statistics_pending, {});
     if (!work) return;
@@ -361,6 +361,7 @@ void ReaderApp::Impl::retire_statistics_mount() {
     statistics_sources.clear();
     statistics_retry_ms = 0;
     statistics_next_sample_ms = 0;
+    statistics_commit_after_ms = 0;
     statistics_pending.reset();
     statistics_waiting_control.reset();
     cancel_statistics_query();

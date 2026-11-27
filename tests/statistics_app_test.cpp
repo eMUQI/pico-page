@@ -165,6 +165,39 @@ std::vector<std::uint8_t> acquisition(const fs::path& root, const fs::path& fixt
     return usb_pixels;
 }
 
+void immediate_reopen_and_idle_commit(const fs::path& root, const fs::path& fixtures, const fs::path& font) {
+    prepare_card(root, font);
+    const std::string path = "Books/sample.txt";
+    fs::copy_file(fixtures / "sample.txt", root / path);
+    Device device(root, true);
+    for (unsigned visit = 0; visit < 2; ++visit) {
+        assert(device.app.open_book(path));
+        device.settle();
+        assert(device.app.view() == View::Reading && report(root).total_ms == 0);
+        device.clock.milliseconds += 6000;
+        device.tap(342, 500);
+        device.press(Input::TouchCenter, 50, 52);
+        device.clock.milliseconds += ReaderApp::background_idle_ms;
+        device.settle();
+        assert(device.app.view() == View::Library);
+        device.app.background_step({});
+        wait_for(device.app, [&] { return !device.app.background_due(); });
+        assert(report(root).total_ms == 0);
+    }
+    device.clock.milliseconds += ReaderApp::background_idle_ms - 1;
+    device.app.poll_background();
+    assert(!device.app.background_due());
+    ++device.clock.milliseconds;
+    device.app.poll_background();
+    assert(device.app.background_due());
+    wait_for(device.app, [&] {
+        if (!device.app.background_due()) return true;
+        device.app.background_step({});
+        return false;
+    });
+    assert(report(root).total_ms == 12000);
+}
+
 void cancellable_sleep_commit(const fs::path& root, const fs::path& fixtures, const fs::path& font) {
     prepare_card(root, font);
     fs::copy_file(fixtures / "valid.epub", root / "Books/sample.epub");
@@ -701,6 +734,7 @@ int main(int argc, char** argv) {
     const auto healthy_usb = acquisition(directory / "epub", fixtures, font, "valid.epub", true);
     acquisition(directory / "txt", fixtures, font, "sample.txt", false);
     force_power_without_statistics(directory / "forced-power", fixtures, font);
+    immediate_reopen_and_idle_commit(directory / "immediate-reopen", fixtures, font);
     cancellable_sleep_commit(directory / "sleep-commit", fixtures, font);
     usb_handoff_write_failure(directory / "usb-failure", fixtures, font, healthy_usb);
     wifi_transfer_and_resume(directory / "wifi-transfer", fixtures, font);

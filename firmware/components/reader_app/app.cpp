@@ -254,6 +254,8 @@ void ReaderApp::complete_frame(bool success) {
         impl_->custom_rotation_name.clear();
     }
     if (success) {
+        if (impl_->statistics_collector.pending_count())
+            impl_->statistics_commit_after_ms = impl_->statistics_milliseconds() + background_idle_ms;
         if (impl_->view == View::Reading && !impl_->image_viewing && impl_->body_images_pending && !impl_->inline_image_pending) {
             const auto delay = frame.purpose == FramePurpose::Body && !impl_->session.visible_record()
                 ? std::chrono::milliseconds(0) : inline_image_delay;
@@ -935,7 +937,9 @@ bool ReaderApp::content_busy() const {
 bool ReaderApp::background_due() const {
     return (impl_->statistics_flush_requested && impl_->statistics_collector.pending_count() &&
             impl_->card_available && !impl_->usb_prepared && !impl_->portal_live && !impl_->statistics_serial_transfer &&
-            !impl_->statistics_retry_ms && !impl_->session.needs_save() && !impl_->sleep_destination_captured &&
+            !impl_->statistics_retry_ms && !impl_->save_failed && !impl_->active_network && !impl_->network_worker_id &&
+            !impl_->power_menu_wait && !impl_->content_loading && !impl_->display.busy() &&
+            impl_->statistics_milliseconds() >= impl_->statistics_commit_after_ms && !impl_->session.needs_save() && !impl_->sleep_destination_captured &&
             impl_->view != View::PowerMenu && impl_->view != View::PowerOff && impl_->view != View::Sleeping) ||
            !!impl_->cover_job || impl_->pending_covers.has_value() || !!impl_->counting_job ||
            impl_->chapter_cache_due() || impl_->custom_prepare_due() || impl_->prefetch_due() ||
@@ -999,7 +1003,7 @@ void ReaderApp::poll_background(bool cancel) {
         if (impl_->view == origin && !impl_->sleep_destination_captured && !impl_->usb_prepared)
             impl_->control(id);
     }
-    impl_->run_statistics(!cancel);
+    impl_->run_statistics(!cancel, false);
     if (!cancel) impl_->poll_dictionary_panel();
     if (!cancel) impl_->flush_entry();
     if (!cancel && impl_->custom_notice_pending &&
@@ -1048,7 +1052,7 @@ void ReaderApp::background_step(const std::function<bool()>& stop) {
         if (impl_->counting_job && !impl_->counting_job->request.statistics) impl_->counting_job->cancel();
         return;
     }
-    impl_->run_statistics(true);
+    impl_->run_statistics(true, true);
     if (impl_->counting_job) return;
     if (impl_->chapter_cache_due()) impl_->write_chapter_cache();
     else if (impl_->custom_prepare_due()) impl_->prepare_custom_sleep(false);
