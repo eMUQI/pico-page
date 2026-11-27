@@ -939,7 +939,9 @@ bool ReaderApp::background_due() const {
             impl_->card_available && !impl_->usb_prepared && !impl_->portal_live && !impl_->statistics_serial_transfer &&
             !impl_->statistics_retry_ms && !impl_->save_failed && !impl_->active_network && !impl_->network_worker_id &&
             !impl_->power_menu_wait && !impl_->content_loading && !impl_->display.busy() &&
-            impl_->statistics_milliseconds() >= impl_->statistics_commit_after_ms && !impl_->session.needs_save() && !impl_->sleep_destination_captured &&
+            !impl_->foreground_job && !impl_->pending_content && !impl_->save_job && !impl_->bookmark_job &&
+            !impl_->session.needs_save() && !impl_->sleep_destination_captured &&
+            impl_->statistics_milliseconds() >= impl_->statistics_commit_after_ms &&
             impl_->view != View::PowerMenu && impl_->view != View::PowerOff && impl_->view != View::Sleeping) ||
            !!impl_->cover_job || impl_->pending_covers.has_value() || !!impl_->counting_job ||
            impl_->chapter_cache_due() || impl_->custom_prepare_due() || impl_->prefetch_due() ||
