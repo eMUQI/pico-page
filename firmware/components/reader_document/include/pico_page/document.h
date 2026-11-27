@@ -271,7 +271,7 @@ public:
      * stop is called synchronously before loading, between XML chunks of at most 4096 bytes,
      * and around linked stylesheet reads. It must not reenter this document. A true result
      * releases output and returns false with kChapterCancelled; retry starts parsing again.
-     * sequential retains a Reading cursor for forward part requests. Backward requests restart;
+     * sequential retains a Reading or Original cursor for forward part requests. Backward requests restart;
      * unsupported streams fall back to the ordinary loader after releasing the cursor.
      * Blocking storage and decompressor calls are not interrupted by this callback.
      */
@@ -282,7 +282,7 @@ public:
     /**
      * Like load_chapter, for the first part that match accepts. match sees each complete part
      * at the given detail, before the stylesheet fields of a Mapping load are final.
-     * sequential retains a Reading cursor after the selected part; searches always start at zero.
+     * sequential retains a Reading or Original cursor after the selected part; searches always start at zero.
      */
     bool find_chapter_part(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
                            const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop = {},
@@ -297,6 +297,8 @@ public:
      */
     bool read_next_chapter_part(std::size_t index, Chapter& chapter, std::string& error,
                                 const std::function<bool()>& stop = {});
+    /** Checks whether the existing cursor can continue at the given part. Call between loads. */
+    bool has_chapter_stream(std::size_t index, ChapterLoad detail, std::uint32_t next_part) const;
     /** Discards the sequential cursor without closing the verified document. No parsing or I/O. */
     void reset_chapter_stream();
     DocumentReadStats read_stats() const;

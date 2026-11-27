@@ -534,6 +534,7 @@ bool ReaderApp::prepare_portal(bool station) {
     if (impl_->portal_live || impl_->network_worker_id) return false;
     if (impl_->content_loading || impl_->usb_prepared || impl_->display.busy() || impl_->active_network ||
         !impl_->card_available || !impl_->persist() || !wifi_enabled()) return false;
+    if (impl_->chapter_session_in_library) impl_->release_chapter_session();
     impl_->cancel_sync();
     impl_->clear_body_cache();
     impl_->stop_covers();

@@ -247,7 +247,7 @@ ReaderApp::Impl::Cover ReaderApp::Impl::draw_cover(const Entry &entry, int x, in
 }
 
 void ReaderApp::Impl::draw_library(bool decode, bool keep_cover_attempts) {
-    release_chapter_session();
+    if (!chapter_session_in_library || !card_available) release_chapter_session();
     if (async_content) cancel_covers();
     if (!keep_cover_attempts) {
         cover_attempts = 0; cover_retry_after = {};

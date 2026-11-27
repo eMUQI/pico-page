@@ -6,7 +6,8 @@ bool ReaderApp::Impl::chapter_prefetch_due() const {
     return async_content && background_content_ready() && !counting_job &&
         !prepared_chapter && !chapter_prefetch_attempted && !chapter.text.empty() &&
         (readable_offset(page.end) == chapter.text.size() ||
-         (next_page && readable_offset(next_page->end) == chapter.text.size()));
+         (next_page && readable_offset(next_page->end) == chapter.text.size())) &&
+        !has_original_next_part();
 }
 
 void ReaderApp::Impl::prepare_chapter() {

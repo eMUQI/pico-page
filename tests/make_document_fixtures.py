@@ -330,6 +330,18 @@ def generate(directory: Path) -> None:
         "</manifest>", '<item id="embedded-font" href="Fonts/welcome.ttf" media-type="font/ttf"/>'
         '<item id="other-font" href="Fonts/other.otf" media-type="font/otf"/></manifest>')
     write_fixture(directory / "font-layout.epub", font_layout)
+    sibling_styles = dict(entries)
+    sibling_styles["EPUB/chapter1.xhtml"] = '''<html xmlns="http://www.w3.org/1999/xhtml">
+<head><link rel="stylesheet" href="book.css"/></head><body>
+<div id="left"><p class="line" lang="en-US">左一</p><p class="line" lang="en-US">左二</p>
+<p class="line" lang="en-GB">左英</p><p class="line" style="font-size:29px">行内</p>
+<p class="line" id="override">有编号</p><p class="other">异类</p><p class="line">左末</p></div>
+<div id="right"><p class="line">右一</p><p class="line">右二</p></div>
+</body></html>'''
+    sibling_styles["EPUB/book.css"] = (
+        "#left > p.line { font-size: 20px; } #left > p.other { font-size: 23px; } "
+        "#override { font-size: 31px !important; } #right > p.line { font-size: 34px; }")
+    write_fixture(directory / "sibling-styles.epub", sibling_styles)
     original_layout = dict(entries)
     original_layout["EPUB/chapter1.xhtml"] = '''<html xmlns="http://www.w3.org/1999/xhtml"><head><link rel="stylesheet" href="book.css"/></head>
 <body><div class="logo"><img src="wide.png" alt="横幅"/></div>

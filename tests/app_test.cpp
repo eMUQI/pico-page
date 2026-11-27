@@ -6974,6 +6974,45 @@ int main(int argc, char** argv) {
         }
     }
     {
+        const auto root = card / "SparseOriginalCache";
+        fs::create_directories(root);
+        const FileStore store(root.string());
+        EpubDocument doc;
+        std::string error;
+        assert(doc.open((fixtures / "multi-part.epub").string(), error));
+        Chapter first, late, restored;
+        ContentCacheEntry first_cache, late_cache, restored_cache;
+        assert(load_content(store, doc, 0, first, error, ChapterLoad::Original, 0, {}, &first_cache));
+        assert(save_content_cache(store, first_cache));
+        assert(load_content(store, doc, 0, late, error, ChapterLoad::Original, 2, {}, &late_cache));
+        assert(save_content_cache(store, late_cache));
+        const auto cache_dir = (root / "PicoPage/cache" / late_cache.name).parent_path();
+        assert(!fs::exists(cache_dir / "1"));
+        Anchor anchor;
+        assert(late.anchor_at(0, anchor));
+        const auto parsed_bytes = doc.read_stats().xml_feed_bytes;
+        std::uint32_t offset = 1;
+        bool read_source = false;
+        const auto before_source_read = [&] {
+            assert(doc.read_stats().xml_feed_bytes == parsed_bytes);
+            read_source = true;
+        };
+        assert(load_anchored_content(store, doc, 0, restored, error, ChapterLoad::Original,
+                                     anchor, offset, {}, &restored_cache, false, before_source_read));
+        assert(restored_cache.from_disk && restored.part == 2 && offset == 0 && restored.text == late.text);
+        assert(!read_source && doc.read_stats().xml_feed_bytes == parsed_bytes);
+        bool cancel_scan = false;
+        const auto cache_directory = fs::path(late_cache.name).parent_path().string();
+        assert(store.visit_cache_entries(cache_directory, 64,
+            [&](std::string_view) { cancel_scan = true; return true; },
+            [&] { return cancel_scan; }) == StoreStatus::Cancelled);
+        assert(store.save_cache(late_cache.name, "invalid") == StoreStatus::Ok);
+        assert(load_anchored_content(store, doc, 0, restored, error, ChapterLoad::Original,
+                                     anchor, offset, {}, &restored_cache, false, before_source_read));
+        assert(!restored_cache.from_disk && restored.part == 2 && offset == 0 && restored.text == late.text);
+        assert(read_source && doc.read_stats().xml_feed_bytes > parsed_bytes);
+    }
+    {
         FileStore store(card.string());
         EpubDocument doc;
         std::string error;
@@ -7714,6 +7753,19 @@ int main(int argc, char** argv) {
         assert(app.cache_usage().chapter_stream == 0);
         app.wake(); driver.present(); driver.complete_content();
         assert(app.view() == View::Reading);
+        assert(app.prepare_usb_transfer() && app.cache_usage().chapter_stream == 0);
+    }
+    {
+        const auto root = card / "OriginalLibraryStream";
+        write(root / "PicoPage/settings.toml", "schema_version=1\n[reader]\nfullscreen_reading=false\noriginal_epub=true\n");
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "multi-part.epub", root / "Books/long.epub");
+        ReaderApp app(root.string(), "original-library", true, true); Driver driver{app};
+        assert(app.initialize()); driver.present();
+        opened(app, "Books/long.epub"); driver.present(); driver.complete_content();
+        driver.tap(342, 500); driver.present();
+        driver.tap(40, 40); driver.present();
+        assert(app.view() == View::Library && app.cache_usage().chapter_stream != 0);
         assert(app.prepare_usb_transfer() && app.cache_usage().chapter_stream == 0);
     }
     {

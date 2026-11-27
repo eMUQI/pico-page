@@ -436,6 +436,13 @@ public:
     StoreStatus load_cache(const std::string& name, std::size_t limit, std::string& bytes,
                            const std::function<bool(std::size_t)>& admit = {}) const;
 
+    /** Visits names in one cache directory. Each name is valid only during the callback.
+     * A false callback ends with Ok. Exceeding the entry limit returns Invalid.
+     */
+    StoreStatus visit_cache_entries(const std::string& directory, std::size_t max_entries,
+                                    const std::function<bool(std::string_view)>& visit,
+                                    const std::function<bool()>& stop = {}) const;
+
     /** Opens a regular rebuildable file without loading its payload; rejects lengths above limit.
      * On failure reader is empty. The caller validates the bytes and serializes card access.
      */

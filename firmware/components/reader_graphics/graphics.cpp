@@ -1,10 +1,15 @@
 #include "pico_page/graphics.h"
 
 #include <algorithm>
+#include <array>
+#include <cerrno>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <fcntl.h>
 #include <limits>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -61,6 +66,85 @@ struct Font::Stream {
     std::function<bool(std::size_t, char*, std::size_t)> read;
 };
 
+struct Font::FileStream {
+    static constexpr unsigned long window_bytes = 512;
+
+    struct Window {
+        unsigned long offset = 0;
+        unsigned long size = 0;
+        std::array<unsigned char, window_bytes> bytes;
+    };
+
+    FT_StreamRec record{};
+    int fd = -1;
+    off_t file_offset = 0;
+    std::array<Window, 4> windows;
+    std::size_t next_window = 0;
+
+    ~FileStream() { if (fd >= 0) ::close(fd); }
+
+    bool open(const std::string& path) {
+        fd = ::open(path.c_str(), O_RDONLY);
+        struct stat info{};
+        if (fd < 0 || fstat(fd, &info) != 0 || !S_ISREG(info.st_mode) || info.st_size <= 0 ||
+            static_cast<std::uintmax_t>(info.st_size) > std::numeric_limits<unsigned long>::max()) return false;
+        record.size = static_cast<unsigned long>(info.st_size);
+        record.descriptor.pointer = this;
+        record.read = [](FT_Stream stream, unsigned long offset, unsigned char* buffer, unsigned long count) -> unsigned long {
+            if (!count) return offset > stream->size;
+            return static_cast<FileStream*>(stream->descriptor.pointer)->read(offset, buffer, count);
+        };
+        return true;
+    }
+
+    unsigned long read_file(unsigned long offset, unsigned char* buffer, unsigned long count) {
+        const auto position = static_cast<off_t>(offset);
+        if (position != file_offset) {
+            file_offset = lseek(fd, position, SEEK_SET);
+            if (file_offset != position) return 0;
+        }
+        unsigned long filled = 0;
+        while (filled < count) {
+            const auto size = std::min<unsigned long>(count - filled, std::numeric_limits<ssize_t>::max());
+            const auto received = ::read(fd, buffer + filled, size);
+            if (received < 0 && errno == EINTR) continue;
+            if (received < 0) file_offset = -1;
+            if (received <= 0) break;
+            file_offset += received;
+            filled += static_cast<unsigned long>(received);
+        }
+        return filled;
+    }
+
+    unsigned long read(unsigned long offset, unsigned char* buffer, unsigned long count) {
+        if (offset >= record.size) return 0;
+        count = std::min(count, record.size - offset);
+        if (count > window_bytes) return read_file(offset, buffer, count);
+
+        unsigned long filled = 0;
+        while (filled < count) {
+            const auto position = offset + filled;
+            const auto window_offset = position - position % window_bytes;
+            auto window = std::find_if(windows.begin(), windows.end(), [window_offset](const auto& entry) {
+                return entry.size && entry.offset == window_offset;
+            });
+            if (window == windows.end()) {
+                window = windows.begin() + next_window;
+                next_window = (next_window + 1) % windows.size();
+                window->offset = window_offset;
+                const auto size = std::min(window_bytes, record.size - window_offset);
+                window->size = read_file(window_offset, window->bytes.data(), size);
+            }
+            const auto within = position - window_offset;
+            if (within >= window->size) return filled + read_file(position, buffer + filled, count - filled);
+            const auto size = std::min(count - filled, window->size - within);
+            std::memcpy(buffer + filled, window->bytes.data() + within, size);
+            filled += size;
+        }
+        return filled;
+    }
+};
+
 #ifdef ESP_PLATFORM
 namespace {
 void* font_allocate(FT_Memory, long size) {
@@ -106,6 +190,46 @@ void Canvas::pixel(int x, int y, std::uint8_t gray) {
     auto& byte = pixels_[static_cast<std::size_t>(y) * stride() + x / 2];
     const int shift = (x & 1) * 4;
     byte = static_cast<std::uint8_t>((byte & ~(15 << shift)) | ((gray & 15) << shift));
+}
+
+void Canvas::blend_glyph(std::int64_t x, std::int64_t y, unsigned glyph_width, unsigned glyph_height,
+                         const std::vector<std::uint8_t>& mask, std::uint8_t gray) {
+    const auto left = std::max<std::int64_t>(0, x);
+    const auto top = std::max<std::int64_t>(0, y);
+    const auto right = std::min<std::int64_t>(width_, x + glyph_width);
+    const auto bottom = std::min<std::int64_t>(height_, y + glyph_height);
+    if (left >= right || top >= bottom || !glyph_width || glyph_height > mask.size() / glyph_width)
+        return;
+
+    const int clipped_width = static_cast<int>(right - left);
+    const int clipped_height = static_cast<int>(bottom - top);
+    const auto row_stride = static_cast<std::size_t>(stride());
+    const auto first_byte = static_cast<std::size_t>(top) * row_stride + static_cast<std::size_t>(left) / 2;
+    const auto mask_offset = static_cast<std::size_t>(top - y) * glyph_width + static_cast<std::size_t>(left - x);
+    const auto ink = static_cast<unsigned>(gray & 15);
+    const auto blend = [ink](unsigned old, unsigned coverage) {
+        return (old * (255 - coverage) + ink * coverage + 127) / 255;
+    };
+
+    for (int row = 0; row < clipped_height; ++row) {
+        auto* pixels = pixels_.data() + first_byte + static_cast<std::size_t>(row) * row_stride;
+        const auto* coverage = mask.data() + mask_offset + static_cast<std::size_t>(row) * glyph_width;
+        int remaining = clipped_width;
+        if (left & 1) {
+            if (*coverage) *pixels = static_cast<std::uint8_t>((*pixels & 15) | (blend(*pixels >> 4, *coverage) << 4));
+            ++pixels;
+            ++coverage;
+            --remaining;
+        }
+        for (; remaining >= 2; remaining -= 2, coverage += 2, ++pixels) {
+            const unsigned low = coverage[0], high = coverage[1];
+            if (!(low | high)) continue;
+            const unsigned old = *pixels;
+            *pixels = static_cast<std::uint8_t>(blend(old & 15, low) | (blend(old >> 4, high) << 4));
+        }
+        if (remaining && *coverage)
+            *pixels = static_cast<std::uint8_t>((*pixels & 0xf0) | blend(*pixels & 15, *coverage));
+    }
 }
 
 void Canvas::fill_rect(int x, int y, int width, int height, std::uint8_t gray) {
@@ -165,6 +289,7 @@ void Font::close() {
     if (face_) FT_Done_Face(static_cast<FT_Face>(face_));
     face_ = nullptr;
     stream_.reset();
+    file_stream_.reset();
     pixel_size_ = 0;
 }
 
@@ -185,7 +310,19 @@ bool Font::open(const std::string& path) {
     close();
     FT_Face face = nullptr;
     if (!library_) return fail("FreeType initialization failed");
-    const auto opened = FT_New_Face(static_cast<FT_Library>(library_), path.c_str(), 0, &face);
+    const auto library = static_cast<FT_Library>(library_);
+    auto file = std::unique_ptr<FileStream>(new (std::nothrow) FileStream);
+    if (file && file->open(path)) {
+        FT_Open_Args args{};
+        args.flags = FT_OPEN_STREAM;
+        args.stream = &file->record;
+        if (FT_Open_Face(library, &args, 0, &face) == 0) file_stream_ = std::move(file);
+    }
+    FT_Error opened = 0;
+    if (!file_stream_) {
+        file.reset();
+        opened = FT_New_Face(library, path.c_str(), 0, &face);
+    }
     if (opened) {
         fail("Cannot open font", opened);
         error_ += "; path=" + path;
@@ -439,18 +576,8 @@ bool Font::draw(Canvas& canvas, char32_t scalar, int x, int baseline, std::uint8
     const auto blend_start_us = timing ? esp_timer_get_time() : 0;
 #endif
     const auto& glyph = glyphs_.at(glyph_key(scalar, bold, italic, weight_adjustment));
-    for (unsigned row = 0; row < glyph.rows; ++row) {
-        const auto* bytes = glyph.coverage.data() + static_cast<std::size_t>(row) * glyph.width;
-        for (unsigned col = 0; col < glyph.width; ++col) {
-            const unsigned coverage = bytes[col];
-            if (!coverage) continue;
-            const int px = x + glyph.left + static_cast<int>(col);
-            const int py = baseline - glyph.top + static_cast<int>(row);
-            const auto old = canvas.pixel(px, py);
-            canvas.pixel(px, py, static_cast<std::uint8_t>(
-                (old * (255 - coverage) + (gray & 15) * coverage + 127) / 255));
-        }
-    }
+    canvas.blend_glyph(static_cast<std::int64_t>(x) + glyph.left, static_cast<std::int64_t>(baseline) - glyph.top,
+                       glyph.width, glyph.rows, glyph.coverage, gray);
 #ifdef CONFIG_PICO_PAGE_LEGACY_PERF_LOG
     if (timing) timing->glyph_blend_us += esp_timer_get_time() - blend_start_us;
 #endif

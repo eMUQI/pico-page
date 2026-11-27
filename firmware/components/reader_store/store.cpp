@@ -1285,6 +1285,32 @@ StoreStatus FileStore::open_cache(const std::string& name, std::size_t limit,
     return StoreStatus::Ok;
 }
 
+StoreStatus FileStore::visit_cache_entries(const std::string& directory, std::size_t max_entries,
+                                           const std::function<bool(std::string_view)>& visit,
+                                           const std::function<bool()>& stop) const {
+    if (stop && stop()) return StoreStatus::Cancelled;
+    if (!visit) return StoreStatus::Invalid;
+    const auto path = "PicoPage/cache/" + directory;
+    const auto safe = store_internal::safe_path(root_, path);
+    if (safe != StoreStatus::Ok) return safe;
+    DIR* entries = opendir((root_ + "/" + path).c_str());
+    if (!entries) return errno == ENOENT ? StoreStatus::Missing : StoreStatus::IoError;
+    StoreStatus status = StoreStatus::Ok;
+    for (;;) {
+        if (stop && stop()) { status = StoreStatus::Cancelled; break; }
+        errno = 0;
+        const auto* entry = readdir(entries);
+        if (!entry) { if (errno) status = StoreStatus::IoError; break; }
+        const std::string_view name = entry->d_name;
+        if (name == "." || name == "..") continue;
+        if (!max_entries) { status = StoreStatus::Invalid; break; }
+        --max_entries;
+        if (!visit(name)) break;
+    }
+    if (closedir(entries) != 0 && status == StoreStatus::Ok) status = StoreStatus::IoError;
+    return status;
+}
+
 StoreStatus FileStore::save_private(const std::string& name, const std::string& bytes,
                                     std::string& error) const {
     error.clear();

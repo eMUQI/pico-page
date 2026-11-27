@@ -32,6 +32,9 @@ public:
     void fill_rect(int x, int y, int width, int height, std::uint8_t gray);
     void line(int x0, int y0, int x1, int y1, std::uint8_t gray, int thickness = 1);
 private:
+    friend class Font;
+    void blend_glyph(std::int64_t x, std::int64_t y, unsigned glyph_width, unsigned glyph_height,
+                     const std::vector<std::uint8_t>& mask, std::uint8_t gray);
     int width_;
     int height_;
     std::vector<std::uint8_t> pixels_;
@@ -96,7 +99,9 @@ public:
     bool ink_rows(char32_t scalar, int& above_baseline, int& rows, bool bold = false);
 private:
     struct Stream;
+    struct FileStream;
     std::unique_ptr<Stream> stream_;
+    std::unique_ptr<FileStream> file_stream_;
     void* library_ = nullptr;
     void* face_ = nullptr;
     int pixel_size_ = 0;
