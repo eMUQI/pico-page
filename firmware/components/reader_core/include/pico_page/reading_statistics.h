@@ -45,6 +45,7 @@ public:
     std::size_t pending_count() const { return count_; }
     bool has_pending(std::uint64_t book_token) const;
     bool acknowledge(std::uint64_t id);
+    void reject(std::uint64_t id);
     /** After durable clearing and completion of outstanding writes, discard this book or all books (zero). */
     void discard(std::uint64_t book_token);
     std::uint64_t dropped_ms() const { return dropped_ms_; }

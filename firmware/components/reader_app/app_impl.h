@@ -359,7 +359,9 @@ struct ReaderApp::Impl final : DisplayBackend {
     void resume_statistics();
     void confirm_statistics_body(const Frame& frame);
     void run_statistics(bool allow_start);
-    void flush_statistics_for_handoff();
+    bool statistics_worker_idle();
+    bool flush_statistics_for_handoff();
+    void start_statistics_work(std::shared_ptr<StatisticsWork> work);
     void retire_statistics_mount();
     void complete_statistics_work(StatisticsWork& work);
     std::shared_ptr<StatisticsWork> statistics_batch();

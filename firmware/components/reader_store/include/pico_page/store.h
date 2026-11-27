@@ -14,7 +14,7 @@
 
 namespace pico_page {
 
-enum class StoreStatus { Ok, Missing, Invalid, UnsupportedVersion, IdentityMismatch, IoError, UnsafePath, ExternalChange, Cleared, Cancelled };
+enum class StoreStatus { Ok, Missing, Invalid, UnsupportedVersion, IdentityMismatch, IoError, UnsafePath, ExternalChange, Cleared, Cancelled, StatisticsCatalogFull, MirrorIncomplete };
 
 struct ProgressResult {
     StoreStatus status = StoreStatus::Missing;
@@ -258,7 +258,8 @@ public:
                                   const std::vector<StatisticsWrite>& records) const;
     StoreStatus query_statistics(const StatisticsQuery& query, StatisticsReport& report,
                                  const std::function<bool()>& stop = {}) const;
-    /** A single-book clear may retain the active writer by fencing all issued record IDs through discard_through. */
+    /** A single-book clear fences IDs through discard_through. MirrorIncomplete means the clear is visible
+     * but its redundant copy was not confirmed. Both outcomes require retiring the cleared records. */
     StoreStatus clear_statistics(std::uint64_t book_id, std::uint64_t discard_through = UINT64_MAX) const;
 
     /**

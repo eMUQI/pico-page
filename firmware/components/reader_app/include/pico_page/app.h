@@ -174,7 +174,7 @@ class ReaderApp {
     ReaderApp &operator=(const ReaderApp &) = delete;
     /** Drops all verified identities before storage can change outside this application. */
     void invalidate_identity_cache();
-    void set_diagnostic_transfer(bool active);
+    bool set_diagnostic_transfer(bool active);
     bool initialize();
 #ifndef ESP_PLATFORM
     void set_statistics_clock_for_test(std::function<StatisticsClock()> source);

@@ -165,6 +165,53 @@ std::vector<std::uint8_t> acquisition(const fs::path& root, const fs::path& fixt
     return usb_pixels;
 }
 
+void cancellable_sleep_commit(const fs::path& root, const fs::path& fixtures, const fs::path& font) {
+    prepare_card(root, font);
+    fs::copy_file(fixtures / "valid.epub", root / "Books/sample.epub");
+    Device device(root, true);
+    assert(device.app.open_book("Books/sample.epub"));
+    device.settle();
+    device.clock.milliseconds += 12000;
+    ContentJob::delay_starts_for_test(ContentJob::Kind::ReadingStatistics, std::chrono::milliseconds(350));
+    assert(device.app.begin_sleep());
+    device.settle();
+    assert(!device.app.prepare_sleep() && device.app.sleep_pending());
+    assert(!device.app.set_diagnostic_transfer(true));
+    device.app.cancel_sleep();
+    device.settle();
+    assert(device.app.view() == View::Reading);
+    device.clock.milliseconds += 6000;
+    ContentJob::delay_starts_for_test(ContentJob::Kind::ReadingStatistics, {});
+    device.handoff();
+    assert(report(root).total_ms == 18000);
+}
+
+void force_power_without_statistics(const fs::path& root, const fs::path& fixtures, const fs::path& font) {
+    prepare_card(root, font);
+    fs::copy_file(fixtures / "valid.epub", root / "Books/sample.epub");
+    Device device(root, true);
+    assert(device.app.open_book("Books/sample.epub"));
+    device.settle();
+    const auto last_book = root / "PicoPage/data/last-book.txt";
+    fs::remove(last_book);
+    fs::create_directory(last_book);
+    device.clock.milliseconds += 12000;
+    assert(device.app.show_power_menu());
+    device.settle();
+    device.tap(300, 520);
+    const auto first = device.app.take_power_request();
+    assert(first.action == PowerAction::Shutdown && !first.without_save);
+    assert(!device.app.prepare_power(first));
+    device.settle();
+    device.tap(500, 1100);
+    const auto forced = device.app.take_power_request();
+    assert(forced.action == PowerAction::Shutdown && forced.without_save);
+    assert(device.app.prepare_power(forced));
+    device.settle();
+    assert(device.app.view() == View::PowerOff);
+    assert(!fs::exists(root / "PicoPage/data/statistics"));
+}
+
 void usb_handoff_write_failure(const fs::path& root, const fs::path& fixtures, const fs::path& font,
                                const std::vector<std::uint8_t>& healthy_pixels) {
     prepare_card(root, font);
@@ -509,6 +556,63 @@ void cancel_query(Device& device) {
     assert(device.app.view() == View::Library && device.app.canvas().pixels() == pixels);
 }
 
+void catalog_capacity(const fs::path& root, const fs::path& fixtures, const fs::path& font) {
+    prepare_card(root, font);
+    const std::string existing = "Books/existing.txt", extra = "Books/extra.txt";
+    for (const auto& path : {existing, extra}) fs::copy_file(fixtures / "sample.txt", root / path);
+    FileStore store(root.string());
+    std::uint64_t writer = 0, existing_id = 0, id = 0;
+    assert(store.begin_statistics_writer(writer) == StoreStatus::Ok);
+    StatisticsBookSource book{existing, sha256_file((root / existing).string()), "existing", -1, "txt-utf8-v1"};
+    assert(store.statistics_book_id(book, existing_id, true) == StoreStatus::Ok);
+    for (unsigned n = 1; n < 512; ++n) {
+        book.path = "History/" + std::to_string(n) + ".txt";
+        assert(store.statistics_book_id(book, id, true) == StoreStatus::Ok);
+    }
+    book.path = extra;
+    assert(store.statistics_book_id(book, id, true) == StoreStatus::StatisticsCatalogFull);
+    Device device(root, true);
+    for (const auto& path : {extra, existing}) {
+        assert(device.app.open_book(path));
+        device.settle();
+        device.clock.milliseconds += 6000;
+        device.tap(342, 500);
+        device.tap(50, 52);
+        assert(device.app.view() == View::Library);
+    }
+    device.handoff();
+    StatisticsReport result;
+    assert(store.query_statistics({0, -1, -2, existing_id, 0, 1}, result) == StoreStatus::Ok);
+    assert(result.total_ms == 6000 && result.book_count == 1);
+}
+
+void clear_with_failed_mirror(const fs::path& root, const fs::path& fixtures, const fs::path& font) {
+    prepare_card(root, font);
+    const std::string path = "Books/sample.txt";
+    fs::copy_file(fixtures / "sample.txt", root / path);
+    Device device(root, true);
+    assert(device.app.open_book(path));
+    device.settle();
+    device.clock.milliseconds += 21000;
+    device.tap(342, 500);
+    device.tap(50, 52);
+    device.open_statistics();
+    assert(report(root).total_ms == 21000);
+    device.tap(342, 1060);
+    device.tap(342, 1036);
+    const auto blocked = root / "PicoPage/data/statistics/catalog.1.tmp";
+    fs::create_directory(blocked);
+    device.tap(507, 1048);
+    assert(device.app.canvas().pixel(60, 194) == 1);
+    assert(report(root).total_ms == 0);
+    assert(fs::remove(blocked));
+    assert(device.app.open_book(path));
+    device.settle();
+    device.clock.milliseconds += 6000;
+    device.handoff();
+    assert(report(root).total_ms == 6000);
+}
+
 void failed_write_and_remount(const fs::path& root, const fs::path& fixtures, const fs::path& font) {
     prepare_card(root, font);
     const std::string book = "Books/sample.epub";
@@ -596,12 +700,16 @@ int main(int argc, char** argv) {
     const fs::path shots = argc == 4 ? fs::path(argv[3]) : fs::path{};
     const auto healthy_usb = acquisition(directory / "epub", fixtures, font, "valid.epub", true);
     acquisition(directory / "txt", fixtures, font, "sample.txt", false);
+    force_power_without_statistics(directory / "forced-power", fixtures, font);
+    cancellable_sleep_commit(directory / "sleep-commit", fixtures, font);
     usb_handoff_write_failure(directory / "usb-failure", fixtures, font, healthy_usb);
     wifi_transfer_and_resume(directory / "wifi-transfer", fixtures, font);
     reflow_and_jump(directory / "reflow", fixtures, font);
     presentation_failure(directory / "failure", fixtures, font);
     image_updates(directory / "images", fixtures, font);
     failed_write_and_remount(directory / "write-failure", fixtures, font);
+    catalog_capacity(directory / "capacity", fixtures, font);
+    clear_with_failed_mirror(directory / "clear-mirror", fixtures, font);
     const auto root = directory / "calendar";
     prepare_card(root, font);
     seed_history(root);

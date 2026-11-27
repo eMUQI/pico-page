@@ -120,9 +120,17 @@ StoreStatus publish(const std::string& root, const std::string& path, char kind,
         const auto slot = 1 - snapshot.active;
         auto next = file_bytes(kind, snapshot.sequence + 1, body);
         std::string error;
-        auto status = store_internal::commit_file(root, path + "." + std::to_string(slot),
-                                                   snapshot.slots[slot], next, file_limit, error, true);
-        if (status != ok) return status;
+        const auto destination = path + "." + std::to_string(slot);
+        auto status = store_internal::commit_file(root, destination, snapshot.slots[slot], next, file_limit, error, true);
+        if (status != ok) {
+            if (pass != 0) return StoreStatus::MirrorIncomplete;
+            if (mirror) {
+                std::string visible;
+                if (store_internal::read_file(root, destination, file_limit, visible) == ok &&
+                    visible == next) return StoreStatus::MirrorIncomplete;
+            }
+            return status;
+        }
         snapshot.slots[slot] = std::move(next);
         ++snapshot.sequence;
         snapshot.active = slot;
@@ -310,7 +318,7 @@ StoreStatus resolve(const std::string& root, Catalog& catalog, const StatisticsB
                    book.source.content_id == source.content_id;
     }
     if (!reserved) {
-        if (catalog.count == book_capacity) return invalid;
+        if (catalog.count == book_capacity) return StoreStatus::StatisticsCatalogFull;
         id = catalog.book_id(catalog.count + 1);
         book = {};
         status = book.read(root, id);

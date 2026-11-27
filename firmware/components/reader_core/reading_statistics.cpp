@@ -148,6 +148,11 @@ void ReadingStatistics::discard(std::uint64_t book_token) {
     frozen_ = retained_frozen;
 }
 
+void ReadingStatistics::reject(std::uint64_t id) {
+    const auto duration_ms = queue_[head_].duration_ms;
+    if (acknowledge(id)) dropped_ms_ += std::min<std::uint64_t>(duration_ms, UINT64_MAX - dropped_ms_);
+}
+
 bool ReadingStatistics::acknowledge(std::uint64_t id) {
     if (!frozen_ || queue_[head_].id != id) return false;
     head_ = (head_ + 1) % capacity;

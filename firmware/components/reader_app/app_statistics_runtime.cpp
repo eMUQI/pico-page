@@ -238,8 +238,11 @@ void ReaderApp::Impl::complete_statistics_work(StatisticsWork& work) {
     if (work.kind == StatisticsWork::Kind::Commit) {
         if (work.writer) statistics_writer = work.writer;
         statistics_save_failed = !okay || statistics_lost_on_handoff;
-        if (okay) {
-            for (const auto& record : work.records) statistics_collector.acknowledge(record.id);
+        if (okay || work.status == StoreStatus::StatisticsCatalogFull) {
+            for (const auto& record : work.records) {
+                if (okay) statistics_collector.acknowledge(record.id);
+                else statistics_collector.reject(record.id);
+            }
             statistics_retry_ms = 0;
             statistics_flush_requested = statistics_collector.pending_count() != 0;
         } else statistics_retry_ms = statistics_now().monotonic_ms + 45000;
@@ -251,7 +254,7 @@ void ReaderApp::Impl::complete_statistics_work(StatisticsWork& work) {
         adopt_statistics_options(work.options);
         if (current) statistics_draft = work.options;
     }
-    if (work.kind == StatisticsWork::Kind::Clear && okay) {
+    if (work.kind == StatisticsWork::Kind::Clear && (okay || work.status == StoreStatus::MirrorIncomplete)) {
         if (!work.book_id) {
             statistics_writer = 0;
             statistics_collector.discard(0);
@@ -312,6 +315,10 @@ void ReaderApp::Impl::run_statistics(bool allow_start) {
         work = statistics_batch();
     if (!work) work = std::exchange(statistics_pending, {});
     if (!work) return;
+    start_statistics_work(std::move(work));
+}
+
+void ReaderApp::Impl::start_statistics_work(std::shared_ptr<StatisticsWork> work) {
     ContentJob::Request request;
     request.kind = ContentJob::Kind::ReadingStatistics;
     request.root = root;
@@ -320,27 +327,24 @@ void ReaderApp::Impl::run_statistics(bool allow_start) {
     if (!counting_job->start()) { counting_job.reset(); complete_statistics_work(*work); }
 }
 
-void ReaderApp::Impl::flush_statistics_for_handoff() {
+bool ReaderApp::Impl::statistics_worker_idle() {
+    if (!counting_job || !counting_job->request.statistics) return true;
+    if (counting_job->request.statistics->kind == StatisticsWork::Kind::Query) counting_job->cancel();
+    poll_counting_job();
+    return !counting_job;
+}
+
+bool ReaderApp::Impl::flush_statistics_for_handoff() {
     pause_statistics();
-    if (!card_available || usb_prepared || portal_live) return;
-    if (counting_job && counting_job->request.statistics) {
-        counting_job->cancel();
-        counting_job->wait();
-        poll_counting_job();
-    }
-    if (statistics_pending && statistics_mutating()) {
-        auto work = std::exchange(statistics_pending, {});
-        work->run(store, {});
-        complete_statistics_work(*work);
-    }
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
-    for (unsigned attempt = 0; attempt < 4; ++attempt) {
-        auto work = statistics_batch();
-        if (!work) break;
-        work->run(store, {});
-        complete_statistics_work(*work);
-        if (work->status != StoreStatus::Ok || std::chrono::steady_clock::now() >= deadline) break;
-    }
+    if (!statistics_worker_idle()) return false;
+    if (!card_available || usb_prepared || portal_live) return true;
+    if (!statistics_mutating() && (!statistics_collector.pending_count() || statistics_retry_ms)) return true;
+    if (counting_job) counting_job->cancel();
+    if (counting_job || foreground_job || save_job || bookmark_job || cover_job) return false;
+    auto work = statistics_mutating() ? std::exchange(statistics_pending, {}) : statistics_batch();
+    if (!work) return true;
+    start_statistics_work(std::move(work));
+    return !counting_job;
 }
 
 void ReaderApp::Impl::retire_statistics_mount() {
