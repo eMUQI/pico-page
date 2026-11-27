@@ -11,6 +11,7 @@ bool ReaderApp::Impl::chapter_prefetch_due() const {
 
 void ReaderApp::Impl::prepare_chapter() {
     chapter_prefetch_attempted = true;
+    chapter_prefetch_cancelled_for_pressure = false;
     auto index = chapter_index;
     auto part = chapter.part + 1;
     if (chapter.last_part) {
