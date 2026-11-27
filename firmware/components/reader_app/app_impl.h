@@ -931,16 +931,18 @@ struct ReaderApp::Impl final : DisplayBackend {
             reading_detail() == ChapterLoad::Original &&
             chapter_session->document.has_chapter_stream(chapter_index, ChapterLoad::Original, chapter.part + 1);
     }
+    void cancel_chapter_prefetch() {
+        if (counting_job && counting_job->request.chapter_prefetch) counting_job->cancel();
+        prepared_chapter.reset();
+    }
     void release_chapter_session() {
-        if (chapter_session) {
-            if (counting_job && counting_job->request.chapter_session == chapter_session) counting_job->cancel();
-            if (prepared_chapter && prepared_chapter->request.chapter_session == chapter_session) prepared_chapter.reset();
-        }
+        cancel_chapter_prefetch();
         chapter_session.reset(); chapter_stream_bytes = 0; chapter_session_in_library = false;
     }
     std::uint64_t chapter_prefetch_hits = 0;
     std::size_t prepared_chapter_size_bytes = 0;
     bool chapter_prefetch_attempted = false;
+    bool chapter_prefetch_cancelled_for_pressure = false;
     bool chapter_prefetch_due() const;
     void prepare_chapter();
     void finish_chapter(ContentJob& job, PageTurnOrigin origin);
@@ -963,7 +965,7 @@ struct ReaderApp::Impl final : DisplayBackend {
             chapter_cache.reset(); recent_chapter_cache.reset();
             chapter_cache_write_needed = recent_cache_write_needed = false;
         }
-        prepared_chapter.reset(); chapter_prefetch_attempted = false;
+        chapter_prefetch_attempted = false;
         release_chapter_session();
         chapter_feedback_after.reset();
         content_loading = image_prepared = false;

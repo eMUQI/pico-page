@@ -620,6 +620,7 @@ void ReaderApp::Impl::control(int id, PageTurnOrigin turn_origin) {
         }
         remember_position();
         save_pages();
+        cancel_chapter_prefetch();
         chapter_session_in_library = controlled_storage && has_original_next_part() &&
             chapter_stream_bytes <= maximum_library_chapter_stream_bytes;
         scan_library();

@@ -172,6 +172,16 @@ void ReaderApp::Impl::reclaim_caches() {
 #endif
     };
     if (!pressure()) return;
+    if (prepared_chapter && prepared_chapter->request.chapter_session != chapter_session) {
+        prepared_chapter.reset(); ++cache_evictions;
+        if (!pressure()) return;
+    }
+    if (counting_job && counting_job->request.chapter_prefetch &&
+        counting_job->request.chapter_session != chapter_session) {
+        chapter_prefetch_cancelled_for_pressure = true;
+        counting_job->cancel();
+        return;
+    }
     if (chapter_session) {
         release_chapter_session(); ++cache_evictions;
         if (!pressure()) return;

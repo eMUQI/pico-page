@@ -6,8 +6,7 @@ bool ReaderApp::Impl::chapter_prefetch_due() const {
     return async_content && background_content_ready() && !counting_job &&
         !prepared_chapter && !chapter_prefetch_attempted && !chapter.text.empty() &&
         (readable_offset(page.end) == chapter.text.size() ||
-         (next_page && readable_offset(next_page->end) == chapter.text.size())) &&
-        !has_original_next_part();
+         (next_page && readable_offset(next_page->end) == chapter.text.size()));
 }
 
 void ReaderApp::Impl::prepare_chapter() {
@@ -30,8 +29,11 @@ void ReaderApp::Impl::prepare_chapter() {
     request.book_index = verified_reader_index();
     request.chapter = index; request.part = part; request.chapter_resource = document.spine()[index].resource;
     request.generation = foreground_generation;
-    if (!chapter_session) chapter_session = std::make_shared<ChapterSession>();
-    request.chapter_session = chapter_session;
+    if (has_original_next_part()) request.chapter_session = std::make_shared<ChapterSession>();
+    else {
+        if (!chapter_session) chapter_session = std::make_shared<ChapterSession>();
+        request.chapter_session = chapter_session;
+    }
     counting_job = std::make_unique<ContentJob>(std::move(request));
     if (!counting_job->start()) counting_job.reset();
 }
@@ -266,7 +268,11 @@ bool ReaderApp::Impl::begin_chapter(std::size_t index, std::uint32_t part, Conte
         prepared_chapter->request.chapter == index && prepared_chapter->request.part == part)
         prepared = std::move(prepared_chapter);
     auto continuing_session = std::move(chapter_session);
-    const auto continuing_bytes = chapter_stream_bytes;
+    auto continuing_bytes = chapter_stream_bytes;
+    if (prepared && prepared->request.chapter_session != continuing_session) {
+        continuing_session = prepared->request.chapter_session;
+        continuing_bytes = prepared->result.chapter_stream_bytes;
+    }
     auto current_cache = std::move(chapter_cache);
     auto recent_cache = std::move(recent_chapter_cache);
     const bool current_write = chapter_cache_write_needed, recent_write = recent_cache_write_needed;
@@ -620,11 +626,15 @@ void ReaderApp::Impl::poll_counting_job() {
         return;
     }
     if (request.kind == ContentJob::Kind::Chapter) {
-        if (request.generation != foreground_generation || request.identity.book_id != document.metadata().book_id) return;
-        if (request.chapter_session == chapter_session) chapter_stream_bytes = result.chapter_stream_bytes;
+        if (std::exchange(chapter_prefetch_cancelled_for_pressure, false)) return;
+        if (view == View::Library || request.generation != foreground_generation ||
+            request.identity.book_id != document.metadata().book_id) return;
+        const bool shares_reading_session = request.chapter_session == chapter_session;
+        if (shares_reading_session) chapter_stream_bytes = result.chapter_stream_bytes;
         if (result.error == kChapterCancelled) chapter_prefetch_attempted = false;
         if (result.error.empty() && result.author_fonts_stable && !result.chapter.text.empty()) {
-            prepared_chapter_size_bytes = chapter_result_bytes(*job);
+            prepared_chapter_size_bytes = chapter_result_bytes(*job) +
+                (shares_reading_session ? 0 : result.chapter_stream_bytes);
             prepared_chapter = std::move(job);
             if (cache_usage().retained > cache_target) prepared_chapter.reset();
         }

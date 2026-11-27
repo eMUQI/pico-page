@@ -540,8 +540,11 @@ void ContentJob::run() {
         ContentJob& job;
         ~FinishChapterSession() {
             if (!job.request.chapter_session) return;
+            const bool cancelled = job.cancelled_.load(std::memory_order_relaxed);
+            if (cancelled && job.request.chapter_prefetch && job.result.error.empty())
+                job.result.error = kChapterCancelled;
             auto& document = job.request.chapter_session->document;
-            if (!job.result.error.empty() || job.cancelled_.load(std::memory_order_relaxed)) document.close();
+            if (!job.result.error.empty() || cancelled) document.close();
             job.result.chapter_stream_bytes = document.metadata().book_id.empty() ? 0 : document.retained_bytes();
         }
     } finish{*this};
