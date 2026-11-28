@@ -4,6 +4,7 @@ namespace pico_page {
 
 void ReaderApp::Impl::error(const std::string &text_in, const std::string &retry, bool repeatable) {
     reset_dictionary_contact();
+    reset_contents_jump();
     sleep_wait_footer.reset();
     sleep_wait_restore_pending = false;
     if (view != View::Error) error_onboarding_help = view == View::Onboarding && onboarding_from_help;
@@ -178,6 +179,7 @@ void ReaderApp::Impl::back() {
     }
     if (view == View::Tools || view == View::Contents || view == View::Typography ||
         view == View::Refresh) {
+        reset_contents_jump();
         show_page(offset);
         return;
     }
@@ -335,6 +337,226 @@ void ReaderApp::Impl::wifi_control(int id) {
     draw_wifi(); overlay();
 }
 
+void ReaderApp::Impl::reset_contents_jump() {
+    contents_jump_open = contents_jump_percent = false;
+    contents_jump_accepts_queued_keys = false;
+    contents_jump_input.clear();
+    contents_jump_current.reset();
+    contents_jump_located.reset();
+    contents_jump_epub_index.reset();
+    contents_jump_current_percent = 0;
+    contents_jump_located_percent = -1;
+}
+
+int ReaderApp::Impl::contents_jump_entry_percent(std::size_t index) const {
+    if (const auto percent = toc_percent(index); percent >= 0) return percent;
+    const auto& toc = document.toc();
+    std::size_t first = 0;
+    while (toc[first].resource != toc[index].resource) ++first;
+    return toc_percent(first);
+}
+
+ReaderApp::Impl::ContentsJumpPreview ReaderApp::Impl::contents_jump_preview() const {
+    ContentsJumpPreview preview;
+    preview.current_toc = contents_jump_current;
+    preview.current_percent = contents_jump_current_percent;
+    const auto count = contents_jump_toc_count();
+    preview.minimum = contents_jump_percent ? 0 : 1;
+    preview.maximum = contents_jump_percent ? 100 : count;
+    auto& value = preview.value;
+    if (contents_jump_input.empty()) {
+        if (contents_jump_percent) value = preview.current_percent;
+        else if (preview.current_toc) value = *preview.current_toc + 1;
+    } else
+        for (const char digit : contents_jump_input) value = value * 10 + (digit - '0');
+    preview.out_of_range = !contents_jump_input.empty() && (value < preview.minimum || value > preview.maximum);
+    if (preview.out_of_range) {
+        preview.can_step_up = value < preview.minimum;
+        preview.can_step_down = value > preview.maximum;
+        return preview;
+    }
+    preview.can_step_down = value > preview.minimum;
+    preview.can_step_up = value < preview.maximum;
+    if (contents_jump_input.empty()) return preview;
+
+    if (!contents_jump_percent) {
+        preview.target_toc = chapter_jump::toc_index(count, value);
+        if (!preview.target_toc) return preview;
+        const auto index = *preview.target_toc;
+        preview.target_percent = contents_jump_entry_percent(index);
+        preview.same_position = preview.target_toc == preview.current_toc;
+        const auto& entry = document.toc()[index];
+        if (!preview.same_position && entry.resource == chapter.resource) {
+            const auto& headings = document.metadata().txt_headings;
+            if (index < headings.size()) {
+                const auto& heading = headings[index];
+                preview.same_position = heading.part == chapter.part && readable_offset(heading.offset) == offset;
+            } else {
+                std::uint32_t start = 0;
+                const bool in_part = entry.fragment.empty() ? chapter.part == 0 : chapter.fragment_offset(entry.fragment, start);
+                preview.same_position = in_part && readable_offset(start) == offset;
+            }
+        }
+        preview.can_jump = !preview.same_position;
+        return preview;
+    }
+
+    const auto& spine = document.spine();
+    if (spine.empty()) return preview;
+    preview.target_percent = static_cast<int>(value);
+    preview.target_position = txt_name(book_path)
+        ? chapter_jump::txt_position(spine.front().bytes, document.metadata().txt_offsets, value)
+        : chapter_jump::epub_position(spine, pages_complete ? &chapter_pages : nullptr, value);
+    if (!preview.target_position) return preview;
+    const auto& target = *preview.target_position;
+    const auto& headings = document.metadata().txt_headings;
+    if (contents_jump_epub_index)
+        preview.target_toc = contents_jump_epub_index->containing_entry(target.index);
+    else if (!headings.empty())
+        preview.target_toc = chapter_jump::containing_txt_heading(headings, spine.front().bytes, target);
+    if (target.index == chapter_index) {
+        switch (target.kind) {
+        case chapter_jump::PositionKind::Start:
+            preview.same_position = target.part == chapter.part && readable_offset(target.offset) == offset;
+            break;
+        case chapter_jump::PositionKind::End:
+            preview.same_position = chapter.last_part && readable_offset(page.end) == chapter.text.size();
+            break;
+        case chapter_jump::PositionKind::SourceByte:
+            break;
+        }
+    }
+    preview.can_jump = !preview.same_position;
+    return preview;
+}
+
+void ReaderApp::Impl::contents_jump_control(int id) {
+    if (view != View::Contents || contents_bookmarks) return;
+    const auto count = contents_jump_toc_count();
+    if (id == ContentsJumpOpen) {
+        if (contents_jump_open) return;
+        reset_contents_jump();
+        contents_jump_open = true;
+        contents_jump_percent = count == 0;
+        const auto current = count ? current_toc() : 0;
+        if (current < count) contents_jump_current = current;
+        contents_jump_current_percent = book_percent_value(page.start, page.end);
+    } else if (!contents_jump_open) return;
+    else if (id == ContentsJumpBack) reset_contents_jump();
+    else if (id == ContentsJumpChapter || id == ContentsJumpPercent) {
+        const bool percent = id == ContentsJumpPercent;
+        if (percent == contents_jump_percent || (!percent && !count)) return;
+        contents_jump_percent = percent;
+        if (percent && count && document.metadata().txt_headings.empty() && !contents_jump_epub_index)
+            contents_jump_epub_index.emplace(document.toc(), document.spine());
+        contents_jump_input.clear();
+        contents_jump_accepts_queued_keys = false;
+    } else if (id >= ContentsJumpDigit0 && id <= ContentsJumpDigit9) {
+        const auto limit = contents_jump_percent ? 3U : std::max<std::size_t>(4, std::to_string(count).size());
+        if (contents_jump_input.size() >= limit) return;
+        const auto digit = static_cast<char>('0' + id - ContentsJumpDigit0);
+        if (contents_jump_percent && contents_jump_input == "0") contents_jump_input.front() = digit;
+        else contents_jump_input.push_back(digit);
+        contents_jump_accepts_queued_keys = true;
+    } else if (id == ContentsJumpClear || id == ContentsJumpBackspace) {
+        if (contents_jump_input.empty()) return;
+        if (id == ContentsJumpClear) contents_jump_input.clear();
+        else contents_jump_input.pop_back();
+    } else {
+        const auto preview = contents_jump_preview();
+        if (id == ContentsJumpLocate) {
+            if (!preview.target_toc) return;
+            const auto index = *preview.target_toc;
+            const auto& toc = document.toc();
+            auto depth = toc[index].depth;
+            for (auto cursor = index; cursor && depth;) {
+                --cursor;
+                if (toc[cursor].depth >= depth) continue;
+                toc_collapsed.erase(cursor);
+                depth = toc[cursor].depth;
+            }
+            reset_contents_jump();
+            contents_jump_located = index;
+            contents_jump_located_percent = contents_jump_entry_percent(index);
+        } else if (id == ContentsJumpGo) {
+            if (!preview.can_jump || !session.visible_record()) return;
+            reset_contents_jump();
+            if (preview.target_position) jump_to_position(*preview.target_position);
+            else jump_to_toc(*preview.target_toc, true);
+            return;
+        } else {
+            const bool down = id == ContentsJumpMinus;
+            if (down ? !preview.can_step_down : !preview.can_step_up) return;
+            const auto stepped = down ? preview.value - 1 : preview.value + 1;
+            contents_jump_input = std::to_string(std::clamp(stepped, preview.minimum, preview.maximum));
+        }
+    }
+    if (contents_jump_open) draw_contents_jump(contents_top + 100);
+    else draw_contents();
+    overlay();
+}
+
+void ReaderApp::Impl::jump_to_toc(std::size_t index, bool reversible) {
+    const auto& item = document.toc()[index];
+    std::size_t target;
+    if (!document.chapter_index_for(item.resource, target)) {
+        error(tr("目录目标不在正文中"));
+        return;
+    }
+    if (reversible && session.visible_record()) {
+        link_return = session.visible_record()->anchor;
+        sync_return = true;
+        clear_page_history();
+    }
+    const auto& txt_headings = document.metadata().txt_headings;
+    if (index < txt_headings.size()) {
+        const auto& heading = txt_headings[index];
+        clear_page_history();
+        if (async_content) begin_chapter(target, heading.part, ContentJob::Target::Start, heading.offset);
+        else if (load_chapter(target, heading.part)) show_page(heading.offset);
+    } else if (async_content) {
+        clear_page_history();
+        begin_chapter(target, 0, ContentJob::Target::Fragment, 0, PageTurnOrigin::Middle, {}, item.fragment);
+    } else {
+        std::uint32_t position = 0;
+        if (seek_fragment(target, item.fragment, position, tr("目录项指向的位置不存在"))) show_page(position);
+    }
+}
+
+void ReaderApp::Impl::jump_to_position(const chapter_jump::Position& position) {
+    link_return = session.visible_record()->anchor;
+    sync_return = true;
+    clear_page_history();
+    using Kind = chapter_jump::PositionKind;
+    if (async_content) {
+        const auto target = position.kind == Kind::End ? ContentJob::Target::End :
+            position.kind == Kind::SourceByte ? ContentJob::Target::SourceByte : ContentJob::Target::Start;
+        begin_chapter(position.index, position.part, target, position.offset);
+        return;
+    }
+    if (position.kind == Kind::SourceByte) {
+        std::uint32_t offset = 0;
+        if (load_with(position.index, [&](Chapter& loaded, std::string& detail) {
+                return document.load_chapter_at_byte(position.index, position.part, position.offset,
+                    loaded, offset, detail, reading_detail());
+            })) show_source_byte_jump(offset);
+    } else if (load_chapter(position.index, position.part)) {
+        if (position.kind == Kind::End) show_page_before(chapter.text.size(), PageTurnOrigin::Middle);
+        else show_page(position.offset);
+    }
+}
+
+void ReaderApp::Impl::show_source_byte_jump(std::size_t start) {
+    const auto target_offset = settings.original_epub ? restore_readable_offset(chapter, start) : readable_offset(start);
+    Anchor target;
+    if (sync_return && link_return && chapter.anchor_at(static_cast<std::uint32_t>(target_offset), target) &&
+        target == *link_return) {
+        link_return = confirmed_link_return;
+        sync_return = confirmed_sync_return;
+    }
+    show_page(start);
+}
+
 void ReaderApp::Impl::control(int id, PageTurnOrigin turn_origin) {
     if (counting_job && counting_job->request.statistics &&
         (id == ManageConfirm || id == DetailDelete || id == DetailReset || id == Library || id == SaveRetry ||
@@ -382,6 +604,8 @@ void ReaderApp::Impl::control(int id, PageTurnOrigin turn_origin) {
     }
     if (usb_prepared && id != UsbExit && id != UsbExitConfirm && id != UsbCancel)
         return;
+    if (id >= ContentsJumpOpen && id <= ContentsJumpDigit9) { contents_jump_control(id); return; }
+    if (view == View::Contents && contents_jump_open && (id == Prev || id == Next)) return;
     if (id == WifiSettings || (id == WifiModeOpen && view == View::Sync)) {
         wifi_from_sync = view == View::Sync;
         wifi_from_transfer = view == View::Import && !import_from_settings;
@@ -428,6 +652,7 @@ void ReaderApp::Impl::control(int id, PageTurnOrigin turn_origin) {
     if (id >= BookmarkBase) {
         const auto index = static_cast<std::size_t>(id - BookmarkBase);
         if (view != View::Contents || !bookmarks_usable() || index >= bookmarks.bookmarks.size()) return;
+        reset_contents_jump();
         const auto target = bookmarks.bookmarks[index].anchor;
         if (async_content) { clear_page_history(); begin_seek(target); return; }
         std::uint32_t position;
@@ -487,31 +712,10 @@ void ReaderApp::Impl::control(int id, PageTurnOrigin turn_origin) {
     }
     if (id >= TocBase) {
         const auto index = static_cast<std::size_t>(id - TocBase);
-        if (index >= document.toc().size())
-            return;
-        const auto item = document.toc()[index];
-        std::size_t target;
-        if (!document.chapter_index_for(item.resource, target)) {
-            error(tr("目录目标不在正文中"));
-            return;
-        }
-        const auto& txt_headings = document.metadata().txt_headings;
-        if (index < txt_headings.size()) {
-            const auto heading = txt_headings[index];
-            clear_page_history();
-            if (async_content) begin_chapter(target, heading.part, ContentJob::Target::Start, heading.offset);
-            else if (load_chapter(target, heading.part)) show_page(heading.offset);
-            return;
-        }
-        if (async_content) {
-            clear_page_history();
-            begin_chapter(target, 0, ContentJob::Target::Fragment, 0, PageTurnOrigin::Middle, {}, item.fragment);
-            return;
-        }
-        std::uint32_t position = 0;
-        if (!seek_fragment(target, item.fragment, position, tr("目录项指向的位置不存在")))
-            return;
-        show_page(position);
+        if (view != View::Contents || contents_jump_open || index >= contents_jump_toc_count()) return;
+        const bool reversible = contents_jump_located == index && index != current_toc();
+        reset_contents_jump();
+        jump_to_toc(index, reversible);
         return;
     }
     if (id >= EntryBase) {
@@ -585,6 +789,7 @@ void ReaderApp::Impl::control(int id, PageTurnOrigin turn_origin) {
     case ContentsToc:
     case ContentsBookmarks:
         if (view != View::Contents) return;
+        reset_contents_jump();
         contents_bookmarks = id == ContentsBookmarks;
         if (contents_bookmarks) {
             const auto present = page_bookmarks();
@@ -640,6 +845,7 @@ void ReaderApp::Impl::control(int id, PageTurnOrigin turn_origin) {
         }
         return;
     case Contents: {
+        reset_contents_jump();
         load_fonts();
         toc_page = 0;
         toc_collapsed.clear();
@@ -659,6 +865,7 @@ void ReaderApp::Impl::control(int id, PageTurnOrigin turn_origin) {
         typography_from_settings = origin_for(view) == Origin::Settings;
         if (!begin_settings_edit())
             return;
+        reset_contents_jump();
         draft = edit_snapshot.config.settings;
         typography_preview.reset();
         typography_preview_failed = false;
@@ -671,6 +878,7 @@ void ReaderApp::Impl::control(int id, PageTurnOrigin turn_origin) {
         refresh_from_settings = view == View::Settings;
         if (!begin_settings_edit(refresh_from_settings))
             return;
+        reset_contents_jump();
         draw_refresh();
         break;
     case LibraryFolders: {
@@ -858,6 +1066,7 @@ void ReaderApp::Impl::control(int id, PageTurnOrigin turn_origin) {
         break;
     case Sync:
         if (!bookmark_io_ready()) return;
+        reset_contents_jump();
         refresh_badge_config();
         cancel_sync();
         sync_status.clear();
@@ -951,6 +1160,8 @@ void ReaderApp::Impl::control(int id, PageTurnOrigin turn_origin) {
                 --toc_page;
             else if (id == Next && toc_page + 1 < toc_starts.size())
                 ++toc_page;
+            else return;
+            reset_contents_jump();
             draw_contents();
         } else {
             turn(id == Next, turn_origin);
@@ -1120,6 +1331,7 @@ void ReaderApp::Impl::input(const AppInput &input) {
             const auto kind = request.kind;
             const bool preview = request.preview;
             const bool mapping = kind == ContentJob::Kind::MapUpload || kind == ContentJob::Kind::MapDownload;
+            const bool resume_reading = kind == ContentJob::Kind::Chapter && (sync_return || confirmed_sync_return);
             abandon_content();
             if (kind == ContentJob::Kind::StorageScan || kind == ContentJob::Kind::ClearCache) {
                 storage_usage.books.reset(); storage_usage.cache.reset(); storage_usage.available.reset();
@@ -1129,7 +1341,7 @@ void ReaderApp::Impl::input(const AppInput &input) {
             if (kind == ContentJob::Kind::ImageViewer) { close_image_viewer(); return; }
             link_return = confirmed_link_return;
             sync_return = confirmed_sync_return;
-            if (kind == ContentJob::Kind::Chapter && sync_return) { recover_body(); return; }
+            if (resume_reading) { recover_body(); return; }
             if (kind == ContentJob::Kind::LockScreenList || kind == ContentJob::Kind::LockScreenPreview) draw_power();
             else if (mapping) { sync_cancelled(false); draw_sync(); }
             else if (preview && font_picker_open) cancel_font_picker();
@@ -1165,7 +1377,9 @@ void ReaderApp::Impl::input(const AppInput &input) {
         if (input.y * 10 < body_height * 7) return PageTurnOrigin::Middle;
         return PageTurnOrigin::Bottom;
     };
-    if (input.queued) {
+    const bool queued_jump_key = input.queued && input.touch && view == View::Contents &&
+        contents_jump_open && contents_jump_accepts_queued_keys;
+    if (input.queued && !queued_jump_key) {
         const bool turn_touch = input.touch && input.y < reading_touch_bottom() && (input.x < 205 || input.x >= 479);
         const auto action = input.touch ? Action::None : map_input(context(), input.event.input);
         const bool turn_key = action == Action::PreviousPage || action == Action::NextPage;
@@ -1231,12 +1445,15 @@ void ReaderApp::Impl::input(const AppInput &input) {
         } else {
             for (const auto &hit : hits)
                 if (hit.contains(input.x, input.y)) {
-                    if (view == View::PowerMenu && input.touch_bounds) {
+                    const int action = hit.id;
+                    if (queued_jump_key && (action < ContentsJumpClear || action > ContentsJumpDigit9)) return;
+                    if (input.touch_bounds && (view == View::PowerMenu ||
+                            (action >= ContentsJumpOpen && action <= ContentsJumpDigit9))) {
                         const auto& bounds = *input.touch_bounds;
                         if (!hit.contains(bounds.min_x, bounds.min_y) ||
                             !hit.contains(bounds.max_x, bounds.max_y)) return;
                     }
-                    int id = hit.id;
+                    int id = action;
                     if (input.long_press && view == View::Library && id == Tools) id = ResumeDetails;
                     if (input.long_press && view == View::Library && id >= EntryBase && id < TocBase &&
                         !entries[static_cast<std::size_t>(id - EntryBase)].directory)

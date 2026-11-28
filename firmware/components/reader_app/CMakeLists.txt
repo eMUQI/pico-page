@@ -33,7 +33,7 @@ set(app_sources
     app_transfer.cpp
     app_update.cpp
     app_wifi.cpp
-    content_cache.cpp content_job.cpp dictionary_job.cpp page_cache.cpp)
+    chapter_jump.cpp content_cache.cpp content_job.cpp dictionary_job.cpp page_cache.cpp)
 
 if(ESP_PLATFORM)
     idf_component_register(SRCS ${app_sources} INCLUDE_DIRS include REQUIRES reader_core reader_store reader_document reader_dictionary reader_graphics reader_sync

@@ -59,6 +59,11 @@ def generate(directory: Path) -> None:
             (directory / (encoding + "-" + name + ".txt")).write_bytes(data)
     (directory / "gb18030.txt").write_bytes(("甲" * 24575 + "😀\ue587" + "乙" * 500 + "\r\n末尾").encode("gb18030"))
     write_fixture(directory / "valid.epub")
+    without_navigation = fixture_entries()
+    del without_navigation["EPUB/nav.xhtml"]
+    without_navigation["EPUB/package.opf"] = without_navigation["EPUB/package.opf"].replace(
+        '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>', '')
+    write_fixture(directory / "no-navigation.epub", without_navigation)
     fragments = fixture_entries()
     fragments["EPUB/chapter1.xhtml"] = ('<html xmlns="http://www.w3.org/1999/xhtml"><body>'
         '<p id="z">甲</p><p id="a">乙</p><p>' + 'x' * 60000 +
@@ -272,6 +277,13 @@ def generate(directory: Path) -> None:
     assert len(large['EPUB/package.opf'].encode()) > 262144
     write_fixture(directory / "large-toc.epub", large)
     write_fixture(directory / "large-toc-reversed.epub", dict(reversed(list(large.items()))))
+    deep_toc = dict(large)
+    parent_end = '<content src="chapter493.xhtml#body"/></navPoint>'
+    child_end = '<content src="chapter494.xhtml#body"/></navPoint>'
+    deep_toc['EPUB/toc.ncx'] = deep_toc['EPUB/toc.ncx'].replace(
+        parent_end, '<content src="chapter493.xhtml#body"/>').replace(
+        child_end, child_end + '</navPoint>').replace('chapter496.xhtml#body', 'chapter496.xhtml#missing')
+    write_fixture(directory / "large-toc-deep.epub", deep_toc)
     write_fixture(directory / "large-toc-small.epub", large_epub_entries(300))
     for chapters in (300, 3000):
         covered = large_epub_entries(chapters)
@@ -488,6 +500,13 @@ def generate(directory: Path) -> None:
     entries["EPUB/nav.xhtml"] = entries["EPUB/nav.xhtml"].replace(
         '<li><a href="chapter2.xhtml">', '<li><a href="chapter1.xhtml#late">后段</a></li><li><a href="chapter2.xhtml">')
     write_fixture(directory / "multi-part.epub", entries)
+    percent_jump = dict(entries)
+    text = "树林宁静阅读" * 180
+    paragraphs = [f"<p>第{number}段：{text}</p>" for number in range(700)]
+    paragraphs[70] = paragraphs[70].replace("<p>", "<p id='late'>", 1)
+    percent_jump["EPUB/chapter1.xhtml"] = ('<html xmlns="http://www.w3.org/1999/xhtml"><body>' +
+                                         "".join(paragraphs) + "</body></html>")
+    write_fixture(directory / "multi-part-percent.epub", percent_jump)
     swipe = dict(entries)
     swipe["EPUB/nav.xhtml"] = swipe["EPUB/nav.xhtml"].replace(
         '<li><a href="chapter1.xhtml">第一章</a></li>',

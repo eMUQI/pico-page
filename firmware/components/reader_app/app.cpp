@@ -528,7 +528,10 @@ WifiTargets ReaderApp::upload_targets() const {
     std::string problem;
     return impl_->card_available ? impl_->wifi_targets(problem) : WifiTargets{};
 }
-bool ReaderApp::keyboard_visible() const { return impl_->view == View::TextEntry; }
+bool ReaderApp::keyboard_visible() const {
+    return impl_->view == View::TextEntry || (impl_->view == View::Contents && impl_->contents_jump_open &&
+                                            impl_->contents_jump_accepts_queued_keys);
+}
 bool ReaderApp::prepare_portal(bool station) {
     if (impl_->cancel_custom_preparation() || !impl_->statistics_worker_idle()) return false;
     if (impl_->portal_live || impl_->network_worker_id) return false;
@@ -812,6 +815,8 @@ bool ReaderApp::prepare_sleep() {
         return false;
     }
     invalidate_identity_cache();
+    impl_->link_return = impl_->confirmed_link_return;
+    impl_->sync_return = impl_->confirmed_sync_return;
     if (!impl_->persist()) return false;
     if (impl_->has_book() && !impl_->session.visible_record()) return false;
     save_clock_sync();
@@ -854,6 +859,7 @@ bool ReaderApp::prepare_sleep() {
     impl_->release_author_fonts();
     impl_->draw_sleep(sync_state);
     if (impl_->view != View::Sleeping) return false;
+    impl_->reset_contents_jump();
     impl_->overlay(true);
     return true;
 }

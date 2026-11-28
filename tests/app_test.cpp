@@ -737,12 +737,12 @@ static void content_font_test(const fs::path& root, const fs::path& fixtures, co
         EpubDocument document; assert(document.open((card / book).string(), error));
         expected.clear(1);
         const auto metrics = book_font.metrics();
-        const int baseline = 522 + (92 - metrics.ascender - metrics.descender) / 2 + metrics.ascender;
+        const int baseline = 538 + (97 - metrics.ascender - metrics.descender) / 2 + metrics.ascender;
         x = 36;
         for (const auto c : graphics::decode_utf8(document.toc().front().label)) {
             assert(book_font.draw(expected, c, x, baseline, 15, true)); x += book_font.advance(c);
         }
-        assert(crop(app.canvas(), 36, 522, 300, 90) == crop(expected, 36, 522, 300, 90));
+        assert(crop(app.canvas(), 36, 538, 300, 90) == crop(expected, 36, 538, 300, 90));
         d.close(); d.present();
         assert(app.view() == View::Reading && crop(app.canvas(), 0, 104, 684, 900) == body);
         assert(app.saved_record() == saved);
@@ -2310,7 +2310,7 @@ static void footer_test(const fs::path& root, const fs::path& fixtures, bool asy
         driver.tap(342, 500); driver.present();
         driver.tap(68, 1140); driver.present();
         assert(app.view() == View::Contents);
-        driver.tap(300, 522 + 92 + 46); driver.present(); driver.complete_content();
+        driver.tap(300, 675); driver.present(); driver.complete_content();
         assert(app.view() == View::Reading && app.saved_record()->anchor.resource.find("chapter2") != std::string::npos);
         for (int i = 0; i < 9; ++i) { driver.tap(36, 1160); driver.present(); }
         expect_text("100.00%");
@@ -4474,11 +4474,314 @@ static void content_failure_test(const fs::path& root, const fs::path& fixtures)
 #endif
 }
 
+static void open_contents(Driver& driver) {
+    if (driver.app.view() == View::Reading) { driver.tap(342, 500); driver.present(); }
+    assert(driver.app.view() == View::Tools);
+    driver.tap(68, 1150); driver.present();
+    assert(driver.app.view() == View::Contents);
+}
+
+static void jump_digits(Driver& driver, std::string_view digits) {
+    for (const auto digit : digits) {
+        const int key = digit == '0' ? 10 : digit - '1';
+        driver.tap(126 + key % 3 * 216, 844 + key / 3 * 72);
+        driver.present();
+    }
+}
+
+static void quick_chapter_jump_test(const fs::path& root, const fs::path& fixtures, bool async) {
+    const std::string book = "Books/chapters.epub";
+    const auto progress = root / (book + ".picopage/progress.json");
+    fs::create_directories(root / "Books");
+    fs::copy_file(fixtures / "large-toc-deep.epub", root / book);
+    use_unified_footer_layout(root);
+    ReaderApp app(root.string(), "quick-jump", true, async); Driver driver{app};
+    assert(app.initialize()); driver.present(); opened(app, book); driver.present();
+    const auto origin = *app.saved_record();
+    const auto saved = read(progress);
+    const auto has_return = [&] { return app.canvas().pixel(0, 102) == 1; };
+    const auto target_row_y = [&] {
+        for (int y = 545; y < 1105; ++y)
+            if (app.canvas().pixel(2, y) == 1 && app.canvas().pixel(16, y) == 15) return y;
+        return -1;
+    };
+    const auto enter_jump = [&] {
+        driver.tap(620, 452); driver.present();
+        assert(app.view() == View::Contents && app.canvas().pixel(24, 630) == 1);
+    };
+
+    open_contents(driver);
+    driver.tap(215, 490); driver.present();
+    driver.tap(620, 490);
+    assert(!app.pending_frame());
+    driver.tap(65, 490); driver.present();
+    enter_jump();
+    const auto empty = app.canvas().pixels();
+    assert(app.canvas().pixel(348, 1116) == 15);
+    driver.input_during_refresh(Input::TouchCenter, true, 342, 908);
+    driver.tap(126, 1066); driver.tap(558, 1066); driver.tap(500, 1160);
+    driver.key(Input::K1); driver.key(Input::K3);
+    driver.swipe(false, 300, 829); driver.swipe(true, 300, 829);
+    assert(!app.pending_frame() && app.canvas().pixels() == empty && app.saved_record() == origin);
+    driver.refresh();
+
+    jump_digits(driver, "0");
+    assert(app.canvas().pixel(26, 651) == 1 && app.canvas().pixel(348, 1116) == 15);
+    driver.tap(160, 1160); driver.tap(500, 1160);
+    assert(!app.pending_frame() && app.saved_record() == origin);
+    driver.tap(620, 662); driver.present();
+    assert(app.canvas().pixel(26, 651) == 15);
+    driver.tap(126, 1066); driver.present();
+    driver.tap(540, 662); driver.present();
+    const auto decremented = app.canvas().pixels();
+    driver.tap(126, 1066); driver.present(); jump_digits(driver, "1");
+    assert(app.canvas().pixels() == decremented);
+    driver.tap(126, 1066); driver.present(); jump_digits(driver, "2");
+    assert(app.canvas().pixel(348, 1116) == 15);
+    driver.tap(126, 1066); driver.present();
+    driver.tap(620, 662); driver.present();
+    assert(app.canvas().pixel(348, 1116) == 1);
+    if (async) {
+        driver.tap(65, 490); driver.present();
+    } else {
+        driver.tap(256, 400); driver.present(); driver.complete_content();
+        assert(app.view() == View::Typography);
+        driver.close(); driver.present(); driver.complete_content();
+        open_contents(driver);
+    }
+    enter_jump();
+    assert(app.canvas().pixel(348, 1116) == 15);
+
+    jump_digits(driver, "499");
+    const auto before_step = app.canvas().pixels();
+    driver.tap(620, 662); driver.present();
+    driver.tap(540, 662); driver.present();
+    assert(app.canvas().pixels() == before_step);
+    driver.tap(620, 662); driver.present();
+    driver.tap(160, 1160); driver.present();
+    assert(app.view() == View::Contents && target_row_y() >= 530);
+    assert(app.canvas().pixel(680, 538 + 5 * 97 - 1) == 1 && app.canvas().pixel(680, 1118) == 15 &&
+           app.canvas().pixel(680, 1119) == 1);
+    assert(app.saved_record() == origin && read(progress) == saved);
+    driver.key(Input::K3); driver.present();
+    driver.key(Input::K1); driver.present();
+    assert(target_row_y() < 0);
+
+    if (async) {
+        enter_jump(); jump_digits(driver, "5");
+        for (int zero = 0; zero < 2; ++zero) {
+            driver.input_during_refresh(Input::TouchCenter, true, 342, 1066);
+            driver.present();
+        }
+        const auto entered_while_refreshing = app.canvas().pixels();
+        driver.input_during_refresh(Input::TouchCenter, true, 500, 1160);
+        driver.input_during_refresh(Input::TouchCenter, true, 65, 490);
+        assert(!app.pending_frame() && app.canvas().pixels() == entered_while_refreshing);
+        driver.tap(126, 1066); driver.present(); jump_digits(driver, "500");
+        assert(app.canvas().pixels() == entered_while_refreshing);
+        ContentJob::delay_starts_for_test(ContentJob::Kind::Chapter, std::chrono::milliseconds(5000));
+        driver.tap(500, 1160); driver.present();
+        assert(app.view() == View::Loading && app.saved_record() == origin && read(progress) == saved);
+        ContentJob::delay_starts_for_test(ContentJob::Kind::Chapter, std::chrono::milliseconds{});
+        driver.tap(560, 1170); driver.present(); driver.complete_content();
+        assert(app.view() == View::Reading && !has_return() && app.saved_record()->anchor == origin.anchor);
+        open_contents(driver);
+    }
+
+    enter_jump(); jump_digits(driver, "500");
+    driver.frame_observer = [&](const Frame& frame) {
+        if (frame.purpose == FramePurpose::Body) assert(app.saved_record() == origin && read(progress) == saved);
+    };
+    driver.tap(500, 1160); driver.present(); driver.complete_content();
+    driver.frame_observer = {};
+    const auto jumped = *app.saved_record();
+    assert(app.view() == View::Reading && has_return() && jumped.anchor.resource == "EPUB/chapter494.xhtml");
+    const auto jumped_file = read(progress);
+    open_contents(driver); enter_jump(); jump_digits(driver, "502");
+    driver.tap(500, 1160); driver.present(); driver.complete_content();
+    assert(app.view() == View::Error && app.saved_record() == jumped && read(progress) == jumped_file);
+    driver.close(); driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && has_return() && app.saved_record()->anchor == jumped.anchor);
+    driver.refresh();
+    driver.tap(100, 50); driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && !has_return() && app.saved_record()->anchor == origin.anchor);
+
+    open_contents(driver); enter_jump(); jump_digits(driver, "500");
+    driver.tap(160, 1160); driver.present();
+    const int y = target_row_y();
+    assert(y >= 530);
+    driver.tap(200, y + 12); driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && app.saved_record()->anchor == jumped.anchor);
+
+    open_contents(driver); enter_jump(); jump_digits(driver, "20");
+    driver.tap(500, 580); driver.present();
+    assert(app.canvas().pixel(348, 1116) == 15);
+    jump_digits(driver, "100");
+    driver.tap(620, 662);
+    assert(!app.pending_frame());
+    driver.tap(500, 1160); driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && has_return() && app.saved_record()->anchor.resource == "EPUB/chapter2999.xhtml");
+    driver.key(Input::K1); driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && !has_return());
+}
+
+static void quick_jump_estimated_percent_test(const fs::path& root, const fs::path& fixtures) {
+    const std::string book = "Books/parts.epub";
+    fs::create_directories(root / "Books");
+    fs::copy_file(fixtures / "multi-part-percent.epub", root / book);
+    write(root / "PicoPage/settings.toml", "schema_version=1\nonboarding.done=true\n[reader]\noriginal_epub=false\n");
+    ReaderApp app(root.string(), "quick-jump-estimated-percent", true, true); Driver driver{app};
+    assert(app.initialize()); driver.present(); opened(app, book); driver.present();
+    const auto origin = app.saved_record()->anchor;
+    const auto enter_jump = [&](bool percent) {
+        open_contents(driver);
+        driver.tap(620, 490); driver.present();
+        if (percent) { driver.tap(500, 580); driver.present(); }
+    };
+
+    enter_jump(true);
+    jump_digits(driver, "41");
+    driver.tap(500, 1160); driver.present(); driver.complete_content();
+    const auto target = app.saved_record()->anchor;
+    assert(app.view() == View::Reading && target.resource == origin.resource && target != origin);
+    driver.tap(100, 50); driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && app.saved_record()->anchor == origin);
+
+    enter_jump(false);
+    jump_digits(driver, "2");
+    driver.tap(500, 1160); driver.present(); driver.complete_content();
+    const auto before = app.saved_record()->anchor;
+    assert(app.view() == View::Reading && before.resource == target.resource && before != target && before != origin);
+
+    enter_jump(true);
+    driver.tap(540, 674); driver.present();
+    const auto decremented = app.canvas().pixels();
+    driver.tap(126, 1066); driver.present(); jump_digits(driver, "40");
+    assert(app.canvas().pixels() == decremented);
+    driver.tap(126, 1066); driver.present(); jump_digits(driver, "41");
+    driver.tap(500, 1160);
+    assert(app.pending_frame());
+    driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && app.saved_record()->anchor == target);
+    driver.tap(100, 50); driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && app.saved_record()->anchor == before);
+
+    const std::string text = "Books/bom.txt";
+    write(root / text, "\xef\xbb\xbf" "Enough words.\n");
+    opened(app, text); driver.present();
+    const auto initial = app.saved_record();
+    assert(initial);
+    enter_jump(false);
+    jump_digits(driver, "10");
+    driver.tap(500, 1160);
+    assert(app.pending_frame());
+    driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && app.saved_record() == initial && app.canvas().pixel(0, 102) == 15);
+}
+
+static void quick_jump_localization_test(const fs::path& root, const fs::path& fixtures) {
+    const std::string book = "Books/book.epub";
+    fs::create_directories(root / "Books");
+    fs::copy_file(fixtures / "valid.epub", root / book);
+    EpubDocument document;
+    Chapter chapter;
+    std::string error;
+    assert(document.open((root / book).string(), error) && document.load_chapter(1, chapter, error));
+    FileStore store(root.string());
+    const auto& identity = document.metadata().book_id;
+    const auto original = store.load_bookmarks(book, identity, "epub-native-v1");
+    BookmarkList committed;
+    std::vector<Bookmark> bookmarks;
+    for (std::uint32_t offset = 0; offset < chapter.text.size() && bookmarks.size() < kMaxBookmarks; ++offset) {
+        Bookmark mark;
+        if (!chapter.anchor_at(offset, mark.anchor)) continue;
+        mark.sequence = bookmarks.size() + 1;
+        bookmarks.push_back(mark);
+    }
+    assert(bookmarks.size() == kMaxBookmarks && store.save_bookmarks(book, identity, "epub-native-v1", original,
+        bookmarks, bookmarks.size() + 1, committed) == StoreStatus::Ok);
+    for (const std::string language : {"zh-Hans", "zh-Hant", "en"}) {
+        write(root / "PicoPage/settings.toml", "schema_version=1\n[system]\nlanguage='" + language + "'\n");
+        use_unified_footer_layout(root);
+        ReaderApp app(root.string(), "quick-jump-localization"); Driver driver{app};
+        assert(app.initialize()); driver.present(); opened(app, book); driver.present(); open_contents(driver);
+        int divider = 683;
+        while (divider > 300 && !(app.canvas().pixel(divider, 455) == 1 && app.canvas().pixel(divider, 520) == 1)) --divider;
+        while (app.canvas().pixel(divider - 1, 455) == 1) --divider;
+        assert(divider > 300 && divider < 600);
+        const auto dark_ink = [&](int left, int right) {
+            for (int y = 470; y < 510; ++y)
+                for (int x = left; x < right; ++x)
+                    if (app.canvas().pixel(x, y) < 12) return true;
+            return false;
+        };
+        assert(dark_ink(24, 137) && dark_ink(146, divider - 12) && dark_ink(divider + 8, 652));
+        assert(!dark_ink(divider - 12, divider));
+        shot(("quick-jump-entrance-" + language).c_str(), app);
+        driver.tap(215, 490); driver.present();
+        assert(app.canvas().pixel(divider, 455) == 15);
+        driver.tap(65, 490); driver.present();
+        driver.tap(620, 452); driver.present(); jump_digits(driver, "2");
+        assert(app.canvas().pixel(348, 1116) == 1);
+        shot(("quick-jump-" + language).c_str(), app);
+    }
+}
+
+static void quick_jump_without_contents_test(const fs::path& root, const fs::path& fixtures, bool txt) {
+    const std::string book = txt ? "Books/no-headings.txt" : "Books/no-navigation.epub";
+    if (txt) {
+        std::string text;
+        for (int line = 0; line < 1200; ++line) text += "The wind moves slowly across the quiet field and the garden.\n";
+        write(root / book, text);
+    } else {
+        fs::create_directories(root / "Books");
+        fs::copy_file(fixtures / "no-navigation.epub", root / book);
+    }
+    use_unified_footer_layout(root);
+    ReaderApp app(root.string(), "jump-without-contents", true, txt); Driver driver{app};
+    assert(app.initialize()); driver.present(); opened(app, book); driver.present();
+    const auto origin = app.saved_record()->anchor;
+    open_contents(driver);
+    driver.tap(620, 490); driver.present();
+    assert(app.view() == View::Contents && app.canvas().pixel(24, 550) == 15 && app.canvas().pixel(348, 550) == 15);
+    driver.tap(140, 580); driver.tap(160, 1160);
+    assert(!app.pending_frame());
+    jump_digits(driver, "0");
+    assert(app.canvas().pixel(26, 651) == 15 && app.canvas().pixel(348, 1116) == 15);
+    driver.tap(126, 1066); driver.present();
+    jump_digits(driver, "101");
+    assert(app.canvas().pixel(26, 651) == 1 && app.canvas().pixel(348, 1116) == 15);
+    driver.tap(558, 1066); driver.present();
+    assert(app.canvas().pixel(30, 1116) == 1 && app.canvas().pixel(348, 1116) == 1);
+    assert(sleep_frame(app)); driver.present();
+    app.wake(); driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && app.saved_record()->anchor == origin);
+    open_contents(driver); driver.tap(620, 490); driver.present();
+    assert(app.canvas().pixel(348, 1116) == 15);
+    jump_digits(driver, txt ? "75" : "100");
+    driver.tap(500, 1160); driver.present(); driver.complete_content();
+    const auto target = app.saved_record()->anchor;
+    assert(app.view() == View::Reading && target != origin && app.canvas().pixel(0, 102) == 1);
+    assert(txt ? target.node == "part:1" : target.resource == "EPUB/chapter2.xhtml");
+    driver.tap(100, 50); driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && app.saved_record()->anchor == origin);
+}
+
 int main(int argc, char** argv) {
     assert(argc == 3 || argc == 4);
     char temporary[] = "/tmp/pico-app-XXXXXX";
     const char* directory = mkdtemp(temporary); assert(directory);
     const fs::path card(directory), fixtures(argv[1]);
+    const bool quick_jump_only = argc == 4 && std::string_view(argv[3]) == "quick-chapter-jump";
+    if (argc == 3 || quick_jump_only) {
+        quick_chapter_jump_test(card / "QuickJumpSync", fixtures, false);
+        quick_chapter_jump_test(card / "QuickJumpAsync", fixtures, true);
+        quick_jump_estimated_percent_test(card / "QuickJumpEstimatedPercent", fixtures);
+        quick_jump_without_contents_test(card / "QuickJumpNoEpubToc", fixtures, false);
+        quick_jump_without_contents_test(card / "QuickJumpNoTxtToc", fixtures, true);
+        quick_jump_localization_test(card / "QuickJumpLocalization", fixtures);
+    }
+    if (quick_jump_only) { fs::remove_all(card); return 0; }
     dictionary_query_failure_test(card / "DictionaryQuery", fixtures, argv[2]);
     dictionary_ui_test(card / "Dictionary", fixtures, argv[2]);
     body_image_cache_checks(card / "body-image-cache", fixtures);
@@ -4810,6 +5113,14 @@ int main(int argc, char** argv) {
         driver.tap(68, 1150); driver.present();
         assert(app.view() == View::Contents && *app.saved_record() == original);
         driver.key(Input::K2); driver.present();
+        if (encoding == "utf-8") {
+            driver.tap(620, 490); driver.present(); jump_digits(driver, "2");
+            driver.tap(500, 1160); driver.present(); driver.complete_content();
+            assert(app.view() == View::Reading && app.saved_record()->anchor == expected && app.canvas().pixel(0, 102) == 1);
+            driver.tap(100, 50); driver.present(); driver.complete_content();
+            assert(app.view() == View::Reading && app.saved_record()->anchor == original.anchor);
+            open_contents(driver);
+        }
         driver.tap(200, 660); driver.present(); driver.complete_content();
         assert(app.view() == View::Reading && app.saved_record()->anchor == expected);
         driver.tap(342, 500); driver.present();
@@ -5402,7 +5713,7 @@ int main(int argc, char** argv) {
         driver.present();
         driver.tap(342, 500); driver.present();
         driver.tap(68, 1140); assert(app.view() == View::Contents); driver.present();
-        driver.tap(300, 522 + 92 + 46); assert(app.view() == View::Reading); driver.present();
+        driver.tap(300, 675); assert(app.view() == View::Reading); driver.present();
         const auto second = *app.saved_record();
         assert(second.anchor.resource.find("chapter2") != std::string::npos);
         driver.key(Input::K1);
@@ -6601,11 +6912,11 @@ int main(int argc, char** argv) {
         const auto metrics = font.metrics();
         const int line_height = std::max(36, metrics.ascender + metrics.descender);
         const int title_height = metrics.ascender + metrics.descender + line_height;
-        const int row_height = std::max(92, title_height + 28);
+        const int row_height = std::max(97, title_height + 28);
         graphics::Canvas expected;
-        const auto check_title = [&](int top, const std::u32string& first, const std::u32string& second) {
+        const auto check_title = [&](int top, int height, const std::u32string& first, const std::u32string& second) {
             expected.clear();
-            const int baseline = top + (row_height - title_height) / 2 + metrics.ascender;
+            const int baseline = top + (height - title_height) / 2 + metrics.ascender;
             for (const auto& line : {std::pair{first, baseline}, std::pair{second, baseline + line_height}}) {
                 int x = 36;
                 for (const auto scalar : line.first) {
@@ -6613,19 +6924,28 @@ int main(int argc, char** argv) {
                     x += font.advance(scalar);
                 }
             }
-            for (int y = top; y < top + row_height - 2; ++y)
+            for (int y = top; y < top + height - 2; ++y)
                 for (int x = 36; x < 492; ++x)
                     if (app.canvas().pixel(x, y) != expected.pixel(x, y)) {
                         std::cerr << "TOC title mismatch at " << x << ',' << y << " top=" << top
-                                  << " row=" << row_height << " metrics=" << metrics.ascender << ',' << metrics.descender
+                                  << " row=" << height << " metrics=" << metrics.ascender << ',' << metrics.descender
                                   << " advances=" << font.advance(U'甲') << ',' << font.advance(U'）') << '\n';
                         assert(false);
                     }
-            for (int y = top + row_height - 12; y < top + row_height - 2; ++y)
+            for (int y = top + height - 12; y < top + height - 2; ++y)
                 for (int x = 36; x < 492; ++x) assert(app.canvas().pixel(x, y) == 15);
         };
-        check_title(522 + 92, std::u32string(15, U'甲'), U"甲）？");
-        check_title(522 + 92 + row_height, std::u32string(16, U'乙'), std::u32string(15, U'乙') + U"…");
+        const int first_screen_rows = 5, spare = 582 - (2 * row_height + 3 * 97);
+        assert(spare > 0 && spare < 97);
+        const auto stretched = [&](int row, int height) {
+            return height + spare / first_screen_rows + (row < spare % first_screen_rows ? 1 : 0);
+        };
+        const int first_row = stretched(0, 97), second_row = stretched(1, row_height);
+        check_title(538 + first_row, second_row, std::u32string(15, U'甲'), U"甲）？");
+        check_title(538 + first_row + second_row, stretched(2, row_height),
+                    std::u32string(16, U'乙'), std::u32string(15, U'乙') + U"…");
+        assert(app.canvas().pixel(680, 1118) == 15 && app.canvas().pixel(680, 1119) == 1 &&
+               app.canvas().pixel(680, 1121) == 15);
         driver.refresh();
         assert(*app.saved_record() == saved);
         driver.key(Input::K3); driver.present();
@@ -8352,7 +8672,7 @@ int main(int argc, char** argv) {
         const auto bookmark_list = [&](Driver& driver) {
             tools(driver);
             driver.tap(68, 1150); driver.present(); assert(driver.app.view() == View::Contents);
-            driver.tap(500, 486); driver.present(); assert(driver.app.view() == View::Contents);
+            driver.tap(215, 486); driver.present(); assert(driver.app.view() == View::Contents);
         };
         Anchor marked;
         std::string id;
@@ -8619,7 +8939,7 @@ int main(int argc, char** argv) {
                 while (app.pending_frame()) app.complete_frame(true);
                 assert(app.view() == View::Contents);
                 if (show_bookmarks) {
-                    driver.tap(500, 486);
+                    driver.tap(215, 486);
                     while (app.pending_frame()) app.complete_frame(true);
                 }
                 const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);

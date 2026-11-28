@@ -204,6 +204,13 @@ endif()
 add_test(NAME app COMMAND app_test ${document_fixtures}
     ${CMAKE_CURRENT_SOURCE_DIR}/.local/card/Fonts/LXGWWenKai-Regular.ttf)
 
+add_executable(chapter_jump_test tests/chapter_jump_test.cpp)
+add_dependencies(chapter_jump_test document_fixtures_target)
+target_include_directories(chapter_jump_test PRIVATE firmware/components/reader_app)
+target_link_libraries(chapter_jump_test PRIVATE reader_app)
+target_compile_options(chapter_jump_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME chapter_jump COMMAND chapter_jump_test ${document_fixtures})
+
 add_executable(statistics_app_test tests/statistics_app_test.cpp)
 add_dependencies(statistics_app_test document_fixtures_target)
 target_link_libraries(statistics_app_test PRIVATE reader_app)
