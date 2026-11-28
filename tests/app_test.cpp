@@ -4666,6 +4666,31 @@ static void quick_jump_estimated_percent_test(const fs::path& root, const fs::pa
     driver.tap(100, 50); driver.present(); driver.complete_content();
     assert(app.view() == View::Reading && app.saved_record()->anchor == before);
 
+    enter_jump(false);
+    jump_digits(driver, "2");
+    assert(app.canvas().pixel(348, 1116) == 15);
+    driver.close(); driver.present(); driver.complete_content();
+    driver.key(Input::K3); driver.present(); driver.complete_content();
+    const auto interior = app.saved_record()->anchor;
+    assert(app.view() == View::Reading && interior.resource == before.resource && interior != before);
+
+    enter_jump(false);
+    jump_digits(driver, "2");
+    assert(app.canvas().pixel(348, 1116) == 1);
+    driver.tap(500, 1160); driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && app.saved_record()->anchor == before && app.canvas().pixel(0, 102) == 1);
+    driver.tap(100, 50); driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && app.saved_record()->anchor == interior);
+
+    enter_jump(false);
+    jump_digits(driver, "2");
+    driver.tap(160, 1160); driver.present();
+    assert(app.view() == View::Contents && app.canvas().pixel(0, 674) == 1);
+    driver.tap(200, 674); driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && app.saved_record()->anchor == before && app.canvas().pixel(0, 102) == 1);
+    driver.tap(100, 50); driver.present(); driver.complete_content();
+    assert(app.view() == View::Reading && app.saved_record()->anchor == interior);
+
     const std::string text = "Books/bom.txt";
     write(root / text, "\xef\xbb\xbf" "Enough words.\n");
     opened(app, text); driver.present();

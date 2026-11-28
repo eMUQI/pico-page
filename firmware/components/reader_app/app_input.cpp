@@ -356,6 +356,19 @@ int ReaderApp::Impl::contents_jump_entry_percent(std::size_t index) const {
     return toc_percent(first);
 }
 
+bool ReaderApp::Impl::at_toc_target(std::size_t index) const {
+    const auto& entry = document.toc()[index];
+    if (entry.resource != chapter.resource) return false;
+    const auto& headings = document.metadata().txt_headings;
+    if (index < headings.size()) {
+        const auto& heading = headings[index];
+        return heading.part == chapter.part && readable_offset(heading.offset) == offset;
+    }
+    std::uint32_t start = 0;
+    const bool in_part = entry.fragment.empty() ? chapter.part == 0 : chapter.fragment_offset(entry.fragment, start);
+    return in_part && readable_offset(start) == offset;
+}
+
 ReaderApp::Impl::ContentsJumpPreview ReaderApp::Impl::contents_jump_preview() const {
     ContentsJumpPreview preview;
     preview.current_toc = contents_jump_current;
@@ -384,19 +397,7 @@ ReaderApp::Impl::ContentsJumpPreview ReaderApp::Impl::contents_jump_preview() co
         if (!preview.target_toc) return preview;
         const auto index = *preview.target_toc;
         preview.target_percent = contents_jump_entry_percent(index);
-        preview.same_position = preview.target_toc == preview.current_toc;
-        const auto& entry = document.toc()[index];
-        if (!preview.same_position && entry.resource == chapter.resource) {
-            const auto& headings = document.metadata().txt_headings;
-            if (index < headings.size()) {
-                const auto& heading = headings[index];
-                preview.same_position = heading.part == chapter.part && readable_offset(heading.offset) == offset;
-            } else {
-                std::uint32_t start = 0;
-                const bool in_part = entry.fragment.empty() ? chapter.part == 0 : chapter.fragment_offset(entry.fragment, start);
-                preview.same_position = in_part && readable_offset(start) == offset;
-            }
-        }
+        preview.same_position = at_toc_target(index);
         preview.can_jump = !preview.same_position;
         return preview;
     }
@@ -713,7 +714,7 @@ void ReaderApp::Impl::control(int id, PageTurnOrigin turn_origin) {
     if (id >= TocBase) {
         const auto index = static_cast<std::size_t>(id - TocBase);
         if (view != View::Contents || contents_jump_open || index >= contents_jump_toc_count()) return;
-        const bool reversible = contents_jump_located == index && index != current_toc();
+        const bool reversible = contents_jump_located == index && !at_toc_target(index);
         reset_contents_jump();
         jump_to_toc(index, reversible);
         return;

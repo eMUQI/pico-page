@@ -2270,6 +2270,7 @@ struct ReaderApp::Impl final : DisplayBackend {
         (footer_zone - contents_top - 100 - contents_switch_height) / bookmark_row;
     std::size_t contents_jump_toc_count() const { return document.has_chapter_toc() ? document.toc().size() : 0; }
     int contents_jump_entry_percent(std::size_t index) const;
+    bool at_toc_target(std::size_t index) const;
     ContentsJumpPreview contents_jump_preview() const;
     void reset_contents_jump();
     void contents_jump_control(int id);
