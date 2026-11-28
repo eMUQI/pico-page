@@ -226,6 +226,23 @@ bool decode_utf16(std::string_view bytes, bool big_endian, std::u32string& text)
     }
     return !decoder.pending();
 }
+
+std::uint32_t txt_scalar_at_byte(std::string_view bytes, std::uint32_t byte_offset, TxtEncoding encoding) {
+    std::uint32_t count = 0;
+    for (std::size_t i = 0; i < bytes.size() && i <= byte_offset; ++count) {
+        const auto first = static_cast<unsigned char>(bytes[i]);
+        if (encoding == TxtEncoding::Utf8) {
+            i += first < 0x80 ? 1 : first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
+        } else if (encoding == TxtEncoding::Gb18030) {
+            i += first < 0x80 ? 1 : bytes[i + 1] >= '0' && bytes[i + 1] <= '9' ? 4 : 2;
+        } else {
+            const auto high_byte = static_cast<unsigned char>(bytes[i + (encoding == TxtEncoding::Utf16Le)]);
+            i += high_byte >= 0xd8 && high_byte <= 0xdb ? 4 : 2;
+        }
+    }
+    return count ? count - 1 : 0;
+}
+
 class TxtTocBuilder {
 public:
     std::vector<TxtHeading> headings;
@@ -873,6 +890,12 @@ struct ChapterCallbackTiming {
 };
 #endif
 
+struct ChapterByteTarget {
+    std::uint32_t source_offset;
+    std::uint32_t scalar_offset = 0;
+    std::uint32_t part_start = 0;
+};
+
 struct ChapterParser {
     static constexpr std::size_t kFragmentLimit = 2048;
     static constexpr auto kFragmentIndexBytes = kFragmentLimit * sizeof(std::uint16_t);
@@ -898,6 +921,7 @@ struct ChapterParser {
     Chapter& result;
     std::uint32_t requested_part = 0;
     const std::function<bool(const Chapter&)>* match_part = nullptr;
+    ChapterByteTarget* byte_target = nullptr;
     std::uint32_t part = 0;
     std::size_t part_source_nodes = 0;
     bool split_pending = false, captured = false, resumable = false;
@@ -1026,7 +1050,20 @@ struct ChapterParser {
         (*visit)(chapter);
         if (separator) chapter.text.push_back(U'\n');
     }
-    bool selected() const {
+    bool selected(bool last = false) {
+        if (byte_target) {
+            const auto index = XML_GetCurrentByteIndex(xml.parser);
+            const auto part_end = last || xml.html || index < 0 ? static_cast<std::uint32_t>(xml.bytes) :
+                static_cast<std::uint32_t>(index);
+            const auto part_start = std::exchange(byte_target->part_start, part_end);
+            if (!last && byte_target->source_offset >= part_end) return false;
+            if (part_end > part_start && byte_target->source_offset > part_start) {
+                const auto bytes = std::min(byte_target->source_offset, part_end) - part_start;
+                byte_target->scalar_offset = static_cast<std::uint64_t>(chapter.text.size()) * bytes /
+                    (part_end - part_start);
+            }
+            return true;
+        }
         return match_part ? (*match_part)(chapter) : requested_part != kLastChapterPart && part == requested_part;
     }
     void capture(bool last) {
@@ -1507,6 +1544,7 @@ ImageHeader image_header_size(std::string_view bytes, std::uint32_t& width, std:
 
 struct EpubDocument::BookIndex {
     bool txt = false;
+    bool has_chapter_toc = false;
     std::string source_path;
     DocumentMetadata metadata;
     std::vector<SpineItem> spine;
@@ -1646,10 +1684,10 @@ struct EpubDocument::Impl {
     }
     bool load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
               std::uint32_t wanted, const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop,
-              const std::function<void(const Chapter&)>& visit);
+              const std::function<void(const Chapter&)>& visit, ChapterByteTarget* byte_target = nullptr);
     bool load_txt(Chapter& chapter, std::string& error, ChapterLoad detail, std::uint32_t wanted,
                   const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop,
-                  const std::function<void(const Chapter&)>& visit);
+                  const std::function<void(const Chapter&)>& visit, ChapterByteTarget* byte_target);
     bool parse(const std::string& path, Xml& xml, std::string& error, std::uint32_t max_bytes = kMaxXmlBytes, const std::function<bool()>& stop = {}, ContentFailureKind* failure_kind = nullptr) {
         const auto fail = content_failure_reporter(failure_kind);
         const StageTimer timer{"xml_read_inflate_parse", 0};
@@ -1730,6 +1768,7 @@ void EpubDocument::close() { impl_.reset(new Impl); }
 const DocumentMetadata& EpubDocument::metadata() const { return impl_->book().metadata; }
 const std::vector<SpineItem>& EpubDocument::spine() const { return impl_->book().spine; }
 const std::vector<TocEntry>& EpubDocument::toc() const { return impl_->book().toc; }
+bool EpubDocument::has_chapter_toc() const { return impl_->book().has_chapter_toc; }
 
 bool EpubDocument::open(const std::string& path, std::string& error, const std::function<bool()>& stop,
                         VerifiedIndex previous_index) {
@@ -1971,6 +2010,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, OpenMo
         parsed->spine.push_back({"text", "text", true, static_cast<std::uint32_t>(length)});
         for (const auto& heading : parsed->metadata.txt_headings)
             parsed->toc.push_back({heading.label, "text", "", 0});
+        parsed->has_chapter_toc = !parsed->toc.empty();
         if (parsed->toc.empty()) parsed->toc.push_back({"正文", "text", "", 0});
         next->index = std::move(parsed);
         impl_ = std::move(next);
@@ -2292,6 +2332,7 @@ bool EpubDocument::open_impl(const std::string& path, std::string& error, OpenMo
             parsed->toc = std::move(toc);
         } else if (toc_error == kChapterCancelled) return fail(error, toc_error);
     }
+    parsed->has_chapter_toc = !parsed->toc.empty();
     if (parsed->toc.empty()) for (const auto& item : parsed->spine) parsed->toc.push_back({item.id, item.resource, "", 0});
     next->index = std::move(parsed);
     impl_ = std::move(next);
@@ -2660,6 +2701,23 @@ bool EpubDocument::load_chapter(std::size_t index, Chapter& chapter, std::string
     reset_chapter_stream();
     return impl_->load(index, chapter, error, detail, part, nullptr, stop, visit);
 }
+
+bool EpubDocument::load_chapter_at_byte(std::size_t index, std::uint32_t part, std::uint32_t byte_offset,
+                                        Chapter& chapter, std::uint32_t& scalar_offset, std::string& error,
+                                        ChapterLoad detail, const std::function<bool()>& stop) {
+    scalar_offset = 0;
+    if (index >= spine().size() || byte_offset >= spine()[index].bytes) {
+        pico_page::release(chapter);
+        return fail(error, "Invalid chapter byte position");
+    }
+    reset_chapter_stream();
+    ChapterByteTarget target{byte_offset};
+    if (!impl_->load(index, chapter, error, detail, part, nullptr, stop, {}, &target)) return false;
+    if (!chapter.runs.empty() && chapter.runs.back().end)
+        scalar_offset = std::min(target.scalar_offset, chapter.runs.back().end - 1);
+    return true;
+}
+
 bool EpubDocument::find_chapter_part(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
                                      const std::function<bool(const Chapter&)>& match, const std::function<bool()>& stop, const std::function<void(const Chapter&)>& visit, bool sequential) {
     reset_chapter_stream();
@@ -2835,13 +2893,13 @@ bool EpubDocument::Impl::finish_author_part(Chapter& chapter, AuthorLayoutState*
 
 bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& error, ChapterLoad detail,
                               std::uint32_t wanted, const std::function<bool(const Chapter&)>* match, const std::function<bool()>& stop,
-                              const std::function<void(const Chapter&)>& visit) {
+                              const std::function<void(const Chapter&)>& visit, ChapterByteTarget* byte_target) {
     const StageTimer timer{"chapter_parse", 0};
     pico_page::release(chapter); error.clear();
     if (stop && stop()) return fail(error, kChapterCancelled);
     const auto& spine = book().spine;
     if (!file || index >= spine.size()) return fail(error, "Invalid chapter index");
-    if (txt) return load_txt(chapter, error, detail, wanted, match, stop, visit);
+    if (txt) return load_txt(chapter, error, detail, wanted, match, stop, visit, byte_target);
     auto author = detail == ChapterLoad::Original ? prepare_author_styles(index, stop) : nullptr;
     if (stop && stop()) return fail(error, kChapterCancelled);
     for (;;) {
@@ -2853,6 +2911,10 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
         }
         parser.requested_part = wanted;
         parser.match_part = match;
+        if (byte_target) {
+            byte_target->part_start = byte_target->scalar_offset = 0;
+            parser.byte_target = byte_target;
+        }
         if (detail == ChapterLoad::Reading) parser.visit = &visit;
         if (detail != ChapterLoad::Mapping) {
             parser.keep_mapping = false;
@@ -2886,7 +2948,7 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
                 return fail(error, "Chapter contains no supported body content");
             }
             parser.visit_part(true);
-            if (!parser.captured && (wanted == kLastChapterPart || parser.selected())) parser.capture(true);
+            if (!parser.captured && (wanted == kLastChapterPart || parser.selected(true))) parser.capture(true);
         }
         if (!parser.captured) { pico_page::release(chapter); return fail(error, kPartUnavailable + spine[index].resource); }
         if (detail == ChapterLoad::Mapping) {
@@ -2922,7 +2984,8 @@ bool EpubDocument::Impl::load(std::size_t index, Chapter& chapter, std::string& 
 }
 bool EpubDocument::Impl::load_txt(Chapter& chapter, std::string& error, ChapterLoad detail,
                                   std::uint32_t wanted, const std::function<bool(const Chapter&)>* match,
-                                  const std::function<bool()>& stop, const std::function<void(const Chapter&)>& visit) {
+                                  const std::function<bool()>& stop, const std::function<void(const Chapter&)>& visit,
+                                  ChapterByteTarget* byte_target) {
     const auto& metadata = book().metadata;
     const bool gb = metadata.txt_encoding == TxtEncoding::Gb18030;
     const bool utf16_be = metadata.txt_encoding == TxtEncoding::Utf16Be;
@@ -2969,6 +3032,7 @@ bool EpubDocument::Impl::load_txt(Chapter& chapter, std::string& error, ChapterL
             pico_page::release(chapter); return fail(error, "无法读取 TXT 文件");
         }
         auto text_bytes = std::string_view(bytes).substr(prefix_bytes);
+        const auto part_bytes = text_bytes.size();
         if (!indexed && part == 0 && text_bytes.substr(0, 3) == "\xef\xbb\xbf") text_bytes.remove_prefix(3);
         if (utf16 && part == 0 && text_bytes.size() >= 2) text_bytes.remove_prefix(2);
         Chapter current;
@@ -2987,6 +3051,11 @@ bool EpubDocument::Impl::load_txt(Chapter& chapter, std::string& error, ChapterL
         if (!(utf16 ? decode_utf16(text_bytes, utf16_be, current.text) :
               gb ? gb18030::decode(text_bytes, current.text) : decode(text_bytes.data(), text_bytes.size(), current.text))) {
             pico_page::release(chapter); return fail(error, "TXT 内容解码失败");
+        }
+        if (byte_target) {
+            const auto text_start = begin + static_cast<std::uint32_t>(part_bytes - text_bytes.size());
+            const auto target = std::max(byte_target->source_offset, text_start) - text_start;
+            byte_target->scalar_offset = txt_scalar_at_byte(text_bytes, target, metadata.txt_encoding);
         }
         std::string().swap(bytes);
         if (!collect_txt_soft_breaks(current, stop)) {

@@ -143,35 +143,223 @@ void ReaderApp::Impl::draw_bookmarks(int list_top) {
     footer_bar("", bookmark_page, pages);
 }
 
+void ReaderApp::Impl::contents_switch(int top) {
+    constexpr int label_size = 24, padding = 24, underline_height = 3, underline_gap = 10, minimum_hit_width = 160;
+    const int bottom = top + contents_switch_height, middle = top + (contents_switch_height - underline_gap) / 2;
+    int jump_left = 684;
+    if (!contents_bookmarks) {
+        const std::string label = tr("快速跳转 ›");
+        jump_left = 684 - text_width(label, label_size) - 2 * padding;
+        canvas.fill_rect(jump_left, top, 2, contents_switch_height, 1);
+        center(label, jump_left + 2, top_for_middle(ui, label_size, middle),
+               684 - jump_left - 2, label_size, 1);
+        hits.push_back({jump_left, top, 684 - jump_left, contents_switch_height, ContentsJumpOpen});
+    }
+    const std::string names[] = {tr("目录"), bookmarks_usable() && !bookmarks.bookmarks.empty()
+        ? trf("书签 {count}", {{"count", std::to_string(bookmarks.bookmarks.size())}}) : tr("书签")};
+    const int actions[] = {ContentsToc, ContentsBookmarks};
+    int hit_left = 0, label_left = 36;
+    for (int index = 0; index < 2; ++index) {
+        const bool active = (index == 1) == contents_bookmarks;
+        const int label_width = std::min(text_width(names[index], label_size), jump_left - padding - label_left);
+        text(names[index], label_left, top_for_middle(ui, label_size, middle, active), label_size, label_width,
+             active ? 1 : 3, active);
+        if (active)
+            canvas.fill_rect(label_left, bottom - 2 - underline_gap - underline_height, label_width, underline_height, 1);
+        const int label_right = label_left + label_width + padding;
+        const int hit_right = index ? std::min(jump_left, std::max(label_right, hit_left + minimum_hit_width)) : label_right;
+        hits.push_back({hit_left, top, hit_right - hit_left, contents_switch_height, actions[index]});
+        if (!index) canvas.fill_rect(hit_right, middle - 19, 2, 38, 12);
+        hit_left = hit_right + 2;
+        label_left = hit_left + padding;
+    }
+    canvas.fill_rect(0, bottom - 2, 684, 2, 1);
+}
+
+void ReaderApp::Impl::draw_contents_jump(int top) {
+    hits.erase(std::remove_if(hits.begin(), hits.end(), [top](const Hit& hit) { return hit.y >= top; }), hits.end());
+    canvas.fill_rect(0, top, 684, 1216 - top, 15);
+    const auto preview = contents_jump_preview();
+    const auto count = contents_jump_toc_count();
+    const auto current_percent = std::to_string(preview.current_percent) + "%";
+    const std::string title = tr("快速跳转"), back_label = tr("‹ 目录");
+    const int back_width = text_width(back_label, 24);
+    const int divider = 36 + back_width + 24;
+    const int title_left = divider + 26;
+    const int bar_middle = top + 43;
+    text(back_label, 36, top_for_middle(ui, 24, bar_middle), 24, back_width);
+    canvas.fill_rect(divider, top + 27, 2, 34, 12);
+    if (count) {
+        const auto status = trf("共 {count} 项", {{"count", std::to_string(count)}});
+        const int status_width = text_width(status, 24), status_left = 648 - status_width;
+        text(title, title_left, top_for_middle(ui, 28, bar_middle, true), 28, status_left - title_left - 16, 1, true);
+        text(status, status_left, top_for_middle(ui, 24, bar_middle), 24, status_width, 3);
+    } else text(title, title_left, top_for_middle(ui, 28, bar_middle, true), 28, 648 - title_left, 1, true);
+    const int header_bottom = top + contents_switch_height;
+    hits.push_back({0, top, divider, contents_switch_height, ContentsJumpBack});
+    canvas.fill_rect(0, header_bottom - 2, 684, 2, 1);
+
+    constexpr int left = 24, width = 636, card_width = 312, second_card = 348;
+    constexpr int mode_top = 548, mode_height = 72, card_top = 630;
+    if (count) {
+        const auto mode_card = [&](int action, const char* label, int x, bool selected) {
+            panel_choice_card(action, label, x, mode_top, selected);
+            hits.back().y = header_bottom;
+            hits.back().h = card_top - header_bottom;
+        };
+        mode_card(ContentsJumpChapter, tr("按目录序号"), panel_card_left, !contents_jump_percent);
+        mode_card(ContentsJumpPercent, tr("按百分比"), panel_card_right, contents_jump_percent);
+    } else
+        text(tr("本书未提供目录，将按全书进度跳转"), 36, top_for_middle(ui, 24, mode_top + mode_height / 2), 24, 612, 3);
+
+    constexpr int input_height = 88, preview_height = 80, card_height = input_height + preview_height;
+    constexpr int step_width = 88, input_middle = card_top + input_height / 2, preview_top = card_top + input_height;
+    constexpr int step_left = left + width - 2 * step_width, inset = 20, readout_left = left + inset;
+    constexpr int preview_width = width - 2 * inset;
+    const bool has_input = !contents_jump_input.empty();
+    const std::string unit = contents_jump_percent ? "%" : "";
+    const auto minimum = std::to_string(preview.minimum) + unit, maximum = std::to_string(preview.maximum) + unit;
+    const auto readout = has_input ? contents_jump_input + unit
+                                   : trf("输入 {min} – {max}", {{"min", minimum}, {"max", maximum}});
+    const int readout_size = has_input ? 34 : 28;
+    const int readout_width = std::min(text_width(readout, readout_size), step_left - readout_left - 48);
+    text(readout, readout_left, top_for_middle(ui, readout_size, input_middle, has_input),
+         readout_size, readout_width, has_input ? 1 : 3, has_input);
+    text("|", readout_left + readout_width + 4, top_for_middle(ui, 32, input_middle), 32, 24, 5);
+    const auto step = [&](int action, const char* label, int x, bool enabled) {
+        canvas.fill_rect(x, card_top, 2, input_height, 1);
+        if (enabled) hits.push_back({x, card_top, step_width, input_height, action});
+        center(label, x, top_for_middle(ui, 40, input_middle), step_width, 40, enabled ? 1 : 5);
+    };
+    step(ContentsJumpMinus, "−", step_left, preview.can_step_down);
+    step(ContentsJumpPlus, "+", step_left + step_width, preview.can_step_up);
+    canvas.fill_rect(left, preview_top, width, 2, 1);
+    outline(left, card_top, width, card_height, preview.out_of_range ? 3 : 2);
+
+    constexpr int preview_middle = preview_top + 24, detail_middle = preview_top + 58;
+    std::string detail;
+    if (preview.out_of_range) {
+        constexpr int badge = 28;
+        canvas.fill_rect(readout_left, preview_middle - badge / 2, badge, badge, 1);
+        center("!", readout_left, top_for_middle(ui, 20, preview_middle, true), badge, 20, 15, true);
+        const auto error = trf("超出范围，请输入 {min} – {max}", {{"min", minimum}, {"max", maximum}});
+        text(error, readout_left + badge + 12, top_for_middle(ui, 28, preview_middle, true),
+             28, preview_width - badge - 12, 1, true);
+        detail = tr("点按「退格」修改，或点按「清空」重新输入");
+    } else if (!has_input) {
+        const auto current_label = tr("当前 · ");
+        const int label_width = text_width(current_label, 28);
+        text(current_label, readout_left, top_for_middle(ui, 28, preview_middle), 28, label_width, 3);
+        auto& font = !count && txt_name(book_path) ? ui : body;
+        const int label_left = readout_left + label_width;
+        text(font, chapter_label(), label_left, top_for_middle(font, 28, preview_middle), 28,
+             preview_width - label_width);
+        detail = preview.current_toc
+            ? trf("第 {number} 项 · {percent}", {{"number", std::to_string(*preview.current_toc + 1)}, {"percent", current_percent}})
+            : trf("已读 {percent}", {{"percent", current_percent}});
+    } else if (preview.target_toc) {
+        const auto target = *preview.target_toc;
+        const auto ordinal = target + 1;
+        const auto current = preview.current_toc ? *preview.current_toc + 1 : 0;
+        std::string distance;
+        if (ordinal == current) distance = tr("当前所在章节");
+        else if (ordinal > current) distance = trf("向后 {count} 项", {{"count", std::to_string(ordinal - current)}});
+        else distance = trf("向前 {count} 项", {{"count", std::to_string(current - ordinal)}});
+        text(body, document.toc()[target].label, readout_left, top_for_middle(body, 28, preview_middle, true),
+             28, preview_width, 1, true);
+        const auto number = std::to_string(ordinal);
+        detail = preview.target_percent < 0
+            ? trf("第 {number} 项 · {percent}", {{"number", number}, {"percent", distance}})
+            : trf("第 {number} 项 · 约 {percent} · {distance}",
+                  {{"number", number}, {"percent", std::to_string(preview.target_percent) + "%"}, {"distance", distance}});
+    } else if (preview.target_position) {
+        const auto target = trf("全书约 {percent} 处", {{"percent", std::to_string(preview.target_percent) + "%"}});
+        text(target, readout_left, top_for_middle(ui, 28, preview_middle, true), 28, preview_width, 1, true);
+        detail = tr("当前 · ") + trf("已读 {percent}", {{"percent", current_percent}});
+    } else detail = tr("目标位置不在正文中");
+    text(detail, readout_left, top_for_middle(ui, 24, detail_middle), 24, preview_width, 3);
+
+    constexpr int pad_top = 812, key_width = 204, key_height = 64, key_dx = 216, key_dy = 72;
+    constexpr int action_top = 1108, action_height = 96;
+    constexpr int hit_top = (card_top + card_height + pad_top) / 2;
+    constexpr int hit_bottom = (pad_top + 3 * key_dy + key_height + action_top) / 2;
+    constexpr int keys[] = {ContentsJumpDigit0 + 1, ContentsJumpDigit0 + 2, ContentsJumpDigit0 + 3,
+                            ContentsJumpDigit0 + 4, ContentsJumpDigit0 + 5, ContentsJumpDigit0 + 6,
+                            ContentsJumpDigit0 + 7, ContentsJumpDigit0 + 8, ContentsJumpDigit0 + 9,
+                            ContentsJumpClear, ContentsJumpDigit0, ContentsJumpBackspace};
+    for (int index = 0; index < 12; ++index) {
+        const int row = index / 3, col = index % 3;
+        const int x = left + col * key_dx, y = pad_top + row * key_dy, action = keys[index];
+        const bool digit = action >= ContentsJumpDigit0 && action <= ContentsJumpDigit9;
+        const auto label = digit ? std::to_string(action - ContentsJumpDigit0)
+                                 : action == ContentsJumpClear ? tr("清空") : tr("退格");
+        if (!digit && !has_input) {
+            disabled_button(label, x, y, key_width, key_height);
+            continue;
+        }
+        outline(x, y, key_width, key_height);
+        button_label(label, x, y, key_width, key_height, digit ? 34 : 28, 1);
+        const int hit_y = row ? y - (key_dy - key_height) / 2 : hit_top;
+        const int bottom = row < 3 ? y + key_height + (key_dy - key_height) / 2 : hit_bottom;
+        const int half_gap = (key_dx - key_width) / 2;
+        hits.push_back({x - half_gap, hit_y, key_dx, bottom - hit_y, action});
+    }
+    int jump_left = left, jump_width = width;
+    if (count) {
+        jump_left = second_card;
+        jump_width = card_width;
+        if (preview.target_toc)
+            button(ContentsJumpLocate, tr("在目录中查看"), left, action_top, card_width, action_height);
+        else disabled_button(tr("在目录中查看"), left, action_top, card_width, action_height);
+    }
+    const auto jump = preview.same_position ? tr("已在当前位置")
+                        : contents_jump_percent ? tr("跳到此位置") : tr("跳到此章");
+    if (preview.can_jump)
+        button(ContentsJumpGo, jump, jump_left, action_top, jump_width, action_height, true);
+    else disabled_button(jump, jump_left, action_top, jump_width, action_height);
+}
+
 void ReaderApp::Impl::draw_contents() {
     view = View::Contents;
     if (!panel_background(contents_top - panel_strip)) return;
     tabs(contents_top, Contents);
+    if (contents_jump_open) { draw_contents_jump(contents_top + 100); return; }
     contents_switch(contents_top + 100);
     const int list_top = contents_top + 100 + contents_switch_height, list_height = footer_zone - list_top;
     if (contents_bookmarks) { draw_bookmarks(list_top); return; }
     const auto &toc = document.toc();
-    const bool generated_text_label = txt_name(book_path) && document.metadata().txt_headings.empty();
-    auto& toc_font = generated_text_label ? ui : body;
-    const auto label = [&](std::size_t index) -> std::string { return generated_text_label ? tr("正文") : toc[index].label; };
-    const auto current = current_toc();
     toc_visible.clear();
     toc_starts = {0};
+    if (!contents_jump_toc_count()) {
+        title_lines(tr("本书未提供目录。可点按右上角「快速跳转」按全书进度定位，或收起面板继续阅读。"),
+                    36, list_top + 40, 612, 24, false, 2, 3);
+        toc_page = 0;
+        toc_locate_current = false;
+        return;
+    }
+    const auto current = current_toc();
+    const auto focus = contents_jump_located.value_or(toc_locate_current ? current : toc.size());
+    const auto target_label = !contents_jump_located ? std::string{} : contents_jump_located_percent < 0 ? tr("目标")
+        : trf("目标 · {percent}", {{"percent", std::to_string(contents_jump_located_percent) + "%"}});
     auto title_width = [&](std::size_t index) {
-        return 456 - std::min<int>(toc[index].depth, 3) * 40 - (toc_parent(index) ? 88 : 0);
+        int width = 456;
+        if (index != current && contents_jump_located == index)
+            width = std::min(width, 596 - text_width(target_label, 22));
+        return width - std::min<int>(toc[index].depth, 3) * 40 - (toc_parent(index) ? 88 : 0);
     };
     auto title_height = [&](std::size_t index) {
-        return title_lines(toc_font, label(index), 0, 0, title_width(index), toc[index].depth ? 24 : 28,
+        return title_lines(body, toc[index].label, 0, 0, title_width(index), toc[index].depth ? 24 : 28,
                            false, 2, 1, false);
     };
+    const int minimum_row = list_height / 6;
     auto row_height = [&](std::size_t index) {
-        return std::max(92, title_height(index) + 28);
+        return std::max(minimum_row, title_height(index) + 28);
     };
     int used = 0;
     for (std::size_t i = 0; i < toc.size(); ++i) {
         const int height = row_height(i);
         if (used && used + height > list_height) { toc_starts.push_back(toc_visible.size()); used = 0; }
-        if (toc_locate_current && i == current) toc_page = toc_starts.size() - 1;
+        if (i == focus) toc_page = toc_starts.size() - 1;
         toc_visible.push_back(i);
         used += height;
         if (toc_collapsed.count(i)) {
@@ -183,21 +371,31 @@ void ReaderApp::Impl::draw_contents() {
     toc_page = std::min(toc_page, toc_starts.size() - 1);
     const auto begin = toc_starts[toc_page];
     const auto end = toc_page + 1 < toc_starts.size() ? toc_starts[toc_page+1] : toc_visible.size();
+    int natural_height = 0;
+    for (auto row = begin; row < end; ++row) natural_height += row_height(toc_visible[row]);
+    const int spare = list_height - natural_height, rows = static_cast<int>(end - begin);
+    const int stretch = spare > 0 && spare < minimum_row ? spare : 0;
+    const bool paged = toc_starts.size() > 1;
     int y = list_top;
     for (std::size_t row = begin; row < end; ++row) {
         const auto i = toc_visible[row];
         const auto &item = toc[i];
-        const int h = row_height(i), indent = std::min<int>(item.depth, 3) * 40;
-        const bool selected = i == current, parent = toc_parent(i);
+        const int position_in_screen = static_cast<int>(row - begin);
+        const int h = row_height(i) + stretch / rows + (position_in_screen < stretch % rows ? 1 : 0);
+        const int indent = std::min<int>(item.depth, 3) * 40;
+        const bool selected = i == current, parent = toc_parent(i), located = !selected && contents_jump_located == i;
         const std::uint8_t ink = selected ? 15 : 1;
         if (selected) canvas.fill_rect(0, y, 684, h - 1, 1);
-        title_lines(toc_font, label(i), 36 + indent, y + (h - title_height(i)) / 2, title_width(i), item.depth ? 24 : 28, selected, 2, ink);
+        if (located) canvas.fill_rect(0, y, 8, h - 1, 1);
+        title_lines(body, item.label, 36 + indent, y + (h - title_height(i)) / 2, title_width(i),
+                    item.depth ? 24 : 28, selected, 2, ink);
         const int percent = toc_percent(i);
-        const auto position = selected ? tr("当前 · ") + book_percent() : percent < 0 ? std::string() : std::to_string(percent) + "%";
+        const auto position = selected ? tr("当前 · ") + book_percent() : located ? target_label :
+                              percent < 0 ? std::string() : std::to_string(percent) + "%";
         const int right = parent ? 560 : 648, width = text_width(position, 22);
         const auto position_metrics = ui.metrics();
         text(position, right - width, y + (h - position_metrics.ascender - position_metrics.descender) / 2,
-             22, width, selected ? 15 : 3);
+             22, width, selected ? 15 : located ? 1 : 3);
         if (parent) {
             std::size_t count = 0;
             for (auto j = i + 1; j < toc.size() && toc[j].depth > item.depth; ++j) ++count;
@@ -213,11 +411,10 @@ void ReaderApp::Impl::draw_contents() {
             center(std::to_string(count), 604, y + h / 2 - 20, 52, 26, ink);
             hits.push_back({572, y, 112, h, TocToggleBase + static_cast<int>(i)});
         }
-        if (!selected) canvas.line(0, y + h - 1, 683, y + h - 1, 1, 2);
+        if (!selected && !(paged && y + h == footer_zone)) canvas.line(0, y + h - 1, 683, y + h - 1, 1, 2);
         hits.push_back({0, y, parent ? 572 : 684, h, TocBase + static_cast<int>(i)});
         y += h;
     }
-    if (toc.empty()) note(tr("这本书未提供目录，可收起后继续阅读。"), list_top + 40);
     footer_bar("", toc_page, toc_starts.size());
 }
 

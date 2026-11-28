@@ -3,6 +3,7 @@
 #include "content_cache.h"
 #include "pico_page/i18n.h"
 #include "content_job.h"
+#include "chapter_jump.h"
 #include "help_content.h"
 #include "font_error_message.h"
 #include "reading_footer.h"
@@ -200,7 +201,11 @@ enum Control {
     StatisticsOpen = 57000, StatisticsOpenBook, StatisticsCalendar, StatisticsBooks, StatisticsSettings,
     StatisticsUnknown, StatisticsToggle, StatisticsMinDown, StatisticsMinUp,
     StatisticsMaxDown, StatisticsMaxUp, StatisticsApply, StatisticsClear, StatisticsConfirm, StatisticsRetry,
-    StatisticsMonthBase = 57100, StatisticsDayBase = 57200, StatisticsBookBase = 57300
+    StatisticsMonthBase = 57100, StatisticsDayBase = 57200, StatisticsBookBase = 57300,
+    ContentsJumpOpen = 58000, ContentsJumpBack, ContentsJumpChapter, ContentsJumpPercent,
+    ContentsJumpMinus, ContentsJumpPlus, ContentsJumpLocate, ContentsJumpGo, ContentsJumpClear, ContentsJumpBackspace,
+    ContentsJumpDigit0, ContentsJumpDigit1, ContentsJumpDigit2, ContentsJumpDigit3, ContentsJumpDigit4,
+    ContentsJumpDigit5, ContentsJumpDigit6, ContentsJumpDigit7, ContentsJumpDigit8, ContentsJumpDigit9
 };
 static_assert(ContentsBookmarks < EntryBase);
 struct PageEffectChoice {
@@ -649,6 +654,20 @@ struct ReaderApp::Impl final : DisplayBackend {
     std::int64_t resume_opened_at = 0;
     BookmarkList bookmarks;
     bool contents_bookmarks = false;
+    bool contents_jump_open = false, contents_jump_percent = false;
+    bool contents_jump_accepts_queued_keys = false;
+    std::string contents_jump_input;
+    std::optional<std::size_t> contents_jump_current, contents_jump_located;
+    std::optional<chapter_jump::EpubTocIndex> contents_jump_epub_index;
+    int contents_jump_current_percent = 0, contents_jump_located_percent = -1;
+    struct ContentsJumpPreview {
+        std::optional<std::size_t> target_toc, current_toc;
+        std::optional<chapter_jump::Position> target_position;
+        std::uint64_t value = 0, minimum = 0, maximum = 0;
+        int current_percent = 0, target_percent = 0;
+        bool out_of_range = false, can_step_down = false, can_step_up = false;
+        bool can_jump = false, same_position = false;
+    };
     std::size_t bookmark_page = 0;
     mutable std::vector<std::uint32_t> bookmark_offsets;
     mutable std::string bookmark_offsets_resource;
@@ -2246,25 +2265,20 @@ struct ReaderApp::Impl final : DisplayBackend {
         }
         return total ? static_cast<int>(before * 100 / total) : -1;
     }
-    static constexpr int contents_top = 350, contents_switch_height = 72, bookmark_row = 112;
+    static constexpr int contents_top = 350, contents_switch_height = 88, bookmark_row = 112;
     static constexpr std::size_t bookmarks_per_screen =
         (footer_zone - contents_top - 100 - contents_switch_height) / bookmark_row;
-    void contents_switch(int top) {
-        canvas.fill_rect(0, top, 684, contents_switch_height, 15);
-        const auto count = bookmarks_usable() && !bookmarks.bookmarks.empty()
-                               ? " " + std::to_string(bookmarks.bookmarks.size()) : std::string();
-        const std::string names[] = {tr("目录"), tr("书签") + count};
-        const int ids[] = {ContentsToc, ContentsBookmarks};
-        for (int i = 0; i < 2; ++i) {
-            const bool active = (i == 1) == contents_bookmarks;
-            const int x = i * 342;
-            center(names[i], x, top + 20, 342, 24, active ? 1 : 3, active);
-            if (active) canvas.fill_rect(x + 131, top + contents_switch_height - 8, 80, 4, 1);
-            hits.push_back({x, top, 342, contents_switch_height, ids[i]});
-        }
-        canvas.line(342, top + 16, 342, top + contents_switch_height - 17, 12, 2);
-        canvas.line(0, top + contents_switch_height - 1, 683, top + contents_switch_height - 1, 1, 2);
-    }
+    std::size_t contents_jump_toc_count() const { return document.has_chapter_toc() ? document.toc().size() : 0; }
+    int contents_jump_entry_percent(std::size_t index) const;
+    bool at_toc_target(std::size_t index) const;
+    ContentsJumpPreview contents_jump_preview() const;
+    void reset_contents_jump();
+    void contents_jump_control(int id);
+    void jump_to_toc(std::size_t index, bool reversible);
+    void jump_to_position(const chapter_jump::Position& position);
+    void show_source_byte_jump(std::size_t start);
+    void contents_switch(int top);
+    void draw_contents_jump(int top);
     void draw_bookmarks(int list_top);
     void draw_contents();
     void draw_font_picker();

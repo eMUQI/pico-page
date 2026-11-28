@@ -260,6 +260,8 @@ public:
     const DocumentMetadata& metadata() const;
     const std::vector<SpineItem>& spine() const;
     const std::vector<TocEntry>& toc() const;
+    /** Reports whether toc() contains EPUB navigation or recognized TXT headings. */
+    bool has_chapter_toc() const;
     /**
      * Parses the spine resource as a stream and keeps one part of it; output is released on
      * failure. Earlier parts are parsed and discarded, so a later part takes longer to reach.
@@ -279,6 +281,14 @@ public:
                       ChapterLoad detail = ChapterLoad::Mapping, std::uint32_t part = 0,
                       const std::function<bool()>& stop = {},
                       const std::function<void(const Chapter&)>& visit = {}, bool sequential = false);
+    /**
+     * Loads the part containing a source byte position. For TXT, part selects the indexed segment
+     * and byte_offset is a file offset. For EPUB, byte_offset is relative to the spine resource
+     * and scalar_offset is estimated within the selected part.
+     */
+    bool load_chapter_at_byte(std::size_t index, std::uint32_t part, std::uint32_t byte_offset,
+                              Chapter& chapter, std::uint32_t& scalar_offset, std::string& error,
+                              ChapterLoad detail, const std::function<bool()>& stop = {});
     /**
      * Like load_chapter, for the first part that match accepts. match sees each complete part
      * at the given detail, before the stylesheet fields of a Mapping load are final.

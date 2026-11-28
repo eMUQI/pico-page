@@ -1383,7 +1383,8 @@ void ContentJob::load_chapter() {
     FileStore store(request.root);
     result.chapter_index = request.chapter;
     const auto detail = request.layout.original_epub ? ChapterLoad::Original : ChapterLoad::Reading;
-    const bool locate = request.target == Target::Anchor || request.target == Target::Fragment;
+    const bool locate = request.target == Target::Anchor || request.target == Target::Fragment ||
+                        request.target == Target::SourceByte;
     bool cached = false;
     if (!locate && !request.chapter_resource.empty()) {
         if (request.content_cache)
@@ -1400,10 +1401,17 @@ void ContentJob::load_chapter() {
     if (stop()) { result.error = kChapterCancelled; return; }
     std::uint32_t position = 0;
     const bool keep_original_stream = request.chapter_session && detail == ChapterLoad::Original;
-    if (request.target == Target::Anchor || request.target == Target::Fragment) {
+    if (locate) {
         if (request.target == Target::Anchor) {
             if (!load_anchored_content(store, document, request.chapter, result.chapter, result.error, detail,
                                        request.anchor, position, stop, &result.content_cache, keep_original_stream)) return;
+        } else if (request.target == Target::SourceByte) {
+            const auto source_offset = static_cast<std::uint32_t>(request.offset);
+            if (source_offset != request.offset) {
+                result.error = "Invalid chapter byte position"; return;
+            }
+            if (!document.load_chapter_at_byte(request.chapter, request.part, source_offset,
+                                               result.chapter, position, result.error, detail, stop)) return;
         } else if (request.fragment.empty()) {
             if (!load_content(store, document, request.chapter, result.chapter, result.error, detail,
                               0, stop, &result.content_cache, false, keep_original_stream)) return;

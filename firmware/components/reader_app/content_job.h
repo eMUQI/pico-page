@@ -96,7 +96,7 @@ public:
         return kind == Kind::DictionaryList || kind == Kind::DictionaryPrepare ||
                kind == Kind::DictionaryLookup || kind == Kind::DictionaryRead || kind == Kind::DictionaryPage;
     }
-    enum class Target { Start, End, Before, Anchor, Fragment };
+    enum class Target { Start, End, Before, Anchor, Fragment, SourceByte };
     enum class StartFailure { None, InternalMemory, TaskCreate };
     static constexpr std::size_t cold_image_memory_required_bytes = 2 * (684U * 1216U / 2) + 768U * 1024;
     struct CoverSource {

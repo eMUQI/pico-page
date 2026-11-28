@@ -263,10 +263,11 @@ bool ReaderApp::Impl::begin_chapter(std::size_t index, std::uint32_t part, Conte
     pause_statistics();
     poll_counting_job();
     std::unique_ptr<ContentJob> prepared;
-    if (target == ContentJob::Target::Start && prepared_chapter &&
+    if (view == View::Reading && target == ContentJob::Target::Start && prepared_chapter &&
         prepared_chapter->request.generation == foreground_generation &&
         prepared_chapter->request.identity.book_id == document.metadata().book_id &&
-        prepared_chapter->request.chapter == index && prepared_chapter->request.part == part)
+        prepared_chapter->request.chapter == index && prepared_chapter->request.part == part &&
+        prepared_chapter->request.offset == position)
         prepared = std::move(prepared_chapter);
     auto continuing_session = std::move(chapter_session);
     auto continuing_bytes = chapter_stream_bytes;
@@ -614,7 +615,8 @@ void ReaderApp::Impl::finish_chapter(ContentJob& job, PageTurnOrigin origin) {
     author_fonts_released = false;
     offset = job.result.offset;
     for (const auto& span : job.result.history) record_boundary(computed_pages, span.first, span.second);
-    show_page(offset, job.request.target == ContentJob::Target::End || job.request.target == ContentJob::Target::Before, origin);
+    if (job.request.target == ContentJob::Target::SourceByte) show_source_byte_jump(offset);
+    else show_page(offset, job.request.target == ContentJob::Target::End || job.request.target == ContentJob::Target::Before, origin);
 }
 
 void ReaderApp::Impl::poll_counting_job() {

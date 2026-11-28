@@ -4,6 +4,7 @@ namespace pico_page {
 
 bool ReaderApp::Impl::open(std::string path) {
     if (display.busy() || !card_available) return false;
+    reset_contents_jump();
     pause_statistics();
     statistics_flush_requested = statistics_collector.pending_count() != 0;
     auto library_session = chapter_session_in_library && view == View::Library && path == book_path
