@@ -258,7 +258,11 @@ bool ReaderApp::Impl::key_input(const AppInput& input) {
     if (!input.touch) return false;
     const auto keys = keyboard();
     const auto inside = [](const Key& key, int x, int y) {
-        return x >= key.x - 3 && x < key.x + key.w + 3 && y >= key.y - 4 && y < key.y + key.h + 4;
+        const bool changes_keyboard_mode = key.kind == KeyKind::Shift || key.kind == KeyKind::Letters ||
+                                           key.kind == KeyKind::Digits || key.kind == KeyKind::Symbols;
+        const int vertical_padding = changes_keyboard_mode ? 0 : 4;
+        return x >= key.x - 3 && x < key.x + key.w + 3 &&
+               y >= key.y - vertical_padding && y < key.y + key.h + vertical_padding;
     };
     const auto found = std::find_if(keys.begin(), keys.end(), [&](const Key& key) { return inside(key, input.x, input.y); });
     if (found == keys.end()) return false;
